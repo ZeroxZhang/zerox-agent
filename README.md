@@ -1,1218 +1,653 @@
 <p align="center">
-  <img src="logo.png" alt="Zerox Agent" width="128" height="128" />
+  <img src="build/icon.svg" width="88" alt="Zerox Agent" />
 </p>
 
 <h1 align="center">Zerox Agent</h1>
 
 <p align="center">
-  <strong>Local-First Desktop AI Agent · macOS · Open Source</strong><br />
-  <sub>Start from Zero. Turn unknown into action. · 从留白开始，把未知任务转成可执行动作。</sub>
+  <strong>把一句话变成一次可追踪、受权限约束、可恢复的本地 Agent 运行。</strong><br />
+  A local-first desktop control plane for observable, permissioned, recoverable agent work.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v3.8.1-111827" alt="Version v3.8.1" />
-  <img src="https://img.shields.io/badge/platform-macOS%20arm64-blue" alt="Platform: macOS arm64" />
-  <img src="https://img.shields.io/badge/electron-42.3-9feaf9" alt="Electron 42" />
-  <img src="https://img.shields.io/badge/react-19.2-61dafb" alt="React 19" />
-  <img src="https://img.shields.io/badge/typescript-6.0-3178c6" alt="TypeScript 6" />
-  <img src="https://img.shields.io/badge/vite-8.0-646cff" alt="Vite 8" />
-  <img src="https://img.shields.io/badge/storage-JSON%2FJSONL%20default-003b57" alt="JSON/JSONL default storage" />
-  <img src="https://img.shields.io/badge/license-ISC-green" alt="License: ISC" />
+  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1"><img src="https://img.shields.io/badge/current_release-v3.8.1-242428" alt="current release: v3.8.1" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20arm64-242428" alt="macOS arm64" />
+  <img src="https://img.shields.io/badge/data-local--first-2f9d65" alt="local-first" />
+  <img src="https://img.shields.io/badge/license-ISC-8a6d3b" alt="ISC" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/ZeroxZhang/zerox-agent">GitHub</a> ·
-  <a href="https://github.com/ZeroxZhang/zerox-agent/releases">Releases</a> ·
-  <a href="docs/product/zerox-positioning.md">Product Positioning</a> ·
-  <a href="#chinese">简体中文</a>
+  <a href="#中文">中文</a> ·
+  <a href="#english">English</a> ·
+  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1">下载 v3.8.1</a> ·
+  <a href="docs/product/zerox-positioning.md">产品定位</a>
 </p>
 
 <p align="center">
-  <img src="docs/product/zerox-agent-product-intro.jpg" alt="Zerox Agent product intro — local-first, permissioned, recoverable, observable desktop AI agent" width="780" />
+  <img src="docs/product/zerox-agent-product-intro.jpg" alt="Zerox Agent 产品介绍" width="820" />
 </p>
 
 ---
 
-> **Language**：English first &nbsp;|&nbsp; <a href="#chinese">简体中文</a> follows after the English section.
+<a id="中文"></a>
+
+# 中文
+
+## Zerox Agent 是什么
+
+Zerox Agent 是一个面向 macOS 的本地桌面智能体控制台。它把模型、工作区、技能、工具权限、长期记忆、计划、执行轨迹和验收证据放在同一个可审计的桌面工作台中。
+
+它适合处理三类工作：
+
+- 在会话中完成明确的本地任务，例如读取资料、修改文件、运行命令、检索网页和生成交付物。
+- 通过 Goal Mode 推进需要多步骤、会变化、必须验收的长期目标。
+- 把稳定任务保存为每日、工作日、每周或固定间隔执行的本地自动任务。
+
+Zerox Agent 的重点不是“让模型无限自主”，而是让真实工作具备清晰的目标、受控的权限、可见的过程、可恢复的状态和有证据的完成判断。
+
+> 当前版本是 **v3.8.1**。当前发布面向 Apple Silicon Mac，采用非 Apple 公证的兼容打包方式；安装说明见[下载与安装](#下载与安装)。
+
+## 产品边界
+
+Zerox Agent：
+
+- 是一个 local-first desktop control plane，而不是云端 Agent 托管平台。
+- 是会调用用户自选模型的本地应用，而不是完全离线模型本身。
+- 是以工作区和权限为边界的执行环境，而不是对整台电脑的无限制控制。
+- 是带恢复、验收和审计的 Agent Runtime，而不是一次性脚本启动器。
+- 支持 parent/child multi-agent sessions，但不会把多 Agent 当作默认复杂度。
+- 支持 user-reviewed learning；候选经验在用户审核前不会静默改变未来行为。
+
+本地优先意味着任务状态、计划、运行记录、记忆和审计数据默认保存在本机。调用外部模型时，完成请求所需的对话与上下文仍会发送给用户选择的服务商；Zerox Agent 不额外引入云端 worker。
+
+## 当前产品一览
+
+| 用户入口 | 主要作用 | 状态真源 |
+| --- | --- | --- |
+| **会话** | 普通 Chat、Goal Mode、技能选择、工作区选择、决策与恢复 | 主进程保存的会话、Plan、Goal 与 session-work 投影 |
+| **任务记录** | 查看运行结果、失败原因、轨迹、工具、检查点和下一步动作 | RunRecord、checkpoint、trajectory 与 kernel events |
+| **任务** | 创建并管理每日、工作日、每周或间隔自动任务 | 本地调度记录与运行历史 |
+| **设置** | 配置模型、工具、记忆、技能、学习、评测和系统状态 | 主进程配置与本地存储 |
+
+设置页按真实使用顺序组织为：
+
+1. **启动配置**：模型连接与模型档案。
+2. **能力与边界**：工具、记忆、技能。
+3. **审核与质量**：学习、评测、系统状态。
+
+旧版本中的独立 Goal 页面已经并入会话。目标的创建、规划、执行、验收、恢复和历史都发生在同一个 session-native Goal Mode 中。
+
+## 选择正确的工作方式
+
+| 任务特征 | 推荐入口 | 为什么 |
+| --- | --- | --- |
+| 单步、明确、低风险 | 普通 Chat 或快速操作 | 不需要额外规划成本 |
+| 步骤固定、重复执行 | 自动任务或脚本型 Skill | 运行方式稳定、容易复用 |
+| 多步骤，但路径基本清楚 | Goal Mode · Direct | 生成计划并经过独立冷审与质量门禁 |
+| 约束多、方案争议大、需要对抗审查 | Goal Mode · Debate | A/B 对抗审查，C 独立综合 |
+| 执行中路径整体失效 | 运行期 Direct 重规划 | 保留原目标和历史计划，只替换当前路径 |
+| 高风险或不可逆操作 | 固定权限门禁 + 人工确认 | 不因 Goal 自动授权而跳过极高风险确认 |
+
+Goal Mode 默认使用 Direct；Debate 是用户显式选择的规划协议。普通 Chat、Goal 执行和自动任务共用同一套工作区、工具授权与运行证据边界。
+
+## Goal 与 Plan
+
+### 核心关系
+
+**Goal 定义要达到什么结果，Plan 定义当前如何达到这个结果。**
+
+一个 Goal 由冻结的 `GoalContractSnapshot` 约束，包含：
+
+- 目标结果、交付物、范围和显式假设。
+- 质量、时间、成本、安全、权限和来源等约束。
+- 语义级成功标准。
+- 达标、取消、外部阻塞、不可实现和安全阻断等停止策略。
+- 普通操作与极高风险操作的确认策略。
+
+Plan 可以是步骤列表、条件分支、依赖图或动态策略。Planner 可以根据真实反馈调整路径，但不能未经授权改变 Goal 语义、删除成功标准、放松硬约束或扩大权限。
+
+### Direct 与 Debate 兼容
+
+两种初始规划协议读取同一份冻结 Goal Contract：
+
+| 协议 | 规划流程 | 适用场景 | 保留内容 |
+| --- | --- | --- | --- |
+| **Direct** | 调查 → direct 生成 → 独立冷审 → quality | 默认路径；目标清楚、方案可直接收敛 | 生成轮次、冷审、质量报告、模型绑定 |
+| **Debate** | 调查 → A1 → B1 → A2 → B2 → C → quality | 约束复杂、需要对抗审查或保留少数意见 | 所有 A/B/C 轮次、Claim Ledger、少数意见、质量报告、模型绑定 |
+
+A/B 只能质疑 Plan 路径。发现目标冲突时，它们必须报告 `goalContractIssues`，不能直接重写 Goal。C 只能综合符合当前 Goal Contract 的最终方案。
+
+Planning 阶段是只读的。Plan Agent 可以调查工作区、代码、Git、运行历史、记忆和已授权网页，但不能写文件、执行 Shell、启动执行型 Actor/Workflow 或写入记忆。只有用户确认 Ready Plan 后，主进程才创建新的可写 Goal Run。
+
+### 动态 Plan 谱系
+
+Goal 相对稳定，Plan 可以随反馈演进。每次结构性重规划创建新的 `PlanRecord`，而不是覆盖旧计划：
+
+~~~text
+GoalContract r1
+  ├─ Plan v1 · Debate · A1/B1/A2/B2/C
+  └─ Plan v2 · Direct · 运行反馈触发
+       └─ Plan v3 · Direct · 再次路径失效
+
+GoalContract r2 · 用户批准目标修订
+  └─ Plan v4 · Direct
+~~~
+
+- `PlanRecord.revision` 表示一次规划过程内部的修改。
+- `goalPlanVersion` 表示同一 Goal 的 Plan v1、v2、v3。
+- 初始 Debate 后发生运行期重规划时，界面会显示“初始 Debate → 当前 Direct v2”，不会把 Debate 历史静默降级。
+- 运行期结构性重规划统一使用 Direct。初始 Direct Goal 继承原 direct profile；初始 Debate Goal 继承原 C profile 的综合意图。
+- 精确修复、同一 milestone 重试或局部替代策略继续由 Goal Controller 处理，不会无意义地制造新 Plan。
+
+新的运行期 Plan 只有在质量门禁通过、Goal Contract 未改变、权限未扩大、风险未提高时才可自动采用；否则进入用户确认或目标修订流程。采用由主进程事务完成，renderer 不能直接切换活动 Plan。
+
+### Plan 完成不等于 Goal 达成
+
+Zerox Agent 严格区分两个事实：
+
+~~~text
+所有 milestone 完成
+        ↓
+Plan = steps_completed
+        ↓
+Goal 最终验收
+   ├─ 有效验收证书 → Goal = achieved
+   └─ 验收失败/不可用 → Goal 尚未完成，可恢复或重规划
+~~~
+
+只有 Goal 的成功标准通过最终验收并产生有效验收证书，界面才会显示目标达成。Plan 已执行完但验收未通过时，产品会明确显示“当前路径已执行，目标尚未通过验收”，不会把步骤完成误报成目标完成，也不会把已达成 Goal 恢复成失败 Plan。
+
+验收优先使用确定性证据，例如文件存在、命令退出码、测试结果和断言；`model_review` 只作为有证据引用的推断性补充。
+
+### Debate 首次执行可靠性
+
+Debate 规划使用结构化输出协议和 Goal Contract 感知修复：
+
+- 调查、A1/B1/A2/B2/C 各阶段使用明确 schema。
+- 标量与列表字段做无损归一化，避免模型形式差异被误判为内容失败。
+- 解析失败保留有界原文证据和修复诊断，不把 `finishReason=stop` 误当作有效计划。
+- 手动重试从失败深度继续，复用已完成的调查和有效轮次，不重复消耗前置工作。
+- 模型不可用时暂停并提示恢复，不静默替换角色模型或降级为 Direct。
+
+## 会话、状态与用户交互
+
+### 主对话只保留真正需要用户处理的内容
+
+| 信息 | 主对话 | 右侧状态栏 |
+| --- | --- | --- |
+| 用户与助手消息 | 是 | 否 |
+| Plan 模式选择、补充问题、确认、恢复和验收决策 | 决策卡 | 摘要状态 |
+| Thinking、工具预览、Debate 轮次、Goal milestone、授权历史 | 默认收纳 | 最新状态，可展开详情 |
+| 常规执行进度 | 不重复刷屏 | 进度、运行环境与上下文 |
+
+已提交的决策卡会退出阻塞状态。Plan 生成、失败重试和 Goal 恢复期间，输入仍归属于对应 Plan/Goal，不会因为切换页面、重启应用或切换 Goal Mode 按钮而意外落入普通 Chat。
+
+### 上下文数字如何理解
+
+“会话上下文”卡同时展示两类不同指标：
+
+- **累计 Token**：本会话历史上 Chat、Plan 和 Goal 请求累计产生的用量，用于成本与活动审计。
+- **当前占用**：下一次模型请求实际装入上下文的消息与记忆，占当前模型上下文窗口的比例。
+- **消息**：进入当前运行上下文的消息数量。
+- **压缩**：当前上下文是否已经进行过可恢复压缩。
+
+因此累计 Token 可能远大于当前上下文窗口；两者不是同一个分母。Chat、Plan、Goal 的分项用于解释累计用量来源，不代表三份内容会同时完整进入下一次模型请求。
+
+### 恢复与状态真实性
+
+主进程通过共享 session-work projection 统一决定“当前正在执行什么、是否已完成、是否需要恢复”。会话列表、主消息、右侧进度、运行环境和恢复入口不各自猜测状态。
+
+- 已达成 Goal 优先显示“已完成”，不会被旧 Plan 失败覆盖。
+- 可恢复 Goal 显示原 Goal、原 Plan、milestone 和验收记录，并提供继续、重试或重规划。
+- 同一个 Goal 的继续执行保留原始谱系，不会另起无关 Chat。
+- 运行失败只更新当前活动 Plan 的真实执行结果，不会把全部历史 Plan 一律标记为失败。
+- checkpoint、trajectory 和 ledger 支持应用重启后的恢复与审计。
+
+## 模型与服务商
+
+模型设置采用“连接优先”的信息架构：
+
+~~~text
+Provider Descriptor
+└── Connection
+    ├── 公开端点与协议配置
+    ├── 加密或环境凭证
+    ├── 与 revision 绑定的连接验证
+    └── Model Profile
+        ├── 模型 ID 与生成参数
+        ├── 能力配置
+        ├── 与 connection/profile revision 绑定的验证
+        └── 默认 Chat / Embedding 用途
+~~~
+
+当前内置连接类型包括：
+
+- OpenAI、Claude（Anthropic）、Gemini。
+- AWS Bedrock、Vertex AI。
+- Z AI（GLM）、DeepSeek、Kimi、MiniMax、Qwen、阿里云百炼 Coding Plan。
+- xAI、Mistral、Meta Model API、Together AI、Fireworks AI、OpenRouter。
+- Ollama 本地模型。
+- 自定义 OpenAI Chat Completions 或 Anthropic Messages 网关。
+
+同一服务商可保存多个 Connection。API Key 由 Electron `safeStorage` 加密；renderer、日志、Plan 和轨迹只读取是否存在凭证、来源与 revision，不读取已保存密钥。
+
+保存后的 Connection 与 Model Profile 必须对当前 revision 验证成功，才能成为默认模型或被分配给 Plan 角色。修改连接、模型或凭证会清除旧验证，避免把历史成功带到新的配置。Plan 一旦开始，会冻结自己的模型绑定。
+
+Embedding 是可选能力。当前实现覆盖 OpenAI、OpenAI-compatible custom 与 Ollama 路径；未配置 Embedding 时，记忆仍可使用关键词检索。
+
+## 工具、权限与工作区
+
+Zerox Agent 的工具覆盖文件、代码搜索、Shell、测试、Git、网页、浏览器资料、记忆、工作流和多 Agent 协作等类别。具体工具列表由当前运行、Skill 和权限动态决定，不在 README 中维护容易漂移的固定数字。
+
+所有执行都经过三层边界：
+
+1. **工具可见性**：模型只看到当前任务允许使用的工具。
+2. **主进程授权**：`ToolAuthorizationService` 根据任务策略、来源、风险和批准状态裁决。
+3. **工作区沙箱**：文件路径、符号链接、Shell 工作目录、网络域名和额外读写目录再次收窄。
+
+Goal Mode 会锁定普通操作的自动授权，使长目标不必为每次低风险读写停下来等待；极高风险、不可逆或超出既有权限的操作仍必须人工确认。renderer 的按钮状态不构成授权，最终决定始终在主进程。
+
+Shell 使用结构化命令分析；文件访问执行路径与符号链接边界检查；Web 访问受搜索开关和域名范围约束。工具调用会写入审计日志与轨迹。
+
+## Skills、MCP 与多 Agent
+
+Skill 是 Zerox Agent 的主要扩展机制。每个 Skill 以 `SKILL.md` 描述：
+
+- 名称、用途、输入参数和执行模式。
+- 文件、Shell、Web、记忆等权限。
+- 是否需要规划及可用工具。
+- 可选脚本入口与 MCP Server。
+
+应用启动时扫描内置和用户 Skill 目录。会话中可通过 `@skill` 搜索并选择技能；执行记录会固定 Skill 的来源和哈希，避免运行途中被静默替换。
+
+Skill 声明的 MCP 进程默认不会自动启动。只有显式设置 `ZEROX_ENABLE_SKILL_MCP=1` 时才启用自动初始化，并且子进程只继承白名单环境变量与 manifest 明确声明的值。
+
+复杂任务可创建 parent/child multi-agent sessions。子任务继承工作区和权限边界，并带有 parent run、session、role 和 depth 元数据；父任务在接收结果前可以设置审查门禁。
+
+## 记忆、学习与评测
+
+本地记忆支持：
+
+- `core`：稳定的用户事实与偏好。
+- `session`：当前会话的短期上下文。
+- `semantic`：概念和知识。
+- `episodic`：一次任务的经历与结果。
+- `procedural`：可复用的操作流程。
+
+检索默认支持关键词搜索；配置 Embedding 后可使用向量或混合检索。记忆治理会识别重复、冲突和低信号内容。
+
+运行轨迹可以生成学习候选和回归评测候选，但学习默认需要用户审核。Zerox Agent 不会把一次模型输出直接写成永久行为规则，也不会进行未经审核的自我修改。
+
+评测层覆盖任务结果、Goal 验收、权限拒绝、恢复、上下文压缩、Plan/Debate、模型路由、存储一致性和 renderer 状态投影。`episode:export` 可导出 `run-graph.json`、`eval-candidate.json` 与 `trajectory.jsonl` 供复盘。
+
+## 本地数据与隐私
+
+### 正式本地数据模式
+
+Electron 桌面端把会话、任务、Plan、Goal、运行记录、轨迹、记忆和审计数据写入：
+
+~~~text
+Electron userData/config
+~~~
+
+macOS 通常对应：
+
+~~~text
+~/Library/Application Support/Zerox Agent/config
+~~~
+
+默认存储后端是完整的 JSON/JSONL；`ZEROX_STORAGE_BACKEND=sqlite` 和 `dual` 是显式迁移/验证路径。API Key 不以明文进入业务记录：Electron `safeStorage` 加密后的密文保存在 `model-settings.json`，renderer、Plan 和运行轨迹不会获得已保存密钥。
+
+常见记录包括会话、Plan、Goal、checkpoint、trajectory、tool audit、memory、scheduled task、`agent-validation.json` 和 multi-agent session。
+
+### 浏览器演示数据模式
+
+只在浏览器中打开 renderer 时，应用显示静态或 `localStorage` 演示数据，不连接 Electron IPC，也不会写入正式桌面数据。界面会明确标记“浏览器演示数据模式”，避免把预览数据误认为真实运行状态。
+
+## 下载与安装
+
+### 下载当前版本
+
+- [Zerox Agent v3.8.1 发布页](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1)
+- [Zerox-Agent-3.8.1-arm64.dmg](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.8.1/Zerox-Agent-3.8.1-arm64.dmg)
+
+当前包适用于 Apple Silicon Mac。v3.8.1 使用 `legacy-adhoc` 兼容发布模式，没有 Apple Developer ID 公证。macOS 可能阻止首次打开。
+
+只应对从本项目 GitHub Release 下载且你信任的文件执行以下命令。移除 quarantine 会绕过这份文件的 Gatekeeper 隔离检查。
+
+下载 DMG 后：
+
+~~~bash
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
+~~~
+
+如果已经把应用拖到“应用程序”：
+
+~~~bash
+xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
+~~~
+
+然后重新打开应用。也可以先在 Finder 中右键应用并选择“打开”。
+
+## 首次启动引导
+
+1. 打开 **设置 → 模型**。
+2. 新建服务商 Connection，填写凭证或选择环境/系统凭证来源。
+3. 测试并保存连接。
+4. 为该连接创建 Chat Model Profile，测试当前 revision，并设为默认 Chat 模型。
+5. 可选：配置 Embedding Model Profile。
+6. 返回 **会话**，选择工作区。
+7. 先用普通 Chat 完成一个小任务，再根据任务复杂度选择 Goal Mode · Direct 或 Debate。
+8. 在执行前检查 Plan 的目标契约、成功标准、权限和风险；确认 Ready Plan 后才进入可写 Goal Run。
+9. 需要完整桌面验收时运行 `npm run validate:agent`；结果会写入 `agent-validation.json`。
+
+## 从源码运行
+
+推荐环境：
+
+- macOS。
+- Node.js 22 LTS。
+- 与 `package-lock.json` 配套的 npm。
+
+~~~bash
+git clone https://github.com/ZeroxZhang/zerox-agent.git
+cd zerox-agent
+
+./init.sh
+less AGENTS.md
+npm ci
+
+npm run doctor
+npm run start:prod
+~~~
+
+开发模式：
+
+~~~bash
+npm run dev
+~~~
+
+它会同时启动 renderer 的 Vite 开发服务器、Electron 主进程 TypeScript watch 和 Electron 窗口。
+
+## 验证与开发命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run dev` | 开发模式：Vite + TypeScript watch + Electron |
+| `npm run start:prod` | 生产构建后启动桌面应用 |
+| `npm test -- --maxWorkers=1` | 单 worker 运行完整 Vitest，适合规避本地存储并发清理竞争 |
+| `npm run build` | TypeScript 与 renderer 生产构建 |
+| `npm run verify` / `npm run doctor` | 测试、构建、Agent eval、Memory eval |
+| `npm run smoke:prod` | 启动生产 Electron 并验证 renderer |
+| `npm run smoke:llm` | 读取 `.api_info.md` 做真实模型连通性冒烟 |
+| `npm run smoke:providers` | 校验服务商注册表；真实调用必须显式 opt-in |
+| `npm run validate:agent` | 在 Electron 主进程执行完整桌面验收 |
+| `npm run eval:agent` / `npm run eval:memory` | 确定性 Agent / Memory 评测 |
+| `npm run harness:check` / `npm run harness:score` | 检查 repo-local harness / 输出质量评分 |
+| `npm run episode:export -- --config-dir <dir> --run-id <id>` | 导出指定运行证据包 |
+| `npm run episode:export -- --config-dir <dir> --latest-validation` | 导出最近一次桌面验收证据 |
+| `npm run pack:mac` | 生成本地 `.app` |
+| `npm run dist:mac` | 生成 `.dmg` 与 `.zip` |
+| `npm run release:mac` | 打包、更新清单签名与发布前检查 |
+| `npm run release:publish -- /absolute/path/to/release-notes.md` | 发布精确资产集合到 GitHub Release |
+
+如果仓库根目录存在 `.api_info.md`，`npm run smoke:llm` 会读取其中的本地测试配置；不要把包含密钥的文件提交到 Git。
+
+## 打包与发布
+
+本地兼容打包：
+
+~~~bash
+npm run build
+npm run smoke:prod
+npm run pack:mac
+npm run dist:mac
+~~~
+
+正式发布链需要独立的 Ed25519 更新签名私钥：
+
+~~~bash
+export ZEROX_RELEASE_MODE=legacy-adhoc
+export ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE=/absolute/path/to/update-signing-private.pem
+npm run release:mac
+npm run release:publish -- "/absolute/path/to/release-notes.md"
+~~~
+
+私钥必须位于仓库外、属于当前用户、权限为 `0600` 或更严格。`release:mac` 会检查源码树、应用签名、嵌入提交、公钥、更新清单签名、哈希、blockmap 和资产白名单。GitHub Release 固定发布 ZIP、DMG、两个 blockmap、`latest-mac.yml` 与 `latest-mac.yml.sig`。
+
+仓库也包含 tag 驱动的 GitHub Actions 发布流程；它运行单 worker 测试、构建、Agent/Memory eval、harness 检查、兼容打包、签名和远端资产复核。
+
+## 项目结构
+
+~~~text
+src/
+├── main/                  Electron 主进程、服务、运行时、存储、工具与 IPC
+│   ├── providers/         Provider Router、原生/兼容适配器与模型矩阵
+│   ├── storage/           JSON/JSONL、SQLite 迁移路径与 repositories
+│   ├── kernel/            Kernel events、permission rules、compaction、stop policy
+│   └── tools/             文件、Shell、Web、Git、测试、工作流等工具
+├── renderer/              React UI、会话、任务记录、自动任务与设置
+│   └── components/chat/   消息、决策卡、Plan/Goal 与运行状态展示
+├── preload/               contextIsolation 下的受控 IPC bridge
+├── shared/                Goal、Plan、权限、模型、记忆、轨迹等共享契约
+├── skills/                内置 Skill 与示例
+├── scripts/               构建、评测、冒烟、打包、发布和证据导出
+├── docs/                  产品、架构、设计与验收文档
+└── .zerox/                功能清单、进度与 repo-local harness 状态
+~~~
+
+关键运行链路：
+
+~~~text
+会话输入
+  → ChatService
+  → PlanDebateOrchestrator（仅 Goal 规划）
+  → 用户确认
+  → Goal Controller
+  → Agent Runtime Engine
+  → ToolAuthorizationService
+  → 本地 checkpoint / trajectory / ledger
+  → Goal 最终验收
+~~~
+
+renderer 只展示和发起操作；Plan 采用、Goal 状态、工具授权、验收证书和持久化事务的最终裁决都在主进程。
+
+## 设计与架构文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [产品定位](docs/product/zerox-positioning.md) | 用户、核心任务、非目标和产品决策矩阵 |
+| [Goal Mode 架构](docs/architecture/agent-goal-mode.md) | Goal 状态机、验收、连续性与恢复 |
+| [Agent Runtime](docs/architecture/agent-runtime.md) | checkpoint、trajectory、kernel 与权限边界 |
+| [工作区与多 Agent](docs/architecture/agent-workspaces.md) | workspace sandbox 与 parent/child context |
+| [学习闭环](docs/architecture/agent-learning-loop.md) | memory、learning candidate 与评测晋升 |
+| [Plan Debate](docs/design/zerox-agent-3-8-0-plan-debate.md) | Direct/Debate、只读规划、确认与角色隔离 |
+| [Plan Debate 用户路径验收](docs/design/zerox-agent-3-8-0-debate-user-path-acceptance.md) | 状态、动作、失败与恢复矩阵 |
+| [3.8.1 模型与会话 UX](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md) | Connection-first 模型设置与信息披露策略 |
+
+历史方案和设计审计保留在 `docs/superpowers/` 与 `docs/design/` 中，但不再承担当前产品说明书的职责。
+
+## 当前限制
+
+- 公开测试包当前仅提供 macOS arm64。
+- v3.8.1 未经过 Apple Developer ID 签名与公证。
+- 用户需要自备模型服务商账号、API Key 或本地 Ollama。
+- 浏览器预览只用于 UI 演示，不能执行桌面任务。
+- Zerox Agent 不提供云端 worker、远程托管 Agent 或未经审核的自我修改。
+- Windows、Linux、Apple 公证分发和可选崩溃报告尚未作为当前版本能力交付。
 
 ---
+
+<a id="english"></a>
 
 # English
 
-## Overview
-
-**Zerox Agent** is a local-first desktop control plane for personal AI agents (current release: v3.8.1). The name comes from **Zero + X**: starting from a blank slate and turning unknown local workflows into observable, permissioned, workspace-scoped runs.
-
-It is **not** a chat wrapper, a hosted agent cloud, or an unbounded autonomous loop. It runs on your Mac: you bring your own API key (Anthropic / Gemini / OpenAI-compatible), grant explicit tool permissions, and keep session state, trajectories, memory, and learning candidates on disk under local `userData`. High-risk actions ask first; interrupted long work can resume from checkpoints; every step leaves an auditable run trail.
-
-**Primary job:** turn one sentence into a trackable local run — organize files, push long goals, schedule patrols — with process visibility, permission gates, and resume after interrupt.
-
-### Trust Pillars
-
-| Pillar | Meaning | Runtime guarantee |
-|--------|---------|-------------------|
-| **Local** | State and memory stay on this machine | No cloud worker; keys encrypted with Electron `safeStorage`; BYO API key only |
-| **Permissioned** | High-risk operations require confirmation | `ToolAuthorizationService` + workspace sandbox; shell uses structural `ShellPlan`, not string match |
-| **Recoverable** | Crash or quit does not erase progress | Durable checkpoints after tool results; pause/resume; goal continuity across compaction |
-| **Observable** | Every step leaves evidence | Trajectory events, Runs export, kernel event replay, reviewed learning only |
-
-### Design Principles
-
-| Principle | Description |
-|-----------|-------------|
-| **Local-First** | All data (tasks, runs, permissions, memory, sessions) is stored in the local `userData` directory. Nothing is uploaded to the cloud. |
-| **Privacy-Safe** | API keys are encrypted with Electron `safeStorage`. Every tool call is authorized per-task and audit-logged. |
-| **Skill-Driven** | Behavior is defined by composable `SKILL.md` files supporting `agent` mode (LLM-driven) and `script` mode, with optional MCP tool extensions. |
-| **Observable** | Every run produces a structured trajectory of model calls, reasoning, tool calls, checkpoints, compaction, pauses, and completion. |
-| **Recoverable** | Agent work is inspectable, cancelable, and resumable — durable checkpoints survive crashes between tool calls. |
-| **Permissioned** | Tools are gated by per-task policies layered with a workspace sandbox; shell commands are analyzed structurally, not just matched by string. |
-| **Modular** | The primary app flow is Chat, Runs, Tasks, and Settings; diagnostics, skills, tools, memory, learning, and evals live under Settings. |
-
-### Who It Is For
-
-- **Independent builders / power users** who want an agent that moves local files and tools without handing state to a hosted platform
-- **Privacy-sensitive knowledge work** — downloads cleanup, notes export, report writing, scheduled patrols with replayable evidence
-- **People who care about control** — not only chat, but *what* it did, *whether* it can stop, and *whether* it will go rogue
-
-### Documentation Map
-
-| Topic | Doc |
-|-------|-----|
-| Product boundary & decision matrix | [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md) |
-| Recoverable runtime & Agent Runtime Kernel | [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md) |
-| Workspace sandbox | [`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md) |
-| User-reviewed learning loop | [`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) |
-| Goal Mode / session-native goals | [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md) |
-| v3.8.1 provider management & decision-card UX | [`docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md`](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md) |
-| v3.8.0 multi-provider models & Plan Debate | [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md) |
-| v3.2.2 Soft Blue Desktop Control Surface | [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md) |
-| v3.4.0 **B · Obsidian** theme | [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) |
-| macOS UI acceptance (v3.3.0+) | [`UI_AUDIT.md`](UI_AUDIT.md), [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md) |
-| Agent operating guide (contributors) | [`AGENTS.md`](AGENTS.md) |
-
-The v3.2.2 interface system is documented in [`docs/design/zerox-agent-3-2-2-design-system-spec.md`](docs/design/zerox-agent-3-2-2-design-system-spec.md): the app keeps the existing local-first workflows while moving the visible design language to a Figma-inspired Soft Blue Desktop Control Surface.
+## What is Zerox Agent?
 
-The v3.3.0 release is a macOS UI polish pass documented in [`UI_AUDIT.md`](UI_AUDIT.md) and accepted in [`UI_ACCEPTANCE.md`](UI_ACCEPTANCE.md). It tightens modal safety contracts, macOS menus, sidebar/settings density, typography, compact layouts, and release-ready visual QA without changing product behavior.
+Zerox Agent is a local-first desktop control plane for personal AI agents on macOS. It turns natural-language work into observable, permissioned, recoverable agent runs across local files, tools, memory, scheduled tasks, and user-reviewed learning.
 
-The v3.4.0 release uses [`docs/design/guidelines_0708.html`](docs/design/guidelines_0708.html) as the active frontend specification and selects **B · Obsidian** as the app theme. It moves the renderer from the older Soft Blue look to a neutral grayscale macOS control surface with a restrained near-black accent, dark-mode accent inversion, tighter focus/press feedback, and no product behavior changes.
+The current release: v3.8.1.
 
-**v3.7.0** hardened 本地权限边界, recoverable checkpoints, tool-pairing context integrity, and 持久化原子性 while keeping trajectories exportable and learning user-reviewed.
+Zerox Agent is not a hosted agent cloud, an unbounded autonomous loop, or a generic chat wrapper. Durable state lives on the Mac, execution is scoped to a workspace, high-risk actions remain gated, and completion is decided from acceptance evidence rather than an assistant's claim.
 
-**v3.7.1** adds packaged-app release detection, background update downloads, and a compact install action beside the sidebar version. Chat now accepts pasted PNG/JPEG/WebP and bounded UTF-8 text attachments, preserves compact attachment metadata in session history, and sends image content through OpenAI-compatible, Anthropic, and Gemini provider paths.
+External model calls still send the context required for a request to the provider selected by the user. Local-first describes the control plane and durable state; it does not mean every configured model is offline.
 
-**v3.8.0** introduces descriptor-driven multi-provider connections and stable model profiles for OpenAI, Anthropic, Gemini, Bedrock, Vertex, OpenAI-compatible services, and Ollama. Goal Mode now plans before it executes: Direct creates a reviewable plan, while Plan Debate runs isolated `A1 → B1 → A2 → B2 → C` deliberation, preserves evidence and minority opinions, and creates a new writable Goal only after a versioned, drift-checked Ready plan is explicitly confirmed.
+## Product surfaces
 
-**v3.8.1** turns provider setup into one connection-first workflow with explicit saved, credential, tested, failed, last-used, and default-model states. It adds Alibaba Model Studio Coding Plan through `https://coding.dashscope.aliyuncs.com/v1`, custom OpenAI Chat Completions and Anthropic Messages gateways, explicit credential removal, and a lighter Chat surface where routine process moves to the right status rail and only user-blocking choices remain as decision cards. Goal Mode now freezes one semantic Goal Contract before Direct or Debate planning, keeps initial and runtime Plans in a durable parent-linked lineage, preserves the original `A1 → B1 → A2 → B2 → C` record when a later structural replan uses Direct, and separates completed Plan steps from an acceptance-certified Goal outcome. Debate investigation now shares the structured-output contract and repair boundary, normalizes lossless provider shape variations, retains bounded diagnostics, and resumes manual retry from the failed investigation depth instead of replaying completed evidence collection.
+| Surface | Purpose |
+| --- | --- |
+| **Chat** | Ordinary conversation, Skills, workspace selection, Goal planning, execution, review, and recovery |
+| **Runs** | Outcomes, checkpoints, trajectories, tools, failures, and next actions |
+| **Tasks** | Daily, weekday, weekly, and interval local automation |
+| **Settings** | Model connections, tools, memory, Skills, learning, evals, and system health |
 
----
+The primary app flow is Chat, Runs, Tasks, and Settings. Diagnostics, skills, tools, memory, learning, and evals live under Settings instead of competing with the core workflow.
 
-## Architecture
+## Chat, Direct, and Debate
 
-Zerox Agent is a layered Electron application. An Electron shell wraps a dependency-injection **container** that constructs every service lazily. A **kernel** defines the event contract, turn-loop driver, stop policies, permission engine, and compaction. Chat, scheduled tasks, and goal milestones share one production turn-loop contract. An **actor model** enables permissioned sub-agents, a **workflow runtime** retains deterministic pipelines behind explicit activation, and a **provider abstraction** talks to LLMs. JSON/JSONL is the complete default source of truth; SQLite and dual-write are explicit migration modes.
+Use ordinary Chat for small, clear work. Use session-native Goal Mode when a task needs multiple milestones, dynamic decisions, recovery, or final acceptance.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Electron Shell                            │
-│   Tray · BrowserWindow · safeStorage · dialog · app lifecycle    │
-├──────────────────────────────────────────────────────────────────┤
-│                         Main Process                              │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │
-│  │  Container (DI) │  │   IPC Handlers  │  │  KernelEventBus  │  │
-│  └─────────────────┘  └─────────────────┘  └──────────────────┘  │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────────┐  │
-│  │ Chat loop │ │ Runtime   │ │ Goal      │ │ Actor / Workflow │  │
-│  │ (chat)    │ │ engine    │ │ engine    │ │ runtime          │  │
-│  │           │ │ (sched.)  │ │ (milest.) │ │ (deep-research)  │  │
-│  └───────────┘ └───────────┘ └───────────┘ └──────────────────┘  │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────────┐  │
-│  │ Provider  │ │ ToolExec  │ │ ToolAuthz │ │ Skill registry / │  │
-│  │ Anthropic │ │ + sandbox │ │ + shell   │ │ MCP / dream-dist │  │
-│  │ Gemini    │ │           │ │ plan      │ │                  │  │
-│  │ OpenAI-c. │ │           │ │           │ │                  │  │
-│  └───────────┘ └───────────┘ └───────────┘ └──────────────────┘  │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Storage: JSON/JSONL default · SQLite/dual migration      │  │
-│  └────────────────────────────────────────────────────────────┘  │
-├─────────────────────────── IPC ──────────────────────────────────┤
-│            Preload bridge  (contextIsolation: true)               │
-├──────────────────────────────────────────────────────────────────┤
-│                       Renderer Process                           │
-│   Chat · Runs · Scheduled Tasks · Settings                       │
-│   (Overview · Skills · Tools · Memory · Learning · Evals)        │
-│   React 19 + hand-rolled CSS design system                       │
-└──────────────────────────────────────────────────────────────────┘
-```
+| Mode | Protocol | Best for |
+| --- | --- | --- |
+| **Direct** | investigation → generation → independent cold review → quality | the default Goal path |
+| **Debate** | investigation → A1 → B1 → A2 → B2 → C → quality | adversarial review, complex constraints, minority opinions |
+| **Runtime Direct replan** | feedback investigation → generation → cold review → quality | structural path failure after Goal execution starts |
 
-### Tech Stack
+Direct and Debate receive the same frozen `GoalContractSnapshot`. Planners may change the path but cannot silently change the objective, remove success criteria, relax hard constraints, or expand permissions.
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Desktop Shell | Electron 42 | Window, tray, `safeStorage`, OS integration |
-| Bundler | Vite 8 | Renderer HMR + production bundle |
-| Language | TypeScript 6 | Full-stack type safety, 3 tsconfig targets |
-| UI | React 19 | Function components + Hooks |
-| Styling | Hand-rolled CSS | Token-based design system (CSS custom properties), light/dark |
-| Storage (default) | JSON / JSONL under `userData/config` | Complete default source of truth for sessions, goals, memory, checkpoints |
-| Storage (optional) | better-sqlite3 | Explicit `sqlite` / `dual` migration backends via `ZEROX_STORAGE_BACKEND` |
-| Parsing | yaml, cron-parser | `SKILL.md` frontmatter, cron schedules |
-| Testing | Vitest 4 | Unit tests + deterministic agent/memory evals |
-| Packaging | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` |
+Plan runs are read-only. Only user-confirmed Ready plans create writable Goal runs.
 
-### The Kernel
+## Goal–Plan contract and lineage
 
-`src/main/kernel/` is the cooperating set of modules that define how a run proceeds:
+A Goal defines the outcome, constraints, success criteria, and stop policy. A Plan defines the current path.
 
-- **`KernelEventBus`** — a synchronous pub/sub with an in-memory history buffer; every `KernelEvent` (`turn_start`, `tool_call`, `compaction`, `checkpoint_written`, `judge_verdict`, `retry`, `run_end`) is forwarded to all renderer windows on the `kernel:event` channel.
-- **Turn-loop driver** — `runRuntimeKernel` is the reference driver; the production loops reimplement the turn loop with richer behavior (streaming, compaction, pausing).
-- **Stop policies** — `createTurnLimitPolicy` and `createEvidenceJudgePolicy`. The evidence judge calls an LLM and **requires its cited evidence strings to actually appear in the transcript** — hallucinated success is rejected.
-- **Permission engine** — pattern-matches tool requests against `PermissionRule[]`; for `shell_exec` it derives a semantic command prefix so `npm run *` matches `npm run build`. Control operators (`;`, `&&`, `||`, backticks, `$(...)`, pipes, redirections) disable `allow` rules on the reduced command, so `allow git *` cannot be bypassed with `git foo; rm -rf`.
-- **Resilience budgets** — chat default 8 turns, goal mode = `milestoneCount × 6`, absolute cap 60.
-- **Compaction (three layers)** — kernel-level context compaction, the rebuild-from-checkpoint strategy (injects FTS5-BM25 memory hits + a 12k-token tail around a markdown checkpoint anchor), and path-guarded JSON checkpoint files.
+~~~text
+GoalContract r1
+  ├─ Plan v1 · Debate · A1/B1/A2/B2/C
+  └─ Plan v2 · Direct · runtime feedback
+       └─ Plan v3 · Direct · another structural replan
+~~~
 
-### Execution Loops
+Every structural replan creates a new `PlanRecord` with a parent reference. The original Direct review or Debate rounds remain attached to their own Plan. A Goal amendment is a separate proposal that requires user approval before the contract revision changes.
 
-Three production loops, all delegating to `runAgentLoop` (`src/main/agentLoop.ts`), the heart of the system. Per turn: inject system reminders → compact oversized history → request the model (streaming or with retry) → terminate, or authorize + execute tools → serialize observations → checkpoint. Loop guards detect repeated tool calls, fragmented tool-call patterns, and tool-failure streaks.
+Completing every milestone sets the active Plan to `steps_completed`. It does not set the Goal to `achieved`. Goal achievement requires final acceptance against the Goal Contract and a valid acceptance certificate.
 
-Every run is governed by an immutable `ExecutionContextPackage` — a frozen snapshot of the workspace sandbox, the selected skill, visible tools, permissions, memory scopes, and the checkpoint strategy. In v3.0.0, chat, goal milestone, and scheduled-task runs also emit a secret-safe `AgentRuntimeContextSnapshot` as the runtime context spine: it records the run surface, model identity, anchored time, sandbox roots, visible tool schema hash, memory scopes, checkpoint metadata, and trajectory identity before model/tool events. In v3.1.0, Goal commands with selected skills keep durable goal acceptance status, requirement-level subtasks, and attached active-goal summaries so complex requests do not collapse into one vague running state. Skills are loaded on demand through permissioned `skill_load` / `skill_resource_list` tools rather than eagerly. Each tool call is recorded in a durable tool invocation ledger (full status-transition history per call), and a separate raw history search store keeps pre-compaction message evidence queryable via `history_search` / `history_around`.
+## Reliable planning and recovery
 
-- **Chat loop** (`chatService.ts`) — interactive chat with streaming deltas, tool-call previews, output parts, status events, and continuation resume.
-- **Recoverable runtime engine** (`agentRuntimeEngine.ts`) — scheduled/manual task execution with a persistent `AgentExecutionCheckpoint` written after every tool call, enabling true pause/resume across app restarts. Optional **max-mode** (best-of-N: 3 propose-only candidates, a judge picks the winner, the winner's tool calls replay via an ephemeral actor).
-- **Goal milestone engine** (`goalRuntimeEngine.ts`) — runs one milestone at a time; deterministic task contracts run a no-LLM direct tool sequence, everything else runs `runAgentLoop` with post-loop acceptance judging.
+Structured planning uses schema-aware extraction, lossless normalization, bounded repair evidence, and explicit quality gates. A failed Debate retry resumes from the failed depth and retains valid investigation or completed rounds. Model bindings are frozen per Plan; the system pauses when a required model is unavailable instead of silently switching roles.
 
-### Actors & Multi-Agent
+A shared main-process session-work projection drives the session list, transcript status, right rail, progress, and recovery entry points. Persisted Goal state takes precedence over stale Plan activity, so an achieved Goal cannot be presented as an unfinished or failed planning run.
 
-`src/main/actors/` implements an actor model so the model itself can spawn sub-agents via the `actor` tool (`run`/`spawn`/`status`/`wait`/`cancel`/`send`). Actors have a `contextMode` (`none`/`state`/`full`), a lifecycle (`persistent`/`ephemeral`), an optional `toolWhitelist`, an `outputSchema` for outcome validation, and a per-actor inbox enabling peer-to-peer messaging. Child run contexts inherit and **narrow** the parent sandbox (network/shell can only restrict, `read_only` is sticky, extra roots must stay inside parent roots, single-level handoff enforced by `depth`). The actor tool parent run context is propagated into spawned actors, terminal actor failures become tool-level failures, and chat status events expose subagent spawned/done/error summaries for the subagent context rail.
+## Context disclosure
 
-The flagship actor is the **checkpoint-writer fork**: it cold-reads the parent run's trajectory and distills an 11-section markdown continuity checkpoint (active intent, next action, directives, task tree, current work, files, learnings, errors, live resources, design decisions, open notes), preferring LLM distillation and falling back to a rule-based builder so it never fails.
+The main transcript keeps user/assistant messages and decisions that actually block progress. Routine thinking, tool activity, Debate rounds, milestones, approvals, and context telemetry live in the right rail with optional detail.
 
-### Workflow Runtime
+The context card separates:
 
-`src/main/workflow/` runs deterministic pipelines inside a frozen host-hook sandbox (`agent`, `webfetch`, `websearch`, `parallel` cap 8, `pipeline`) with a deadline (default 12h) and abort signal. The built-in **`deep-research`** workflow is a `plan → search → extract → group → verify → report` pipeline where verification uses **3-voter adversarial actors** (a fact is dropped if ≥2 of 3 reject). Workflows can be packaged as discoverable skills (`registerWorkflowAsSkill`), and the model can invoke them through the `workflow` tool.
+- **Cumulative tokens** across historical Chat, Plan, and Goal requests.
+- **Current occupancy** of the next model request against that model's context window.
+- **Messages in context** and whether recoverable compaction has occurred.
 
-### Providers
+Cumulative usage can be much larger than current occupancy; they measure different things.
 
-`src/main/providers/` abstracts the LLM behind a frozen `LLMProvider` interface (`complete`, `stream`, `countTokens`, `buildCachePrefix`) with normalized content (text/thinking/tool_use/tool_result/image). Three implementations:
+## Models
 
-- **Anthropic** — native Messages API, `thinking` budget, multi-segment system messages + `cache_control: ephemeral` for prompt-cache hit rate, native `count_tokens`.
-- **Gemini** — native `generateContent`/`streamGenerateContent`, `systemInstruction`, `thinkingConfig`, `cachedContent`.
-- **OpenAI-compatible** (default) — wraps the legacy client; converts normalized content at the boundary; heuristic token counting.
+Provider setup is connection-first. A saved Connection owns encrypted or ambient credentials, revision-bound verification, and one or more Model Profiles. A model can become a default or Plan role only after that exact Connection/Profile revision passes verification.
 
-### Storage & Persistence
+Built-in connection types cover OpenAI, Anthropic, Gemini, Bedrock, Vertex AI, Z AI, DeepSeek, Kimi, MiniMax, Qwen, Alibaba Model Studio Coding Plan, xAI, Mistral, Meta Model API, Together AI, Fireworks AI, OpenRouter, Ollama, and custom OpenAI-compatible or Anthropic endpoints.
 
-JSON/JSONL is the complete default source of truth. `ZEROX_STORAGE_BACKEND` can explicitly enable transitional `sqlite` / `dual` paths for converted run and trajectory stores, but session, Goal, Memory, and execution checkpoint state remains JSON-backed until store-by-store parity is complete.
+Stored secrets are encrypted with Electron `safeStorage` and are never exposed to the renderer, Plan artifacts, or trajectories. Plan model bindings are frozen for reproducibility.
 
-Key tables: `sessions`, `chat_messages`, `runs`, `trajectory_events`, `checkpoints`, `tool_results` (raw string offloads), `memory_records` + `memory_fts` (FTS5 external-content), `goals` + `goal_ledger`, `artifacts` (provenance), `tasks` (scheduled), `tool_audit`, `permissions`, `actors`, `learning_candidates`, `eval_candidates`, `workspaces`, `memory_profile`, `validation_snapshots`.
+## Trust boundary
 
-Legacy JSON/JSONL files coexist under the same `config/` directory (`agent-runs.jsonl`, `chat-sessions.json`, `memory-records.json`, `scheduled-tasks.json`, `tool-audit.jsonl`, `agent-trajectories/<runId>.jsonl`, `agent-goals/*`, `tool-result-refs/*.json`, `memory-persona.md`, `agent-validation.json`, `multi-agent-sessions.json`, etc.). API keys are encrypted with Electron `safeStorage` and stored in `model-settings.json` — never in the database, never in plaintext.
+- Tool visibility is narrowed before a model request.
+- `ToolAuthorizationService` performs the main-process authorization decision.
+- Workspace sandboxing rechecks paths, symlinks, shell working directories, network scope, and extra roots.
+- Goal autonomy auto-approves ordinary in-scope work, while extreme-risk, irreversible, or expanded-permission actions still require confirmation.
+- Checkpoints, trajectories, ledgers, and run records remain local and recoverable.
+- Learning candidates require user review before they affect future behavior.
+- Renderer state is never the source of truth for tool permission, Plan adoption, Goal completion, or acceptance certificates.
 
-### Data Modes
+## Skills, memory, and multi-agent work
 
-The app explicitly indicates the current data mode:
+`SKILL.md` files define inputs, execution mode, permissions, planning requirements, custom tools, and optional MCP servers. Skills are discoverable through `@skill` and are provenance-pinned for execution. Skill MCP startup is opt-in through `ZEROX_ENABLE_SKILL_MCP=1`.
 
-- **Desktop Mode**: Electron is connected. Data is written to `userData/config`.
-- **Preview Mode**: only the frontend is loaded in a browser. Static demo data is used; no persistent writes occur.
+Memory supports core, session, semantic, episodic, and procedural records with lexical retrieval and optional embedding-backed search. Parent/child multi-agent sessions inherit workspace and authorization context and preserve parent run, session, role, and depth metadata.
 
----
+## Download and install
 
-## Core Capabilities
+Download [Zerox Agent v3.8.1](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1) or the [arm64 DMG](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.8.1/Zerox-Agent-3.8.1-arm64.dmg).
 
-### 1. Agent Chat
+This compatibility build is not notarized by Apple. Only for a package downloaded from the trusted project release, remove quarantine with:
 
-The chat window is the primary entry point — a goal-mode-first, chat-first interaction surface. Users describe needs in natural language; the Agent selects the appropriate skill, decomposes the task, invokes tools, and returns results. The session displays model, skill, task, memory, and tool status in real time.
+~~~bash
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
+~~~
 
-Chat UX includes: session-native Goal Mode in Chat Session mode (a persistent 目标 composer control, typed goal-draft confirmation before execution, legacy `/目标 ...` compatibility, inline review gates, goal progress from the same conversation); a right context rail that shows decomposed task progress and automatically switches to active subagent execution status while subagents run; a compact real-time activity strip; expandable task-activity timeline (newest first); provider-returned public reasoning fields; user-controlled long-task continuation at checkpoints or repeated tool failures; and an always-available interrupt that cancels the active request and propagates cancellation into running tools.
+After copying the app to Applications:
 
-### 2. Model Settings
+~~~bash
+xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
+~~~
 
-- Supports OpenAI-compatible, Anthropic (native), and Gemini (native) providers
-- Separate configuration for chat model and embedding model
-- Adjustable temperature (recommended 0.2–0.5), max tokens, and thinking budget
-- One-click connection test with latency and connectivity reporting
+Removing quarantine bypasses Gatekeeper's quarantine check for that file.
 
-### 3. Skill System
+## Run from source
 
-Skills are auto-discovered from the app `skills/` directory plus user roots such as `~/.claude/skills` and `~/.agents/skills` (app-local first wins, so local skills can override user skills of the same name). Each skill is a `SKILL.md` file with YAML frontmatter defining execution mode (`agent`/`script`), typed inputs, permissions, dependencies, optional custom tools, and optional MCP servers. Skills are invoked via `@skill` fuzzy autocomplete in the composer and run through a staged `SkillExecutionContract` state machine with tamper-evident provenance. Built-in: `local-file-organizer`; example: `example-mcp-skill`.
+Recommended: macOS, Node.js 22 LTS, and the npm version compatible with the lockfile.
 
-### 4. Scheduled Tasks
-
-Six schedule kinds: `manual`, `daily`, `weekdays`, `weekly`, `interval`, and `cron` (parsed via `cron-parser`). Natural-language drafting (`draftScheduleFromText`) recognizes bilingual phrases like "工作日 09:30" / "every 30 minutes". Tasks are **prompt-first** (describe what, when, where results go, when to stop) — skills are optional. Prompt-only tasks run as `prompt-task` in full-auto mode; `shell_exec`/`test_run` are hidden unless explicit shell templates are configured. Each automatic run is linked to a real chat session so task records can open the run context directly. The scheduler ticks every 60s.
-
-### 5. Agent Execution & Recovery
-
-The recoverable runtime is designed to be hard to strand:
-
-- Dynamic skill and MCP tools are authorized by explicit tool name or registered source.
-- Tool failures are appended as model-visible observations before retrying.
-- Duplicate retry blocks and exhausted retry budgets become structured `reflection_added` / `failure_classified` evidence.
-- Long histories are compacted before model requests and recorded as `context_compacted`.
-- Transient model failures retry with bounded exponential backoff and `model_retry` evidence.
-- Checkpoints are written after each tool result, so a crash between tools does not erase completed observations.
-- Runs trajectory insight cards summarize recovery stops, model retries, and context compaction before users inspect raw payloads.
-
-### 6. Goal Mode
-
-For long-running objectives, Goal Mode plans milestones with success criteria and acceptance checks (`file_exists`, `command_exit_code`, `test_passes`, `assertion`, `model_review`). It runs one milestone at a time, tracks budget (iterations, tool calls, wall clock, tokens, replans), and carries an 11-section **goal-continuity checkpoint** through compaction (marked never-compact). Evidence-based `model_review` checks can use a transcript-backed goal judge that emits a `goal_judged` verdict before acceptance. Goal Mode artifact evidence files are written under the workspace or explicit user-selected output roots, so refs like `artifact:research_notes` are judged from real local files. Deterministic task contracts (e.g. Chrome bookmarks → desktop markdown) run a no-LLM pipeline with provenance-backed acceptance. Review gates fire based on policy (`each`/`key`/`final`/`high_risk` milestone).
-
-### 7. Multi-Agent & Workflows
-
-Parent/child multi-agent sessions are recorded as lineage metadata on top of the recoverable runtime. Child runs inherit and narrow the workspace sandbox, making multi-agent activity inspectable in the Runs panel instead of becoming an opaque execution path. The model can spawn actors (`actor` tool) and invoke workflows (`workflow` tool); the built-in `deep-research` workflow orchestrates search → extract → adversarial verify → report. Actor lifecycle events are mirrored back into chat so the right rail can show each subagent's current state instead of hiding parallel work behind a generic context list.
-
-### 8. Tool System
-
-**25 built-in tools** cover core agent capabilities. Tools come from three sources: built-in, skill-defined (from `SKILL.md`), and MCP servers.
-
-| Tool | Function |
-|------|----------|
-| `file_list` / `file_stat` / `file_search` / `file_inventory` | Directory listing, metadata, name/content search, inventory |
-| `file_read` / `file_write` | Read / write files (auto-creates dirs) |
-| `file_move_plan` / `file_apply_moves` / `file_verify_moves` / `file_rollback_moves` | Transactional file-move pipeline with verify + rollback |
-| `tool_result_read` | Read back offloaded large tool results |
-| `code_search` | ripgrep-first source search |
-| `git_status` / `git_diff` | Branch + changed-file summary / raw diff + numstat |
-| `test_run` | Run approved test commands with structured output + cancellation |
-| `chrome_bookmarks_read` | Deterministic native Chrome bookmark extraction (with artifact output) |
-| `memory_search` / `conversation_search` | Bounded long-term memory / chat-session evidence recall |
-| `web_search` / `web_fetch` / `web_fetch_document` | DuckDuckGo search / webpage fetch / normalized research document fetch |
-| `citation_record` / `citation_coverage_check` | Record structured source evidence / verify sourced facts cite known citations |
-| `markdown_report_write` | Write citation-backed Markdown reports + `.citations.json` sidecars |
-| `shell_exec` | Execute shell commands with timeout, cancellation, structured failure diagnostics |
-
-Native tools emit `native_tool_invocation` and `native_tool_observation` trajectory events so evals and episode exports can distinguish first-party tools from shell fallbacks. An ACI (agent-computer-interface) policy lints tool descriptors for risk level, permission scope, and observable-event hygiene.
-
-### 9. Memory System
-
-Local long-term memory with five cognitive-science-inspired types:
-
-| Type | Purpose | Example |
-|------|---------|---------|
-| `core` | Persistent facts about the user | Name, preferences, identity |
-| `session` | Transient per-session context | Temporary info in current conversation |
-| `semantic` | General knowledge, concepts | Markdown syntax rules, API docs |
-| `episodic` | Task execution experiences | Run summaries and outcomes |
-| `procedural` | Workflows, procedures | Recommended file-organization steps |
-
-Features: lexical search (title 3×, tags 2×, body 1×, multi-word phrase matching) over FTS5; optional **vector search** (cosine similarity via embedding model) with a **hybrid RRF** fusion strategy; 30-minute auto-maintenance (consolidates duplicate titles, rolls up topics, archives sources); memory governance reports (duplicates, preference conflicts, stale low-signal records); retrieval evals; an editable `memory-persona.md` profile; bounded runtime recall; conversation-evidence memories; atomic L1 preference extraction; and reviewed procedural learning that influences future planning.
-
-### 10. Permissions & Security
-
-- **File**: absolute-path whitelists with `{{placeholder}}` support; symlink-boundary detection walks each path segment and re-checks `realpathSync`.
-- **Shell**: structural command analysis (tree-sitter-style `ShellPlan` is the source of truth), command-template matching, control-operator blocking, and destructive-command prevention (`rm -rf`, `git push -f`, `DROP TABLE`, `kubectl delete`, etc.).
-- **Web**: explicit search toggle, subdomain-aware domain fetch whitelist.
-- **Memory**: read/write toggles on task policies; memory tools are read-only recall helpers unless explicit write permission is granted.
-- **Sandbox layering**: the run context narrows tool access by sandbox mode (`workspace_write`/`read_only`), network mode (`none`/`approved_domains`/`task_policy`), and shell mode (`disabled`/`approved_commands`/`workspace_only`).
-- **Approval**: every tool call is checked against the task policy and audit-logged; critical calls (shell/file-write/web-fetch) escalate to a system dialog with risk classification (`normal`/`high`/`critical`).
-
-### 11. Self-Improvement & Evals
-
-- **Dream + Distill** (`selfImprovementService`): a background loop scans recent trajectories — `dream` distills recurring tool-call bigrams into procedural memory and failure lessons; `distill` clusters repeated tool-call sequences and packages high-confidence ones as discoverable skills. Low-confidence findings queue as user-reviewed learning candidates. Default off (`ZEROX_SELF_IMPROVEMENT`).
-- **Agent evals** (`runAgentEvals`): trajectory-event assertion checks over curated fixtures (happy paths, permission-denied recovery, tool-error reflection, resume-after-tool-call, workspace-escape-denied, etc.). **Adversarial evals** mutation-test the harness itself — any mutation that escapes undetected is a failure.
-- **Eval candidates**: a run's trajectory can be mined into a regression fixture; accepted candidates are promoted into the permanent set.
-- **Harness score**: Overview computes a 0–10 **ETCLOVG** maturity score across 7 categories (Execution environment, Tool interface, Context management, Lifecycle orchestration, Observability, Verification, Governance) plus a native **Agent Capability** score. The score folds in adversarial eval, goal-mode pass rate, and goal-judge pass rate.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- **macOS** (currently macOS-only)
-- **Node.js** ≥ 18
-- **npm** ≥ 9
-
-### Install & Run
-
-```bash
-# 1. Clone
+~~~bash
 git clone https://github.com/ZeroxZhang/zerox-agent.git
 cd zerox-agent
 
-# 2. Initialize the repo-local harness and read the agent guide
 ./init.sh
 less AGENTS.md
+npm ci
 
-# 3. Install dependencies
-npm install
-
-# 4. Run full self-check (tests + build + deterministic agent/memory evals)
 npm run doctor
-
-# 5. Launch the desktop app (production mode)
 npm run start:prod
-```
+~~~
 
-### Development Mode
+Development mode:
 
-```bash
+~~~bash
 npm run dev
-```
+~~~
 
-Starts three processes concurrently: Vite dev server (renderer HMR → `http://127.0.0.1:5173`), TypeScript main-process compilation (watch), and Electron (waits for compilation to complete).
+## Verification and packaging
 
-### First-Time Setup
+~~~bash
+npm test -- --maxWorkers=1
+npm run build
+npm run verify
+npm run smoke:prod
+npm run harness:check
 
-1. **Configure Model**: Open app → Settings → add a provider connection, test it, create a Chat Model Profile, and choose the default profile
-2. **Prepare Agent**: return to Overview, click "Prepare Local Agent", review the default file workflow and its allowed directories
-3. **Validate**: click "One-Click Validate" to test connection, tool permissions, run log, and the default task path
+npm run pack:mac
+npm run dist:mac
+~~~
 
-> Embedding Model is optional; without it, memory uses keyword search only. With it, vector semantic search is enabled.
+Additional checks include `npm run smoke:llm`, `npm run smoke:providers`, `npm run validate:agent`, `npm run harness:score`, and `npm run episode:export -- --latest-validation`.
 
-### LLM Smoke Test
+For release packaging:
 
-If `.api_info.md` is present in the working directory:
-
-```bash
-npm run smoke:llm
-```
-
-Parses `.api_info.md`, sends a minimal `/chat/completions` request per provider, and reports results with API keys redacted.
-
-The multi-provider contract smoke always validates the complete descriptor/matrix registry and fail-closed routing:
-
-```bash
-npm run smoke:providers
-```
-
-Live provider calls are opt-in. Set `ZEROX_PROVIDER_SMOKE=1` and pass a JSON array through `ZEROX_PROVIDER_SMOKE_CASES`; each case names `providerKind`, `modelId`, optional non-secret `values`, and a `secretEnvs` map whose values are environment-variable names. Secrets are never accepted inline or printed.
-
-### Desktop Validation
-
-```bash
-npm run validate:agent
-```
-
-Runs full validation inside the Electron main process: reads config → saves model → prepares task → tests connection → runs task → writes memory and validation snapshot.
-
----
-
-## Development Guide
-
-### Common Commands
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Development mode (Vite + tsc watch + Electron) |
-| `npm run doctor` / `verify` | Full self-check: tests, build, deterministic agent/memory evals |
-| `npm run build` | Production build |
-| `npm run start:prod` | Production build & launch |
-| `npm test` / `test:watch` | Run / watch unit tests |
-| `npm run smoke:llm` | Real-model connectivity smoke |
-| `npm run smoke:providers` | Multi-provider registry smoke; live calls require explicit environment opt-in |
-| `npm run smoke:prod` | Production smoke (start → verify render → exit) |
-| `npm run validate:agent` | Full desktop agent validation |
-| `npm run eval:agent` / `eval:memory` | Deterministic agent / memory eval suites |
-| `npm run harness:check` / `harness:score` | Repo-local harness check / ETCLOVG score |
-| `npm run episode:export` | Export a local evidence package (`run-graph.json`, `eval-candidate.json`, `trajectory.jsonl`) |
-| `npm run pack:mac` / `dist:mac` | Package macOS `.app` (unsigned trial) / `.dmg` + `.zip` (distribution) |
-
-### TypeScript Configuration
-
-Three compilation targets via project references:
-
-| Config | Target | Output | Purpose |
-|--------|--------|--------|---------|
-| `tsconfig.electron.json` | `main` + `preload` + `shared` | `dist-electron/` | Electron main process (Node16 ESM) |
-| `tsconfig.renderer.json` | `renderer` + `shared` | (noEmit) | Vite-bundled renderer (ESNext) |
-| `tsconfig.json` | Root reference | — | Combines the two above |
-
-### Project Structure
-
-```
-src/
-├── main/                  # Electron main process (Node.js)
-│   ├── main.ts            # Entry: window/tray/IPC/startup
-│   ├── container.ts       # DI container — constructs every service lazily
-│   ├── agentLoop.ts       # Core turn loop (system reminders → compact → model → tools)
-│   ├── agentRuntimeEngine.ts   # Recoverable runtime (checkpoints, pause/resume, max-mode)
-│   ├── goalRuntimeEngine.ts    # Goal milestone engine + acceptance
-│   ├── chatService.ts     # Chat-mode entry + streaming
-│   ├── agentRunnerService.ts   # Runner facade + streaming generator
-│   ├── agentToolExecutor.ts    # Tool registry, execution, sandbox
-│   ├── kernel/            # Kernel: eventBus, runtimeKernel, stopPolicy, permissionEngine, compaction
-│   ├── actors/            # Actor runtime, inbox, actor tool, checkpoint-writer, dream/distill
-│   ├── workflow/          # Workflow runtime + deep-research workflow + workflow tool
-│   ├── providers/         # LLM providers: Anthropic, Gemini, OpenAI-compatible + maxMode
-│   ├── storage/           # SQLite (storageDb), migrations, repositories, backend resolver
-│   ├── eval/              # Agent eval runner, adversarial eval, fixtures
-│   ├── tools/             # Tool implementations (file/shell/web/code/git/test/...)
-│   ├── ipc/               # IPC handlers per domain
-│   └── ...
-│
-├── renderer/              # Electron renderer (browser)
-│   ├── App.tsx            # Root: navigation + panel switching
-│   ├── components/        # Panels (Chat, Runs, ScheduledTasks, Overview, Settings, ...)
-│   │   └── chat/          # Chat output-part renderers (code, table, command, ledger, ...)
-│   ├── chatStreamReducer.ts     # Pure streaming state machine
-│   ├── chatOutputModel.ts       # Output-part adapter
-│   ├── chatTaskActivity.ts      # Task status / process timeline
-│   ├── goalProgressViewModel.ts # Goal progress projection
-│   ├── agentWorkStatus.ts       # Work-phase state machine
-│   ├── chatMarkdown.ts          # Hand-written markdown parser
-│   └── styles/            # Token-based CSS design system
-│
-├── preload/               # Context bridge (contextIsolation: true)
-├── shared/                # Shared domain logic (~140 modules, no subdirs)
-│   ├── agentProtocol.ts   # Tool definitions, model-response parse, prompt profiles
-│   ├── agentGoal.ts       # Goal / milestone / acceptance aggregate
-│   ├── agentTrajectory.ts # Universal trajectory event type (~50 variants)
-│   ├── agentWorkspace.ts  # Run context + sandbox policy
-│   ├── toolPermissions.ts # Permission policy + authorization
-│   ├── memory.ts          # Memory types + search (lexical/vector/hybrid RRF)
-│   ├── skills.ts          # SKILL.md parsing
-│   ├── scheduledTasks.ts  # Schedule kinds + NL drafting
-│   ├── systemPromptLayer*.ts # Layered prompt assembly
-│   ├── kernelContract.ts  # Kernel event/run/permission contract
-│   ├── storageContract.ts # Frozen storage/repository interfaces
-│   └── ...
-│
-├── skills/                # Local skills (local-file-organizer, example-mcp-skill, distilled/)
-├── scripts/               # eval runners, packaging, migrations, smoke, episode export
-├── build/                 # electron-builder resources (icon.svg, icon.icns)
-├── docs/                  # product positioning + architecture docs
-└── package.json
-```
-
----
-
-## Skill System
-
-Skills are the core extension mechanism. Each skill is a `SKILL.md` file with YAML frontmatter and a Markdown body:
-
-```markdown
----
-name: my-skill
-displayName: 我的技能
-description: 这个技能做了什么
-version: 0.1.0
-execution:
-  mode: agent            # agent | script
-  maxTurns: 15           # optional
-inputs:
-  - name: inputParam
-    label: 输入参数
-    type: string         # string | path | number | boolean | choice
-    required: true
-permissions:
-  files:
-    read: ["{{inputParam}}"]     # Mustache-style placeholders
-    write: ["{{inputParam}}"]
-  shell:
-    commands: []
-  web:
-    search: false
-    fetchDomains: []
-  memory:
-    read: true
-    write: true
-planning:
-  required: true
-  maxSteps: 7
-tools:                    # optional custom tool definitions
-  - name: my_tool
-    description: 自定义工具描述
-    parameters: { type: object, properties: {} }
-    entrypoint: my_tool_handler
-mcpServers:               # optional MCP servers
-  - name: external-server
-    command: npx
-    args: ["-y", "@scope/server"]
-    env:
-      API_KEY: "{{env.MCP_API_KEY}}"
----
-# 技能指令
-
-技能的具体指令内容，将作为 Agent 的执行指南。
-```
-
-At startup the registry scans app-local `skills/` then user roots, parses frontmatter, and validates manifests. Skill MCP processes do not auto-start by default; automatic MCP initialization requires the explicit `ZEROX_ENABLE_SKILL_MCP=1` opt-in, and child processes inherit only an allowlisted environment plus manifest-declared values. Skills are invoked via `@skill` fuzzy autocomplete and run through a staged `SkillExecutionContract` with provenance pinning the skill's hash for tamper-evidence.
-
----
-
-## Agent Run Lifecycle
-
-Scheduled and manual task runs go through the recoverable runtime by default. Each run writes checkpoints, appends trajectory events, stores a terminal run record, and can generate learning candidates from the completed trajectory.
-
-```
-startedAt
-  │
-  ├── [preflight]  Workspace, skill, memory, and tool-schema setup
-  │
-  ├── [executing]  Model/tool loop
-  │    ├── Compact oversized history before model_request
-  │    ├── Retry transient model failures (model_retry evidence)
-  │    ├── Authorize every tool against task policy + source metadata
-  │    ├── Execute tool, append native/tool observation evidence
-  │    ├── Write a checkpoint after each tool result
-  │    └── Feed recoverable failures back to the model as observations
-  │
-  ├── [recovering] Runtime reflection
-  │    ├── Classify permission / verification / network / duplicate / budget failures
-  │    ├── Allow bounded retry only when recoverable
-  │    └── Emit structured trajectory evidence before aborting unrecoverable loops
-  │
-  └── [done]       Completion
-       ├── Write AgentRunRecord
-       ├── Success → auto-write episodic memory
-       └── Update task lastRunAt
-finishedAt
-```
-
-Active checkpoints appear in the Runs panel and can be paused or resumed after interruption or app restart. The Runs panel also inspects raw trajectory events, payloads, and redaction flags, and projects runtime/trajectory/kernel/goal/milestone/tool/checkpoint/summary/gate evidence into a single stable run graph.
-
----
-
-## Packaging & Distribution
-
-```bash
-npm run doctor        # Self-check first
-npm run smoke:prod    # Production smoke
-npm run pack:mac      # .app → release/mac/ (local trial)
-npm run dist:mac      # .dmg + .zip → release/ (build only)
-npm run release:mac   # Build + manifest signature + fail-closed release preflight
-npm run release:publish -- /absolute/path/to/release-notes.md
-```
-
-Developer ID remains the default public-release mode: set the expected 10-character `APPLE_TEAM_ID` and Apple signing/notarization credentials. When those credentials are unavailable, the explicit compatibility mode preserves the project's historical first-install behavior while protecting later updates with a separate Ed25519 release signature:
-
-```bash
+~~~bash
 export ZEROX_RELEASE_MODE=legacy-adhoc
-export ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE=/secure/path/update-signing-private.pem
+export ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE=/absolute/path/to/update-signing-private.pem
 npm run release:mac
-```
-
-The private key path must be absolute, outside the repository, owned by the current user, and mode `0600` or stricter; inline environment keys, symlinks, and repository-contained keys are rejected. Its matching public key is packaged with the app. `release:mac` refuses dirty source trees, invalid application signatures, unstable Squirrel requirements, mismatched embedded commits/public keys, unverified Ed25519 metadata, extra ZIP/DMG payloads, invalid hashes/blockmaps, or unsafe asset names. Publication is an exact six-asset allowlist: ZIP, DMG, both blockmaps, `latest-mac.yml`, and `latest-mac.yml.sig`; `release:publish` reruns preflight and verifies the remote asset names and sizes after upload.
-
-Compatibility artifacts remain non-notarized, so the first v3.7.0 → v3.7.1 transition is a manual install and may require right-clicking **Open** or removing quarantine. v3.7.1 is the signed update seed for automatic v3.7.2+ transitions:
-
-Launch at login is opt-in. Set `ZEROX_ENABLE_LOGIN_STARTUP=1` only when deliberately enabling the packaged login item; hidden login-item launches keep the main window closed until the user activates the app.
-
-```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
-# or, after dragging the app into Applications:
-xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
-```
-
-The v3.7.1 auto-update runtime verifies the exact-tag manifest signature before electron-updater can download anything. The signed V2 envelope binds a monotonic release sequence and bounded validity window; the app uses a single-instance gate plus a cross-process monotonic compare-and-set to persist the highest accepted sequence and reject replay below it. Download completion must repeat the complete signed metadata comparison, settle the active `downloadUpdate` promise, and independently rehash the event's regular ZIP file before install is authorized. Developer ID releases add Apple trust and notarization; compatibility releases use the independent Ed25519 publisher-authentication gate described above. Crash reporting remains separate distribution work.
-
----
-
-## Testing & Evals
-
-```bash
-npm test                              # all unit tests
-npm run test:watch                    # watch mode
-npm run eval:agent                    # deterministic agent eval suite
-npm run eval:memory                   # deterministic memory retrieval eval suite
-npm run harness:check                 # repo-local harness check
-npm run harness:score                 # build + contract evals + ETCLOVG score
-npm run verify                        # tests + build + deterministic evals
-BUILDING_AGENT_CONFIG_DIR=/path/to/config npm run eval:agent      # include local promoted fixtures
-npm run episode:export -- --config-dir <userData/config> --run-id <runId>
-npm run episode:export -- --config-dir <userData/config> --latest-validation
-```
-
-`npm run verify` covers the Vitest suite (200+ test files under `src/`), the production build, 26 deterministic agent eval fixtures, and the memory eval suite. Release readiness additionally requires independent packaged-app acceptance. Agent evals cover native code engineering, research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. research writing, reflection-after-test-failure, retry-budget exhaustion, context compaction, tool-call checkpointing, model retry, strategy-guard fragmentation recovery, episode eval-candidate, child-handoff review gate, goal-mode recovery/control, bounded-autonomy golden paths, Agent Runtime Kernel event replay, permission-rule behavior, deterministic local artifact provenance acceptance, execution-context/tool-ledger/history contracts, memory-history scope checks, and output-rendering restore fidelity. Adversarial evals mutation-test the harness itself. The harness score emits the seven-category ETCLOVG score plus a native Agent Capability score used by Overview.
-
-Deterministic local artifact goals are accepted only when the task contract, canonical destination, generated artifact, and provenance evidence all agree; location/resource canonicalization normalizes home-relative, workspace-relative, Desktop, Downloads, and absolute roots before sandbox and acceptance checks.
-
-### Test Coverage
-
-- **Shared layer**: skill parsing, task permissions, memory search, bootstrap, navigation, data boundary, agent protocol, goal/task contracts, trajectory, run graph, etc.
-- **Main process**: tool execution, permission authorization, model config store, task scheduling, memory store, chat service, storage/repositories, smoke mode, etc.
-- **Renderer**: agent work status, chat stream reducer, output model, goal view model, validation preview, demo data, design-system invariants, etc.
-
----
-
-## Roadmap
-
-Planned:
-
-- [ ] Apple signing and notarization for trusted automatic-update distribution
-- [ ] Deeper runtime-loop consolidation with first-class persistent plans and verifier/critic passes
-- [ ] Skill marketplace, remote skill installation, and visual skill/workflow editing
-- [ ] Event-triggered tasks (file changes, system events, etc.)
-- [ ] Windows & Linux desktop support
-- [ ] Opt-in crash reporting and diagnostics
-
----
-
----
-# Chinese
-
-<h1 id="chinese">Zerox Agent（中文）</h1>
-
-<p align="center">
-  <img src="docs/product/zerox-agent-product-intro.jpg" alt="Zerox Agent 产品介绍：本地优先、可控、可续、可查的桌面 AI Agent" width="780" />
-</p>
-
-## 项目概述
-
-**Zerox Agent** 是一个本地优先的桌面智能体控制台（**v3.8.1**）。名字取自 **Zero + X**——从留白开始，把未知的本地工作流转成可观察、受权限管控、可恢复的 Agent 运行。
-
-它不是聊天壳，也不是泛用云端 Agent 入口，更不是无限自治循环。它运行在你的 Mac 上：自行配置 OpenAI-compatible / Anthropic / Gemini 模型（需自备 API Key）、扫描本地 `SKILL.md` 技能、执行 recoverable agent runs、调用受权限管控的工具、跟踪 parent/child multi-agent sessions、把经验写入本地长期记忆，并且在改变未来行为前保留 **user-reviewed learning**。
-
-**核心命题：** 把一句话变成一次可追踪的本地运行——整理文件、推进长目标、定时巡检。过程看得见，高风险先问你，中断后还能接着做。
-
-### 信任四支柱
-
-| 支柱 | 含义 | 代码级保证 |
-|------|------|------------|
-| **本地** | 状态与记忆都在本机 | 无云端 worker；API Key 仅 `safeStorage` 加密落盘；workspace-scoped runs |
-| **可控** | 高风险操作必须确认 | 不绕过 `ToolAuthorizationService`；shell 走结构化 `ShellPlan` |
-| **可续** | 崩溃与关应用可接上 | 工具结果后写 checkpoint；Goal 连续性与 resume |
-| **可查** | 每一步留下运行轨迹 | Runs · Evidence · kernel event replay；学习默认不生效 |
-
-### 设计原则
-
-| 原则 | 说明 |
-|------|------|
-| **本地优先** | 所有数据（任务、运行日志、权限、记忆、会话）存储在本地 `userData` 目录，不上传云端。 |
-| **隐私安全** | API Key 使用 Electron `safeStorage` 加密存储，工具调用按任务授权并记录审计日志。 |
-| **技能驱动** | 行为由可组合的 `SKILL.md` 文件定义，支持智能体模式 (`agent`) 和脚本模式 (`script`)，可扩展 MCP 工具。 |
-| **可观测** | 每次运行产生结构化轨迹，覆盖模型调用、推理、工具调用、检查点、压缩、暂停和完成。 |
-| **可恢复** | Agent 工作可检查、可取消、可恢复——持久化 checkpoint 让工具间的崩溃不丢已完成结果。 |
-| **权限管控** | 工具按任务策略授权并叠加 workspace sandbox；shell 命令做结构化分析，而非仅字符串匹配。 |
-| **模块化** | 主流程保留会话、运行、任务和设置；诊断、技能、工具、记忆、学习和评测收纳到设置内。 |
-
-### 适合谁
-
-- **独立构建者 / Power User** — 需要 Agent 动本地文件与工具，但不想把状态交给托管平台
-- **隐私敏感的知识工作** — 整理下载、导出书签、写报告、定时巡检，过程可查可回
-- **关心 Agent 可控性的人** — 不只想聊天，还想看清它做了什么、能不能停、会不会乱来
-
-产品边界写在 [`docs/product/zerox-positioning.md`](docs/product/zerox-positioning.md)。运行时、workspace、学习机制和目标模式分别见 [`docs/architecture/agent-runtime.md`](docs/architecture/agent-runtime.md)、[`docs/architecture/agent-workspaces.md`](docs/architecture/agent-workspaces.md)、[`docs/architecture/agent-learning-loop.md`](docs/architecture/agent-learning-loop.md) 与 [`docs/architecture/agent-goal-mode.md`](docs/architecture/agent-goal-mode.md)。
-
-当前版本是 **v3.8.1**。本次发布把模型设置收敛为以连接为中心的服务商与模型管理，明确保存、凭证、连接验证、失败、最近使用和默认模型状态；新增阿里云百炼 Coding Plan、自定义 OpenAI Chat Completions / Anthropic Messages 服务商、显式移除凭证，并把普通思考、工具、Goal 与 Debate 过程移到右侧状态栏。主会话只在需要用户选择或回答时显示决策卡片，Plan 模式选择完成后即收起。Goal 模式会在 Direct 或 Debate 开始前冻结同一份语义级目标契约，以父子谱系持久化初始 Plan 与运行期 Plan；初始 Debate 的 `A1 → B1 → A2 → B2 → C` 记录不会被后续 Direct 结构性重规划覆盖，同时严格区分“Plan 步骤已完成”和“Goal 已通过最终验收”。Debate 调查阶段统一使用结构化输出契约和修复边界，兼容无损的服务商字段形态差异，保留有界诊断，并在手动重试时从失败的调查深度继续，而不是重放已经完成的证据收集。
-
-3.8.1 的模型接入、信息披露与决策卡片规范见 [`docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md`](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md)；3.8.0 的领域边界、权限门禁和辩论协议见 [`docs/design/zerox-agent-3-8-0-plan-debate.md`](docs/design/zerox-agent-3-8-0-plan-debate.md)。
-
----
-
-## 架构设计
-
-Zerox Agent 是分层 Electron 应用。Electron 壳包裹一个依赖注入 **container**，懒加载构造每个服务；**kernel** 定义事件契约、轮次循环驱动、停止策略、权限引擎和压缩；对话、定时任务与目标里程碑共享同一套生产 turn-loop 契约；**actor 模型**支撑受权限收窄的子智能体，**workflow 运行时**在显式开启后跑确定性流水线，**provider 抽象**对接 LLM。**JSON/JSONL 是覆盖全部核心域的默认真相源**；SQLite / dual-write 仅为显式迁移模式。
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Electron Shell                            │
-│   Tray · BrowserWindow · safeStorage · dialog · app 生命周期      │
-├──────────────────────────────────────────────────────────────────┤
-│                         主进程 (Main)                             │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐  │
-│  │  Container (DI) │  │   IPC Handlers  │  │  KernelEventBus  │  │
-│  └─────────────────┘  └─────────────────┘  └──────────────────┘  │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────────┐  │
-│  │ 对话 loop │ │ Runtime   │ │ Goal      │ │ Actor / Workflow │  │
-│  │ (chat)    │ │ engine    │ │ engine    │ │ runtime          │  │
-│  │           │ │ (定时任务)│ │ (里程碑)  │ │ (deep-research)  │  │
-│  └───────────┘ └───────────┘ └───────────┘ └──────────────────┘  │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────────┐  │
-│  │ Provider  │ │ ToolExec  │ │ ToolAuthz │ │ Skill registry / │  │
-│  │ Anthropic │ │ + sandbox │ │ + shell   │ │ MCP / dream-dist │  │
-│  │ Gemini    │ │           │ │ plan      │ │                  │  │
-│  │ OpenAI-c. │ │           │ │           │ │                  │  │
-│  └───────────┘ └───────────┘ └───────────┘ └──────────────────┘  │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  存储：JSON/JSONL 默认 · SQLite/dual 显式迁移                │  │
-│  └────────────────────────────────────────────────────────────┘  │
-├─────────────────────────── IPC ──────────────────────────────────┤
-│            Preload 桥接层  (contextIsolation: true)               │
-├──────────────────────────────────────────────────────────────────┤
-│                       渲染进程 (Renderer)                         │
-│   会话 · 运行 · 定时任务 · 设置                                   │
-│   (总览 · 技能 · 工具 · 记忆 · 学习 · 评测)                       │
-│   React 19 + 手写 CSS 设计系统                                    │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### 技术栈
-
-| 层 | 技术 | 用途 |
-|----|------|------|
-| 桌面壳 | Electron 42 | 窗口、托盘、`safeStorage`、系统集成 |
-| 构建 | Vite 8 | 渲染进程 HMR + 生产打包 |
-| 类型 | TypeScript 6 | 全栈类型安全，三套 tsconfig |
-| UI | React 19 | 函数组件 + Hooks |
-| 样式 | 手写 CSS | 基于 token 的设计系统（CSS 自定义属性），明暗主题 |
-| 存储（默认） | JSON / JSONL | `userData/config` 下完整默认真相源 |
-| 存储（可选） | better-sqlite3 | `ZEROX_STORAGE_BACKEND=sqlite|dual` 显式迁移路径 |
-| 解析 | yaml、cron-parser | `SKILL.md` 前置元数据、cron 调度 |
-| 测试 | Vitest 4 | 单元测试 + 确定性 Agent/记忆评测 |
-| 打包 | electron-builder 26 | macOS `.app` / `.dmg` / `.zip` |
-
-### Kernel
-
-`src/main/kernel/` 是一组协作模块，定义运行如何推进：
-
-- **`KernelEventBus`** — 同步发布/订阅，带内存历史缓冲；每个 `KernelEvent`（`turn_start`/`tool_call`/`compaction`/`checkpoint_written`/`judge_verdict`/`retry`/`run_end`）通过 `kernel:event` 通道转发到所有渲染窗口。
-- **轮次循环驱动** — `runRuntimeKernel` 是参考驱动；生产循环在其基础上重实现了更丰富的行为（流式、压缩、暂停）。
-- **停止策略** — `createTurnLimitPolicy` 与 `createEvidenceJudgePolicy`。证据 judge 调用 LLM 并**要求其引用的证据字符串真实出现在 transcript 中**——幻觉式"成功"会被拒绝。
-- **权限引擎** — 按模式匹配工具请求与 `PermissionRule[]`；对 `shell_exec` 推导语义命令前缀，使 `npm run *` 匹配 `npm run build`。出现控制符（`; && ||` 反引号 `$(...)` 管道 重定向）时，禁用对缩减命令的 `allow` 规则，`allow git *` 无法被 `git foo; rm -rf` 绕过。
-- **韧性预算** — 对话默认 8 轮，目标模式 = `里程碑数 × 6`，绝对上限 60。
-- **压缩（三层）** — kernel 级上下文压缩、rebuild-from-checkpoint 策略（在 markdown checkpoint 锚点周围注入 FTS5-BM25 记忆命中 + 12k token 尾部）、路径受保护的 JSON checkpoint 文件。
-
-### 执行循环
-
-三个生产循环，都委托给 `runAgentLoop`（`src/main/agentLoop.ts`），系统核心。每轮：注入系统提醒 → 压缩过长历史 → 请求模型（流式或带重试）→ 终止，或授权+执行工具 → 序列化 observation → checkpoint。循环守卫检测重复工具调用、碎片化工具调用模式和工具失败连击。
-
-- **对话循环**（`chatService.ts`）— 交互式聊天，支持流式增量、工具调用预览、output part、状态事件和续跑恢复。
-- **可恢复 runtime engine**（`agentRuntimeEngine.ts`）— 手动/定时任务执行，每个工具结果后写持久化 `AgentExecutionCheckpoint`，支持跨应用重启的暂停/恢复。可选 **max-mode**（best-of-N：3 个仅提议候选，judge 选优，胜者的工具调用通过临时 actor 重放）。
-- **目标里程碑 engine**（`goalRuntimeEngine.ts`）— 一次跑一个里程碑；确定性任务契约跑无 LLM 的直接工具序列，其余跑 `runAgentLoop` 并在循环后做验收判定。
-
-### Actor 与多智能体
-
-`src/main/actors/` 实现了 actor 模型，模型本身可通过 `actor` 工具（`run`/`spawn`/`status`/`wait`/`cancel`/`send`）生成子智能体。Actor 有 `contextMode`（`none`/`state`/`full`）、生命周期（`persistent`/`ephemeral`）、可选 `toolWhitelist`、用于结果校验的 `outputSchema`，以及支持点对点消息的 per-actor 收件箱。子运行上下文继承并**收窄**父 sandbox（network/shell 只能更严、`read_only` 粘性、额外根必须在父根内、`depth` 强制单层 handoff）。
-
-旗舰 actor 是 **checkpoint-writer fork**：冷读父运行轨迹，蒸馏出 11 段 markdown 连续性 checkpoint（活跃意图、下一步、指令、任务树、当前工作、文件、习得、错误、在线资源、设计决策、待办备注），优先 LLM 蒸馏，失败回退到规则构建器，永不失败。
-
-### Workflow 运行时
-
-`src/main/workflow/` 在冻结的 host-hook sandbox（`agent`/`webfetch`/`websearch`/`parallel` 上限 8 /`pipeline`）内跑确定性流水线，带截止时间（默认 12h）和 abort 信号。内置 **`deep-research`** workflow 是 `plan → search → extract → group → verify → report` 流水线，验证使用 **3-voter 对抗 actor**（一个 fact 若被 ≥2 个否决则丢弃）。Workflow 可被打包成可发现技能（`registerWorkflowAsSkill`），模型可通过 `workflow` 工具调用。
-
-### Provider
-
-`src/main/providers/` 用冻结的 `LLMProvider` 接口（`complete`/`stream`/`countTokens`/`buildCachePrefix`）抽象 LLM，内容归一化（text/thinking/tool_use/tool_result/image）。三个实现：
-
-- **Anthropic** — 原生 Messages API，`thinking` 预算，多段 system 消息 + `cache_control: ephemeral` 提升 prompt cache 命中，原生 `count_tokens`。
-- **Gemini** — 原生 `generateContent`/`streamGenerateContent`，`systemInstruction`、`thinkingConfig`、`cachedContent`。
-- **OpenAI-compatible**（默认）— 包装旧客户端；在边界转换归一化内容；启发式 token 计数。
-
-### 存储与持久化
-
-JSON/JSONL 是覆盖全部核心域的默认真相源。`ZEROX_STORAGE_BACKEND` 可显式启用仍在迁移中的 `sqlite`/`dual` 路径，但会话、Goal、Memory 与执行 checkpoint 在完成逐 store parity 前继续以 JSON 为准。
-
-主要表：`sessions`、`chat_messages`、`runs`、`trajectory_events`、`checkpoints`、`tool_results`（原始字符串卸载）、`memory_records` + `memory_fts`（FTS5 external-content）、`goals` + `goal_ledger`、`artifacts`（来源证明）、`tasks`（定时）、`tool_audit`、`permissions`、`actors`、`learning_candidates`、`eval_candidates`、`workspaces`、`memory_profile`、`validation_snapshots`。
-
-旧 JSON/JSONL 文件并存于同一 `config/` 目录（`agent-runs.jsonl`、`chat-sessions.json`、`memory-records.json`、`scheduled-tasks.json`、`tool-audit.jsonl`、`agent-trajectories/<runId>.jsonl`、`agent-goals/*`、`tool-result-refs/*.json`、`memory-persona.md`、`agent-validation.json`、`multi-agent-sessions.json` 等）。API Key 用 Electron `safeStorage` 加密存在 `model-settings.json`——不入数据库、不落明文。
-
-### 数据模式
-
-应用明确指出当前所处的数据模式：
-
-- **正式本地数据模式**：Electron 桌面端已连接，数据写入 `userData/config`。
-- **浏览器演示数据模式**：仅 localhost 预览前端，使用静态演示数据，不写入正式存储。
-
----
-
-## 核心能力
-
-### 1. 智能体对话 (Chat)
-
-对话窗口是第一入口。用户从自然语言描述需求，Agent 选择技能、分解任务、调用工具、返回结果，会话中实时展示模型、技能、任务、记忆和工具状态。
-
-对话体验包括：会话原生 **Goal Mode**（固定的“目标”输入控制、执行前的结构化目标草案确认、兼容旧 `/目标 ...`、内联审核门、从同一会话查看目标进度）；输入框上方紧凑实时状态栏；可展开的任务过程时间线（最新在前）；模型/API 返回的公开 reasoning 字段；长任务到检查点或连续工具失败时暂停让用户决定；以及始终可用的中断，可取消当前请求并把取消信号传给正在运行的工具。
-
-### 2. 模型配置 (Model Settings)
-
-- 支持 OpenAI-compatible、Anthropic（原生）、Gemini（原生）provider
-- 独立配置对话模型与 Embedding 模型
-- 可调 temperature（建议 0.2–0.5）、max tokens、thinking 预算
-- 一键连接测试，报告延迟和连通性
-
-### 3. 技能系统 (Skills)
-
-从应用内 `skills/` 目录及 `~/.claude/skills`、`~/.agents/skills` 等用户目录自动发现（应用内优先，可覆盖同名用户技能）。每个技能是一个带 YAML frontmatter 的 `SKILL.md`，定义执行模式（`agent`/`script`）、类型化输入、权限、依赖、可选自定义工具和 MCP 服务器。通过输入框 `@skill` 模糊自动补全调用，经分阶段 `SkillExecutionContract` 状态机执行并带防篡改来源。内置：`local-file-organizer`；示例：`example-mcp-skill`。
-
-### 4. 任务调度 (Scheduled Tasks)
-
-六种调度：`manual`、`daily`、`weekdays`、`weekly`、`interval`、`cron`（`cron-parser` 解析）。自然语言草拟（`draftScheduleFromText`）识别"工作日 09:30"/"every 30 minutes"等双语表述。任务以 **prompt 描述为主**（写清做什么、何时、结果放哪、何时停），技能可选。prompt-only 任务以 `prompt-task` 全自动运行；未配置显式命令模板时不暴露 `shell_exec`/`test_run`。每次自动运行绑定真实会话，任务记录可直接打开运行上下文。调度器每 60 秒触发一次。
-
-### 5. Agent 执行与恢复
-
-可恢复 runtime 的设计目标是让运行不再轻易卡死：
-
-- 动态 skill / MCP 工具按显式工具名或注册来源授权。
-- 工具失败作为模型可见 observation 写回，再决定是否重试。
-- 重复 retry 和恢复预算耗尽成为结构化 `reflection_added` / `failure_classified` 证据。
-- 长历史在模型请求前压缩，记录 `context_compacted`。
-- 瞬时模型失败有限指数退避重试，记录 `model_retry`。
-- 每个工具结果后立即写 checkpoint，工具间崩溃不丢已完成 observation。
-- Runs 轨迹诊断卡会摘要恢复停止、模型重试和上下文压缩，再让用户看 raw payload。
-
-### 6. 目标模式 (Goal Mode)
-
-面向长期目标，Goal Mode 规划带成功标准和验收检查（`file_exists`/`command_exit_code`/`test_passes`/`assertion`/`model_review`）的里程碑，一次跑一个，跟踪预算（迭代、工具调用、墙钟、token、重规划），并在压缩中携带 11 段**目标连续性 checkpoint**（标记 never-compact）。确定性任务契约（如 Chrome 书签 → 桌面 markdown）跑无 LLM 流水线并做来源证明验收。审核门按策略触发（`each`/`key`/`final`/`high_risk` 里程碑）。
-
-### 7. 多智能体与工作流
-
-父子多 Agent 会话作为血缘元数据记录在可恢复 runtime 之上。子运行继承并收窄 workspace sandbox，使多 Agent 活动在 Runs 面板可检视，而非变成不透明执行路径。模型可生成 actor（`actor` 工具）和调用 workflow（`workflow` 工具）；内置 `deep-research` workflow 编排 搜索 → 抽取 → 对抗验证 → 报告。
-
-### 8. 工具系统 (Tools)
-
-**25 种内置工具**覆盖核心能力。工具来自三类来源：内置、技能定义（来自 `SKILL.md`）、MCP 服务器。
-
-| 工具 | 功能 |
-|------|------|
-| `file_list` / `file_stat` / `file_search` / `file_inventory` | 目录列表、元数据、名称/内容搜索、清单 |
-| `file_read` / `file_write` | 读取 / 写入文件（自动建目录） |
-| `file_move_plan` / `file_apply_moves` / `file_verify_moves` / `file_rollback_moves` | 事务化文件移动流水线，带校验 + 回滚 |
-| `tool_result_read` | 读回卸载的大型工具结果 |
-| `code_search` | ripgrep 优先源码搜索 |
-| `git_status` / `git_diff` | 分支 + 改动文件摘要 / raw diff + numstat |
-| `test_run` | 运行已授权测试命令，结构化结果 + 可中断 |
-| `chrome_bookmarks_read` | 确定性原生 Chrome 书签抽取（带 artifact 输出） |
-| `memory_search` / `conversation_search` | 有预算的长期记忆 / 会话证据召回 |
-| `web_search` / `web_fetch` / `web_fetch_document` | DuckDuckGo 搜索 / 网页抓取 / 规范化研究文档抓取 |
-| `citation_record` / `citation_coverage_check` | 记录结构化引用证据 / 检查 sourced fact 是否引用已知 citation |
-| `markdown_report_write` | 写入带引用的 Markdown 报告 + `.citations.json` sidecar |
-| `shell_exec` | 执行 shell 命令，支持超时、中断、结构化失败诊断 |
-
-原生工具额外写入 `native_tool_invocation` 和 `native_tool_observation` 轨迹事件，让 eval 和 episode export 能区分一方工具调用与 shell fallback。ACI（agent-computer-interface）策略会对工具描述符做风险等级、权限范围和可观测事件卫生的 lint。
-
-### 9. 记忆系统 (Memory)
-
-本地长期记忆支持五种参考认知科学的类型：
-
-| 类型 | 用途 | 示例 |
-|------|------|------|
-| `core` (核心) | 关于用户的持久事实 | 用户姓名、偏好、身份 |
-| `session` (会话) | 单次会话临时上下文 | 当前对话中的临时信息 |
-| `semantic` (语义) | 通用知识、概念 | Markdown 语法规则、API 文档摘要 |
-| `episodic` (情景) | 任务执行经验 | 某次运行的摘要和结果 |
-| `procedural` (流程) | 操作流程、工作流 | 文件整理的推荐步骤 |
-
-特性：基于 FTS5 的关键词检索（标题 3×、标签 2×、正文 1×，支持多词短语匹配）；可选**向量检索**（Embedding 模型余弦相似度）与 **hybrid RRF** 融合策略；每 30 分钟自动整理（合并重复标题、话题归拢、归档源记忆）；记忆治理报告（重复、偏好冲突、陈旧低信号）；检索评测；可编辑 `memory-persona.md` 画像；有预算运行时召回；会话证据记忆；原子 L1 偏好抽取；以及影响后续规划的审核后流程学习。
-
-### 10. 权限与安全 (Permissions & Security)
-
-- **文件**：绝对路径白名单，支持 `{{placeholder}}`；符号链接边界检测逐段行走并复查 `realpathSync`。
-- **Shell**：结构化命令分析（tree-sitter 风格 `ShellPlan` 为唯一真相源）、命令模板匹配、控制符拦截、破坏性命令拦截（`rm -rf`、`git push -f`、`DROP TABLE`、`kubectl delete` 等）。
-- **Web**：显式搜索开关、子域名感知的域名抓取白名单。
-- **记忆**：任务策略中 memory.read/write 开关；记忆工具默认只读召回，除非显式授予写权限。
-- **Sandbox 分层**：运行上下文按 sandbox 模式（`workspace_write`/`read_only`）、network 模式（`none`/`approved_domains`/`task_policy`）、shell 模式（`disabled`/`approved_commands`/`workspace_only`）收窄工具访问。
-- **授权**：每次工具调用按任务策略检查并写审计日志；关键调用（shell/文件写/web 抓取）按风险分级（`normal`/`high`/`critical`）升级到系统对话框。
-
-### 11. 自我改进与评测 (Self-Improvement & Evals)
-
-- **Dream + Distill**（`selfImprovementService`）：后台循环扫描近期轨迹——`dream` 把重复工具调用 bigram 蒸馏成流程记忆和失败教训；`distill` 聚类重复工具调用序列，把高置信度的打包成可发现技能。低置信度发现排队为待用户审核的学习候选。默认关闭（`ZEROX_SELF_IMPROVEMENT`）。
-- **Agent 评测**（`runAgentEvals`）：对精选 fixture 做轨迹事件断言检查（happy path、权限拒绝恢复、工具错误反思、工具后恢复、workspace 越界拒绝等）。**对抗评测**对 harness 本身做变异测试——任何未被发现的变异都是失败。
-- **评测候选**：运行轨迹可被挖掘成回归 fixture；接受的候选晋升为永久集。
-- **Harness 评分**：Overview 计算跨 7 类（执行环境、工具接口、上下文、生命周期编排、可观测、验证、治理）的 0–10 **ETCLOVG** 成熟度评分，外加原生 **Agent Capability** 评分。
-
----
-
-## 快速开始
-
-### 环境要求
-
-- **macOS**（当前仅支持 macOS）
-- **Node.js** ≥ 18
-- **npm** ≥ 9
-
-### 安装与运行
-
-```bash
-# 1. 克隆仓库
-git clone https://github.com/ZeroxZhang/zerox-agent.git
-cd zerox-agent
-
-# 2. 初始化仓库本地 harness，并阅读 Agent 操作指南
-./init.sh
-less AGENTS.md
-
-# 3. 安装依赖
-npm install
-
-# 4. 运行完整自检（测试 + 构建 + Agent/记忆评测）
-npm run doctor
-
-# 5. 启动桌面应用（生产模式）
-npm run start:prod
-```
-
-### 开发模式
-
-```bash
-npm run dev
-```
-
-同时启动三个进程：Vite 开发服务器（renderer HMR → `http://127.0.0.1:5173`）、TypeScript 主进程编译（watch）、Electron 窗口（自动等待编译完成）。
-
-### 首次启动引导
-
-1. **配置模型**：打开应用 → 设置 → 新增并测试服务商连接 → 创建 Chat 模型档案 → 选择默认档案
-2. **准备智能体**：回到首页，点击「准备本地智能体」，检查模型、技能和默认任务
-3. **验收运行**：点击「一键验收」，测试连接、工具权限、运行日志和默认任务路径
-
-> Embedding Model 可选填；不填时记忆仍可用关键词检索，填后增加向量语义检索。
-
-### 真实模型冒烟测试
-
-如果当前目录有 `.api_info.md`：
-
-```bash
-npm run smoke:llm
-```
-
-解析 `.api_info.md`，对每个供应商发送一次最小 `/chat/completions` 请求，打印延迟和回复摘要（**API Key 已脱敏**）。
-
-多服务商合约冒烟会默认校验完整 Descriptor/Matrix 注册表与未知服务商 fail-closed：
-
-```bash
-npm run smoke:providers
-```
-
-真实服务商调用必须显式设置 `ZEROX_PROVIDER_SMOKE=1`，并通过 `ZEROX_PROVIDER_SMOKE_CASES` 提供 JSON 数组。每项包含 `providerKind`、`modelId`、可选非敏感 `values`，以及只保存环境变量名的 `secretEnvs`；脚本不接受或输出内联密钥。
-
-### 桌面端完整验收
-
-```bash
-npm run validate:agent
-```
-
-在 Electron 主进程内运行完整验收：读取配置 → 保存模型 → 准备任务 → 测试连接 → 运行任务 → 写入记忆和验收快照。
-
----
-
-## 开发指南
-
-### 常用命令
-
-| 命令 | 说明 |
-|------|------|
-| `npm run dev` | 开发模式（Vite + tsc watch + Electron） |
-| `npm run doctor` / `verify` | 完整自检：测试、构建、确定性 Agent/记忆评测 |
-| `npm run build` | 生产构建 |
-| `npm run start:prod` | 生产构建并启动 |
-| `npm test` / `test:watch` | 运行 / watch 单元测试 |
-| `npm run smoke:llm` | 真实模型连通性冒烟 |
-| `npm run smoke:providers` | 多服务商注册表冒烟；真实调用需显式环境变量 opt-in |
-| `npm run smoke:prod` | 生产包冒烟（启动 → 验证渲染 → 退出） |
-| `npm run validate:agent` | 桌面端完整验收 |
-| `npm run eval:agent` / `eval:memory` | 确定性 Agent / 记忆评测 |
-| `npm run harness:check` / `harness:score` | 仓库本地 harness 检查 / ETCLOVG 评分 |
-| `npm run episode:export` | 导出本地证据包（`run-graph.json`、`eval-candidate.json`、`trajectory.jsonl`） |
-| `npm run pack:mac` / `dist:mac` | 打包 macOS `.app`（未签名试用）/ `.dmg` + `.zip`（分发） |
-
-### TypeScript 配置
-
-项目使用 TypeScript 项目引用分离三个编译目标：
-
-| 配置 | 目标 | 输出 | 用途 |
-|------|------|------|------|
-| `tsconfig.electron.json` | `src/main` + `src/preload` + `src/shared` | `dist-electron/` | Electron 主进程 (Node16 ESM) |
-| `tsconfig.renderer.json` | `src/renderer` + `src/shared` | (noEmit) | Vite 打包的渲染进程 (ESNext) |
-| `tsconfig.json` | 根引用文件 | — | 组合以上两者 |
-
-### 项目结构
-
-```
-src/
-├── main/                  # Electron 主进程 (Node.js)
-│   ├── main.ts            # 入口：窗口/Tray/IPC/启动
-│   ├── container.ts       # DI container，懒加载构造每个服务
-│   ├── agentLoop.ts       # 核心轮次循环（系统提醒 → 压缩 → 模型 → 工具）
-│   ├── agentRuntimeEngine.ts   # 可恢复 runtime（checkpoint、暂停/恢复、max-mode）
-│   ├── goalRuntimeEngine.ts    # 目标里程碑 engine + 验收
-│   ├── chatService.ts     # 对话模式入口 + 流式
-│   ├── agentRunnerService.ts   # Runner facade + 流式生成器
-│   ├── agentToolExecutor.ts    # 工具注册、执行、sandbox
-│   ├── kernel/            # Kernel：eventBus、runtimeKernel、stopPolicy、permissionEngine、压缩
-│   ├── actors/            # Actor runtime、inbox、actor 工具、checkpoint-writer、dream/distill
-│   ├── workflow/          # Workflow runtime + deep-research workflow + workflow 工具
-│   ├── providers/         # LLM provider：Anthropic、Gemini、OpenAI-compatible + maxMode
-│   ├── storage/           # SQLite (storageDb)、迁移、repositories、backend resolver
-│   ├── eval/              # Agent eval runner、对抗 eval、fixtures
-│   ├── tools/             # 工具实现（file/shell/web/code/git/test/...）
-│   ├── ipc/               # 按域注册的 IPC handler
-│   └── ...
-│
-├── renderer/              # Electron 渲染进程（浏览器）
-│   ├── App.tsx            # 根组件：导航 + 面板切换
-│   ├── components/        # 面板（Chat、Runs、ScheduledTasks、Overview、Settings...）
-│   │   └── chat/          # 聊天 output-part 渲染器（code、table、command、ledger...）
-│   ├── chatStreamReducer.ts     # 纯流式状态机
-│   ├── chatOutputModel.ts       # output-part 适配层
-│   ├── chatTaskActivity.ts      # 任务状态 / 过程时间线
-│   ├── goalProgressViewModel.ts # 目标进度投影
-│   ├── agentWorkStatus.ts       # 工作相位状态机
-│   ├── chatMarkdown.ts          # 手写 markdown 解析器
-│   └── styles/            # 基于 token 的 CSS 设计系统
-│
-├── preload/               # 预加载桥接 (contextIsolation: true)
-├── shared/                # 共享域逻辑（约 140 个模块，无子目录）
-│   ├── agentProtocol.ts   # 工具定义、模型响应解析、prompt profile
-│   ├── agentGoal.ts       # 目标 / 里程碑 / 验收聚合
-│   ├── agentTrajectory.ts # 通用轨迹事件类型（约 50 个变体）
-│   ├── agentWorkspace.ts  # 运行上下文 + sandbox 策略
-│   ├── toolPermissions.ts # 权限策略 + 授权
-│   ├── memory.ts          # 记忆类型 + 搜索（关键词/向量/hybrid RRF）
-│   ├── skills.ts          # SKILL.md 解析
-│   ├── scheduledTasks.ts  # 调度类型 + 自然语言草拟
-│   ├── systemPromptLayer*.ts # 分层 prompt 组装
-│   ├── kernelContract.ts  # Kernel 事件/运行/权限契约
-│   ├── storageContract.ts # 冻结的存储/repository 接口
-│   └── ...
-│
-├── skills/                # 本地技能（local-file-organizer、example-mcp-skill、distilled/）
-├── scripts/               # 评测运行、打包、迁移、冒烟、episode 导出
-├── build/                 # electron-builder 资源（icon.svg、icon.icns）
-├── docs/                  # 产品定位 + 架构文档
-└── package.json
-```
-
----
-
-## 技能系统
-
-技能是核心扩展机制。每个技能是一个带 YAML frontmatter 和 Markdown 正文的 `SKILL.md`：
-
-```markdown
----
-name: my-skill
-displayName: 我的技能
-description: 这个技能做了什么
-version: 0.1.0
-execution:
-  mode: agent            # agent | script
-  maxTurns: 15           # 可选
-inputs:
-  - name: inputParam
-    label: 输入参数
-    type: string         # string | path | number | boolean | choice
-    required: true
-permissions:
-  files:
-    read: ["{{inputParam}}"]     # Mustache 风格占位符
-    write: ["{{inputParam}}"]
-  shell:
-    commands: []
-  web:
-    search: false
-    fetchDomains: []
-  memory:
-    read: true
-    write: true
-planning:
-  required: true
-  maxSteps: 7
-tools:                    # 可选自定义工具
-  - name: my_tool
-    description: 自定义工具描述
-    parameters: { type: object, properties: {} }
-    entrypoint: my_tool_handler
-mcpServers:               # 可选 MCP 服务器
-  - name: external-server
-    command: npx
-    args: ["-y", "@scope/server"]
-    env:
-      API_KEY: "{{env.MCP_API_KEY}}"
----
-# 技能指令
-
-技能的具体指令内容，将作为 Agent 的执行指南。
-```
-
-启动时注册表按序扫描应用内 `skills/` 和用户目录，解析 frontmatter 并校验 manifest。Skill MCP 进程默认不会自动启动；只有显式设置 `ZEROX_ENABLE_SKILL_MCP=1` 才会自动初始化，子进程仅继承白名单环境变量和 manifest 明确声明的值。技能通过输入框 `@skill` 模糊自动补全调用，经分阶段 `SkillExecutionContract` 执行，并用 hash 锁定技能来源以防篡改。
-
----
-
-## Agent 运行生命周期
-
-手动/定时任务默认走可恢复 runtime。每次运行写 checkpoint、追加 trajectory event、保存终态 run record，并可从完成轨迹生成学习候选。v3.0.0 增加了 `AgentRuntimeContextSnapshot` 作为 runtime context spine，在模型/工具事件前记录运行表面、模型身份、时间锚点、workspace sandbox、可见工具 schema、记忆范围、checkpoint 与 trajectory identity，且不包含 API key 或大块原始工具输出。v3.1.0 继续补强 Goal 命令、选中技能、子任务验收和子代理执行的可观测链路：
-
-```
-startedAt
-  │
-  ├── [preflight]  workspace、skill、memory、tool schema 准备
-  │
-  ├── [executing]  模型/工具循环
-  │    ├── 模型请求前压缩过长历史
-  │    ├── 瞬时模型失败有限重试（model_retry 证据）
-  │    ├── 每个工具调用按任务权限和来源元数据授权
-  │    ├── 执行工具并追加 native/tool observation 证据
-  │    ├── 每个工具结果后写 checkpoint
-  │    └── 可恢复失败作为 observation 反喂模型
-  │
-  ├── [recovering] 运行时反思
-  │    ├── 分类权限/验证/网络/重复/预算等失败
-  │    ├── 仅在可恢复时允许有限重试
-  │    └── 不可恢复循环终止前写入结构化轨迹证据
-  │
-  └── [done]       完成
-       ├── 写入 AgentRunRecord
-       ├── 成功运行 → 自动写入 episodic memory
-       └── 更新任务 lastRunAt
-finishedAt
-```
-
-活动 checkpoint 出现在 Runs 面板，可在中断或应用重启后暂停/恢复。Runs 面板还可检视原始轨迹事件、payload 和脱敏标记，并把 runtime/trajectory/kernel/goal/milestone/tool/checkpoint/summary/gate 证据投影成单一稳定 run graph。
-
----
-
-## 打包与分发
-
-```bash
-npm run doctor        # 先跑自检
-npm run smoke:prod    # 生产包冒烟
-npm run pack:mac      # .app → release/mac/（本地试用）
-npm run dist:mac      # .dmg + .zip → release/（仅构建）
-npm run release:mac   # 构建 + 清单签名 + 失败关闭发布检查
-npm run release:publish -- /absolute/path/to/release-notes.md
-```
-
-Developer ID 仍是默认公开发版模式，需要设置预期的 10 位 `APPLE_TEAM_ID` 及 Apple 签名/公证凭据。凭据暂不可用时，只能显式启用兼容模式；它保留项目过去的首次安装方式，同时用独立 Ed25519 发布签名保护后续更新：
-
-```bash
-export ZEROX_RELEASE_MODE=legacy-adhoc
-export ZEROX_UPDATE_SIGNING_PRIVATE_KEY_FILE=/secure/path/update-signing-private.pem
-npm run release:mac
-```
-
-私钥路径必须是仓库外绝对路径，文件须由当前用户持有且权限为 `0600` 或更严格；内联环境变量私钥、符号链接和仓库内私钥都会被拒绝。配对公钥会随应用打包。`release:mac` 会拒绝脏源码树、无效应用签名、不稳定的 Squirrel requirement、嵌入提交/公钥不一致、Ed25519 元数据验证失败、ZIP/DMG 额外载荷、错误哈希/blockmap 或不安全资产名。发布严格限定六个资产：ZIP、DMG、两个 blockmap、`latest-mac.yml` 和 `latest-mac.yml.sig`；`release:publish` 会再次运行 preflight，并在上传后核对远端名称和大小。
-
-兼容产物仍未经过 Apple 公证，因此 v3.7.0 → v3.7.1 是一次手动安装，可能需要右键选择“打开”或移除隔离属性。v3.7.1 是 v3.7.2+ 自动更新所需的签名种子：
-
-开机登录启动默认关闭。只有明确设置 `ZEROX_ENABLE_LOGIN_STARTUP=1` 时才会配置打包应用的 Login Item；隐藏登录启动不会主动显示主窗口。
-
-```bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
-# 或已将应用拖入 Applications 后执行：
-xattr -dr com.apple.quarantine "/Applications/Zerox Agent.app"
-```
-
-v3.7.1 自动更新运行时会先验证精确 tag 的清单签名，再允许 electron-updater 下载。V2 签名信封绑定单调发布序号和有限有效期；应用用单实例门加跨进程单调 compare-and-set 保存已接受的最高序号并拒绝低于它的重放。下载完成后还必须再次完整比对签名元数据、等待当前 `downloadUpdate` promise 完成，并独立重算事件所指常规 ZIP 文件的哈希，才能进入安装。Developer ID 模式额外提供 Apple 信任与公证；兼容模式依赖上述独立 Ed25519 发布者认证门。崩溃报告仍属于后续分发工作。
-
----
-
-## 测试与评测
-
-```bash
-npm test                              # 全部单元测试
-npm run test:watch                    # watch 模式
-npm run eval:agent                    # 确定性 Agent 评测
-npm run eval:memory                   # 确定性记忆检索评测
-npm run harness:check                 # 仓库本地 harness 检查
-npm run harness:score                 # 构建 + 契约评测 + ETCLOVG 评分
-npm run verify                        # 测试 + 构建 + 确定性评测
-BUILDING_AGENT_CONFIG_DIR=/path/to/config npm run eval:agent      # 含本地 promoted fixture
-npm run episode:export -- --config-dir <userData/config> --run-id <runId>
-npm run episode:export -- --config-dir <userData/config> --latest-validation
-```
-
-`npm run verify` 覆盖 Vitest 测试套件（`src/` 下 200+ 个测试文件）、生产构建、确定性 Agent 评测套件（26 个 fixture）和记忆评测套件；发版还要求独立 packaged-app 验收。Agent 评测覆盖原生代码工程、研究写作、测试失败反思、retry budget 耗尽、上下文压缩、tool-call checkpoint、模型重试、strategy guard 碎片化恢复、episode eval candidate、child handoff review gate、goal-mode recovery/control、bounded-autonomy 黄金路径、Agent Runtime Kernel 事件回放、permission-rule 行为、确定性本地 artifact 来源验收、execution-context/tool-ledger/history 契约、memory-history scope 检查和输出渲染恢复保真。对抗评测对 harness 本身做变异测试。harness 评分输出与 Overview 一致的七类 ETCLOVG 分数和原生 Agent Capability 分数。
-
-确定性本地 artifact 目标只有在 task contract、canonical destination、生成的 artifact 和 provenance evidence 相互匹配时才通过验收。Location/resource canonicalization 会在 sandbox 和验收检查前规范化 `~`、workspace-relative、Desktop、Downloads 和绝对路径。
-
-### 测试覆盖
-
-- **共享层**：技能解析、任务权限、记忆搜索、引导流程、导航、数据边界、Agent 协议、goal/task 契约、trajectory、run graph 等
-- **主进程**：工具执行、权限授权、模型配置存储、任务调度、记忆存储、会话服务、storage/repositories、冒烟模式等
-- **渲染进程**：Agent 工作状态、聊天流式 reducer、output model、目标视图模型、验收预览、演示数据、设计系统不变量等
-
----
-
-## 路线图
-
-后续计划：
-
-- [ ] Apple 签名与公证，以可信方式分发自动更新
-- [ ] 更深的 runtime loop 统一，包含一等持久化 plan 与 verifier/critic 回路
-- [ ] 技能市场、远程技能安装和可视化技能/工作流编辑
-- [ ] 条件触发任务（文件变化、系统事件等）
-- [ ] Windows 和 Linux 桌面支持
-- [ ] 可选开启的崩溃报告和诊断
-
----
+npm run release:publish -- "/absolute/path/to/release-notes.md"
+~~~
+
+## Architecture docs
+
+- [Product positioning](docs/product/zerox-positioning.md)
+- [Goal Mode architecture](docs/architecture/agent-goal-mode.md)
+- [Agent Runtime architecture](docs/architecture/agent-runtime.md)
+- [Workspaces and multi-agent context](docs/architecture/agent-workspaces.md)
+- [Learning loop](docs/architecture/agent-learning-loop.md)
+- [Plan Debate](docs/design/zerox-agent-3-8-0-plan-debate.md)
+- [Plan Debate user-path acceptance](docs/design/zerox-agent-3-8-0-debate-user-path-acceptance.md)
+- [v3.8.1 model and conversation UX](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md)
 
 ## License
 
@@ -1221,5 +656,5 @@ ISC
 ---
 
 <p align="center">
-  <sub>Built with ❤️ by Zerox · macOS-first · Local-first · Privacy-first</sub>
+  <sub>macOS-first · local-first · permissioned · observable · recoverable</sub>
 </p>

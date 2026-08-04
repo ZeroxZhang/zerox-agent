@@ -8995,3 +8995,52 @@
     `release-test-p71-debate-reliability-v2/mac-arm64/Zerox Agent.app`; deep
     strict codesign validation passed and local `better-sqlite3` was restored
     to the Node ABI.
+
+## 2026-08-03 - Current Product README Rewrite
+
+- Replaced the historical, duplicated release chronicle with a current-product
+  README organized around the real user journey: Chat, Runs, Tasks, Settings,
+  model setup, Goal planning, execution, acceptance, recovery, installation,
+  development, and release operations.
+- Documented the P70/P71 runtime truth directly: frozen GoalContract snapshots,
+  Direct/Debate compatibility, runtime Direct replanning, durable Plan lineage,
+  `steps_completed` versus `achieved`, contract-aware Debate repair, and retry
+  from the failed investigation depth.
+- Aligned user-facing explanations with the current UI and main-process state
+  boundary, including session-work recovery projection, cumulative versus
+  current context usage, Goal auto-authorization with extreme-risk confirmation,
+  current provider connections, local data modes, and non-notarized v3.8.1
+  installation.
+- Rebuilt `src/shared/readme.test.ts` as a current-product contract and removed
+  assertions that forced stale version history, tool counts, budget semantics,
+  and old design-system marketing into the main README.
+- Verification evidence:
+  - focused README and release metadata suites: 2 files / 15 tests passed;
+  - `npm run verify`: 247 files / 2,561 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run harness:check` passed;
+  - all 21 local Markdown links resolve and `git diff --check` passed.
+
+## 2026-08-03 - README Product OnePage Refresh
+
+- Replaced the stale v3.6.1 README product poster with a new A1 long-form,
+  B9-Light, C2, T1-product OnePage for v3.8.1 while preserving the existing
+  `docs/product/zerox-agent-product-intro.jpg` README asset path.
+- Reframed the visual story around the current product truth: local desktop
+  control plane, GoalContract versus Plan, Direct/Debate compatibility,
+  runtime Direct replanning, `steps_completed` versus `achieved`, four primary
+  product surfaces, main-process authorization, recovery, and evidence-backed
+  acceptance.
+- Added an editable, self-contained source at
+  `docs/product/zerox-agent-A1-B9-20260803.html` and a 2x Retina PNG alongside
+  the replacement JPEG. The B9 design uses a restrained 11-color Google
+  palette, inline SVG icons, solid fills, and no gradients, glow, glass, emoji,
+  absolute positioning, or external JavaScript.
+- OnePage quality evidence: 14 automated checks passed. The only remaining
+  warning is that the static checker cannot infer enough contrast pairs through
+  CSS variables; the rendered white, charcoal, Google-blue, and four-color
+  text/background pairs were inspected in the final 1600×8522 output.
+- Verification evidence:
+  - focused README and release metadata suites: 2 files / 16 tests passed;
+  - `npm run harness:check` and `git diff --check` passed;
+  - final JPEG and editable PNG were visually inspected after capture.
