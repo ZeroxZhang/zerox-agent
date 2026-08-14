@@ -10024,3 +10024,18 @@
   - program, harness, and whitespace checks passed.
 - P86 and KM03 are complete. ChatService remains on the direct path;
   `P87-chat-kernel-production-cutover` is the only next Feature.
+
+## 2026-08-14 - KM04 Chat Production Kernel Cutover Completed
+
+- Default Production Kernel scope is now `scheduled_chat`; `scheduled` remains
+  the data-preserving Chat rollback and `off` disables the driver.
+- Admitted Chat requests run through the receipt-validated adapter. Validation
+  rejects fabricated persistence, while requests with no created domain state
+  record that condition explicitly.
+- Added success, pause, and cancel integration ordering tests proving assistant,
+  continuation, and terminal activity persistence precede one `run_end`.
+- Same-session serialization, duplicate request, restart continuation, stream
+  output, and all existing Chat contracts remained green.
+- Verification: focused 185 tests; full/verify 2,759 tests; Agent 26/26; Memory
+  2/2; JSON fallback and Electron SQLite smoke passed; Node ABI restored.
+- P87/KM04 are complete. Goal remains direct; P88/KM05 is next.

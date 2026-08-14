@@ -18,6 +18,7 @@ export type ChatKernelSettlement<TResult> = ProductionKernelSegment & {
     assistantMessageId?: string;
     continuationPersisted?: true;
     terminalActivityPersisted?: true;
+    noDomainStateCreated?: true;
   };
   streamTerminals: readonly [ChatKernelStreamTerminal];
 };
@@ -120,7 +121,8 @@ export function validateChatKernelSettlement<TResult>(
   if (
     (settlement.status === "failed" ||
       settlement.status === "canceled") &&
-    settlement.persistence.terminalActivityPersisted !== true
+    settlement.persistence.terminalActivityPersisted !== true &&
+    settlement.persistence.noDomainStateCreated !== true
   ) {
     throw new Error(
       `${settlement.status} Chat Kernel settlement requires durable terminal activity.`,
@@ -130,7 +132,8 @@ export function validateChatKernelSettlement<TResult>(
     (settlement.status === "succeeded" ||
       settlement.status === "paused") &&
     !assistantMessageId &&
-    settlement.persistence.terminalActivityPersisted !== true
+    settlement.persistence.terminalActivityPersisted !== true &&
+    settlement.persistence.noDomainStateCreated !== true
   ) {
     throw new Error(
       `${settlement.status} Chat Kernel settlement requires a persisted assistant message or terminal activity.`,

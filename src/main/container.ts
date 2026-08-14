@@ -1113,7 +1113,7 @@ export function createAppContainer(options: {
 
   function productionKernelDriver() {
     if (
-      readFeatureFlags().ZEROX_PRODUCTION_KERNEL !== "scheduled"
+      readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "off"
     ) {
       return undefined;
     }
@@ -1122,6 +1122,12 @@ export function createAppContainer(options: {
         bus: kernelEventBus(),
       }),
     );
+  }
+
+  function chatProductionKernelDriver() {
+    return readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "scheduled_chat"
+      ? productionKernelDriver()
+      : undefined;
   }
 
   function setKernelPermissionRules(rules: PermissionRule[]): {
@@ -1983,6 +1989,12 @@ export function createAppContainer(options: {
         historyIndexStore: historyIndexStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
         compactionStrategy: compactionStrategy(),
+        ...(chatProductionKernelDriver()
+          ? {
+              productionKernelDriver:
+                chatProductionKernelDriver()!,
+            }
+          : {}),
         maxMode: {
           async runStep(req, opts) {
             const provider = await getProvider();

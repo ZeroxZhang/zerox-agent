@@ -38,6 +38,8 @@ import type {
 } from "../shared/workspaceRunLedger";
 import type { GoalDraft } from "../shared/goalTranslation";
 import type { PlanRecord } from "../shared/planMode";
+import { KernelEventBus } from "./kernel/eventBus";
+import { createProductionKernelDriver } from "./kernel/productionKernelDriver";
 
 function chatReply(content: string): ChatCompletionResponse {
   return { content, toolCalls: [], finishReason: "stop" };
@@ -7733,6 +7735,197 @@ describe("chat service", () => {
     expect(JSON.stringify(postCompletionRequests[0])).not.toContain(
       "用户已确认继续执行上一个已暂停的长任务",
     );
+  });
+
+  it("persists the assistant and stream terminal before Chat Kernel run_end", async () => {
+    const lifecycle: string[] = [];
+    const bus = new KernelEventBus();
+    bus.subscribe((event) => {
+      if (event.type === "run_end") lifecycle.push("run_end");
+    });
+    const storedMessages: AppendChatMessageInput[] = [];
+    const baseStore = createChatSessionStore(storedMessages);
+    const store = {
+      ...baseStore,
+      async appendMessage(input: AppendChatMessageInput) {
+        const result = await baseStore.appendMessage(input);
+        if (input.role === "assistant") lifecycle.push("assistant_persisted");
+        return result;
+      },
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({
+        bus,
+        now: () => "2026-08-14T12:00:00.000Z",
+      }),
+      async runAgentLoop(messages) {
+        return {
+          status: "succeeded",
+          summary: "Kernel Chat complete.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+
+    await expect(
+      service.sendMessage(
+        {
+          sessionId: "kernel_chat_session",
+          requestId: "kernel_chat_request",
+          message: "use Kernel",
+        },
+        {
+          onStreamEvent(event) {
+            if (event.type === "completed") lifecycle.push("stream_completed");
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      reply: "Kernel Chat complete.",
+    });
+
+    expect(lifecycle).toEqual([
+      "assistant_persisted",
+      "stream_completed",
+      "run_end",
+    ]);
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "succeeded",
+    });
+  });
+
+  it("persists paused continuation before Chat Kernel run_end", async () => {
+    const lifecycle: string[] = [];
+    const bus = new KernelEventBus();
+    bus.subscribe((event) => {
+      if (event.type === "run_end") lifecycle.push("run_end");
+    });
+    const storedMessages: AppendChatMessageInput[] = [];
+    const baseStore = createChatSessionStore(storedMessages);
+    const store = {
+      ...baseStore,
+      async appendActivityEvent(
+        sessionId: string,
+        event: ChatTaskStatusEvent,
+      ) {
+        if (event.state === "paused") lifecycle.push("continuation_persisted");
+        return baseStore.appendActivityEvent(sessionId, event);
+      },
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runAgentLoop(messages) {
+        return {
+          status: "paused",
+          summary: "Paused for review.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+          continuation: {
+            reason: "tool_failure_loop",
+            maxTurns: 8,
+            toolCallsExecuted: 0,
+          },
+        };
+      },
+    });
+
+    await expect(
+      service.sendMessage({
+        sessionId: "kernel_pause_session",
+        requestId: "kernel_pause_request",
+        message: "pause",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      agentStatus: { state: "paused" },
+    });
+    expect(lifecycle).toContain("continuation_persisted");
+    expect(lifecycle.at(-1)).toBe("run_end");
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "paused",
+    });
+  });
+
+  it("persists canceled activity before Chat Kernel run_end", async () => {
+    const lifecycle: string[] = [];
+    const bus = new KernelEventBus();
+    bus.subscribe((event) => {
+      if (event.type === "run_end") lifecycle.push("run_end");
+    });
+    const storedMessages: AppendChatMessageInput[] = [];
+    const baseStore = createChatSessionStore(storedMessages);
+    const store = {
+      ...baseStore,
+      async appendActivityEvent(
+        sessionId: string,
+        event: ChatTaskStatusEvent,
+      ) {
+        if (event.state === "canceled") lifecycle.push("canceled_persisted");
+        return baseStore.appendActivityEvent(sessionId, event);
+      },
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runAgentLoop(messages) {
+        return {
+          status: "canceled",
+          summary: "canceled",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+
+    await expect(
+      service.sendMessage({
+        sessionId: "kernel_cancel_session",
+        requestId: "kernel_cancel_request",
+        message: "cancel",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "CANCELED",
+    });
+    expect(lifecycle).toContain("canceled_persisted");
+    expect(lifecycle.at(-1)).toBe("run_end");
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "canceled",
+    });
   });
 });
 

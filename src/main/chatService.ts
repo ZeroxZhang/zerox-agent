@@ -16,6 +16,11 @@ import {
 } from "./providers/normalize";
 import { estimateMessageTokens } from "./contextManager";
 import type { CompactionStrategy } from "./kernel/compactionStrategy";
+import type { ProductionKernelDriver } from "./kernel/productionKernelDriver";
+import {
+  runChatKernelSegment,
+  type ChatKernelSettlement,
+} from "./kernel/chatKernelSegment";
 import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
 import type { MemoryProfileStore } from "./memoryProfileStore";
@@ -321,6 +326,7 @@ export function createChatService(options: {
   historyIndexStore?: Pick<HistoryIndexStore, "append">;
   /** P2: overflow compaction strategy passed through to the chat agent loop. */
   compactionStrategy?: CompactionStrategy;
+  productionKernelDriver?: ProductionKernelDriver;
   maxMode?: MaxMode;
 }): ChatService {
   const createId = options.createId ?? randomUUID;
@@ -2234,6 +2240,230 @@ export function createChatService(options: {
       };
   }
 
+  async function executeMessageWithKernel(
+    input: SendChatMessageInput,
+    runtimeOptions: SendChatMessageRuntimeOptions,
+    internalOptions: ChatTurnInternalOptions,
+  ): Promise<SendChatMessageResult> {
+    if (
+      !options.productionKernelDriver ||
+      runtimeOptions.signal?.aborted
+    ) {
+      return executeMessageInternal(input, runtimeOptions, internalOptions);
+    }
+
+    const requestId =
+      input.requestId ?? `request_${getNowMs(options.now)}`;
+    const normalizedInput = { ...input, requestId };
+    const terminalEvents: Array<
+      Extract<
+        ChatStreamEvent,
+        { type: "completed" | "failed" | "canceled" }
+      >
+    > = [];
+    let lastStreamEvent: ChatStreamEvent | undefined;
+    const wrappedRuntimeOptions: SendChatMessageRuntimeOptions = {
+      ...runtimeOptions,
+      onStreamEvent(event) {
+        lastStreamEvent = event;
+        if (
+          event.type === "completed" ||
+          event.type === "failed" ||
+          event.type === "canceled"
+        ) {
+          terminalEvents.push(event);
+        }
+        try {
+          runtimeOptions.onStreamEvent?.(event);
+        } catch {
+          // User observers are not part of Kernel settlement.
+        }
+      },
+    };
+    const runId = [
+      "chat_kernel",
+      sanitizeRuntimeId(input.sessionId ?? "new"),
+      sanitizeRuntimeId(requestId),
+    ].join("_");
+
+    const persistTerminalActivity = async (
+      status: "paused" | "failed" | "canceled",
+      message: string,
+      sessionId: string | undefined,
+    ): Promise<boolean> => {
+      if (!sessionId) return false;
+      if (!options.chatSessionStore?.appendActivityEvent) {
+        throw new Error(
+          "Chat Kernel terminal activity persistence is unavailable.",
+        );
+      }
+      await persistRequiredChatActivityEvent(
+        options.chatSessionStore,
+        {
+          sessionId,
+          requestId,
+          state: status,
+          message,
+          createdAt: new Date(getNowMs(options.now)).toISOString(),
+          elapsedMs: 0,
+        },
+      );
+      return true;
+    };
+
+    const emitSyntheticTerminal = (
+      type: "completed" | "failed" | "canceled",
+      message: string,
+      sessionId: string | undefined,
+    ) => {
+      const event: Extract<
+        ChatStreamEvent,
+        { type: "completed" | "failed" | "canceled" }
+      > = {
+        type,
+        sessionId: sessionId ?? "unpersisted",
+        requestId,
+        sequence: (lastStreamEvent?.sequence ?? 0) + 1,
+        turnId: lastStreamEvent?.turnId ?? `turn-${requestId}`,
+        createdAt: new Date(getNowMs(options.now)).toISOString(),
+        message,
+      };
+      terminalEvents.push(event);
+      lastStreamEvent = event;
+      try {
+        runtimeOptions.onStreamEvent?.(event);
+      } catch {
+        // User observers are not part of Kernel settlement.
+      }
+    };
+
+    const settleResult = async (
+      result: SendChatMessageResult,
+    ): Promise<ChatKernelSettlement<SendChatMessageResult>> => {
+      const status = toChatKernelStatus(result);
+      const message = result.ok ? result.reply : result.message;
+      const sessionId = result.ok
+        ? result.sessionId
+        : input.sessionId ?? lastStreamEvent?.sessionId;
+      if (terminalEvents.length === 0) {
+        emitSyntheticTerminal(
+          status === "failed"
+            ? "failed"
+            : status === "canceled"
+              ? "canceled"
+              : "completed",
+          message,
+          sessionId,
+        );
+      }
+      const terminal = terminalEvents.at(-1)!;
+      const needsTerminalActivity =
+        status === "failed" || status === "canceled";
+      const terminalActivityPersisted = needsTerminalActivity
+        ? await persistTerminalActivity(status, message, sessionId)
+        : false;
+      const assistantMessageId = terminal.finalMessageId?.trim();
+
+      return {
+        status,
+        summary: message,
+        result,
+        persistence: {
+          requiredStatePersisted: true,
+          ...(assistantMessageId ? { assistantMessageId } : {}),
+          ...(status === "paused"
+            ? { continuationPersisted: true as const }
+            : {}),
+          ...(terminalActivityPersisted
+            ? { terminalActivityPersisted: true as const }
+            : {}),
+          ...(!sessionId ? { noDomainStateCreated: true as const } : {}),
+        },
+        streamTerminals: [terminal],
+      };
+    };
+
+    const outcome = await runChatKernelSegment<SendChatMessageResult>({
+      driver: options.productionKernelDriver,
+      runId,
+      ...(runtimeOptions.signal ? { signal: runtimeOptions.signal } : {}),
+      async execute() {
+        return settleResult(
+          await executeMessageInternal(
+            normalizedInput,
+            wrappedRuntimeOptions,
+            internalOptions,
+          ),
+        );
+      },
+      async settleAborted(status) {
+        const message =
+          status === "paused" ? "任务已暂停。" : "已中断任务。";
+        const sessionId = input.sessionId ?? lastStreamEvent?.sessionId;
+        if (terminalEvents.length === 0) {
+          emitSyntheticTerminal(
+            status === "paused" ? "completed" : "canceled",
+            message,
+            sessionId,
+          );
+        }
+        const activityPersisted = await persistTerminalActivity(
+          status,
+          message,
+          sessionId,
+        );
+        return {
+          status,
+          summary: message,
+          result: {
+            ok: false as const,
+            code: "CANCELED" as const,
+            retryable: true,
+            message,
+          },
+          persistence: {
+            requiredStatePersisted: true,
+            ...(status === "paused"
+              ? { continuationPersisted: true as const }
+              : {}),
+            ...(activityPersisted
+              ? { terminalActivityPersisted: true as const }
+              : {}),
+            ...(!sessionId ? { noDomainStateCreated: true as const } : {}),
+          },
+          streamTerminals: [terminalEvents.at(-1)!],
+        };
+      },
+      async settleFailed(error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        const sessionId = input.sessionId ?? lastStreamEvent?.sessionId;
+        if (terminalEvents.length === 0) {
+          emitSyntheticTerminal("failed", message, sessionId);
+        }
+        const activityPersisted = await persistTerminalActivity(
+          "failed",
+          message,
+          sessionId,
+        );
+        return {
+          status: "failed",
+          summary: message,
+          result: { ok: false as const, message },
+          persistence: {
+            requiredStatePersisted: true,
+            ...(activityPersisted
+              ? { terminalActivityPersisted: true as const }
+              : {}),
+            ...(!sessionId ? { noDomainStateCreated: true as const } : {}),
+          },
+          streamTerminals: [terminalEvents.at(-1)!],
+        };
+      },
+    });
+    return outcome.settlement.result;
+  }
+
   async function sendMessageInternal(
     input: SendChatMessageInput,
     runtimeOptions: SendChatMessageRuntimeOptions = {},
@@ -2241,7 +2471,7 @@ export function createChatService(options: {
   ): Promise<SendChatMessageResult> {
     const sessionKey = input.sessionId?.trim();
     if (!sessionKey) {
-      return executeMessageInternal(input, runtimeOptions, internalOptions);
+      return executeMessageWithKernel(input, runtimeOptions, internalOptions);
     }
 
     const previous = sessionRequestTails.get(sessionKey) ?? Promise.resolve();
@@ -2256,7 +2486,11 @@ export function createChatService(options: {
       if (!ready) {
         return { ok: false, code: "CANCELED", retryable: true, message: "已中断任务。" };
       }
-      return await executeMessageInternal(input, runtimeOptions, internalOptions);
+      return await executeMessageWithKernel(
+        input,
+        runtimeOptions,
+        internalOptions,
+      );
     } finally {
       release();
       void tail.finally(() => {
@@ -2768,6 +3002,17 @@ function normalizeToolCallPreviewIndex(value: unknown): number | undefined {
 
 function getNowMs(now: (() => Date) | undefined): number {
   return now ? now().getTime() : Date.now();
+}
+
+function toChatKernelStatus(
+  result: SendChatMessageResult,
+): ChatKernelSettlement<unknown>["status"] {
+  if (!result.ok) {
+    return result.code === "CANCELED" ? "canceled" : "failed";
+  }
+  if (result.agentStatus?.state === "paused") return "paused";
+  if (result.agentStatus?.state === "failed") return "failed";
+  return "succeeded";
 }
 
 function inferApprovalRiskLevel(input: {
