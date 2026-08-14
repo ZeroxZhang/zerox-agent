@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const root = process.cwd();
 
 describe("production Kernel boundary", () => {
-  it("cuts over scheduled and Chat execution while keeping Goal explicit", () => {
+  it("cuts over Scheduled Task, Chat, and Goal execution", () => {
     const container = read("src/main/container.ts");
     const runtime = read("src/main/agentRuntimeEngine.ts");
     const goal = read("src/main/goalRuntimeEngine.ts");
@@ -32,11 +32,15 @@ describe("production Kernel boundary", () => {
     );
     expect(runtime).toContain("settleAborted(status) {");
     expect(driverModeContract(runtime)).toBe(true);
-    expect(goal).not.toContain("productionKernelDriver");
+    expect(goal).toContain("productionKernelDriver?: ProductionKernelDriver");
+    expect(goal).toContain("runGoalKernelSegment({");
     expect(chat).toContain("productionKernelDriver?: ProductionKernelDriver");
     expect(chat).toContain("runChatKernelSegment<SendChatMessageResult>");
     expect(container).toContain(
-      'readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "scheduled_chat"',
+      'scope === "scheduled_chat" || scope === "all"',
+    );
+    expect(container).toContain(
+      'readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "all"',
     );
     expect(chatAdapter).toContain('mode: "chat"');
     expect(chatAdapter).toContain("validateChatKernelSettlement");
@@ -71,9 +75,9 @@ describe("production Kernel boundary", () => {
     const main = read("src/main/main.ts");
 
     expect(flags).toContain(
-      'ZEROX_PRODUCTION_KERNEL: "scheduled_chat" | "scheduled" | "off"',
+      'ZEROX_PRODUCTION_KERNEL: "all" | "scheduled_chat" | "scheduled" | "off"',
     );
-    expect(flags).toContain('ZEROX_PRODUCTION_KERNEL: "scheduled_chat"');
+    expect(flags).toContain('ZEROX_PRODUCTION_KERNEL: "all"');
     expect(main).toContain(
       'parts.at(-3) === "agent-executions"',
     );

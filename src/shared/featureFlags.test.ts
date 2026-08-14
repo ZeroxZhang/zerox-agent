@@ -22,9 +22,9 @@ describe("process sandbox feature flag", () => {
 });
 
 describe("production Kernel and read Code Mode flags", () => {
-  it("defaults scheduled and Chat execution to Kernel with read Code Mode enabled", () => {
+  it("defaults all production execution to Kernel with read Code Mode enabled", () => {
     expect(readFeatureFlags({})).toMatchObject({
-      ZEROX_PRODUCTION_KERNEL: "scheduled_chat",
+      ZEROX_PRODUCTION_KERNEL: "all",
       ZEROX_READ_CODE_MODE: "on",
     });
   });
@@ -49,11 +49,11 @@ describe("production Kernel and read Code Mode flags", () => {
   it("rejects unsafe or unknown modes", () => {
     expect(
       readFeatureFlags({
-        ZEROX_PRODUCTION_KERNEL: "all",
+        ZEROX_PRODUCTION_KERNEL: "everything",
         ZEROX_READ_CODE_MODE: "write",
       }),
     ).toMatchObject({
-      ZEROX_PRODUCTION_KERNEL: "scheduled_chat",
+      ZEROX_PRODUCTION_KERNEL: "all",
       ZEROX_READ_CODE_MODE: "on",
     });
   });

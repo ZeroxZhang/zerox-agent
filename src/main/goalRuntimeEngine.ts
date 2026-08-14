@@ -61,6 +61,8 @@ import {
   toCompleteRequest,
 } from "./providers/normalize";
 import type { AgentContextUsage } from "../shared/contextUsage";
+import type { ProductionKernelDriver } from "./kernel/productionKernelDriver";
+import { runGoalKernelSegment } from "./kernel/goalKernelSegment";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -95,7 +97,65 @@ export function createGoalRuntimeEngine(options: {
   getMaxMode?: (goal: Goal) => Promise<MaxMode>;
   onProgress?: (event: GoalProgressEvent) => void;
   onEvent?: (event: AgentRunEvent) => void;
+  productionKernelDriver?: ProductionKernelDriver;
 }): GoalRuntimeEngine {
+  if (options.productionKernelDriver) {
+    const {
+      productionKernelDriver,
+      ...directOptions
+    } = options;
+    const directEngine = createGoalRuntimeEngine(directOptions);
+    const reserveRunId =
+      options.createId ?? (() => `goal_run_${randomUUID()}`);
+    return {
+      async runMilestone(goal, milestone, runOptions) {
+        const runId = reserveRunId();
+        let checkpointPersisted = false;
+        const executeDirect = () =>
+          directEngine.runMilestone(goal, milestone, {
+            ...runOptions,
+            runId,
+            async onCheckpoint(checkpoint) {
+              await runOptions?.onCheckpoint?.(checkpoint);
+              checkpointPersisted = true;
+            },
+          });
+        const toSettlement = (
+          result: Awaited<ReturnType<typeof executeDirect>>,
+        ) => {
+          const status = result.status ?? "succeeded";
+          return {
+            status,
+            summary: result.summary ?? `Goal milestone ${status}.`,
+            result,
+            persistence: {
+              runRecordPersisted: true as const,
+              trajectoryFlushed: true as const,
+              ...(status === "paused" && checkpointPersisted
+                ? { checkpointPersisted: true as const }
+                : {}),
+            },
+          };
+        };
+        const outcome = await runGoalKernelSegment({
+          driver: productionKernelDriver,
+          runId,
+          ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
+          async execute() {
+            return toSettlement(await executeDirect());
+          },
+          async settleAborted() {
+            return toSettlement(await executeDirect());
+          },
+          async settleFailed(error) {
+            throw error;
+          },
+        });
+        return outcome.settlement.result;
+      },
+    };
+  }
+
   const createId = options.createId ?? (() => `goal_run_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
   const runLoop = options.runAgentLoop ?? runAgentLoop;
@@ -206,7 +266,7 @@ export function createGoalRuntimeEngine(options: {
   return {
     async runMilestone(goal, milestone, runOptions) {
       const startedAt = now();
-      const runId = createId();
+      const runId = runOptions?.runId ?? createId();
       const runSignal = runOptions?.signal;
       let trajectoryQueue: Promise<void> = Promise.resolve();
       const appendRunTrajectory = (

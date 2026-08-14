@@ -25,6 +25,8 @@ import { createScheduledTaskStore } from "./taskStore";
 import { createToolAuditLog } from "./toolAuditLog";
 import { createToolAuthorizationService } from "./toolAuthorizationService";
 import { projectRunGraph } from "../shared/runGraph";
+import { KernelEventBus } from "./kernel/eventBus";
+import { createProductionKernelDriver } from "./kernel/productionKernelDriver";
 
 function createGoalRuntimeEngine(
   options: Parameters<typeof createProductionGoalRuntimeEngine>[0],
@@ -89,6 +91,76 @@ describe("goal runtime engine", () => {
       command,
       "python3 /Users/demo/project/check.py --help",
     ]));
+  });
+
+  it("persists the milestone run and trajectory before Goal Kernel run_end", async () => {
+    const lifecycle: string[] = [];
+    const bus = new KernelEventBus();
+    const trajectories: AgentTrajectoryEvent[] = [];
+    bus.subscribe((event) => {
+      if (event.type === "run_end") lifecycle.push("run_end");
+    });
+    const trajectoryStore = {
+      async append(_runId: string, event: AgentTrajectoryEvent) {
+        trajectories.push(event);
+        lifecycle.push(`trajectory:${event.type}`);
+        return event;
+      },
+    };
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          return { content: "done", toolCalls: [], finishReason: "stop" };
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "goal-model",
+        temperature: 0,
+        maxTokens: 4096,
+      }),
+      toolExecutor: createAgentToolExecutor(),
+      runStore: {
+        async append(run) {
+          lifecycle.push("run_persisted");
+          return run;
+        },
+      },
+      trajectoryStore,
+      goalContext: createAgentGoalContext({
+        trajectoryStore,
+      }),
+      createId: () => "goal_kernel_run",
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runAgentLoop(messages) {
+        return {
+          status: "succeeded",
+          summary: "Goal Kernel complete.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+    const goal = createGoal();
+
+    const result = await engine.runMilestone(
+      goal,
+      goal.milestones[0]!,
+    );
+
+    expect(result.runId).toBe("goal_kernel_run");
+    expect(lifecycle.indexOf("run_persisted")).toBeLessThan(
+      lifecycle.indexOf("run_end"),
+    );
+    expect(lifecycle.at(-1)).toBe("run_end");
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      runId: "goal_kernel_run",
+      status: "succeeded",
+    });
   });
 
   it("routes supported deterministic contracts through the native pipeline without a model loop", async () => {

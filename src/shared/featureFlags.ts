@@ -34,7 +34,7 @@ export interface FeatureFlags {
   /** Model-reachable subprocess policy. "deny" never means unconfined. */
   ZEROX_PROCESS_SANDBOX: "required" | "deny";
   /** Production Kernel cutover scope. */
-  ZEROX_PRODUCTION_KERNEL: "scheduled_chat" | "scheduled" | "off";
+  ZEROX_PRODUCTION_KERNEL: "all" | "scheduled_chat" | "scheduled" | "off";
   /** Typed read-only Code Mode pilot. */
   ZEROX_READ_CODE_MODE: "on" | "off";
   /** Override for user data directory path. */
@@ -55,7 +55,7 @@ const DEFAULTS: FeatureFlags = {
   ZEROX_COMPACTION_STRATEGY: "auto",
   ZEROX_MULTI_SEGMENT_SYSTEM: "0",
   ZEROX_PROCESS_SANDBOX: "required",
-  ZEROX_PRODUCTION_KERNEL: "scheduled_chat",
+  ZEROX_PRODUCTION_KERNEL: "all",
   ZEROX_READ_CODE_MODE: "on",
   ZEROX_AGENT_USER_DATA_DIR: "",
 };
@@ -121,7 +121,7 @@ export function readFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureF
     ),
     ZEROX_PRODUCTION_KERNEL: resolveEnum(
       env.ZEROX_PRODUCTION_KERNEL,
-      ["scheduled_chat", "scheduled", "off"],
+      ["all", "scheduled_chat", "scheduled", "off"],
       DEFAULTS.ZEROX_PRODUCTION_KERNEL,
     ),
     ZEROX_READ_CODE_MODE: resolveEnum(

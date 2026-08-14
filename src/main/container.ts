@@ -1125,7 +1125,14 @@ export function createAppContainer(options: {
   }
 
   function chatProductionKernelDriver() {
-    return readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "scheduled_chat"
+    const scope = readFeatureFlags().ZEROX_PRODUCTION_KERNEL;
+    return scope === "scheduled_chat" || scope === "all"
+      ? productionKernelDriver()
+      : undefined;
+  }
+
+  function goalProductionKernelDriver() {
+    return readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "all"
       ? productionKernelDriver()
       : undefined;
   }
@@ -1762,6 +1769,12 @@ export function createAppContainer(options: {
           nextSequence: nextGoalTrajectorySequence,
           now: () => new Date().toISOString(),
           onProgress: emitGoalProgressEvent,
+          ...(goalProductionKernelDriver()
+            ? {
+                productionKernelDriver:
+                  goalProductionKernelDriver()!,
+              }
+            : {}),
           maxMode: {
             async runStep(req, opts) {
               const provider = await getProvider();

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "programId": "chat-goal-kernel-migration-2026-08",
   "title": "Chat And Goal Production Kernel Migration",
-  "updatedAt": "2026-08-14T23:38:43.000+08:00",
+  "updatedAt": "2026-08-14T23:46:51.000+08:00",
   "sourceBaseline": {
     "release": "v3.8.2",
     "releaseCommit": "9d343ab0424e4a78287d6c38d929ee4269f5c7ec",
@@ -13,7 +13,7 @@
   "architectureDecision": ".zerox/decisions/KM01-kernel-migration-program.md",
   "status": "active",
   "activeFeatureId": null,
-  "nextFeatureId": "P89-goal-kernel-production-cutover",
+  "nextFeatureId": "P90-kernel-runtime-convergence-cleanup",
   "maxActiveFeatures": 1,
   "migrationCompletionWorkstreamId": "KM07",
   "postMigrationGates": [
@@ -169,7 +169,7 @@
     {
       "id": "KM06",
       "title": "Goal controller production Kernel cutover",
-      "state": "planned",
+      "state": "completed",
       "featureId": "P89-goal-kernel-production-cutover",
       "findings": [
         "GOAL_PRODUCTION_CUTOVER",

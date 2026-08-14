@@ -79,6 +79,7 @@ export type GoalRuntimeEngine = {
     goal: Goal,
     milestone: Milestone,
     options?: {
+      runId?: string;
       signal?: AbortSignal;
       repairDirective?: AcceptanceRepairDirective;
       resumeMessages?: ChatMessage[];

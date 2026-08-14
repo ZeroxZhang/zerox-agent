@@ -10056,3 +10056,16 @@
 - Focused 27 tests; full/verify 2,766 tests; Agent 26/26; Memory 2/2; build and
   production smoke passed.
 - P88/KM05 complete; P89/KM06 is next.
+
+## 2026-08-14 - KM06 Goal Production Kernel Cutover Completed
+
+- Default scope is now `all`; `scheduled_chat`, `scheduled`, and `off` provide
+  progressively narrower data-preserving rollback.
+- GoalRuntimeEngine uses a Kernel wrapper around the unchanged direct delegate,
+  sharing the reserved milestone run ID and tracking durable checkpoints.
+- Added integration ordering evidence for milestone run and trajectory
+  persistence before Goal `run_end`.
+- Focused 203 tests; full/verify 2,767 tests; Agent 26/26; Memory 2/2; JSON and
+  Electron SQLite smoke passed; Node ABI restored.
+- P89/KM06 complete; all three production surfaces now use Kernel. P90/KM07 is
+  next for convergence cleanup.
