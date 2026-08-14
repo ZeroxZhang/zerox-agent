@@ -9722,3 +9722,49 @@
 - P80 and RC09 are complete. The runtime convergence program is closed again
   with no active or next Feature; the verified `4daf812` baseline remains
   unchanged and these fixes form a separate follow-up commit.
+
+## 2026-08-14 - RC10 Dependency Vulnerability Remediation Started
+
+- Pushed the verified runtime convergence commits through `759e0fb` to
+  `origin/main` before changing dependencies.
+- Reopened the program with one bounded Feature:
+  `P81-dependency-vulnerability-remediation`.
+- Baseline `npm audit` reported seven high-severity findings:
+  - production tree: `undici` and `js-yaml`;
+  - development/packaging tree: Electron/`extract-zip`, `brace-expansion`,
+    `fast-uri`, `nanoid`, and nested `undici`.
+- Accepted
+  `.zerox/decisions/RC10-dependency-vulnerability-remediation.md`.
+- Scope is restricted to patched versions within existing dependency ranges or
+  the current Electron major. Unrelated upgrades and `npm audit fix --force`
+  are explicitly excluded.
+
+## 2026-08-14 - RC10 Dependency Vulnerability Remediation Completed
+
+- Raised only the reviewed direct security floors:
+  - `undici`: `^7.28.0` to `^7.29.0`;
+  - Electron: `^42.3.3` to `^42.9.0`.
+- Refreshed affected transitive nodes to patched releases:
+  `undici@6.28.0`, `js-yaml@4.3.1`, `brace-expansion@5.0.9`,
+  `fast-uri@3.1.5`, and `nanoid@3.3.18`.
+- Electron now resolves `@electron-internal/extract-zip@1.0.5`; vulnerable
+  `extract-zip@2.0.1` and its obsolete helper nodes are absent.
+- Added `src/shared/dependencySecurity.test.ts` as an offline regression sensor
+  for direct minimums, patched lockfile versions, and extractor replacement.
+- Verification evidence:
+  - `npm ci` reproduced the lockfile and reported zero vulnerabilities.
+  - Full and production-only `npm audit --audit-level=high` both reported
+    zero vulnerabilities.
+  - Focused dependency/network/updater/release gate: 8 files / 107 tests.
+  - Full serial gate: 267 files / 2,728 tests.
+  - `npm run build` passed.
+  - `npm run verify` passed with 267 files / 2,728 tests, Agent evaluations
+    26/26, and Memory evaluations 2/2.
+  - `npm run smoke:prod` rendered through the explicit JSON fallback under the
+    Node ABI.
+  - Electron 42.9 plus Electron-rebuilt `better-sqlite3` rendered with SQLite
+    loaded and no fallback; Node ABI restoration then passed 4 files / 37
+    dependency-security and storage tests.
+  - Active-state program, harness, and whitespace checks passed.
+- P81 and RC10 are complete. The program is closed with no active or next
+  Feature, and no application data or schema migration was required.

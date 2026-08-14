@@ -4,7 +4,7 @@
   "title": "Zerox Runtime Convergence Program",
   "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
   "operatingGuide": ".zerox/runtime-convergence-program.md",
-  "updatedAt": "2026-08-14T21:43:26.000+08:00",
+  "updatedAt": "2026-08-14T21:58:10.000+08:00",
   "status": "completed",
   "activeFeatureId": null,
   "nextFeatureId": null,
@@ -192,6 +192,35 @@
       "rollback": "Use the existing Kernel, Code Mode, and storage rollback flags; no schema rollback is required and legacy checkpoints remain readable.",
       "verification": [
         "thirteen focused review reproductions",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "RC10",
+      "title": "Dependency vulnerability remediation",
+      "state": "completed",
+      "featureId": "P81-dependency-vulnerability-remediation",
+      "findings": [
+        "DEP1",
+        "DEP2",
+        "DEP3",
+        "DEP4",
+        "DEP5",
+        "DEP6",
+        "DEP7"
+      ],
+      "dependsOn": ["RC09"],
+      "architectureDecisionRequired": false,
+      "rollback": "Revert package manifests and lockfile, run npm ci, and preserve all application data and schemas.",
+      "verification": [
+        "full and production-only npm audit at high severity",
+        "focused dependency and compatibility tests",
         "npm test -- --maxWorkers=1",
         "npm run build",
         "npm run verify",

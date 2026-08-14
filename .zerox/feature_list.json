@@ -1,7 +1,48 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T21:43:26.000+08:00",
+  "updatedAt": "2026-08-14T21:58:10.000+08:00",
   "features": [
+    {
+      "id": "P81-dependency-vulnerability-remediation",
+      "priority": 111,
+      "status": "done",
+      "title": "Remediate audited dependency vulnerabilities without unrelated upgrades",
+      "files": [
+        ".zerox/decisions/RC10-dependency-vulnerability-remediation.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/runtime-convergence-program.json",
+        "package.json",
+        "package-lock.json",
+        "src/shared/dependencySecurity.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/electronBuilderConfig.test.ts",
+        "src/shared/releasePreflight.test.ts",
+        "src/main/outboundUrlPolicy.test.ts",
+        "src/main/appUpdateService.test.ts",
+        "src/main/appUpdateManifest.test.ts",
+        "src/main/providers/providers.test.ts"
+      ],
+      "definitionOfDone": [
+        "full and production-only npm audit report zero high or critical vulnerabilities",
+        "undici and Electron direct minimums exclude the vulnerable releases while remaining on accepted major versions",
+        "affected transitive dependencies resolve to patched versions without force or unrelated direct dependency upgrades",
+        "runtime networking, updater, packaging, release, and Electron SQLite startup behavior remain compatible",
+        "all focused, full, build, verify, smoke, harness, program, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm audit --audit-level=high",
+        "npm audit --omit=dev --audit-level=high",
+        "npm test -- --run src/shared/dependencySecurity.test.ts src/shared/packageScripts.test.ts src/shared/electronBuilderConfig.test.ts src/shared/releasePreflight.test.ts src/main/outboundUrlPolicy.test.ts src/main/appUpdateService.test.ts src/main/appUpdateManifest.test.ts src/main/providers/providers.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P80-post-review-runtime-and-recovery-hardening",
       "priority": 110,
