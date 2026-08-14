@@ -73,4 +73,21 @@ describe("GitHub verify workflow", () => {
     expect(workflowSource).not.toContain("xvfb-run");
     expect(packageJson.scripts.verify).not.toContain("electron");
   });
+
+  it("runs the opt-in stress gate before tagged release packaging", () => {
+    const workflowSource = readFileSync(
+      path.join(process.cwd(), ".github", "workflows", "release.yml"),
+      "utf8",
+    );
+
+    expect(workflowSource).toContain('tags:\n      - "v*.*.*"');
+    expect(workflowSource).toContain(
+      "secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY",
+    );
+    expect(workflowSource).toContain("npm run stress:runtime");
+    expect(workflowSource.indexOf("npm run stress:runtime")).toBeLessThan(
+      workflowSource.indexOf("npm run release:mac"),
+    );
+    expect(workflowSource).toContain("npm run release:publish");
+  });
 });

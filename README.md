@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1"><img src="https://img.shields.io/badge/current_release-v3.8.1-242428" alt="current release: v3.8.1" /></a>
+  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.2"><img src="https://img.shields.io/badge/current_release-v3.8.2-242428" alt="current release: v3.8.2" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20arm64-242428" alt="macOS arm64" />
   <img src="https://img.shields.io/badge/data-local--first-2f9d65" alt="local-first" />
   <img src="https://img.shields.io/badge/license-ISC-8a6d3b" alt="ISC" />
@@ -19,7 +19,7 @@
 <p align="center">
   <a href="#中文">中文</a> ·
   <a href="#english">English</a> ·
-  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1">下载 v3.8.1</a> ·
+  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.2">下载 v3.8.2</a> ·
   <a href="docs/product/zerox-positioning.md">产品定位</a>
 </p>
 
@@ -45,7 +45,7 @@ Zerox Agent 是一个面向 macOS 的本地桌面智能体控制台。它把模�
 
 Zerox Agent 的重点不是“让模型无限自主”，而是让真实工作具备清晰的目标、受控的权限、可见的过程、可恢复的状态和有证据的完成判断。
 
-> 当前版本是 **v3.8.1**。当前发布面向 Apple Silicon Mac，采用非 Apple 公证的兼容打包方式；安装说明见[下载与安装](#下载与安装)。
+> 当前版本是 **v3.8.2**。当前发布面向 Apple Silicon Mac，采用非 Apple 公证的兼容打包方式；安装说明见[下载与安装](#下载与安装)。
 
 ## 产品边界
 
@@ -308,17 +308,17 @@ macOS 通常对应：
 
 ### 下载当前版本
 
-- [Zerox Agent v3.8.1 发布页](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1)
-- [Zerox-Agent-3.8.1-arm64.dmg](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.8.1/Zerox-Agent-3.8.1-arm64.dmg)
+- [Zerox Agent v3.8.2 发布页](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.2)
+- [Zerox-Agent-3.8.2-arm64.dmg](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.8.2/Zerox-Agent-3.8.2-arm64.dmg)
 
-当前包适用于 Apple Silicon Mac。v3.8.1 使用 `legacy-adhoc` 兼容发布模式，没有 Apple Developer ID 公证。macOS 可能阻止首次打开。
+当前包适用于 Apple Silicon Mac。v3.8.2 使用 `legacy-adhoc` 兼容发布模式，没有 Apple Developer ID 公证。macOS 可能阻止首次打开。
 
 只应对从本项目 GitHub Release 下载且你信任的文件执行以下命令。移除 quarantine 会绕过这份文件的 Gatekeeper 隔离检查。
 
 下载 DMG 后：
 
 ~~~bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.2-arm64.dmg"
 ~~~
 
 如果已经把应用拖到“应用程序”：
@@ -470,7 +470,7 @@ renderer 只展示和发起操作；Plan 采用、Goal 状态、工具授权、�
 ## 当前限制
 
 - 公开测试包当前仅提供 macOS arm64。
-- v3.8.1 未经过 Apple Developer ID 签名与公证。
+- v3.8.2 未经过 Apple Developer ID 签名与公证。
 - 用户需要自备模型服务商账号、API Key 或本地 Ollama。
 - 浏览器预览只用于 UI 演示，不能执行桌面任务。
 - Zerox Agent 不提供云端 worker、远程托管 Agent 或未经审核的自我修改。
@@ -486,7 +486,7 @@ renderer 只展示和发起操作；Plan 采用、Goal 状态、工具授权、�
 
 Zerox Agent is a local-first desktop control plane for personal AI agents on macOS. It turns natural-language work into observable, permissioned, recoverable agent runs across local files, tools, memory, scheduled tasks, and user-reviewed learning.
 
-The current release: v3.8.1.
+The current release: v3.8.2.
 
 Zerox Agent is not a hosted agent cloud, an unbounded autonomous loop, or a generic chat wrapper. Durable state lives on the Mac, execution is scoped to a workspace, high-risk actions remain gated, and completion is decided from acceptance evidence rather than an assistant's claim.
 
@@ -576,12 +576,12 @@ Memory supports core, session, semantic, episodic, and procedural records with l
 
 ## Download and install
 
-Download [Zerox Agent v3.8.1](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.1) or the [arm64 DMG](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.8.1/Zerox-Agent-3.8.1-arm64.dmg).
+Download [Zerox Agent v3.8.2](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.2) or the [arm64 DMG](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.8.2/Zerox-Agent-3.8.2-arm64.dmg).
 
 This compatibility build is not notarized by Apple. Only for a package downloaded from the trusted project release, remove quarantine with:
 
 ~~~bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.1-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.8.2-arm64.dmg"
 ~~~
 
 After copying the app to Applications:

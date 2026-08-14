@@ -9813,3 +9813,38 @@
   - active-state program, harness, and whitespace checks passed.
 - P82 and RC11 are complete. The program is closed with no active or next
   Feature. No production source or persisted schema changed.
+
+## 2026-08-14 - RC12 Zerox Agent v3.8.2 Release Started
+
+- Confirmed v3.8.1 is already public and its annotated tag resolves to
+  `4e86f1efbf0d7545383c286102992338d621dd37`; it will remain immutable.
+- Selected v3.8.2 as the patch release for the verified runtime convergence,
+  post-review hardening, dependency remediation, and stress-gate commits.
+- Accepted `.zerox/decisions/RC12-v3.8.2-release.md` and activated
+  `P83-v3.8.2-runtime-convergence-release`.
+- The local machine has GitHub authentication but no update-signing private
+  key. Publication will use the tracked tag-triggered GitHub Actions workflow,
+  which materializes the repository secret, builds, signs, preflights, and
+  publishes six verified assets.
+- P83 remains active until the public v3.8.2 Release and all six assets are
+  independently verified.
+
+## 2026-08-14 - v3.8.2 Release Preparation Verified
+
+- Updated package, lockfile, README, install commands, release tests, and
+  dedicated release notes to 3.8.2 while preserving v3.8.1 history.
+- Added `npm run stress:runtime` to the tag-triggered release workflow before
+  packaging and publication.
+- Release-preparation verification evidence:
+  - focused metadata/workflow/signing/preflight gate: 7 files / 44 tests;
+  - runtime stress gate: 1 file / 6 tests;
+  - full serial gate: 267 files / 2,729 tests, with the six stress tests skipped
+    by default;
+  - `npm run build` and `npm run verify` passed;
+  - Agent evaluations 26/26 and Memory evaluations 2/2 passed;
+  - dependency audit reported zero vulnerabilities;
+  - standard production smoke rendered through explicit JSON fallback;
+  - Electron-ABI smoke rendered with SQLite loaded and no fallback;
+  - Node-ABI restoration passed 19 metadata and storage tests.
+- P83 remains active for the external tag workflow, signed artifact preflight,
+  public publication, and six-asset verification.

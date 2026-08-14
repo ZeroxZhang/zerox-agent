@@ -1,7 +1,48 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T22:08:43.000+08:00",
+  "updatedAt": "2026-08-14T22:12:56.000+08:00",
   "features": [
+    {
+      "id": "P83-v3.8.2-runtime-convergence-release",
+      "priority": 113,
+      "status": "in_progress",
+      "title": "Publish the verified runtime convergence baseline as v3.8.2",
+      "files": [
+        ".zerox/decisions/RC12-v3.8.2-release.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/runtime-convergence-program.json",
+        ".github/release-notes/v3.8.2.md",
+        ".github/workflows/release.yml",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "src/shared/ciWorkflow.test.ts"
+      ],
+      "definitionOfDone": [
+        "v3.8.1 remains immutable and all current release metadata consistently identifies v3.8.2",
+        "release notes describe runtime convergence, review hardening, dependency remediation, and the stress gate",
+        "the tagged release workflow runs stress plus all existing source, build, eval, harness, package, signing, and preflight gates",
+        "an annotated v3.8.2 tag resolves exactly to the clean verified release preparation commit",
+        "GitHub Actions succeeds and publishes a non-draft non-prerelease Release with exactly six verified assets",
+        "post-release program, harness, remote tag, Release asset, and worktree checks pass"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm test -- --run src/shared/packageScripts.test.ts src/shared/readme.test.ts src/shared/ciWorkflow.test.ts src/shared/releasePreflight.test.ts src/shared/signUpdateManifest.test.ts src/shared/electronBuilderConfig.test.ts",
+        "npm run stress:runtime",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm audit --audit-level=high",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check",
+        "GitHub release workflow and six-asset verification"
+      ]
+    },
     {
       "id": "P82-runtime-stress-and-stability-gate",
       "priority": 112,

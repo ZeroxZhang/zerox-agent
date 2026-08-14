@@ -4,10 +4,10 @@
   "title": "Zerox Runtime Convergence Program",
   "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
   "operatingGuide": ".zerox/runtime-convergence-program.md",
-  "updatedAt": "2026-08-14T22:08:43.000+08:00",
-  "status": "completed",
-  "activeFeatureId": null,
-  "nextFeatureId": null,
+  "updatedAt": "2026-08-14T22:12:56.000+08:00",
+  "status": "active",
+  "activeFeatureId": "P83-v3.8.2-runtime-convergence-release",
+  "nextFeatureId": "P83-v3.8.2-runtime-convergence-release",
   "maxActiveFeatures": 1,
   "requiredClosureGates": [
     "focused_tests",
@@ -255,6 +255,34 @@
         "npm run program:check",
         "npm run harness:check",
         "git diff --check"
+      ]
+    },
+    {
+      "id": "RC12",
+      "title": "Zerox Agent v3.8.2 release",
+      "state": "in_progress",
+      "featureId": "P83-v3.8.2-runtime-convergence-release",
+      "findings": [
+        "RELEASE_VERSION",
+        "RELEASE_NOTES",
+        "RELEASE_STRESS_GATE",
+        "RELEASE_SIGNING",
+        "RELEASE_ASSETS"
+      ],
+      "dependsOn": ["RC09", "RC10", "RC11"],
+      "architectureDecisionRequired": false,
+      "rollback": "Before tagging, revert release preparation; after publication, preserve immutable tags and issue a new patch release.",
+      "verification": [
+        "release metadata and workflow contract tests",
+        "npm run stress:runtime",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm audit --audit-level=high",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "GitHub release workflow and six-asset verification"
       ]
     }
   ]
