@@ -10039,3 +10039,20 @@
 - Verification: focused 185 tests; full/verify 2,759 tests; Agent 26/26; Memory
   2/2; JSON fallback and Electron SQLite smoke passed; Node ABI restored.
 - P87/KM04 are complete. Goal remains direct; P88/KM05 is next.
+
+## 2026-08-14 - KM05 Goal Kernel Segment Adapter Started
+
+- Activated P88/KM05 and accepted the Goal segment adapter decision.
+- The receipt requires milestone run persistence, trajectory flush, and paused
+  checkpoint persistence before Kernel terminal publication.
+- GoalRuntimeEngine remains direct until KM06.
+
+## 2026-08-14 - KM05 Goal Kernel Segment Adapter Completed
+
+- Added the mode-goal adapter with mandatory run record, trajectory flush, and
+  paused checkpoint receipts.
+- Verified success/failure/cancel/pause, pre-cancel, error rethrow, and invalid
+  persistence rejection before one `run_end`.
+- Focused 27 tests; full/verify 2,766 tests; Agent 26/26; Memory 2/2; build and
+  production smoke passed.
+- P88/KM05 complete; P89/KM06 is next.

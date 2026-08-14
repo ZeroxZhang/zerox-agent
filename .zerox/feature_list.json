@@ -1,7 +1,39 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T23:32:03.000+08:00",
+  "updatedAt": "2026-08-14T23:38:43.000+08:00",
   "features": [
+    {
+      "id": "P88-goal-kernel-segment-adapter",
+      "priority": 118,
+      "status": "done",
+      "title": "Add a persistence-validated Goal milestone Kernel adapter",
+      "files": [
+        ".zerox/decisions/KM05-goal-kernel-segment-adapter.md",
+        ".zerox/feature_list.json",
+        ".zerox/kernel-migration-program.json",
+        ".zerox/progress.md",
+        "src/main/kernel/goalKernelSegment.ts",
+        "src/main/kernel/goalKernelSegment.test.ts",
+        "src/shared/productionKernelBoundary.test.ts"
+      ],
+      "definitionOfDone": [
+        "the Goal adapter always invokes ProductionKernelDriver with goal mode",
+        "every settlement proves run record persistence and trajectory flush before run_end",
+        "paused settlements additionally prove checkpoint persistence",
+        "failure and pre-abort settlement preserve ordering and original errors",
+        "GoalRuntimeEngine remains direct until KM06",
+        "all focused, full, verify, smoke, program, harness, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm test -- --run src/main/kernel/goalKernelSegment.test.ts src/main/kernel/productionKernelDriver.test.ts src/shared/productionKernelBoundary.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P87-chat-kernel-production-cutover",
       "priority": 117,
