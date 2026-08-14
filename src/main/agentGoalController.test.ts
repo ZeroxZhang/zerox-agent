@@ -4556,12 +4556,13 @@ describe("agent goal controller", () => {
   async function waitFor<T>(
     predicate: () => T | null | false | Promise<T | null | false>,
   ): Promise<T> {
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
       const value = await predicate();
       if (value) {
         return value;
       }
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 1));
     }
     throw new Error("Timed out waiting for goal controller test condition.");
   }

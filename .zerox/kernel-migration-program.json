@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "programId": "chat-goal-kernel-migration-2026-08",
   "title": "Chat And Goal Production Kernel Migration",
-  "updatedAt": "2026-08-15T00:04:58.000+08:00",
+  "updatedAt": "2026-08-15T00:14:19.000+08:00",
   "sourceBaseline": {
     "release": "v3.8.2",
     "releaseCommit": "9d343ab0424e4a78287d6c38d929ee4269f5c7ec",
@@ -11,9 +11,9 @@
   "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
   "operatingGuide": ".zerox/kernel-migration-program.md",
   "architectureDecision": ".zerox/decisions/KM01-kernel-migration-program.md",
-  "status": "active",
+  "status": "completed",
   "activeFeatureId": null,
-  "nextFeatureId": "P92-post-kernel-migration-stress-and-deferrals",
+  "nextFeatureId": null,
   "maxActiveFeatures": 1,
   "migrationCompletionWorkstreamId": "KM07",
   "postMigrationGates": [
@@ -37,25 +37,28 @@
   "deferredCapabilities": [
     {
       "id": "context_event_compaction",
-      "status": "deferred_pending_pressure_evidence",
+      "status": "kept_deferred",
+      "decisionEvidence": ".zerox/reviews/KM09-post-migration-stress-and-deferrals.md",
       "decisionGate": "KM09",
-      "currentEvidence": "RC11 passed 25000 Context events plus replay in 89 ms and 10000 Chat messages in 456 ms on the recorded baseline.",
+      "currentEvidence": "Final KM09 rerun passed 25000 Context events plus exact replay in 85 ms, 10000 Chat messages in 414 ms, and 25000 SQLite trajectory events in 1123 ms; no pressure budget was approached.",
       "trigger": "Consider compaction only after repeatable stress or production telemetry demonstrates nonlinear replay memory, a breached stress budget, or user-visible p95 startup or turn latency attributable to Context event volume.",
       "prohibitedCurrentAction": "Do not add compaction formats, destructive pruning, or replacement-event rewriting during Kernel migration."
     },
     {
       "id": "external_subagent_provider",
-      "status": "deferred_pending_product_decision",
+      "status": "kept_deferred",
+      "decisionEvidence": ".zerox/reviews/KM09-post-migration-stress-and-deferrals.md",
       "decisionGate": "KM09",
-      "currentEvidence": "The product has no approved requirement to send delegated task context to an external subagent service.",
+      "currentEvidence": "KM09 reconfirmed that the product has no approved requirement or trust contract for sending delegated task context to an external subagent service.",
       "trigger": "Proceed only with an approved product requirement covering provider value, user consent, data residency, credentials, cost, observability, cancellation, and ToolRuntime-equivalent permissions.",
       "prohibitedCurrentAction": "Do not add cloud workers, hidden delegation, or a provider-specific bypass around Actor and ToolRuntime contracts."
     },
     {
       "id": "arbitrary_code_mode",
-      "status": "deferred_blocked_on_isolation",
+      "status": "kept_deferred",
+      "decisionEvidence": ".zerox/reviews/KM09-post-migration-stress-and-deferrals.md",
       "decisionGate": "KM09",
-      "currentEvidence": "Current Code Mode is intentionally a typed read-only DAG executed by a resource-limited Worker and workspace-scoped tools.",
+      "currentEvidence": "KM09 passed bounded Worker timeout, drain, and recovery stress, but no independent arbitrary-code process-isolation design exists; current Code Mode remains a typed read-only DAG.",
       "trigger": "Reconsider only after a separate process isolation design proves syscall, filesystem, network, credential, child-process, timeout, kill, audit, and capability-only I/O boundaries with adversarial tests.",
       "prohibitedCurrentAction": "Do not add eval, Function, VM escape surfaces, arbitrary shell, mutating nested tools, or in-process model-authored code execution."
     }
@@ -231,7 +234,7 @@
     {
       "id": "KM09",
       "title": "Post-migration stress and deferred capability assessment",
-      "state": "planned",
+      "state": "completed",
       "featureId": "P92-post-kernel-migration-stress-and-deferrals",
       "findings": [
         "POST_MIGRATION_STRESS",

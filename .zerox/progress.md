@@ -10123,3 +10123,79 @@
   - active-state program, harness, and whitespace checks passed.
 - P91 and KM08 are complete. The program returns to controlled idle state with
   `P92-post-kernel-migration-stress-and-deferrals` as the only next Feature.
+
+## 2026-08-15 - KM09 Post-Migration Stress Started
+
+- Activated `P92-post-kernel-migration-stress-and-deferrals` as the only
+  unfinished Feature.
+- Preserved the six-scenario runtime stress contract:
+  - 25,000 Context events with O(1) token reads and replay;
+  - 10,000 persisted Chat messages with bounded projection and search;
+  - 25,000 SQLite trajectory events with ordered tail reads;
+  - 5,000 parallel tool calls with a 32-call concurrency ceiling and ordered
+    commits;
+  - cancellation after 32 admissions with started-work drain and no later
+    admissions;
+  - saturated Worker timeout with full drain and a successful next run.
+- Kept all three deferred capabilities locked while stress evidence is
+  collected. KM09 may decide their disposition but may not implement them.
+
+## 2026-08-15 - KM09 And Kernel Migration Program Completed
+
+- Repeated the post-migration runtime stress gate: 1 file / 6 scenarios passed.
+- Recorded elapsed evidence:
+  - 25,000 Context events and replay: 83 ms;
+  - 10,000 Chat messages, bounded projection, and search: 439 ms;
+  - 25,000 SQLite trajectory events and ordered tail read: 1,135 ms;
+  - 5,000 parallel calls with 32 active and ordered commits: 17 ms;
+  - cancellation after 32 admissions with full drain: 4 ms;
+  - saturated Worker timeout, drain, and recovery: 234 ms.
+- Explicit deferral decisions:
+  - `context_event_compaction`: `kept_deferred`; measured Context, Chat, and
+    SQLite volume remained far inside existing budgets.
+  - `external_subagent_provider`: `kept_deferred`; no approved product
+    requirement or external data and authorization trust contract exists.
+  - `arbitrary_code_mode`: `kept_deferred`; bounded Worker recovery passed,
+    but the required independent process-isolation and adversarial escape
+    design does not exist.
+- No deferred capability was implemented or approved for a new program.
+- Final verification evidence:
+  - full serial and verify gates: 271 files / 2,773 tests;
+  - `npm run build`, Agent evaluations 26/26, and Memory evaluations 2/2;
+  - standard smoke rendered through explicit JSON fallback;
+  - Electron-rebuilt SQLite smoke rendered without fallback;
+  - Node ABI restoration passed native loading and 4 files / 41 storage and
+    dependency tests;
+  - dependency audit reported zero vulnerabilities;
+  - active-state program, harness, and whitespace checks passed.
+- P92 and KM09 are complete. All nine Kernel migration workstreams are closed,
+  all production surfaces retain their rollback matrix, and the program has no
+  active or next Feature.
+
+## 2026-08-15 - KM09 Closure Reopened For CI Stability
+
+- GitHub Actions run `31817696111` exposed a CI-only timing defect in
+  `agentGoalController.test.ts`.
+- Three failures shared one cause:
+  - the test helper stopped after 50 zero-delay polls, which can be less than
+    200 ms under CI load;
+  - two tests timed out before their asynchronous controller runs reached the
+    expected state;
+  - unfinished work from those failed tests then produced the apparent
+    duplicate terminal event in a later test.
+- Reopened P92/KM09 as the only active Feature. Deferred capability decisions
+  remain recorded but cannot leave deferred machine state until the repeated
+  local and remote gates pass.
+
+## 2026-08-15 - KM09 CI Stability Follow-Up Completed
+
+- Replaced the controller test helper's 50 zero-delay polls with a real
+  5,000 ms deadline and 1 ms polling. Production code and runtime deadlines
+  are unchanged.
+- Focused `agentGoalController.test.ts`: 1 file / 112 tests passed.
+- Full parallel `npm run verify`: 271 files / 2,773 tests, build, Agent
+  evaluations 26/26, and Memory evaluations 2/2 passed.
+- Repeated runtime stress: 1 file / 6 scenarios passed with final volume
+  metrics of 85 ms Context, 414 ms Chat, and 1,123 ms SQLite trajectory.
+- P92/KM09 and the program are ready to close again. Remote verification of
+  the final closure commit remains mandatory before Goal completion.

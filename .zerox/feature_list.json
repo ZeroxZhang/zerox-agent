@@ -1,7 +1,38 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-15T00:04:58.000+08:00",
+  "updatedAt": "2026-08-15T00:14:19.000+08:00",
   "features": [
+    {
+      "id": "P92-post-kernel-migration-stress-and-deferrals",
+      "priority": 122,
+      "status": "done",
+      "title": "Stress the converged Kernel runtime and decide every deferred capability",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/kernel-migration-program.json",
+        ".zerox/progress.md",
+        ".zerox/reviews/KM09-post-migration-stress-and-deferrals.md",
+        "src/main/agentGoalController.test.ts",
+        "src/main/runtimeStress.test.ts"
+      ],
+      "definitionOfDone": [
+        "long Context, long Chat, SQLite trajectory, parallel scheduler, cancellation drain, and Worker recovery stress pass",
+        "every deferred capability records an explicit keep-deferred or independent-program decision from current evidence",
+        "no deferred capability is implemented inside the Kernel migration program",
+        "all full, verify, dual smoke, audit, program, harness, and whitespace gates pass",
+        "the Kernel migration program closes with no active or next Feature"
+      ],
+      "verification": [
+        "npm run stress:runtime",
+        "npm run program:check",
+        "npm test -- --maxWorkers=1",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm audit --audit-level=high",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P91-post-kernel-migration-review",
       "priority": 121,
