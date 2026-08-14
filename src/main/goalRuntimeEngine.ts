@@ -140,12 +140,13 @@ export function createGoalRuntimeEngine(options: {
         const outcome = await runGoalKernelSegment({
           driver: productionKernelDriver,
           runId,
-          ...(runOptions?.signal ? { signal: runOptions.signal } : {}),
           async execute() {
             return toSettlement(await executeDirect());
           },
           async settleAborted() {
-            return toSettlement(await executeDirect());
+            throw new Error(
+              "Goal Kernel wrapper does not own surface cancellation.",
+            );
           },
           async settleFailed(error) {
             throw error;

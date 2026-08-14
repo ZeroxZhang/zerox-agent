@@ -1,7 +1,39 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T23:51:47.000+08:00",
+  "updatedAt": "2026-08-15T00:04:58.000+08:00",
   "features": [
+    {
+      "id": "P91-post-kernel-migration-review",
+      "priority": 121,
+      "status": "done",
+      "title": "Review and harden the completed Chat and Goal Kernel migration",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/kernel-migration-program.json",
+        ".zerox/progress.md",
+        ".zerox/reviews/KM08-post-migration-review.md",
+        "src/main/chatService.ts",
+        "src/main/chatService.test.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/goalRuntimeEngine.test.ts"
+      ],
+      "definitionOfDone": [
+        "code and security review cover the complete KM02-KM07 diff",
+        "every confirmed correctness issue is fixed with focused regression tests",
+        "no exploitable source-to-sink security issue remains",
+        "all focused, full, verify, dual smoke, program, harness, and whitespace gates pass"
+      ],
+      "verification": [
+        "review 8430d10..f06f288",
+        "npm run program:check",
+        "npm test -- --run src/main/chatService.test.ts src/main/goalRuntimeEngine.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P90-kernel-runtime-convergence-cleanup",
       "priority": 120,

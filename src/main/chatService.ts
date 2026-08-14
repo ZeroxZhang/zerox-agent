@@ -2386,7 +2386,6 @@ export function createChatService(options: {
     const outcome = await runChatKernelSegment<SendChatMessageResult>({
       driver: options.productionKernelDriver,
       runId,
-      ...(runtimeOptions.signal ? { signal: runtimeOptions.signal } : {}),
       async execute() {
         return settleResult(
           await executeMessageInternal(
@@ -2396,43 +2395,10 @@ export function createChatService(options: {
           ),
         );
       },
-      async settleAborted(status) {
-        const message =
-          status === "paused" ? "任务已暂停。" : "已中断任务。";
-        const sessionId = input.sessionId ?? lastStreamEvent?.sessionId;
-        if (terminalEvents.length === 0) {
-          emitSyntheticTerminal(
-            status === "paused" ? "completed" : "canceled",
-            message,
-            sessionId,
-          );
-        }
-        const activityPersisted = await persistTerminalActivity(
-          status,
-          message,
-          sessionId,
+      async settleAborted() {
+        throw new Error(
+          "Chat Kernel wrapper does not own surface cancellation.",
         );
-        return {
-          status,
-          summary: message,
-          result: {
-            ok: false as const,
-            code: "CANCELED" as const,
-            retryable: true,
-            message,
-          },
-          persistence: {
-            requiredStatePersisted: true,
-            ...(status === "paused"
-              ? { continuationPersisted: true as const }
-              : {}),
-            ...(activityPersisted
-              ? { terminalActivityPersisted: true as const }
-              : {}),
-            ...(!sessionId ? { noDomainStateCreated: true as const } : {}),
-          },
-          streamTerminals: [terminalEvents.at(-1)!],
-        };
       },
       async settleFailed(error) {
         const message =

@@ -163,6 +163,78 @@ describe("goal runtime engine", () => {
     });
   });
 
+  it("does not replay a milestone when cancellation arrives after run persistence", async () => {
+    const controller = new AbortController();
+    const bus = new KernelEventBus();
+    const runs: AgentRunRecord[] = [];
+    let loopCalls = 0;
+    const trajectoryStore = {
+      async append(_runId: string, event: AgentTrajectoryEvent) {
+        return event;
+      },
+    };
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          return { content: "done", toolCalls: [], finishReason: "stop" };
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "goal-model",
+        temperature: 0,
+        maxTokens: 4096,
+      }),
+      toolExecutor: createAgentToolExecutor(),
+      runStore: {
+        async append(run) {
+          runs.push(run);
+          if (runs.length === 1) {
+            controller.abort(new Error("late cancellation"));
+          }
+          return run;
+        },
+      },
+      trajectoryStore,
+      goalContext: createAgentGoalContext({
+        trajectoryStore,
+      }),
+      createId: () => "goal_kernel_late_cancel",
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runAgentLoop(messages) {
+        loopCalls += 1;
+        return {
+          status: "succeeded",
+          summary: "Committed Goal milestone.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+    const goal = createGoal();
+
+    const result = await engine.runMilestone(
+      goal,
+      goal.milestones[0]!,
+      { signal: controller.signal },
+    );
+
+    expect(result).toMatchObject({
+      runId: "goal_kernel_late_cancel",
+      status: "succeeded",
+    });
+    expect(loopCalls).toBe(1);
+    expect(runs).toHaveLength(1);
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      runId: "goal_kernel_late_cancel",
+      status: "succeeded",
+    });
+  });
+
   it("routes supported deterministic contracts through the native pipeline without a model loop", async () => {
     const runs: AgentRunRecord[] = [];
     const trajectoryEvents: AgentTrajectoryEvent[] = [];

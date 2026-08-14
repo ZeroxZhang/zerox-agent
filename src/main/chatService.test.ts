@@ -7807,6 +7807,77 @@ describe("chat service", () => {
     });
   });
 
+  it("keeps a completed Chat settlement when cancellation arrives after assistant persistence", async () => {
+    const controller = new AbortController();
+    const bus = new KernelEventBus();
+    const storedMessages: AppendChatMessageInput[] = [];
+    const streamEvents: ChatStreamEvent[] = [];
+    const baseStore = createChatSessionStore(storedMessages);
+    const store = {
+      ...baseStore,
+      async appendMessage(input: AppendChatMessageInput) {
+        const result = await baseStore.appendMessage(input);
+        if (input.role === "assistant") {
+          controller.abort(new Error("late cancellation"));
+        }
+        return result;
+      },
+    };
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runAgentLoop(messages) {
+        return {
+          status: "succeeded",
+          summary: "Committed Chat reply.",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+
+    await expect(
+      service.sendMessage(
+        {
+          sessionId: "kernel_late_cancel_session",
+          requestId: "kernel_late_cancel_request",
+          message: "commit before cancellation",
+        },
+        {
+          signal: controller.signal,
+          onStreamEvent: (event) => streamEvents.push(event),
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      reply: "Committed Chat reply.",
+    });
+
+    expect(
+      storedMessages.filter((message) => message.role === "assistant"),
+    ).toHaveLength(1);
+    expect(
+      streamEvents.filter((event) =>
+        ["completed", "failed", "canceled"].includes(event.type),
+      ),
+    ).toEqual([
+      expect.objectContaining({ type: "completed" }),
+    ]);
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "succeeded",
+    });
+  });
+
   it("persists paused continuation before Chat Kernel run_end", async () => {
     const lifecycle: string[] = [];
     const bus = new KernelEventBus();

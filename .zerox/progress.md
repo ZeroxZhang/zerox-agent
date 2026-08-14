@@ -10080,3 +10080,46 @@
   production smoke passed.
 - KM01-KM07 migration implementation is complete. P91/KM08 post-migration code
   and security review is next.
+
+## 2026-08-14 - KM08 Post-Migration Review Started
+
+- Activated `P91-post-kernel-migration-review` as the only unfinished Feature.
+- Fixed the review scope at `8430d10..f06f288`, covering the complete KM02-KM07
+  production migration diff.
+- The code review identified one correctness issue for independent
+  confirmation: Chat and Goal pass the same `AbortSignal` to both the
+  surface-owned runtime and Kernel, allowing late abort to compete with an
+  already persisted surface terminal.
+- The security review found no exploitable attacker-controlled source to
+  dangerous-sink path introduced by the migration.
+- No deferred capability is unlocked by KM08.
+
+## 2026-08-15 - KM08 Post-Migration Review Completed
+
+- Completed the code and security review for `8430d10..f06f288`.
+- Two independent validators confirmed one Major correctness issue:
+  Chat and Goal shared a caller `AbortSignal` with Kernel after assigning
+  cancellation and terminal persistence to the surface.
+- Added red regressions that reproduced:
+  - Chat durable success followed by `failed != succeeded` Kernel parity;
+  - Goal late cancellation replaying the direct milestone and replacing the
+    committed success with cancellation.
+- Removed the caller signal from both production Kernel wrappers. Chat and
+  Goal surface runtimes still receive it, persist the resulting terminal, and
+  return one receipt for Kernel validation. Kernel abort callbacks now fail
+  closed instead of synthesizing a competing terminal or rerunning work.
+- Security review result: no exploitable attacker-controlled source to
+  dangerous-sink path was introduced by KM02-KM07.
+- Verification evidence:
+  - focused Chat and Goal gate: 2 files / 131 tests;
+  - full serial and verify gates: 271 files / 2,773 tests, with six KM09 stress
+    tests skipped by default;
+  - `npm run build`, Agent evaluations 26/26, and Memory evaluations 2/2;
+  - standard smoke rendered through explicit JSON fallback;
+  - Electron-rebuilt SQLite smoke rendered without fallback;
+  - Node ABI restoration passed native loading and 4 files / 41 storage and
+    dependency tests;
+  - dependency audit reported zero vulnerabilities;
+  - active-state program, harness, and whitespace checks passed.
+- P91 and KM08 are complete. The program returns to controlled idle state with
+  `P92-post-kernel-migration-stress-and-deferrals` as the only next Feature.
