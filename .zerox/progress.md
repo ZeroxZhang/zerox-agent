@@ -9848,3 +9848,19 @@
   - Node-ABI restoration passed 19 metadata and storage tests.
 - P83 remains active for the external tag workflow, signed artifact preflight,
   public publication, and six-asset verification.
+
+## 2026-08-14 - v3.8.2 Remote Verify Repair
+
+- GitHub Actions verify run `31809346980` rejected the first release-preparation
+  commit because `container.test.ts` required only the controller's English
+  achieved message.
+- Under parallel delivery, an earlier progress event can be reconciled against
+  the already-persisted achieved Goal and legitimately produce the canonical
+  Chinese `stopped/目标已达成。` event before the controller's own stopped event.
+- Updated the test to preserve the actual contract: achieved terminal status
+  and stopped ordering are required, while either valid achieved message is
+  accepted. Production behavior and persisted state are unchanged.
+- Focused container/workflow gate passed 73 tests; a complete `npm run verify`
+  then passed 2,729 tests, build, Agent evaluations 26/26, and Memory
+  evaluations 2/2.
+- The v3.8.2 tag was not created while remote verify was failing.

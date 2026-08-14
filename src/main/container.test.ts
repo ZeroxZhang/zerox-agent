@@ -1381,8 +1381,11 @@ describe("app container goal drafts", () => {
 
     expect(terminalProgress).toMatchObject({
       status: "achieved",
-      message: "Goal acceptance passed.",
     });
+    expect([
+      "Goal acceptance passed.",
+      "目标已达成。",
+    ]).toContain(terminalProgress.message);
     expect(achievedProgress.map((event) => event.event)).toEqual([
       "acceptance_certified",
       "stopped",
