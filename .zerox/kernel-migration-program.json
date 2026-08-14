@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "programId": "chat-goal-kernel-migration-2026-08",
   "title": "Chat And Goal Production Kernel Migration",
-  "updatedAt": "2026-08-14T22:53:40.000+08:00",
+  "updatedAt": "2026-08-14T23:10:55.000+08:00",
   "sourceBaseline": {
     "release": "v3.8.2",
     "releaseCommit": "9d343ab0424e4a78287d6c38d929ee4269f5c7ec",
@@ -13,7 +13,7 @@
   "architectureDecision": ".zerox/decisions/KM01-kernel-migration-program.md",
   "status": "active",
   "activeFeatureId": null,
-  "nextFeatureId": "P85-kernel-mode-aware-production-driver",
+  "nextFeatureId": "P86-chat-kernel-segment-adapter",
   "maxActiveFeatures": 1,
   "migrationCompletionWorkstreamId": "KM07",
   "postMigrationGates": [
@@ -85,7 +85,7 @@
     {
       "id": "KM02",
       "title": "Mode-aware Production Kernel segment contract",
-      "state": "planned",
+      "state": "completed",
       "featureId": "P85-kernel-mode-aware-production-driver",
       "findings": [
         "KERNEL_MODE_PROPAGATION",

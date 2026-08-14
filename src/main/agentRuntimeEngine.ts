@@ -766,6 +766,7 @@ export function createAgentRuntimeEngine(options: {
     return (
       await options.productionKernelDriver.run({
         runId: current.runId,
+        mode: "scheduled_task",
         ...(signal ? { signal } : {}),
         checkpointEvery: maxTurns,
         execute: executePersistedSegment,

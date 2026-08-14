@@ -1,7 +1,44 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T22:53:40.000+08:00",
+  "updatedAt": "2026-08-14T23:10:55.000+08:00",
   "features": [
+    {
+      "id": "P85-kernel-mode-aware-production-driver",
+      "priority": 115,
+      "status": "done",
+      "title": "Make the Production Kernel segment contract mode-aware and failure-settled",
+      "files": [
+        ".zerox/decisions/KM02-mode-aware-production-driver.md",
+        ".zerox/feature_list.json",
+        ".zerox/kernel-migration-program.json",
+        ".zerox/progress.md",
+        "src/main/kernel/runtimeKernel.ts",
+        "src/main/kernel/runtimeKernel.test.ts",
+        "src/main/kernel/productionKernelDriver.ts",
+        "src/main/kernel/productionKernelDriver.test.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/agentRuntimeEngine.test.ts",
+        "src/shared/productionKernelBoundary.test.ts"
+      ],
+      "definitionOfDone": [
+        "every ProductionKernelDriver invocation declares chat, goal, or scheduled_task mode and receives an immutable execution context with exact mode/run/turn identity",
+        "surface failure settlement completes before the single failed run_end event while the original execution error is still rethrown",
+        "pause and cancellation settlement continues to complete before run_end and rejects stale success parity",
+        "the Scheduled Task caller explicitly selects scheduled_task with unchanged checkpoint, persistence, terminal, and resume behavior",
+        "Chat and Goal remain direct AgentLoop entry points with no production cutover in KM02",
+        "focused, full, build, verify, smoke, program, harness, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm test -- --run src/main/kernel/productionKernelDriver.test.ts src/main/agentRuntimeEngine.test.ts src/shared/productionKernelBoundary.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P84-kernel-migration-program-foundation",
       "priority": 114,

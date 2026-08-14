@@ -1,6 +1,7 @@
 import {
   KERNEL_EVENT_VERSION,
   type KernelEvent,
+  type KernelRunMode,
   type KernelRunStatus,
 } from "../../shared/kernelContract";
 import type { KernelEventBus } from "./eventBus";
@@ -28,18 +29,37 @@ export type ProductionKernelReporter = {
   }): void;
 };
 
+export type ProductionKernelExecutionContext = Readonly<{
+  runId: string;
+  mode: KernelRunMode;
+  turn: number;
+}>;
+
+export type ProductionKernelRunInput<
+  TSegment extends ProductionKernelSegment,
+> = {
+  runId: string;
+  mode: KernelRunMode;
+  signal?: AbortSignal;
+  checkpointEvery?: number;
+  execute(
+    reporter: ProductionKernelReporter,
+    context: ProductionKernelExecutionContext,
+  ): Promise<TSegment>;
+  settleAborted?(
+    status: "paused" | "canceled",
+    context: ProductionKernelExecutionContext,
+  ): Promise<TSegment>;
+  settleFailed?(
+    error: unknown,
+    context: ProductionKernelExecutionContext,
+  ): Promise<TSegment>;
+};
+
 export type ProductionKernelDriver = {
-  run<TSegment extends ProductionKernelSegment>(input: {
-    runId: string;
-    signal?: AbortSignal;
-    checkpointEvery?: number;
-    execute(
-      reporter: ProductionKernelReporter,
-    ): Promise<TSegment>;
-    settleAborted?(
-      status: "paused" | "canceled",
-    ): Promise<TSegment>;
-  }): Promise<{
+  run<TSegment extends ProductionKernelSegment>(
+    input: ProductionKernelRunInput<TSegment>,
+  ): Promise<{
     kernel: RuntimeKernelResult;
     segment: TSegment;
   }>;
@@ -64,17 +84,7 @@ export function createProductionKernelDriver(options: {
 async function runProductionSegment<
   TSegment extends ProductionKernelSegment,
 >(
-  input: {
-    runId: string;
-    signal?: AbortSignal;
-    checkpointEvery?: number;
-    execute(
-      reporter: ProductionKernelReporter,
-    ): Promise<TSegment>;
-    settleAborted?(
-      status: "paused" | "canceled",
-    ): Promise<TSegment>;
-  },
+  input: ProductionKernelRunInput<TSegment>,
   options: {
     bus: KernelEventBus;
     now: () => string;
@@ -125,13 +135,21 @@ async function runProductionSegment<
       });
     },
   };
+  const executionContext = (
+    turn = activeTurn,
+  ): ProductionKernelExecutionContext =>
+    Object.freeze({
+      runId: input.runId,
+      mode: input.mode,
+      turn,
+    });
 
   let kernel: RuntimeKernelResult;
   try {
     kernel = await runRuntimeKernel(
       {
         runId: input.runId,
-        mode: "scheduled_task",
+        mode: input.mode,
         turn: 0,
         maxTurns: Math.max(
           1,
@@ -159,14 +177,27 @@ async function runProductionSegment<
             input.settleAborted &&
             (!segment || segment.status !== status)
           ) {
-            segment = await input.settleAborted(status);
+            try {
+              const settled = await input.settleAborted(
+                status,
+                executionContext(ctx.turn),
+              );
+              assertSettlementStatus(settled, status, "aborted");
+              segment = settled;
+            } catch (error) {
+              segmentError = error;
+              throw error;
+            }
           }
           return segment ? { summary: segment.summary } : undefined;
         },
         async runTurn(ctx) {
           activeTurn = ctx.turn;
           try {
-            const executed = await input.execute(reporter);
+            const executed = await input.execute(
+              reporter,
+              executionContext(ctx.turn),
+            );
             segment = executed;
             return {
               summary: executed.summary,
@@ -174,8 +205,28 @@ async function runProductionSegment<
               reason: `segment ${executed.status}`,
             };
           } catch (error) {
-            segmentError = error;
-            throw error;
+            if (!input.settleFailed) {
+              segmentError = error;
+              throw error;
+            }
+            try {
+              const settled = await input.settleFailed(
+                error,
+                executionContext(ctx.turn),
+              );
+              assertSettlementStatus(settled, "failed", "failed");
+              segment = settled;
+              segmentError = error;
+              return {
+                summary: settled.summary,
+                terminalStatus: settled.status,
+                reason: formatError(error),
+              };
+            } catch (settlementError) {
+              segment = undefined;
+              segmentError = settlementError;
+              throw settlementError;
+            }
           }
         },
       },
@@ -185,29 +236,57 @@ async function runProductionSegment<
   }
 
   assertOneTerminalEvent(terminalEvents, kernel);
-  if (segmentError) {
-    throw segmentError;
-  }
   if (!segment) {
+    if (segmentError) {
+      throw segmentError;
+    }
     throw new Error(
       "Production Kernel ended without an execution segment result.",
     );
   }
   const settledSegment = segment as TSegment;
-  if (kernel.status !== settledSegment.status) {
-    throw new Error(
-      `Production Kernel status parity failed: ${kernel.status} != ${settledSegment.status}.`,
-    );
-  }
-  if (kernel.summary !== settledSegment.summary) {
-    throw new Error(
-      "Production Kernel summary parity failed.",
-    );
+  assertSegmentParity(kernel, settledSegment);
+  if (segmentError) {
+    throw segmentError;
   }
   return {
     kernel,
     segment: settledSegment,
   };
+}
+
+function assertSettlementStatus(
+  segment: ProductionKernelSegment,
+  expected: ProductionKernelSegment["status"],
+  kind: string,
+): void {
+  if (segment.status !== expected) {
+    throw new Error(
+      `Production Kernel ${kind} settlement status must be ${expected}, received ${segment.status}.`,
+    );
+  }
+}
+
+function assertSegmentParity(
+  kernel: RuntimeKernelResult,
+  segment: ProductionKernelSegment,
+): void {
+  if (kernel.status !== segment.status) {
+    throw new Error(
+      `Production Kernel status parity failed: ${kernel.status} != ${segment.status}.`,
+    );
+  }
+  if (kernel.summary !== segment.summary) {
+    throw new Error(
+      "Production Kernel summary parity failed.",
+    );
+  }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : String(error ?? "Unknown error");
 }
 
 function assertOneTerminalEvent(

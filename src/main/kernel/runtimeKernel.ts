@@ -40,8 +40,7 @@ export async function runRuntimeKernel(
   let summary = "";
 
   if (ctx.signal?.aborted) {
-    summary = await settleAbortedRun(ctx, deps, summary);
-    return endRunForAbortedSignal(ctx, deps.bus, now, summary);
+    return settleAndEndAbortedRun(ctx, deps, now, summary);
   }
 
   while (Number.isFinite(ctx.turn)) {
@@ -71,8 +70,7 @@ export async function runRuntimeKernel(
     }
 
     if (ctx.signal?.aborted) {
-      summary = await settleAbortedRun(ctx, deps, summary);
-      return endRunForAbortedSignal(ctx, deps.bus, now, summary);
+      return settleAndEndAbortedRun(ctx, deps, now, summary);
     }
 
     if (lastTurn.terminalStatus) {
@@ -174,6 +172,32 @@ async function settleAbortedRun(
 ): Promise<string> {
   const settlement = await deps.beforeAbortedEnd?.(ctx);
   return settlement?.summary ?? summary;
+}
+
+async function settleAndEndAbortedRun(
+  ctx: RunContext,
+  deps: RuntimeKernelDependencies,
+  now: () => string,
+  summary: string,
+): Promise<RuntimeKernelResult> {
+  try {
+    const settledSummary = await settleAbortedRun(ctx, deps, summary);
+    return endRunForAbortedSignal(
+      ctx,
+      deps.bus,
+      now,
+      settledSummary,
+    );
+  } catch (error) {
+    return endRun(
+      ctx,
+      deps.bus,
+      now,
+      "failed",
+      formatError(error),
+      summary,
+    );
+  }
 }
 
 function endRunForAbortedSignal(

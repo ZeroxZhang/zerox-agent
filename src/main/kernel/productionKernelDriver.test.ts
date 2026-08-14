@@ -14,6 +14,7 @@ describe("production Kernel driver", () => {
 
       const result = await driver.run({
         runId: `run_${status}`,
+        mode: "scheduled_task",
         async execute(reporter) {
           reporter.toolCall("file_read", { path: "README.md" });
           reporter.retry({
@@ -52,6 +53,37 @@ describe("production Kernel driver", () => {
     },
   );
 
+  it.each(["chat", "goal", "scheduled_task"] as const)(
+    "passes a frozen %s execution context to the segment",
+    async (mode) => {
+      const contexts: unknown[] = [];
+      const result = await createProductionKernelDriver({
+        bus: new KernelEventBus(),
+        now: fixedNow,
+      }).run({
+        runId: `run_mode_${mode}`,
+        mode,
+        async execute(_reporter, context) {
+          contexts.push(context);
+          expect(Object.isFrozen(context)).toBe(true);
+          return {
+            status: "succeeded",
+            summary: `${mode} complete`,
+          };
+        },
+      });
+
+      expect(contexts).toEqual([
+        {
+          runId: `run_mode_${mode}`,
+          mode,
+          turn: 1,
+        },
+      ]);
+      expect(result.kernel.status).toBe("succeeded");
+    },
+  );
+
   it("rethrows a segment failure after publishing one failed terminal event", async () => {
     const bus = new KernelEventBus();
     const driver = createProductionKernelDriver({
@@ -63,6 +95,7 @@ describe("production Kernel driver", () => {
     await expect(
       driver.run({
         runId: "run_error",
+        mode: "scheduled_task",
         async execute() {
           throw error;
         },
@@ -78,6 +111,100 @@ describe("production Kernel driver", () => {
     ]);
   });
 
+  it("settles a failed segment before run_end and rethrows the execution error", async () => {
+    const bus = new KernelEventBus();
+    const lifecycle: string[] = [];
+    const error = new Error("segment exploded");
+    const unsubscribe = bus.subscribe((event) => {
+      if (event.type === "run_end") {
+        lifecycle.push("run_end");
+      }
+    });
+
+    await expect(
+      createProductionKernelDriver({ bus, now: fixedNow }).run({
+        runId: "run_settled_failure",
+        mode: "chat",
+        async execute() {
+          lifecycle.push("execute");
+          throw error;
+        },
+        async settleFailed(observedError, context) {
+          expect(observedError).toBe(error);
+          expect(context).toEqual({
+            runId: "run_settled_failure",
+            mode: "chat",
+            turn: 1,
+          });
+          expect(Object.isFrozen(context)).toBe(true);
+          lifecycle.push("persisted");
+          return {
+            status: "failed",
+            summary: "Durable Chat failure.",
+          };
+        },
+      }),
+    ).rejects.toBe(error);
+    unsubscribe();
+
+    expect(lifecycle).toEqual(["execute", "persisted", "run_end"]);
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "failed",
+      reason: "segment exploded",
+    });
+  });
+
+  it("publishes and rethrows a failure-settlement error without masking it", async () => {
+    const bus = new KernelEventBus();
+    const settlementError = new Error("failure persistence failed");
+
+    await expect(
+      createProductionKernelDriver({ bus, now: fixedNow }).run({
+        runId: "run_failure_settlement_error",
+        mode: "goal",
+        async execute() {
+          throw new Error("segment exploded");
+        },
+        async settleFailed() {
+          throw settlementError;
+        },
+      }),
+    ).rejects.toBe(settlementError);
+
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "failed",
+      reason: "failure persistence failed",
+    });
+  });
+
+  it("rejects a failure settlement that does not return failed", async () => {
+    const bus = new KernelEventBus();
+
+    await expect(
+      createProductionKernelDriver({ bus, now: fixedNow }).run({
+        runId: "run_invalid_failure_settlement",
+        mode: "goal",
+        async execute() {
+          throw new Error("segment exploded");
+        },
+        async settleFailed() {
+          return {
+            status: "succeeded",
+            summary: "invalid settlement",
+          };
+        },
+      }),
+    ).rejects.toThrow(/status must be failed/i);
+
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "failed",
+      reason: expect.stringMatching(/status must be failed/i),
+    });
+  });
+
   it("does not execute a pre-canceled production segment", async () => {
     const bus = new KernelEventBus();
     const controller = new AbortController();
@@ -87,6 +214,7 @@ describe("production Kernel driver", () => {
     await expect(
       createProductionKernelDriver({ bus, now: fixedNow }).run({
         runId: "run_pre_canceled",
+        mode: "scheduled_task",
         signal: controller.signal,
         async execute() {
           executed = true;
@@ -112,6 +240,7 @@ describe("production Kernel driver", () => {
     await expect(
       createProductionKernelDriver({ bus, now: fixedNow }).run({
         runId: "run_pre_paused",
+        mode: "scheduled_task",
         signal: controller.signal,
         async execute() {
           executed = true;
@@ -144,6 +273,7 @@ describe("production Kernel driver", () => {
       now: fixedNow,
     }).run({
       runId: "run_pre_paused_settled",
+      mode: "scheduled_task",
       signal: controller.signal,
       async execute() {
         throw new Error("pre-paused segment must not execute");
@@ -171,6 +301,35 @@ describe("production Kernel driver", () => {
     expect(lifecycle).toEqual(["persisted", "run_end"]);
   });
 
+  it("publishes failed when pre-abort settlement cannot persist", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+    controller.abort("pause");
+    const settlementError = new Error("pause persistence failed");
+
+    await expect(
+      createProductionKernelDriver({ bus, now: fixedNow }).run({
+        runId: "run_pre_paused_settlement_error",
+        mode: "scheduled_task",
+        signal: controller.signal,
+        async execute() {
+          throw new Error("pre-paused segment must not execute");
+        },
+        async settleAborted() {
+          throw settlementError;
+        },
+      }),
+    ).rejects.toBe(settlementError);
+
+    expect(bus.history()).toEqual([
+      expect.objectContaining({
+        type: "run_end",
+        status: "failed",
+        reason: "pause persistence failed",
+      }),
+    ]);
+  });
+
   it("rejects a stale success when cancellation wins before segment settlement", async () => {
     const bus = new KernelEventBus();
     const controller = new AbortController();
@@ -182,6 +341,7 @@ describe("production Kernel driver", () => {
     await expect(
       driver.run({
         runId: "run_cancel_race",
+        mode: "scheduled_task",
         signal: controller.signal,
         async execute() {
           controller.abort(new Error("user canceled"));
@@ -206,6 +366,7 @@ describe("production Kernel driver", () => {
     });
     await driver.run({
       runId: "run_long_resume",
+      mode: "scheduled_task",
       async execute() {
         return { status: "paused", summary: "first segment" };
       },
@@ -214,6 +375,7 @@ describe("production Kernel driver", () => {
     await expect(
       driver.run({
         runId: "run_long_resume",
+        mode: "scheduled_task",
         async execute(reporter) {
           for (let index = 0; index < 1_005; index += 1) {
             reporter.toolCall("file_read", { index });

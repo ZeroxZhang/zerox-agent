@@ -160,6 +160,43 @@ describe("runRuntimeKernel", () => {
     ]);
   });
 
+  it("publishes failed when pre-abort settlement fails", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+    controller.abort("pause");
+    let turnRan = false;
+
+    const result = await runRuntimeKernel(createContext({
+      mode: "chat",
+      signal: controller.signal,
+      stopPolicy: turnLimitPolicy(),
+    }), {
+      bus,
+      now: fixedNow,
+      async beforeAbortedEnd() {
+        throw new Error("Chat pause persistence failed.");
+      },
+      async runTurn() {
+        turnRan = true;
+        return {};
+      },
+    });
+
+    expect(turnRan).toBe(false);
+    expect(result).toMatchObject({
+      status: "failed",
+      turns: 0,
+      reason: "Chat pause persistence failed.",
+    });
+    expect(bus.history()).toEqual([
+      expect.objectContaining({
+        type: "run_end",
+        status: "failed",
+        reason: "Chat pause persistence failed.",
+      }),
+    ]);
+  });
+
   it.each(["paused", "failed", "canceled"] as const)(
     "preserves an explicit %s production segment terminal status",
     async (terminalStatus) => {
@@ -216,6 +253,41 @@ describe("runRuntimeKernel", () => {
       status: "canceled",
       reason: "Agent run canceled.",
       summary: "stale success",
+    });
+  });
+
+  it("publishes failed when post-turn cancellation settlement fails", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+
+    const result = await runRuntimeKernel(createContext({
+      mode: "goal",
+      signal: controller.signal,
+    }), {
+      bus,
+      now: fixedNow,
+      async runTurn() {
+        controller.abort(new Error("user canceled"));
+        return {
+          terminalStatus: "succeeded",
+          summary: "stale success",
+        };
+      },
+      async beforeAbortedEnd() {
+        throw new Error("Goal cancellation persistence failed.");
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      turns: 1,
+      reason: "Goal cancellation persistence failed.",
+      summary: "stale success",
+    });
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "failed",
+      reason: "Goal cancellation persistence failed.",
     });
   });
 

@@ -21,6 +21,7 @@ describe("production Kernel boundary", () => {
     expect(runtime).toContain(
       "await options.productionKernelDriver.run({",
     );
+    expect(runtime).toContain('mode: "scheduled_task"');
     expect(runtime).toContain(
       "const result = await persistLoopResult(settled);",
     );
@@ -28,6 +29,7 @@ describe("production Kernel boundary", () => {
       "return (await executePersistedSegment()).result;",
     );
     expect(runtime).toContain("settleAborted(status) {");
+    expect(driverModeContract(runtime)).toBe(true);
     expect(goal).not.toContain("productionKernelDriver");
     expect(chat).not.toContain("productionKernelDriver");
   });
@@ -39,12 +41,13 @@ describe("production Kernel boundary", () => {
     expect(runtime).toContain("kernelReporter?.retry({");
     expect(runtime).toContain("kernelReporter?.toolCall(toolName, args)");
     expect(runtime).toContain("kernelReporter?.checkpoint(");
-    expect(driver).toContain(
-      "if (kernel.status !== settledSegment.status)",
-    );
-    expect(driver).toContain(
-      "if (kernel.summary !== settledSegment.summary)",
-    );
+    expect(driver).toContain("mode: input.mode");
+    expect(driver).toContain("Object.freeze({");
+    expect(driver).toContain("input.settleFailed");
+    expect(driver).toContain("assertSettlementStatus(settled, \"failed\"");
+    expect(driver).toContain("assertSegmentParity(kernel, settledSegment)");
+    expect(driver).toContain("if (kernel.status !== segment.status)");
+    expect(driver).toContain("if (kernel.summary !== segment.summary)");
     expect(driver).toContain(
       "const unsubscribe = options.bus.subscribe((event) => {",
     );
@@ -68,4 +71,12 @@ describe("production Kernel boundary", () => {
 
 function read(relativePath: string): string {
   return readFileSync(path.join(root, relativePath), "utf8");
+}
+
+function driverModeContract(runtime: string): boolean {
+  const invocation = runtime.slice(
+    runtime.indexOf("await options.productionKernelDriver.run({"),
+  );
+  return invocation.indexOf('mode: "scheduled_task"') <
+    invocation.indexOf("execute: executePersistedSegment");
 }

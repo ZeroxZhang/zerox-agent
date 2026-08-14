@@ -9949,3 +9949,50 @@
   `P85-kernel-mode-aware-production-driver`.
 - All three deferred capabilities remain locked behind KM09 decision gates.
   No production runtime or persisted data changed.
+
+## 2026-08-14 - KM02 Mode-Aware Production Driver Started
+
+- Activated `P85-kernel-mode-aware-production-driver`; KM01 is complete and no
+  other Feature is unfinished.
+- Accepted `.zerox/decisions/KM02-mode-aware-production-driver.md`.
+- Confirmed the only production driver caller is `agentRuntimeEngine`; Chat and
+  Goal still have no `ProductionKernelDriver` dependency.
+- Frozen the KM02 contract:
+  - every invocation declares its Kernel mode;
+  - adapters receive frozen run/mode/turn execution identity;
+  - optional failure settlement completes before failed `run_end`;
+  - the original execution error remains observable after successful failure
+    settlement;
+  - Scheduled Task behavior remains the compatibility baseline.
+- No production surface cutover, feature-flag expansion, or persisted schema
+  change is allowed in KM02.
+
+## 2026-08-14 - KM02 Mode-Aware Production Driver Completed
+
+- Made `ProductionKernelDriver.run()` require an explicit `KernelRunMode`.
+- Added a frozen execution context carrying exact `runId`, `mode`, and Kernel
+  turn identity to execute and settlement adapters.
+- Added `settleFailed(error, context)`:
+  - durable failure settlement completes before failed `run_end`;
+  - Kernel/segment status and summary parity is validated;
+  - the original execution error is rethrown after successful settlement;
+  - a settlement error becomes the failed Kernel reason and is rethrown.
+- Unified pre- and post-turn abort settlement in `RuntimeKernel`. A failed
+  pause/cancel persistence attempt now emits one failed `run_end` instead of
+  rejecting without a terminal event.
+- Updated the Scheduled Task caller to pass `mode: "scheduled_task"`.
+  Chat and Goal remain direct AgentLoop entry points and received no driver
+  injection or cutover.
+- Verification evidence:
+  - focused Kernel/Scheduled Task gate: 4 files / 65 tests;
+  - full serial gate: 268 files / 2,747 tests, with six opt-in stress tests
+    skipped by default;
+  - `npm run build` and `npm run verify` passed;
+  - Agent evaluations 26/26 and Memory evaluations 2/2 passed;
+  - dependency audit reported zero vulnerabilities;
+  - standard production smoke passed through explicit JSON fallback;
+  - Electron-ABI smoke passed with SQLite loaded and no fallback;
+  - Node-ABI restoration passed 3 files / 37 Kernel and storage tests;
+  - active-state program, harness, and whitespace checks passed.
+- P85 and KM02 are complete. The program is in controlled idle state with
+  `P86-chat-kernel-segment-adapter` as the only next Feature.
