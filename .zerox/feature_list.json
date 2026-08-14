@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T22:27:00.000+08:00",
+  "updatedAt": "2026-08-14T22:37:59.000+08:00",
   "features": [
     {
       "id": "P83-v3.8.2-runtime-convergence-release",
       "priority": 113,
-      "status": "in_progress",
+      "status": "done",
       "title": "Publish the verified runtime convergence baseline as v3.8.2",
       "files": [
         ".zerox/decisions/RC12-v3.8.2-release.md",

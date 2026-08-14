@@ -9864,3 +9864,37 @@
   then passed 2,729 tests, build, Agent evaluations 26/26, and Memory
   evaluations 2/2.
 - The v3.8.2 tag was not created while remote verify was failing.
+
+## 2026-08-14 - Zerox Agent v3.8.2 Published
+
+- Remote verify run `31809726735` passed on release commit
+  `9d343ab0424e4a78287d6c38d929ee4269f5c7ec`.
+- Created and pushed immutable annotated tag `v3.8.2`:
+  - tag object: `b037541e96a630ba1c632b45d11fd1c06c172f88`;
+  - dereferenced commit: `9d343ab0424e4a78287d6c38d929ee4269f5c7ec`.
+- GitHub release workflow `31809947300` passed in 3m38s:
+  source verification, runtime stress, signing-key materialization,
+  compatibility build, release preflight, publication, and key cleanup all
+  succeeded.
+- Published latest non-draft, non-prerelease Release:
+  `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.8.2`.
+- Independently verified all six public assets and GitHub SHA-256 digests:
+  - DMG: 132,784,725 bytes,
+    `4fbfaeafe47d8ffa309a997c5ad88bb0628bc96abea0a780c8df3eda7c4130bf`;
+  - ZIP: 131,950,793 bytes,
+    `3aaf1ddf07c027ffa8cc4f95b84cca102956093cf3df483f128e910997006a33`;
+  - DMG blockmap: 138,601 bytes,
+    `30ce7da8e89916097a392052964a2a0cdc27d9159510ee6920b47377943b5123`;
+  - ZIP blockmap: 138,702 bytes,
+    `64ee342a5ae68ad01ffe9b5a57fab333c8457509544c85676b816ff4d045b5ab`;
+  - `latest-mac.yml`: 507 bytes,
+    `e96206c80a68369accb6e8a4a034f0fcdb0b10b7ee53ac8d68aff6b7dc02ede0`;
+  - `latest-mac.yml.sig`: 437 bytes,
+    `49a6cc0dca9757eb59f0d6a92f1aee6d780193f7bf6ab7d6afe8c9ba5b98b85c`.
+- Downloaded the public update manifest and signature and verified them against
+  the tracked Ed25519 public key:
+  - key ID `a9e4a8f7350d43543d5b76811548ab54`;
+  - sequence `3008002`;
+  - validity through `2027-08-14T14:34:33.992Z`.
+- P83 and RC12 are complete. The program is closed with no active or next
+  Feature; the release tag remains on the exact verified release commit.

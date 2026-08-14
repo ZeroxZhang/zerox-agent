@@ -4,10 +4,10 @@
   "title": "Zerox Runtime Convergence Program",
   "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
   "operatingGuide": ".zerox/runtime-convergence-program.md",
-  "updatedAt": "2026-08-14T22:27:00.000+08:00",
-  "status": "active",
-  "activeFeatureId": "P83-v3.8.2-runtime-convergence-release",
-  "nextFeatureId": "P83-v3.8.2-runtime-convergence-release",
+  "updatedAt": "2026-08-14T22:37:59.000+08:00",
+  "status": "completed",
+  "activeFeatureId": null,
+  "nextFeatureId": null,
   "maxActiveFeatures": 1,
   "requiredClosureGates": [
     "focused_tests",
@@ -260,7 +260,7 @@
     {
       "id": "RC12",
       "title": "Zerox Agent v3.8.2 release",
-      "state": "in_progress",
+      "state": "completed",
       "featureId": "P83-v3.8.2-runtime-convergence-release",
       "findings": [
         "RELEASE_VERSION",
