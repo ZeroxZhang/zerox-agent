@@ -81,6 +81,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         for (const seq of [1, 2, 3]) await store.append("run-1", makeEvent(seq));
         const events = await store.list("run-1");
         expect(events.map((e) => e.sequence)).toEqual([1, 2, 3]);
+        if (backend === "dual") await store.flushShadowWrites();
       });
     });
   },

@@ -18,6 +18,9 @@ export type TurnResult = {
   summary?: string;
   /** Explicit semantic completion; legacy maxTurns is only a checkpoint interval. */
   completed?: boolean;
+  /** Production segments may terminate with any public runtime status. */
+  terminalStatus?: RuntimeKernelResult["status"];
+  reason?: string;
 };
 
 export type StopPolicy = {

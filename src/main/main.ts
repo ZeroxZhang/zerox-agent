@@ -852,6 +852,9 @@ function sendToRendererWindows(channel: string, payload: unknown) {
 
 function extractRunIdFromCheckpointRef(checkpointRef: string): string {
   const parts = String(checkpointRef).split(/[\\/]/).filter(Boolean);
+  if (parts.length >= 3 && parts.at(-3) === "agent-executions") {
+    return parts.at(-2) ?? checkpointRef;
+  }
   if (parts.length >= 3 && parts.at(-3) === "kernel-checkpoints") {
     return parts.at(-2) ?? checkpointRef;
   }

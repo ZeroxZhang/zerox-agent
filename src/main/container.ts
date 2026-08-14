@@ -1,5 +1,6 @@
 import { app, BrowserWindow, safeStorage } from "electron";
 import { createHash, randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createAgentExecutionStore } from "./agentExecutionStore";
 import {
@@ -96,6 +97,9 @@ import { createScheduledTaskStore } from "./taskStore";
 import { createTaskSchedulerService } from "./taskSchedulerService";
 import { createToolAuditLog } from "./toolAuditLog";
 import { KernelEventBus } from "./kernel/eventBus";
+import { createProductionKernelDriver } from "./kernel/productionKernelDriver";
+import { createToolRuntime } from "./toolRuntime";
+import { registerReadCodeTool } from "./readCodeTool";
 import { createStorageImpl } from "./storage/storageDb";
 import { resolveStorageBackend } from "./storage/backendResolver";
 import {
@@ -149,7 +153,10 @@ import { createContextManager } from "./contextManager";
 import { createActorRuntime } from "./actors/actorRuntime";
 import { createCheckpointWriterOrchestrator } from "./actors/checkpointWriterOrchestrator";
 import { runCheckpointWriterActor } from "./actors/checkpointWriterActor";
-import { createWorkflowRuntime } from "./workflow/workflowRuntime";
+import {
+  createWorkflowActorHostHook,
+  createWorkflowRuntime,
+} from "./workflow/workflowRuntime";
 import { registerDeepResearchWorkflow } from "./workflow/deepResearchWorkflow";
 import { registerActorTool } from "./actors/actorTool";
 import { readFeatureFlags } from "../shared/featureFlags";
@@ -160,6 +167,7 @@ import { createRunRepository, createTrajectoryRepository } from "./storage/repos
 import { createMemoryRepository } from "./storage/repositories/memoryRepository";
 import { createSessionRepository } from "./storage/repositories/sessionRepository";
 import { createSelfImprovementService } from "./actors/selfImprovementService";
+import { createProcessSandboxProvider } from "./processSandbox";
 import type { Storage } from "../shared/storageContract";
 import {
   createToolAuthorizationService,
@@ -981,6 +989,14 @@ export function createAppContainer(options: {
     }
   }
 
+  function processSandboxProvider() {
+    return lazy("processSandboxProvider", () =>
+      createProcessSandboxProvider({
+        mode: readFeatureFlags().ZEROX_PROCESS_SANDBOX,
+      }),
+    );
+  }
+
   function createToolExecutor() {
     return lazy("agentToolExecutor", () => {
       const executor = createAgentToolExecutor({
@@ -989,12 +1005,45 @@ export function createAppContainer(options: {
         toolResultOffloadStore: toolResultOffloadStore(),
         discoverSkills: () => discoverSkills({ skillsDir }),
         historyIndexStore: historyIndexStore(),
+        processSandbox: processSandboxProvider(),
       });
       // Actor execution depends on the SQLite checkpoint graph. Do not
       // advertise a model-callable tool when the active JSON backend cannot
       // execute it. Workflow networking remains disabled below until its
       // permission path is complete.
       const registry = executor.getRegistry();
+      if (readFeatureFlags().ZEROX_READ_CODE_MODE === "on") {
+        const subcallRuntime = createToolRuntime({
+          authorizationService: toolAuthorizationService(),
+          toolExecutor: executor,
+        });
+        registerReadCodeTool(registry, {
+          executeSubcall(input) {
+            return subcallRuntime.execute({
+              taskId: input.taskId,
+              request: input.request,
+              authorizationOptions: {
+                ...(input.runtimeTask
+                  ? { runtimeTask: input.runtimeTask }
+                  : {}),
+              },
+              executionOptions: {
+                signal: input.signal,
+                ...(input.runContext
+                  ? { runContext: input.runContext }
+                  : {}),
+                ...(input.toolResultReadScope
+                  ? {
+                      toolResultReadScope:
+                        input.toolResultReadScope,
+                    }
+                  : {}),
+              },
+              onStage: input.onStage,
+            });
+          },
+        });
+      }
       if (activeSqliteStorage()) {
         registerActorTool(registry, { actorRuntime: actorRuntime() });
       }
@@ -1060,6 +1109,19 @@ export function createAppContainer(options: {
 
   function kernelEventBus() {
     return lazy("kernelEventBus", () => new KernelEventBus());
+  }
+
+  function productionKernelDriver() {
+    if (
+      readFeatureFlags().ZEROX_PRODUCTION_KERNEL !== "scheduled"
+    ) {
+      return undefined;
+    }
+    return lazy("productionKernelDriver", () =>
+      createProductionKernelDriver({
+        bus: kernelEventBus(),
+      }),
+    );
   }
 
   function setKernelPermissionRules(rules: PermissionRule[]): {
@@ -1214,7 +1276,19 @@ export function createAppContainer(options: {
   }
 
   function chatSessionStore() {
-    return lazy("chatSessionStore", () => createChatSessionStore({ configDir }));
+    return lazy("chatSessionStore", () => {
+      const sqlite = storage();
+      if (sqlite) {
+        return createChatSessionStore({
+          configDir,
+          backend: "sqlite",
+          storage: sqlite,
+        });
+      }
+      // SQLite open failure is the only runtime degradation path. The legacy
+      // JSON store remains available without pretending parity succeeded.
+      return createChatSessionStore({ configDir, backend: "json" });
+    });
   }
 
   function memoryStore() {
@@ -1528,13 +1602,9 @@ export function createAppContainer(options: {
           "Workflow runtime is disabled until permissioned network hooks are configured.",
         );
       }
+      const spawnActor = createWorkflowActorHostHook(actorRuntime());
       const rt = createWorkflowRuntime({
-        async spawnActor(input) {
-          // Delegate to the actor runtime; voters are ephemeral.
-          const runtime = actorRuntime();
-          const handle = runtime.spawn(input);
-          return runtime.wait(handle.actorId);
-        },
+        spawnActor,
         async webfetch() {
           throw new Error("Workflow webfetch is unavailable until permission wiring is configured.");
         },
@@ -1629,6 +1699,12 @@ export function createAppContainer(options: {
           ? { actorRuntimeForMaxMode: maxModeActorRuntime }
           : {}),
         runAgentLoop,
+        ...(productionKernelDriver()
+          ? {
+              productionKernelDriver:
+                productionKernelDriver()!,
+            }
+          : {}),
       });
     });
   }
@@ -1972,6 +2048,27 @@ export function createAppContainer(options: {
           const transportKind = resolveTransportKind(
             (config as { transport?: string }).transport,
           );
+          const stdioSandboxRoot =
+            transportKind === "stdio"
+              ? path.join(
+                  configDir,
+                  "mcp-process-sandbox",
+                  createHash("sha256")
+                    .update(
+                      JSON.stringify([
+                        config.sourceSkill,
+                        config.name,
+                        config.command,
+                        config.args ?? [],
+                      ]),
+                    )
+                    .digest("hex")
+                    .slice(0, 24),
+                )
+              : null;
+          if (stdioSandboxRoot) {
+            await mkdir(stdioSandboxRoot, { recursive: true });
+          }
           const client =
             transportKind === "stdio"
               ? createMcpClient({
@@ -1980,6 +2077,12 @@ export function createAppContainer(options: {
                   command: config.command,
                   args: config.args,
                   env: config.env,
+                  processSandbox: processSandboxProvider(),
+                  sandboxPolicy: {
+                    mode: "workspace_write",
+                    workspaceRoot: stdioSandboxRoot!,
+                    network: "allow",
+                  },
                 })
               : createMcpTransportClient({
                   name: config.name,
@@ -2031,9 +2134,9 @@ export function createAppContainer(options: {
       }
 
       // Script-backed manifest tools are intentionally not registered here.
-      // A child process alone is not a filesystem/network sandbox; exposing
-      // arbitrary Node entrypoints would bypass the manifest permission model.
-      // They remain unavailable until an OS-enforced capability sandbox exists.
+      // They require a separate activation that maps each manifest permission
+      // into ProcessSandboxPolicy and ToolRuntime guards. Merely having the
+      // provider must not silently expose arbitrary Node entrypoints.
     } catch (error) {
       console.error(
         `MCP initialization failed: ${

@@ -23,6 +23,7 @@ import type {
 } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
+import { createToolRuntime } from "./toolRuntime";
 import {
   buildAgentSystemPrompt,
   buildPlanningPrompt,
@@ -50,6 +51,7 @@ import {
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
 import { resolveContextTokenBudget } from "../shared/contextUsage";
+import type { ProductionKernelDriver } from "./kernel/productionKernelDriver";
 
 export type AgentModelProfile = {
   baseUrl: string;
@@ -109,11 +111,16 @@ export function createAgentRunnerService(options: {
   maxReflectionRounds?: number;
   /** Shared production loop used by chat, goals, and scheduled runs. */
   runAgentLoop?: typeof runSharedAgentLoop;
+  productionKernelDriver?: ProductionKernelDriver;
 }): AgentRunnerService {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
   const maxReflectionRounds = options.maxReflectionRounds ?? 3;
   const contextManager = options.contextManager ?? createContextManager();
+  const toolRuntime = createToolRuntime({
+    authorizationService: options.toolAuthorizationService,
+    toolExecutor: options.toolExecutor,
+  });
   const runtimeEngine = options.executionStore
     ? createAgentRuntimeEngine({
         taskStore: options.taskStore,
@@ -144,6 +151,9 @@ export function createAgentRunnerService(options: {
         createId,
         now,
         ...(options.runAgentLoop ? { runLoop: options.runAgentLoop } : {}),
+        ...(options.productionKernelDriver
+          ? { productionKernelDriver: options.productionKernelDriver }
+          : {}),
       })
     : null;
 
@@ -189,87 +199,93 @@ export function createAgentRunnerService(options: {
   ): Promise<ChatMessage[]> {
     const toolMessages: ChatMessage[] = [];
 
-    // Phase: authorize all tool calls in parallel
-    const authResults = await Promise.all(
+    const preparedCalls = await Promise.all(
       toolCalls.map(async (tc) => {
         const toolName = tc.function.name;
         let args: Record<string, unknown> = {};
         try {
           args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
         } catch {
-          return { tc, toolName, args, allowed: false, reason: "无法解析工具参数 JSON。" };
-        }
-
-        throwIfCanceled(signal);
-        const auth = await options.toolAuthorizationService.authorize(
-          taskId,
-          {
-            toolName: toolName as never,
+          return {
+            tc,
+            toolName,
             args,
-          },
-          { ...(signal ? { signal } : {}) },
-        );
+            parseError: "无法解析工具参数 JSON。",
+          };
+        }
 
         return {
           tc,
           toolName,
           args,
-          allowed: auth.ok && auth.decision.allowed,
-          reason: auth.ok ? auth.decision.reason : auth.message,
         };
       }),
     );
 
-    // Phase: execute allowed tool calls in parallel
     const executeResults = await Promise.all(
-      authResults.map(async (authResult) => {
-        if (!authResult.allowed) {
+      preparedCalls.map(async (prepared) => {
+        if (prepared.parseError) {
           events.push(
-            createEvent("warn", `工具 ${authResult.toolName} 未授权：${authResult.reason}`, "executing", {
-              toolName: authResult.toolName,
+            createEvent("warn", prepared.parseError, "executing", {
+              toolName: prepared.toolName,
             }),
           );
           return {
-            toolCallId: authResult.tc.id,
-            toolName: authResult.toolName,
+            toolCallId: prepared.tc.id,
+            toolName: prepared.toolName,
             ok: false,
-            error: `工具调用被拒绝：${authResult.reason}`,
+            error: prepared.parseError,
             result: undefined as Record<string, unknown> | undefined,
+            dispatched: false,
           };
         }
 
-        events.push(
-          createEvent("info", `执行工具：${authResult.toolName}`, "executing", {
-            toolName: authResult.toolName,
-          }),
-        );
-
         throwIfCanceled(signal);
-        const result = await options.toolExecutor.execute({
-          toolName: authResult.toolName as never,
-          args: authResult.args,
-        }, {
-          ...(signal ? { signal } : {}),
-          toolResultReadScope: { runId: taskId },
+        const outcome = await toolRuntime.execute({
+          taskId,
+          request: {
+            toolName: prepared.toolName,
+            args: prepared.args,
+          },
+          executionOptions: {
+            ...(signal ? { signal } : {}),
+            toolResultReadScope: { runId: taskId },
+          },
+          onStage(event) {
+            if (event.stage === "dispatching") {
+              events.push(
+                createEvent(
+                  "info",
+                  `执行工具：${prepared.toolName}`,
+                  "executing",
+                  { toolName: prepared.toolName },
+                ),
+              );
+            }
+          },
         });
+        const result = outcome.result;
 
         events.push(
           createEvent(
             result.ok ? "info" : "warn",
             result.ok
-              ? `工具 ${authResult.toolName} 执行成功`
-              : `工具 ${authResult.toolName} 返回错误`,
+              ? `工具 ${prepared.toolName} 执行成功`
+              : outcome.dispatched
+                ? `工具 ${prepared.toolName} 返回错误`
+                : `工具 ${prepared.toolName} 未授权：${result.error}`,
             "executing",
-            { toolName: authResult.toolName },
+            { toolName: prepared.toolName },
           ),
         );
 
         return {
-          toolCallId: authResult.tc.id,
-          toolName: authResult.toolName,
+          toolCallId: prepared.tc.id,
+          toolName: prepared.toolName,
           ok: result.ok,
           error: result.ok ? undefined : (result as { error: string }).error,
           result: result.ok ? (result as { result: Record<string, unknown> }).result : undefined,
+          dispatched: outcome.dispatched,
         };
       }),
     );
@@ -298,10 +314,10 @@ export function createAgentRunnerService(options: {
       });
     }
 
-    const denied = authResults.find((result) => !result.allowed);
+    const denied = executeResults.find((result) => !result.dispatched);
     if (denied) {
       throw new Error(
-        `Permission denied for tool ${denied.toolName}: ${denied.reason}`,
+        `Permission denied for tool ${denied.toolName}: ${denied.error}`,
       );
     }
 

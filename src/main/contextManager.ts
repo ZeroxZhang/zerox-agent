@@ -5,6 +5,7 @@ export type ContextManager = {
   compressMessages(
     messages: ChatMessage[],
     maxTokens: number,
+    knownCurrentTokens?: number,
   ): ChatMessage[];
 };
 
@@ -24,9 +25,14 @@ export function createContextManager(
       return estimateTotalTokens(messages);
     },
 
-    compressMessages(messages, overrideMaxTokens) {
+    compressMessages(messages, overrideMaxTokens, knownCurrentTokens) {
       const limit = overrideMaxTokens ?? maxTokens;
-      const currentTokens = estimateTotalTokens(messages);
+      const currentTokens =
+        typeof knownCurrentTokens === "number" &&
+        Number.isFinite(knownCurrentTokens) &&
+        knownCurrentTokens >= 0
+          ? knownCurrentTokens
+          : estimateTotalTokens(messages);
 
       if (currentTokens <= limit) {
         return messages;

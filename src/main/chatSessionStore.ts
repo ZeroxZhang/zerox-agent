@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type {
   ChatAttachmentMetadata,
   ChatAttachmentInput,
@@ -27,6 +28,12 @@ import {
   getRecoveryGoalSummary,
   isLiveGoalStatus,
 } from "../shared/chatSessionWork";
+import type { Storage } from "../shared/storageContract";
+import {
+  createChatSessionEventRepository,
+  type ChatSessionMetadata,
+  type ChatSessionProjection,
+} from "./storage/repositories/chatSessionEventRepository";
 
 type StoredChatSessions = {
   schemaVersion: 1;
@@ -87,6 +94,24 @@ export type ChatSessionStore = {
 };
 
 export function createChatSessionStore(options: {
+  configDir: string;
+  createId?: () => string;
+  now?: () => Date;
+  backend?: "json" | "sqlite";
+  storage?: Storage;
+}): ChatSessionStore {
+  if (options.backend === "sqlite" && options.storage) {
+    return createSqliteChatSessionStore({
+      configDir: options.configDir,
+      storage: options.storage,
+      ...(options.createId ? { createId: options.createId } : {}),
+      ...(options.now ? { now: options.now } : {}),
+    });
+  }
+  return createJsonChatSessionStore(options);
+}
+
+function createJsonChatSessionStore(options: {
   configDir: string;
   createId?: () => string;
   now?: () => Date;
@@ -440,6 +465,432 @@ export function createChatSessionStore(options: {
   };
 }
 
+function createSqliteChatSessionStore(options: {
+  configDir: string;
+  createId?: () => string;
+  now?: () => Date;
+  storage: Storage;
+}): ChatSessionStore {
+  const createId = options.createId ?? randomUUID;
+  const now = options.now ?? (() => new Date());
+  const repository = createChatSessionEventRepository(options.storage);
+  const legacyStore = createJsonChatSessionStore({
+    configDir: options.configDir,
+    createId,
+    now,
+  });
+  let mutationQueue = Promise.resolve();
+  let readyPromise: Promise<void> | null = null;
+
+  function ensureReady(): Promise<void> {
+    if (repository.isBootstrapComplete()) return Promise.resolve();
+    if (readyPromise) return readyPromise;
+    readyPromise = (async () => {
+      const legacyItems = await legacyStore.list();
+      const legacySessions = (
+        await Promise.all(
+          legacyItems.map((item) => legacyStore.get(item.id)),
+        )
+      ).filter((session): session is ChatSessionRecord => Boolean(session));
+      if (repository.countProjections() === 0 && legacySessions.length > 0) {
+        repository.importSnapshots(
+          legacySessions.map((session) => ({
+            eventId: `chat_import_${session.id}`,
+            session,
+          })),
+        );
+      }
+      for (const legacySession of legacySessions) {
+        const imported = repository.getSession(legacySession.id);
+        if (!imported || !areCanonicalSessionsEqual(imported, legacySession)) {
+          throw new Error(
+            `Chat legacy import parity failed for session ${legacySession.id}.`,
+          );
+        }
+      }
+      repository.completeBootstrap(new Date().toISOString());
+    })().catch((error) => {
+      readyPromise = null;
+      throw error;
+    });
+    return readyPromise;
+  }
+
+  function serialize<T>(operation: () => Promise<T>): Promise<T> {
+    return serializeMutation(
+      mutationQueue,
+      (nextQueue) => {
+        mutationQueue = nextQueue;
+      },
+      async () => {
+        await ensureReady();
+        return operation();
+      },
+    );
+  }
+
+  function commitMetadata(
+    session: ChatSessionMetadata,
+    type: Parameters<typeof repository.commit>[0]["type"],
+    eventPayload: Record<string, unknown>,
+    createdAt: string,
+  ): ChatSessionRecord {
+    repository.commit({
+      eventId: `chat_event_${randomUUID()}`,
+      sessionId: session.id,
+      type,
+      eventPayload,
+      createdAt,
+      session,
+    });
+    const stored = repository.getSession(session.id);
+    if (!stored) {
+      throw new Error(`Chat projection ${session.id} disappeared after ${type}.`);
+    }
+    return stored;
+  }
+
+  return {
+    async flush() {
+      await mutationQueue;
+      await ensureReady();
+    },
+
+    async list() {
+      await mutationQueue;
+      await ensureReady();
+      return repository
+        .listProjections()
+        .sort((left, right) =>
+          compareSessionsForList(
+            { ...left.session, messages: [] },
+            { ...right.session, messages: [] },
+          ),
+        )
+        .map(toListItemFromProjection);
+    },
+
+    async get(sessionId) {
+      await mutationQueue;
+      await ensureReady();
+      return repository.getSession(sessionId);
+    },
+
+    async appendMessage(input) {
+      return serialize(async () => {
+        const existingProjection = input.sessionId
+          ? repository.getProjection(input.sessionId)
+          : null;
+        if (existingProjection) {
+          const lastMessage = repository.getLastMessage(
+            existingProjection.session.id,
+          );
+          if (
+            lastMessage &&
+            isRetriedAttachmentMessage(input, lastMessage)
+          ) {
+            return {
+              session: repository.getSession(existingProjection.session.id)!,
+              message: lastMessage,
+            };
+          }
+        }
+
+        const content = input.content;
+        const summaryContent = summarizeSessionContent(content);
+        const timestamp = now().toISOString();
+        const sessionId =
+          existingProjection?.session.id ?? createId();
+        const workspaceId =
+          normalizeOptionalString(input.workspaceId) ??
+          existingProjection?.session.workspaceId;
+        const workspaceSummary =
+          normalizeChatWorkspaceSummary(input.workspaceSummary) ??
+          existingProjection?.session.workspaceSummary;
+        const message: ChatMessageRecord = {
+          id: createId(),
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+          role: input.role,
+          content,
+          ...(input.outputParts?.length
+            ? { outputParts: input.outputParts }
+            : {}),
+          ...(input.relatedMemoryIds?.length
+            ? { relatedMemoryIds: input.relatedMemoryIds }
+            : {}),
+          ...(input.executedRunId
+            ? { executedRunId: input.executedRunId }
+            : {}),
+          ...(input.goalId ? { goalId: input.goalId } : {}),
+          ...(input.goalEventRef
+            ? { goalEventRef: input.goalEventRef }
+            : {}),
+          ...(input.attachments?.length
+            ? { attachments: input.attachments }
+            : {}),
+          createdAt: timestamp,
+        };
+        const metadata: ChatSessionMetadata = existingProjection
+          ? {
+              ...existingProjection.session,
+              summary:
+                summaryContent || existingProjection.session.summary,
+              ...(workspaceId ? { workspaceId } : {}),
+              ...(workspaceSummary ? { workspaceSummary } : {}),
+              updatedAt: timestamp,
+            }
+          : toSessionMetadata(
+              createSession({
+                sessionId,
+                content: summaryContent,
+                message,
+                timestamp,
+                ...(workspaceId ? { workspaceId } : {}),
+                ...(workspaceSummary ? { workspaceSummary } : {}),
+              }),
+            );
+        repository.commit({
+          eventId: `chat_event_${randomUUID()}`,
+          sessionId,
+          type: "message_appended",
+          eventPayload: {
+            messageId: message.id,
+            role: message.role,
+            ...(message.requestId ? { requestId: message.requestId } : {}),
+            sessionPatch: {
+              summary: metadata.summary,
+              ...(metadata.workspaceId
+                ? { workspaceId: metadata.workspaceId }
+                : {}),
+              ...(metadata.workspaceSummary
+                ? { workspaceSummary: metadata.workspaceSummary }
+                : {}),
+              updatedAt: metadata.updatedAt,
+            },
+          },
+          createdAt: timestamp,
+          session: metadata,
+          message,
+        });
+        return {
+          session: repository.getSession(sessionId)!,
+          message,
+        };
+      });
+    },
+
+    async rename(sessionId, title) {
+      const normalizedTitle = normalizeSessionTitle(title);
+      if (!normalizedTitle) {
+        throw new Error("Session title is required.");
+      }
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) return null;
+        return commitMetadata(
+          { ...projection.session, title: normalizedTitle },
+          "session_renamed",
+          { title: normalizedTitle },
+          projection.session.updatedAt,
+        );
+      });
+    },
+
+    async archive(sessionId) {
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) return null;
+        const archivedAt = now().toISOString();
+        return commitMetadata(
+          { ...projection.session, archivedAt },
+          "session_archived",
+          { archivedAt },
+          archivedAt,
+        );
+      });
+    },
+
+    async restore(sessionId) {
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) return null;
+        const { archivedAt, ...rest } = projection.session;
+        return commitMetadata(
+          rest,
+          "session_restored",
+          archivedAt ? { previousArchivedAt: archivedAt } : {},
+          projection.session.updatedAt,
+        );
+      });
+    },
+
+    async delete(sessionId) {
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) return false;
+        repository.commit({
+          eventId: `chat_event_${randomUUID()}`,
+          sessionId,
+          type: "session_deleted",
+          eventPayload: {
+            title: projection.session.title,
+            messageCount: projection.messageCount,
+          },
+          createdAt: projection.session.updatedAt,
+          deleteSession: true,
+        });
+        return true;
+      });
+    },
+
+    async addTokenUsage(sessionId, usage) {
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) return null;
+        const normalizedUsage = normalizeTokenUsage(usage);
+        return commitMetadata(
+          {
+            ...projection.session,
+            tokenUsage: mergeTokenUsage(
+              projection.session.tokenUsage,
+              normalizedUsage,
+            ),
+          },
+          "token_usage_added",
+          normalizedUsage,
+          projection.session.updatedAt,
+        );
+      });
+    },
+
+    async appendActivityEvent(sessionId, event, eventOptions) {
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) return null;
+        const normalizedEvent = normalizeStatusEvent(event);
+        const previousEvents =
+          projection.session.activity?.statusEvents ?? [];
+        const statusEvents = [...previousEvents, normalizedEvent].slice(-80);
+        const selectedSkillName =
+          eventOptions?.selectedSkillName ??
+          normalizedEvent.selectedSkillName ??
+          projection.session.activity?.selectedSkillName;
+        const session: ChatSessionMetadata = {
+          ...projection.session,
+          ...(normalizedEvent.context
+            ? { context: normalizedEvent.context }
+            : {}),
+          activity: {
+            updatedAt: normalizedEvent.createdAt,
+            statusEvents,
+            ...(selectedSkillName ? { selectedSkillName } : {}),
+          },
+          updatedAt: normalizedEvent.createdAt,
+        };
+        return commitMetadata(
+          session,
+          "activity_appended",
+          {
+            event: normalizedEvent,
+            ...(selectedSkillName ? { selectedSkillName } : {}),
+          },
+          normalizedEvent.createdAt,
+        );
+      });
+    },
+
+    async attachGoal(sessionId, goal) {
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) {
+          throw new Error(`Chat session "${sessionId}" was not found.`);
+        }
+        const timestamp = now().toISOString();
+        const nextSession = attachGoalToSession(
+          { ...projection.session, messages: [] },
+          goal,
+          timestamp,
+        );
+        return commitMetadata(
+          toSessionMetadata(nextSession),
+          "goal_attached",
+          { goal },
+          timestamp,
+        );
+      });
+    },
+
+    async clearActiveGoal(sessionId, goalId) {
+      return serialize(async () => {
+        const projection = repository.getProjection(sessionId);
+        if (!projection) return null;
+        if (projection.session.activeGoalId !== goalId) {
+          return repository.getSession(sessionId);
+        }
+        const {
+          activeGoalId: _activeGoalId,
+          ...sessionWithoutActiveGoal
+        } = projection.session;
+        const updatedAt = now().toISOString();
+        return commitMetadata(
+          { ...sessionWithoutActiveGoal, updatedAt },
+          "active_goal_cleared",
+          { goalId },
+          updatedAt,
+        );
+      });
+    },
+
+    async searchMessages(searchOptions) {
+      await mutationQueue;
+      await ensureReady();
+      return repository.searchMessages(searchOptions);
+    },
+  };
+}
+
+function toSessionMetadata(
+  session: ChatSessionRecord,
+): ChatSessionMetadata {
+  const { messages: _messages, ...metadata } = session;
+  return metadata;
+}
+
+function toListItemFromProjection(
+  projection: ChatSessionProjection,
+): ChatSessionListItem {
+  return {
+    ...toListItem({ ...projection.session, messages: [] }),
+    messageCount: projection.messageCount,
+    ...(projection.lastAssistantMessageAt
+      ? { lastAssistantMessageAt: projection.lastAssistantMessageAt }
+      : {}),
+  };
+}
+
+function isRetriedAttachmentMessage(
+  input: AppendChatMessageInput,
+  lastMessage: ChatMessageRecord,
+): boolean {
+  return Boolean(
+    input.role === "user" &&
+      input.attachments?.length &&
+      lastMessage.role === "user" &&
+      lastMessage.content === input.content &&
+      areAttachmentMetadataListsEqual(
+        lastMessage.attachments,
+        input.attachments,
+      ),
+  );
+}
+
+function areCanonicalSessionsEqual(
+  left: ChatSessionRecord,
+  right: ChatSessionRecord,
+): boolean {
+  return isDeepStrictEqual(left, right);
+}
+
 function findRetriedAttachmentMessage(
   input: AppendChatMessageInput,
   session: ChatSessionRecord,
@@ -624,6 +1075,12 @@ function normalizeStoredSession(session: ChatSessionRecord): ChatSessionRecord {
     createdAt: String(session.createdAt ?? new Date(0).toISOString()),
     updatedAt: String(session.updatedAt ?? session.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+export function normalizeChatSessionRecord(
+  session: ChatSessionRecord,
+): ChatSessionRecord {
+  return normalizeStoredSession(session);
 }
 
 function normalizeActivitySnapshot(

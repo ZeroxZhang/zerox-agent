@@ -366,6 +366,10 @@ export function authorizeToolCall(
       return authorizeWebFetch(String(request.args.url ?? ""), normalized);
     case "citation_coverage_check":
       return allow("citation_coverage_check 仅检查已提供的引用结构。");
+    case "read_code":
+      return request.source === "built-in"
+        ? allow("read_code 仅编排会再次授权的只读工具。")
+        : deny("read_code 仅允许内建只读 Worker 来源。");
     case "markdown_report_write":
       return authorizeFilePath(
         String(request.args.path ?? ""),

@@ -9044,3 +9044,625 @@
   - focused README and release metadata suites: 2 files / 16 tests passed;
   - `npm run harness:check` and `git diff --check` passed;
   - final JPEG and editable PNG were visually inspected after capture.
+
+## 2026-08-14 - DeepSeek Harness Comparative Architecture Review
+
+- Reviewed Zerox Agent at `764df0f4b1fcd05ebf36a04728bfc404d9cc86b8`
+  against DeepSeek Harness at
+  `47f943859bef60e4160492346772ded9b24f765a`.
+- Added
+  `docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md` with design,
+  runtime, tool-pipeline, sandbox, persistence, compaction, multi-agent,
+  testing, and end-to-end efficiency findings plus a phased adoption roadmap.
+- Two independent code-review validators confirmed all 10 reported findings;
+  each finding received 2/2 existence agreement and high confidence.
+- Verification evidence:
+  - all 34 local report links resolve;
+  - all 24 upstream code links are pinned to the reviewed commit;
+  - `npm run harness:check` and `git diff --check` passed;
+  - runtime tests were not run because this change is documentation-only and
+    local dependencies were not installed.
+
+## 2026-08-14 - P72 Runtime Convergence Program And Trajectory Integrity
+
+- Established `.zerox/runtime-convergence-program.json` as the machine-readable
+  control plane for all ten findings in the DeepSeek Harness comparison. Eight
+  dependency-ordered workstreams now carry one Feature id, finding coverage,
+  rollback, verification, and architecture-decision requirements.
+- Added `.zerox/runtime-convergence-program.md` and
+  `npm run program:check`. The checker enforces one active Feature, dependency
+  order, cycle freedom, complete F1-F10 coverage, required artifacts, rollback
+  and verification declarations, and agreement between the program and
+  `.zerox/feature_list.json`. Seven positive and negative tests cover active
+  and idle boundaries, cycles, uncovered findings, multiple active workstreams,
+  missing artifacts, and Feature-state drift.
+- Closed the first correctness slice without a schema migration:
+  - JSON and SQLite publication appends allocate the next per-run trajectory
+    sequence inside the store instead of trusting caller sequence values;
+  - SQLite uses one conditional `INSERT ... SELECT ... RETURNING` statement for
+    idempotency and monotonic sequence allocation;
+  - dual shadow writes are ordered, retain the SQLite-assigned sequence, and
+    heal a missing JSON publication on an idempotent retry;
+  - MultiAgent lineage and handoff records use stable publication keys and no
+    longer collide at `sequence: 1`;
+  - RunRepository status changes update the indexed column and canonical JSON
+    payload in one SQL statement.
+- The parameterized dual-store test now explicitly drains shadow writes before
+  deleting its temporary directory, eliminating a cleanup race exposed by the
+  ordered queue.
+- Program state is now between Features: RC01/P72 is complete,
+  `activeFeatureId` is clear, and P73 is only the declared next Feature. It has
+  not been promoted or started.
+- Verification evidence:
+  - `npm ci`: 482 packages installed; npm reported seven existing high-severity
+    dependency advisories, recorded for separate dependency governance rather
+    than mixed into this runtime Feature;
+  - focused final gate: 6 files / 61 tests passed, followed by the idle-boundary
+    checker test (1 file / 7 tests passed);
+  - full serial gate: 248 files / 2,573 tests passed before the final recovery
+    test; final closed-state `npm run verify`: 248 files / 2,575 tests passed;
+  - production build passed;
+  - Agent evaluations 26/26 and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`: renderer rendered the Agent Chat UI and startup
+    passed;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+
+## 2026-08-14 - P73 Quiescent Tool And Workflow Cancellation
+
+- Promoted only RC02/P73 after RC01 completed and captured a deterministic
+  five-failure baseline:
+  - non-shell tool timeout returned after the old 1500ms grace while the
+    handler promise was still unresolved;
+  - parent-canceled tool work did not have an explicit settle-before-return
+    regression;
+  - Workflow deadline returned before its registered function settled;
+  - Workflow parent cancellation was classified as `error`;
+  - the Workflow dynamic tool did not forward its active signal.
+- Removed the non-shell `Promise.race` force-timeout path. Timeout and parent
+  cancellation still abort the linked handler signal, but the executor now
+  waits for the handler promise to settle before preserving the existing
+  structured cancellation result or throwing the existing timeout error.
+- Replaced Workflow deadline racing with one linked operation controller:
+  - deadline and parent cancellation close host and journal admission;
+  - the derived signal is available on `WorkflowSandbox` and is forwarded to
+    actor, webfetch, and websearch host hooks;
+  - registered workflow completion, unawaited host calls, parallel work, and
+    pipeline work are drained before `run()` returns;
+  - terminal classification is deterministic after quiescence;
+  - delayed host calls after normal completion fail admission without entering
+    a host hook.
+- Added `createWorkflowActorHostHook`, which binds workflow cancellation to
+  ActorRuntime `cancel()` and then awaits `wait()` before settling. The
+  production container now uses this adapter.
+- Workflow tool execution now forwards the active tool signal into
+  `WorkflowRuntime.run()`.
+- Preserved existing compatibility behavior:
+  - pre-aborted Actor Tool requests return structured failures without entering
+    `runActor`;
+  - parent-canceled `test_run` continues returning structured diagnostics;
+  - timeout still rejects with the existing `timed out after ...` message.
+- Residual risk is explicit: trusted in-process handlers or registered workflow
+  functions that ignore abort and never settle will keep their invocation
+  pending. Returning while they still run would be unsafe; hard termination is
+  intentionally deferred to RC03/RC04 worker and process substrates.
+- Verification evidence:
+  - final focused gate: 6 files / 152 tests passed, including 8 Workflow
+    quiescence cases;
+  - full serial gate: 249 files / 2,585 tests passed;
+  - `npm run verify`: 249 files / 2,585 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`: renderer rendered the Agent Chat UI and startup
+    passed;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+- Program state is between Features: RC02/P73 is complete,
+  `activeFeatureId` is clear, and P74 is only the next declared Feature. P74 has
+  an architecture-decision gate and has not been promoted or started.
+
+## 2026-08-14 - RC03 Unified Tool Runtime Architecture Decision
+
+- Completed the required pre-implementation architecture review at
+  `.zerox/decisions/RC03-unified-tool-runtime.md`.
+- Enumerated five production authorization-plus-dispatch implementations:
+  AgentLoop, legacy AgentRunnerService, AgentRuntimeEngine, deterministic Goal
+  execution, and Goal acceptance.
+- Accepted a compatibility-first boundary:
+  - `ToolRuntime` becomes the only production authorization orchestration
+    owner;
+  - `ToolAuthorizationService` remains the policy and audit authority;
+  - `AgentToolExecutor` remains the guarded, quiescent dispatch substrate;
+  - request canonicalization, monotonic guards, authorization, dispatch,
+    output validation, serial lifecycle hooks, and result freezing become one
+    pipeline;
+  - sandbox providers, safe concurrency, offload ownership, and tool schema
+    redesign remain outside RC03.
+- Required invariants include fail-closed missing dependencies, exact
+  authorize/dispatch request identity, no dispatch after any denial,
+  authorized command proof derivation, immutable outcomes, and a source sensor
+  against future direct bypass.
+- Compatibility and rollback require no persistence, permission rule, tool
+  definition, or user-data migration. Caller-local authorization can be
+  restored while the existing services remain intact.
+
+## 2026-08-14 - P74 Unified Tool Runtime Pipeline
+
+- Implemented `src/main/toolRuntime.ts` as the production
+  authorization-to-dispatch boundary:
+  - canonical request preparation resolves registered source authority and
+    detaches/freeze-protects model arguments;
+  - pre hooks and guards run serially;
+  - the first guard denial is terminal and later guards, authorization, and
+    dispatch never run;
+  - missing authorization fails closed;
+  - authorization receives the exact canonical request and the same live
+    run-context and signal used by dispatch;
+  - command proof is derived from the authorized canonical command instead of
+    trusting caller-provided proof;
+  - pre-dispatch lifecycle failures stop dispatch, while post-dispatch observer
+    failures become outcome diagnostics to avoid uncertain duplicate retries;
+  - valid results are detached and deep-frozen; malformed and non-cloneable
+    results become structured `invalid_tool_output` failures;
+  - dispatch exceptions such as timeout and abort remain unchanged.
+- Migrated all five identified production owners:
+  - AgentLoop, including native-fallback policy as a monotonic guard and
+    approval/invocation transitions;
+  - legacy AgentRunnerService parallel tool fallback;
+  - recoverable AgentRuntimeEngine approval checkpoints and native evidence;
+  - deterministic Goal execution;
+  - Goal acceptance executor.
+- Preserved the Goal acceptance run-context identity contract while giving
+  pre/guard hooks a detached frozen context snapshot. Live `AbortSignal`
+  objects are never recursively frozen.
+- Added a recursive production-source sensor over every
+  `src/main/**/*.ts` non-test file. Direct dispatch remains limited to
+  ToolRuntime and the two acceptance ports that receive the authorized
+  container adapter; direct authorization remains limited to ToolRuntime and
+  the authorization-only IPC diagnostic endpoint.
+- Compatibility regression evidence:
+  - the first AgentLoop migration run exposed 22 fixture failures because a
+    legacy test executor intentionally throws from `getRegistry()`; source
+    resolution now degrades to the caller source only when registry authority
+    is unavailable, while production registries remain authoritative;
+  - Goal acceptance initially exposed run-context identity drift; the runtime
+    now preserves the original canonical context across authorization and
+    dispatch.
+- Verification evidence:
+  - focused migration gate: 8 files / 136 tests passed;
+  - full serial gate: 251 files / 2,600 tests passed;
+  - `npm run verify`: 251 files / 2,600 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`: renderer rendered the Agent Chat UI and startup
+    passed;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+- Program state is between Features: RC03/P74 is complete,
+  `activeFeatureId` is clear, and P75 is only the next declared Feature. P75 is
+  an OS-sandbox architecture-decision gate and has not been promoted or
+  started.
+
+## 2026-08-14 - RC04 OS Process Sandbox Architecture Decision
+
+- Completed the required architecture decision at
+  `.zerox/decisions/RC04-os-process-sandbox.md`.
+- Enumerated the model-reachable arbitrary-process surfaces as `shell_exec`,
+  `test_run`, and opt-in stdio MCP. Fixed-argv native helpers, release scripts,
+  and internal workers remain outside this workstream.
+- Verified the actual host before selecting a backend:
+  - macOS 26.6.1 arm64 provides `/usr/bin/sandbox-exec`;
+  - canonical workspace writes succeed under a Seatbelt allow-list;
+  - adjacent writes fail with `operation not permitted`;
+  - `(deny network*)` blocks a real local TCP connect with `EPERM`.
+- Accepted a typed `ProcessSandboxProvider` seam with a macOS Seatbelt
+  implementation. Every consumer receives a confined argv and runs it with
+  `shell: false`; runner failure has no unconfined retry.
+- Enforcement claims are deliberately bounded:
+  - file writes are restricted to canonical writable roots;
+  - `network: none` is kernel-enforced;
+  - reads remain allow-default;
+  - domain allowlists remain authorization-layer policy;
+  - CPU, memory, syscall, and process-count isolation are deferred.
+- Accepted `ZEROX_PROCESS_SANDBOX=required|deny`, default `required`.
+  Rollback is `deny`, which disables process tools rather than restoring host
+  execution.
+- Stdio MCP receives a dedicated state write root and temp access, never a
+  global user-workspace write grant. Per-workspace MCP pools remain deferred.
+
+## 2026-08-14 - P75 OS-Enforced Process Sandbox
+
+- Added `ProcessSandboxProvider` and a macOS Seatbelt backend:
+  - functional probe is cached on first use;
+  - argv is wrapped as `/usr/bin/sandbox-exec -p <profile> -- <argv>`;
+  - writable roots use native canonical identity;
+  - read-only grants no writable roots beyond `/dev/null`;
+  - workspace-write grants workspace, explicit extra write roots, `/tmp`, and
+    the Darwin user temp root;
+  - `network:none` adds a kernel network deny;
+  - unavailable, invalid-root, non-macOS, and explicit deny states fail closed.
+- Added `ZEROX_PROCESS_SANDBOX=required|deny`, defaulting to `required`.
+  There is no unconfined production value; rollback is denial.
+- Migrated all reviewed arbitrary model-process consumers:
+  - `shell_exec` executes wrapped argv with `shell:false` and reports backend,
+    enforcement, and OS-denial diagnostics;
+  - `test_run` executes wrapped argv with `shell:false` while retaining
+    process-group timeout/cancellation and structured stdout/stderr;
+  - opt-in stdio MCP requires provider and policy together and confines every
+    initial connect and reconnect.
+- Each stdio MCP server receives a stable, hashed state root under
+  `<configDir>/mcp-process-sandbox/`. It receives no arbitrary user-workspace
+  write grant. Network remains allowed because external integration is the
+  server's purpose.
+- Kept script-backed manifest tools unavailable. They still require a separate
+  activation that maps manifest permissions into ProcessSandboxPolicy and
+  ToolRuntime guards.
+- Added source-boundary tests requiring provider injection and forbidding
+  unconfined feature modes.
+- Real macOS world verification passed:
+  - workspace write succeeded while an adjacent write was denied;
+  - symlink-mediated outside write was denied;
+  - read-only write was denied;
+  - network-none TCP connect was denied with `EPERM`.
+- Enforcement boundary remains explicit: RC04 constrains file writes and
+  network-none on macOS. It does not claim kernel read isolation, domain
+  allowlist enforcement, CPU/memory/syscall limits, or Linux/Windows support;
+  unsupported platforms deny process execution.
+- Verification evidence:
+  - focused gate: 9 files / 142 tests passed;
+  - full serial gate: 255 files / 2,622 tests passed;
+  - `npm run verify`: 255 files / 2,622 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod`: renderer rendered the Agent Chat UI and startup
+    passed;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+- Program state is between Features: RC04/P75 is complete,
+  `activeFeatureId` is clear, and P76 is only the next declared Feature. P76 is
+  a Chat storage architecture-decision gate and has not been promoted or
+  started.
+
+## 2026-08-14 - RC05 Chat Event Storage Architecture Decision
+
+- Completed `.zerox/decisions/RC05-chat-event-storage.md`.
+- Confirmed every current Chat mutation rewrites the complete
+  `chat-sessions.json`; sidebar and search read all transcript payloads.
+- Rejected direct reuse of generic `sessions.payload` as the new source because
+  it still stores full records and has no event sequence, projection version,
+  watermark, or deletion tombstone.
+- Accepted three layers:
+  - append-only `chat_session_events`;
+  - message-per-row `chat_messages`;
+  - one message-free, versioned `chat_session_projections` row per live
+    session.
+- Production Chat becomes SQLite-authoritative independently of the legacy
+  global storage default. First access transactionally imports normalized JSON,
+  verifies canonical parity, and then leaves JSON untouched as a read-only
+  recovery source.
+- Rollback remains explicit through the existing confirmed SQLite export
+  script, which will reconstruct sessions from projections and messages while
+  freezing any existing JSON.
+- Search scoring and all public `ChatSessionStore` shapes stay compatible; FTS
+  ranking and model-context replay remain deferred.
+
+## 2026-08-14 - P76 Chat Event Storage and Projections
+
+- Added migration `0002_chat_session_events.sql` with:
+  - immutable per-message rows and per-session sequence numbers;
+  - append-only, uniquely ordered `chat_session_events`;
+  - versioned, message-free `chat_session_projections` with watermarks;
+  - bootstrap metadata for one-time legacy import.
+- Added `ChatSessionEventRepository` as the transactional SQLite boundary.
+  Message insertion, event append, and projection replacement commit under one
+  `BEGIN IMMEDIATE` transaction. Deletion retains its event tombstone after
+  projection and message removal.
+- Split `ChatSessionStore` into compatible JSON and SQLite implementations:
+  - list reads projection rows only;
+  - get reads one projection and its ordered transcript;
+  - search joins matching message rows to projection titles without loading
+    every session payload;
+  - all existing mutation and return shapes remain compatible.
+- Production Chat now selects SQLite whenever the application database opens,
+  independently of the legacy global JSON backend setting. Explicit JSON
+  fallback remains limited to SQLite-open failure.
+- First SQLite access normalizes and transactionally imports legacy
+  `chat-sessions.json`, verifies canonical per-session parity, records the
+  bootstrap marker, and leaves the legacy file untouched as a read-only
+  recovery source. Existing generic `chat_messages` rows are adopted without
+  duplication.
+- Updated JSON-to-SQLite migration and confirmed SQLite-to-JSON rollback.
+  Round-trip tests preserve messages, token usage, activity, goal linkage,
+  archive state, and session metadata while freezing an existing recovery
+  file.
+- Added ordering, concurrency, projection-version, long-history query-shape,
+  bootstrap recovery, production-container, source-boundary, migration, and
+  rollback regression coverage.
+- Verification evidence:
+  - focused implementation gate: 7 files / 122 tests passed;
+  - post-native-module restore gate: 6 files / 113 tests passed;
+  - full serial gate: 257 files / 2,639 tests passed;
+  - `npm run build` passed;
+  - `npm run verify`: 257 files / 2,639 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod` rendered the Agent Chat UI and exercised the explicit
+    JSON fallback when the local native module initially had the Node ABI;
+  - after `electron-rebuild -f -w better-sqlite3`,
+    `npm run smoke:prod:built` rendered the Agent Chat UI with SQLite loaded
+    and no fallback; `npm rebuild better-sqlite3` then restored the Node ABI;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+- Program state is between Features: RC05/P76 is complete,
+  `activeFeatureId` is clear, and P77 is only the next declared Feature. P77 is
+  a replay-safe context-surface architecture-decision gate and has not been
+  promoted or started.
+
+## 2026-08-14 - RC06 Replay-Safe Context Surface Architecture Decision
+
+- Completed `.zerox/decisions/RC06-replay-safe-context-surface.md` before
+  activating P77.
+- Confirmed that production `runAgentLoop` mutates one `ChatMessage[]` in
+  place for append, reminder insertion, integrity repair, summary compaction,
+  and checkpoint rebuild. Existing checkpoints preserve content but do not
+  identify the source nodes shadowed by a replacement.
+- Confirmed repeated O(n) context estimates before reminders, compaction,
+  usage reporting, fallback completion accounting, and checkpoint telemetry.
+- Accepted a per-run, append-only `ContextSurfaceState`:
+  - immutable source-message events;
+  - complete replacement events citing all shadowed visible nodes;
+  - transitive source lineage and deterministic replay;
+  - strict replacement-time tool-call/result integrity;
+  - versioned checkpoint persistence with legacy bootstrap and parity checks;
+  - an O(1) active token total updated from per-node deltas.
+- Kept RC05 Chat events separate from model-facing surface events. Chat is the
+  user-conversation source; one Chat message can create multiple runtime
+  surfaces with different prompts, memories, tools, and checkpoints.
+- Compatibility keeps the existing message checkpoint beside the optional
+  surface. Rollback ignores the additive surface field and restores the array
+  as authority without deleting user data.
+- RC06 does not activate safe tool concurrency, make Kernel authoritative, or
+  expose Code Mode; those remain RC07 and RC08.
+
+## 2026-08-14 - P77 Replay-Safe Context Surface
+
+- Added versioned `ContextSurfaceState` with monotonic append-only events:
+  - immutable `source` nodes for runtime messages;
+  - `replace` events that cite the complete visible shadow set;
+  - transitive immutable source lineage;
+  - generated replacement nodes with per-node token estimates, reason,
+    strategy, timestamp, and optional checkpoint reference.
+- Added deterministic replay that rejects unsupported versions, sequence and
+  next-sequence drift, duplicate ids, stale insertion/shadow references,
+  incomplete lineage, invalid messages, and replacement projections that
+  split assistant tool-call/result batches.
+- Made the shared production `runAgentLoop` surface-owned:
+  - append and reminder insertion add source events;
+  - message-integrity repair, partial tool-batch trim, summary compaction, and
+    checkpoint rebuild create cited replacements;
+  - model requests, callbacks, checkpoints, and results use the projected
+    surface;
+  - the compatibility `ChatMessage[]` remains a synchronized view for
+    existing callers and rollback.
+- Replaced steady-state full-list token scans with an incremental meter.
+  Appending a message estimates only that message and updates the active total
+  in O(1); repeated usage reads do not call the estimator or replay history.
+  Compaction receives the known pre-compaction total and estimates only the
+  replacement nodes.
+- Fixed checkpoint microcompaction to resolve exact tool names from assistant
+  tool calls. Only explicitly configured regenerable tools are compacted;
+  large mutating or unknown tool results remain visible. Stable surface node
+  ids replace positional placeholder refs when available.
+- Extended scheduled `AgentExecutionCheckpoint` with optional
+  `contextSurface`:
+  - legacy checkpoints bootstrap from compatibility messages;
+  - new checkpoints persist surface and messages together;
+  - resume replays the surface and fails closed on message parity drift;
+  - `name` and image fields now survive execution-message conversion.
+- Added production-source sensors against reintroducing independent
+  AgentLoop message authority, steady-state full-list token scans,
+  replay-on-append, missing checkpoint persistence, and heuristic
+  microcompaction.
+- Upgraded the release gate test so runtime-convergence Features are sourced
+  from the machine-readable workstream manifest. It now requires the one open
+  Feature to equal `activeFeatureId` instead of hard-coding P76.
+- Verification evidence:
+  - focused implementation gate: 7 files / 101 tests passed;
+  - post-Electron-ABI restore gate: 4 files / 81 tests passed;
+  - full serial gate: 259 files / 2,652 tests passed;
+  - `npm run build` passed;
+  - `npm run verify`: 259 files / 2,652 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod` rendered the Agent Chat UI and exercised the explicit
+    JSON fallback while the local native module had the Node ABI;
+  - after `electron-rebuild -f -w better-sqlite3`,
+    `npm run smoke:prod:built` rendered the Agent Chat UI with SQLite loaded
+    and no fallback; `npm rebuild better-sqlite3` restored the Node ABI;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+- Residual boundary: context-surface events deliberately grow append-only
+  within a run; compressed event segments remain deferred. Legacy private
+  loops in `AgentRunnerService` and `AgentRuntimeEngine` retain their old
+  arrays until production Kernel convergence in RC08.
+- Program state is between Features: RC06/P77 is complete,
+  `activeFeatureId` is clear, and P78 is only the next declared Feature. P78
+  has not been promoted or started.
+
+## 2026-08-14 - P78 Safe Ordered Tool Scheduling
+
+- Added a generic bounded `ToolBatchScheduler`:
+  - consecutive parallel items run through a rolling worker pool;
+  - exclusive items form barriers before and after their execution;
+  - each group is fully settled before any commit or later group admission;
+  - settled results commit serially in original model index order;
+  - dispatch exceptions and parent cancellation close queued admission;
+  - started peers are drained before the scheduler returns;
+  - queued calls receive explicit canceled, prior-failure, or stopped states.
+- Added `SerialToolPolicyAdmission`. ToolRuntime preparation, monotonic guards,
+  authorization, approval interaction, source verification, and invocation
+  admission remain serial. The admission lock releases only at the
+  `dispatching` stage, allowing already-authorized execution bodies to overlap.
+- Added fail-closed capability metadata:
+  - only explicit read/pure opt-ins may be parallel;
+  - the authoritative registration source must be exactly `built-in`;
+  - dynamic/MCP sources and same-name custom tools remain exclusive;
+  - unknown tools, invalid arguments, writes, destructive calls, approval
+    tools, tests, Shell, Actor, and Workflow stay exclusive;
+  - `file_stat`, `file_list`, `file_search`, `file_inventory`,
+    `file_move_plan`, `file_verify_moves`, `file_read`, `code_search`, and
+    `web_fetch` are the initial bounded opt-in set.
+- Split the shared production AgentLoop tool batch into execution and commit:
+  - execution performs serial policy admission and bounded body dispatch;
+  - no parallel body mutates the context surface, usage counters, dedup state,
+    failure streaks, or model-visible transcript;
+  - ordered commit performs offload, invocation completion, callbacks,
+    telemetry, tool result append, dedup/failure updates, and terminal checks;
+  - strategy and recovery system messages are deferred until every committed
+    tool result, preserving provider tool-call/result adjacency;
+  - a terminal or recovery decision stops later barrier groups but never drops
+    an already-started peer result.
+- Dispatch exceptions now transition their invocation to error before
+  propagating. Parent cancellation is passed through ToolRuntime and the
+  quiescent executor; AgentLoop returns only after started calls settle and
+  trims every never-started call from the replay-safe surface.
+- Added deterministic and world-effect tests proving:
+  - rolling-pool concurrency limits and reverse completion order;
+  - model-order result and callback commit;
+  - authorization high-water remains one while execution high-water exceeds
+    one;
+  - writes form barriers between two parallel read groups;
+  - cancellation starts only pool-width work and drains it;
+  - errors stop new admission while active peers settle;
+  - unknown/custom sources fail closed to exclusive;
+  - delayed system notes never split a provider tool-result batch.
+- Verification evidence:
+  - focused implementation gate: 5 files / 70 tests passed;
+  - post-Electron-ABI restore gate: 4 files / 60 tests passed;
+  - full serial gate: 261 files / 2,666 tests passed;
+  - `npm run build` passed;
+  - `npm run verify`: 261 files / 2,666 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod` rendered the Agent Chat UI and exercised the explicit
+    JSON fallback while the local native module had the Node ABI;
+  - after `electron-rebuild -f -w better-sqlite3`,
+    `npm run smoke:prod:built` rendered the Agent Chat UI with SQLite loaded
+    and no fallback; `npm rebuild better-sqlite3` restored the Node ABI;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+- Rollback sets the parallel opt-in set empty, leaving the scheduler and all
+  ordering/cancellation tests in place while every tool becomes exclusive.
+- Residual boundary: legacy private execution loops in `AgentRunnerService`
+  and `AgentRuntimeEngine` retain their previous scheduling. Production entry
+  convergence belongs to RC08 rather than duplicating the scheduler.
+- Program state is between Features: RC07/P78 is complete,
+  `activeFeatureId` is clear, and P79 is only the next declared Feature. P79
+  requires an explicit production-Kernel and Code Mode architecture decision
+  before activation.
+
+## 2026-08-14 - RC08 Production Kernel And Read-Only Code Mode Decision
+
+- Completed `.zerox/decisions/RC08-production-kernel-and-read-code-mode.md`
+  before activating P79.
+- Selected recoverable scheduled tasks as the only production Kernel cutover:
+  Kernel owns lifecycle events and terminal classification around the existing
+  shared-AgentLoop execution segment. Chat and Goal cutover remain explicit
+  follow-up boundaries.
+- Required exact Kernel/AgentLoop parity for run id, status, summary,
+  checkpoint identity, cancellation, and one terminal event.
+- Rejected arbitrary model-written JavaScript in Node `vm` or a Worker Thread;
+  those mechanisms are not security sandboxes.
+- Accepted a typed read-only DAG pilot in a bounded Worker Thread. The Worker
+  can request only code-owned read SDK calls over structured messages; each
+  subcall returns to the main process and traverses ToolRuntime, authorization,
+  run-context guards, and trajectory evidence.
+- Required heap, wall-time, call-count, parallelism, and output limits plus
+  awaited Worker termination on every terminal path.
+- Rollback flags preserve all checkpoints and user data:
+  `ZEROX_PRODUCTION_KERNEL=off` restores the legacy scheduled driver and
+  `ZEROX_READ_CODE_MODE=off` removes the additive tool.
+
+## 2026-08-14 - P79 Production Kernel And Read-Only Code Mode
+
+- Extended RuntimeKernel with explicit production-segment terminal statuses.
+  Parent cancellation has precedence over stale success, and succeeded,
+  paused, failed, and canceled segments retain exact public status and summary.
+- Added `ProductionKernelDriver` and cut recoverable scheduled-task start and
+  resume over to it by default:
+  - each admitted segment emits `turn_start` and exactly one `run_end`;
+  - AgentLoop retry, tool-call, and durable checkpoint callbacks project to
+    the same Kernel event bus already exposed to the renderer;
+  - Kernel and AgentLoop run id, status, and summary parity are fail-closed;
+  - scheduled checkpoint refs carry both run and checkpoint ids and remain
+    resumable through Kernel IPC;
+  - segment exceptions publish a failed Kernel terminal event before the
+    original exception is rethrown to existing run failure classification.
+- Added `ZEROX_PRODUCTION_KERNEL=scheduled|off`, default `scheduled`.
+  `off` restores the prior scheduled driver without changing checkpoints,
+  trajectory, run records, or user data. Chat and Goal remain explicit,
+  unclaimed Kernel cutover boundaries.
+- Added a typed `read_code` Worker Thread pilot:
+  - the model supplies a declarative DAG of `{id, tool, args, dependsOn}`;
+  - model input is structured-cloned data and is never passed to `eval`,
+    `Function`, `vm`, a shell, filesystem, process, network, or module binding;
+  - the fixed Worker validates ids, dependencies, cycles, outputs, and runs
+    ready steps through a bounded semaphore;
+  - output ids preserve requested order while dependency-only steps remain
+    internal to the aggregate result.
+- Added Code Mode resource and lifecycle limits:
+  - program bytes, declared and actual call counts;
+  - parallelism, wall time, Worker old/young heap, and stack;
+  - per-subcall and aggregate output bytes;
+  - parent abort, timeout, protocol failure, early Worker exit, and normal
+    completion all await active subcall settlement and Worker termination.
+- Kept every Code Mode subcall inside existing trust boundaries:
+  - only a code-owned read allowlist is available;
+  - write, test, Shell, Actor, Workflow, MCP, unknown, and nested Code Mode
+    calls fail before dispatch;
+  - the outer envelope is authorized only from authoritative `built-in`
+    registration;
+  - ToolRuntime overwrites spoofed task/runtime identity before dispatch;
+  - every Worker RPC traverses ToolRuntime authorization and AgentToolExecutor
+    run-context guards;
+  - scheduled subcall start/completion events project to ordinary trajectory
+    tool-call/tool-result evidence, while authorization audit remains per
+    subcall.
+- Added `ZEROX_READ_CODE_MODE=on|off`, default `on`. `off` removes only the
+  additive tool definition and stores no migration state.
+- Proved model-round efficiency at the boundary: one outer `read_code`
+  ToolRuntime call executed two read steps, produced one bounded aggregate
+  result, and recorded three independent authorizations (outer plus both
+  subcalls).
+- Added source sensors preventing accidental claims that Chat/Goal use the
+  production Kernel, arbitrary-code evaluation, mutating/nested Code Mode,
+  missing limits, direct subcall execution, or non-resumable scheduled
+  checkpoint refs.
+- Verification evidence:
+  - focused implementation gate: 12 files / 209 tests passed;
+  - post-Electron-ABI restore gate: 7 files / 67 tests passed;
+  - full serial gate: 266 files / 2,702 tests passed;
+  - `npm run build` passed;
+  - first parallel verify exposed a test-only 15 ms race that could fire before
+    the Worker started a subcall; the test now first observes active work and
+    uses a 100 ms timeout, preserving the intended timeout-plus-drain proof;
+  - final `npm run verify`: 266 files / 2,702 tests, production build, Agent
+    evaluations 26/26, and Memory evaluations 2/2 passed;
+  - `npm run smoke:prod` rendered the Agent Chat UI and exercised the explicit
+    JSON fallback while the local native module had the Node ABI;
+  - after `electron-rebuild -f -w better-sqlite3`,
+    `npm run smoke:prod:built` rendered the Agent Chat UI with SQLite loaded
+    and no fallback; `npm rebuild better-sqlite3` restored the Node ABI;
+  - `npm run program:check`, `npm run harness:check`, and `git diff --check`
+    passed before closure.
+- Residual boundaries are explicit rather than hidden:
+  - scheduled Kernel owns lifecycle around one shared-AgentLoop segment; it
+    does not replace AgentLoop model/tool semantics;
+  - Chat and Goal Kernel cutover remains future work;
+  - Code Mode is a typed read-only DAG, not arbitrary JavaScript or Python;
+  - external subagent provider convergence remains outside this program.
+
+## 2026-08-14 - Runtime Convergence Program Closure
+
+- RC01 through RC08 and P72 through P79 are complete.
+- All ten findings from
+  `docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md` have a verified,
+  scoped implementation or an explicitly bounded first production cutover.
+- The program is closed with no active or next Feature. Future Chat/Goal
+  Kernel cutover, arbitrary Code Mode, compressed context-event segments, and
+  external subagent providers require new Features and architecture decisions;
+  they are not silently included in this closure.

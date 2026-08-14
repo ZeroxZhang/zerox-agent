@@ -31,6 +31,7 @@ import type {
 import { toCompleteRequest } from "./providers/normalize";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
+import { createToolRuntime } from "./toolRuntime";
 import {
   buildAgentSystemPrompt,
   buildTaskPrompt,
@@ -67,6 +68,10 @@ import {
 } from "../shared/modelServiceNotice";
 import type { ModelCapabilities } from "../shared/modelSettings";
 import type { SkillRecord } from "../shared/skills";
+import type {
+  ProductionKernelDriver,
+  ProductionKernelReporter,
+} from "./kernel/productionKernelDriver";
 import type { AgentToolName } from "../shared/toolPermissions";
 import type { ScheduledTask } from "../shared/scheduledTasks";
 import { filterToolDefinitionsForScheduledTask } from "./scheduledTaskToolVisibility";
@@ -136,12 +141,18 @@ export function createAgentRuntimeEngine(options: {
   modelRetry?: ModelRetryOptions;
   /** Shared production turn loop. Omitted only by legacy compatibility tests. */
   runLoop?: typeof runSharedAgentLoop;
+  /** Scheduled production lifecycle driver. Omitted only for explicit rollback/tests. */
+  productionKernelDriver?: ProductionKernelDriver;
   createId?: () => string;
   now?: () => Date;
 }): AgentRuntimeEngine {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
   const contextManager = options.contextManager ?? createContextManager();
+  const toolRuntime = createToolRuntime({
+    authorizationService: options.toolAuthorizationService,
+    toolExecutor: options.toolExecutor,
+  });
   const trajectorySequences = new Map<string, number>();
   const trajectoryAppendQueues = new Map<string, Promise<void>>();
 
@@ -396,7 +407,8 @@ export function createAgentRuntimeEngine(options: {
       ));
     };
 
-    const loopResult = await options.runLoop!(
+    let kernelReporter: ProductionKernelReporter | undefined;
+    const executeLoopSegment = () => options.runLoop!(
       [],
       profile,
       {
@@ -407,6 +419,9 @@ export function createAgentRuntimeEngine(options: {
         runId: current.runId,
         ...(current.runContext ? { runContext: current.runContext } : {}),
         resumeMessages: current.messages.map(toChatMessage),
+        ...(current.contextSurface
+          ? { resumeContextSurface: current.contextSurface }
+          : {}),
         initialToolCallsExecuted: current.toolCallCount,
         tools: toolDefinitions,
         maxTurns,
@@ -501,6 +516,12 @@ export function createAgentRuntimeEngine(options: {
           events.push(runEvent);
           onEvent?.(runEvent);
           appendObserved("model_retry", event);
+          kernelReporter?.retry({
+            attempt: event.attempt,
+            maxRetries: event.maxRetries,
+            afterMs: event.delayMs,
+            error: event.error,
+          });
         },
         onContextCompacted(event) {
           const runEvent = createEvent(
@@ -528,6 +549,26 @@ export function createAgentRuntimeEngine(options: {
             containsFileContent: false,
             containsUserText: true,
           });
+          kernelReporter?.toolCall(toolName, args);
+        },
+        onToolRuntimeEvent(_toolName, runtimeEvent, event) {
+          if (runtimeEvent.type !== "read_code_subcall") {
+            return;
+          }
+          appendObserved(
+            runtimeEvent.status === "started"
+              ? "tool_call"
+              : "tool_result",
+            {
+              parentToolCallId: event.toolCallId,
+              codeModeCallId: runtimeEvent.callId,
+              toolName: runtimeEvent.toolName,
+              codeMode: "read_only_dag",
+              ...(runtimeEvent.ok !== undefined
+                ? { ok: runtimeEvent.ok }
+                : {}),
+            },
+          );
         },
         onToolResult(toolName, ok, result, event) {
           const runEvent = createEvent(
@@ -566,6 +607,7 @@ export function createAgentRuntimeEngine(options: {
           await observationTail;
           current = await saveCheckpoint(current, "running", {
             messages: loopCheckpoint.messages.map(toExecutionMessage),
+            contextSurface: loopCheckpoint.contextSurface,
             toolCallCount: loopCheckpoint.toolCallsExecuted,
           });
           const event = createEvent("info", "Agent checkpoint saved.", {
@@ -574,13 +616,33 @@ export function createAgentRuntimeEngine(options: {
           });
           events.push(event);
           onEvent?.(event);
+          kernelReporter?.checkpoint(
+            `agent-executions/${current.runId}/${current.id}`,
+            loopCheckpoint.turns,
+          );
         },
       },
     );
+    const loopResult = options.productionKernelDriver
+      ? (
+          await options.productionKernelDriver.run({
+            runId: current.runId,
+            ...(signal ? { signal } : {}),
+            checkpointEvery: maxTurns,
+            async execute(reporter) {
+              kernelReporter = reporter;
+              return executeLoopSegment();
+            },
+          })
+        ).segment
+      : await executeLoopSegment();
     await observationTail;
 
     current = await saveCheckpoint(current, loopResult.status === "paused" ? "paused" : "running", {
       messages: loopResult.messages.map(toExecutionMessage),
+      ...(loopResult.contextSurface
+        ? { contextSurface: loopResult.contextSurface }
+        : {}),
       toolCallCount: loopResult.toolCallsExecuted,
       ...(loopResult.status === "succeeded"
         ? {
@@ -943,16 +1005,18 @@ export function createAgentRuntimeEngine(options: {
         };
         await appendToolInvocation(toolInvocation);
         await transitionInvocation({ status: "visible" });
-        const auth = await options.toolAuthorizationService.authorize(
-          task.id,
-          {
+        const nativeDescriptor = getNativeToolDescriptor(
+          options.toolExecutor,
+          toolName,
+        );
+        const runtimeOutcome = await toolRuntime.execute({
+          taskId: task.id,
+          request: {
             toolName,
             ...(toolSource ? { source: toolSource } : {}),
             args,
           },
-          {
-            ...(signal ? { signal } : {}),
-            runContext: current.runContext,
+          authorizationOptions: {
             onApprovalRequested: async () => {
               await transitionInvocation({ status: "waiting_approval" });
               current = await saveCheckpoint(current, "waiting_for_approval");
@@ -965,9 +1029,53 @@ export function createAgentRuntimeEngine(options: {
               current = await saveCheckpoint(current, "running");
             },
           },
-        );
-        if (!auth.ok || !auth.decision.allowed) {
-          const reason = auth.ok ? auth.decision.reason : auth.message;
+          executionOptions: {
+            runContext: current.runContext,
+            ...(signal ? { signal } : {}),
+            toolResultReadScope: {
+              runId: current.runId,
+              ...(current.runContext?.sessionId
+                ? { sessionId: current.runContext.sessionId }
+                : {}),
+              ...(current.runContext?.runId
+                ? { workspaceRunId: current.runContext.runId }
+                : {}),
+            },
+          },
+          async onStage(event) {
+            if (
+              event.stage === "authorized" &&
+              toolInvocation.status !== "authorized"
+            ) {
+              await transitionInvocation({
+                status: "authorized",
+                reason: event.reason,
+              });
+            }
+            if (event.stage === "dispatching") {
+              if (nativeDescriptor) {
+                await appendTrajectory(
+                  current.runId,
+                  "native_tool_invocation",
+                  {
+                    toolCallId: toolCall.id,
+                    ...buildNativeToolEvidencePayload(nativeDescriptor),
+                  },
+                  {
+                    containsApiKey: false,
+                    containsFileContent: false,
+                    containsUserText: false,
+                  },
+                  current.runContext,
+                );
+              }
+              await transitionInvocation({ status: "running" });
+            }
+          },
+        });
+        const result = runtimeOutcome.result;
+        if (!runtimeOutcome.dispatched) {
+          const reason = result.ok ? "工具调用未执行。" : result.error;
           await transitionInvocation({
             status: "error",
             error: reason,
@@ -989,52 +1097,6 @@ export function createAgentRuntimeEngine(options: {
           }
           throw new Error(`工具调用被拒绝：${reason}`);
         }
-        if (toolInvocation.status !== "authorized") {
-          await transitionInvocation({
-            status: "authorized",
-            reason: auth.decision.reason,
-          });
-        }
-
-        const nativeDescriptor = getNativeToolDescriptor(
-          options.toolExecutor,
-          toolName,
-        );
-        if (nativeDescriptor) {
-          await appendTrajectory(current.runId, "native_tool_invocation", {
-            toolCallId: toolCall.id,
-            ...buildNativeToolEvidencePayload(nativeDescriptor),
-          }, {
-            containsApiKey: false,
-            containsFileContent: false,
-            containsUserText: false,
-          }, current.runContext);
-        }
-
-        await transitionInvocation({ status: "running" });
-        const result = await options.toolExecutor.execute(
-          {
-            toolName,
-            ...(toolSource ? { source: toolSource } : {}),
-            args,
-          },
-          {
-            runContext: current.runContext,
-            ...(signal ? { signal } : {}),
-            ...(toolName === "shell_exec" || toolName === "test_run"
-              ? { authorizedShellCommand: String(args.command ?? "") }
-              : {}),
-            toolResultReadScope: {
-              runId: current.runId,
-              ...(current.runContext?.sessionId
-                ? { sessionId: current.runContext.sessionId }
-                : {}),
-              ...(current.runContext?.runId
-                ? { workspaceRunId: current.runContext.runId }
-                : {}),
-            },
-          },
-        );
         toolCallCount += 1;
         if (nativeDescriptor) {
           await appendTrajectory(current.runId, "native_tool_observation", {
@@ -1569,6 +1631,10 @@ function toExecutionMessage(message: ChatMessage): AgentExecutionMessage {
     content: message.content,
     ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
     ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+    ...(message.name ? { name: message.name } : {}),
+    ...(message.images
+      ? { images: message.images.map((image) => ({ ...image })) }
+      : {}),
   };
 }
 
@@ -1578,6 +1644,10 @@ function toChatMessage(message: AgentExecutionMessage): ChatMessage {
     content: message.content,
     ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
     ...(message.tool_calls ? { tool_calls: message.tool_calls as ChatMessage["tool_calls"] } : {}),
+    ...(message.name ? { name: message.name } : {}),
+    ...(message.images
+      ? { images: message.images.map((image) => ({ ...image })) }
+      : {}),
   };
 }
 

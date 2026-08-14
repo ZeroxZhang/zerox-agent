@@ -11,6 +11,9 @@ npm-debug.log*
 .api_info.md
 iteration-roadmap/
 docs/*
+!docs/reviews/
+docs/reviews/*
+!docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md
 !docs/product/
 docs/product/*
 !docs/product/zerox-agent-product-intro.jpg

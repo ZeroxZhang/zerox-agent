@@ -1175,6 +1175,43 @@ describe("tool authorization", () => {
     ).toMatchObject({ allowed: false, reason: expect.stringContaining("只读沙箱") });
   });
 
+  it("allows only the outer read_code envelope while subcalls remain independently authorized", () => {
+    const policy = getDefaultTaskPermissionPolicy();
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "read_code",
+        source: "built-in",
+        args: {
+          program: {
+            steps: [
+              { id: "read", tool: "file_read", args: { path: "/tmp/x" } },
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "read_code 仅编排会再次授权的只读工具。",
+    });
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "file_read",
+        source: "built-in",
+        args: { path: "/outside/not-authorized" },
+      }).allowed,
+    ).toBe(false);
+    expect(
+      authorizeToolCall(policy, {
+        toolName: "read_code",
+        source: "mcp:spoofed",
+        args: { program: { steps: [] } },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "read_code 仅允许内建只读 Worker 来源。",
+    });
+  });
+
   it("denies network shell commands when the run sandbox disables network", () => {
     const broadPolicy = getDefaultTaskPermissionPolicy();
     const runContext = buildPrimaryRunContext({

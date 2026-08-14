@@ -58,6 +58,21 @@ describe("context manager", () => {
       ).toBe(true);
     }
   });
+
+  it("accepts a known current total without changing compression output", () => {
+    const manager = createContextManager({ maxTokens: 80, recentTurnsToKeep: 1 });
+    const messages: ChatMessage[] = [
+      { role: "system", content: "System instructions stay." },
+      { role: "user", content: "Older request " + "a".repeat(120) },
+      { role: "assistant", content: "Older answer " + "b".repeat(120) },
+      { role: "user", content: "Recent request" },
+    ];
+
+    expect(manager.compressMessages(messages, 80, 10_000)).toEqual(
+      manager.compressMessages(messages, 80),
+    );
+    expect(manager.compressMessages(messages, 80, 0)).toBe(messages);
+  });
 });
 
 function createToolCall(id: string, name: string) {

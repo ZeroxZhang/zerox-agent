@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getToolCapability,
   getToolCapabilityRegistry,
+  getToolConcurrencyMode,
   preferNativeToolForOperation,
 } from "./agentToolCapabilities";
 
@@ -14,13 +15,39 @@ describe("agent tool capabilities", () => {
       supportsRecursive: false,
       resultSizeRisk: "medium",
       platformSensitivity: "none",
+      concurrency: "parallel",
     });
     expect(getToolCapability("shell_exec")).toMatchObject({
       name: "shell_exec",
       sideEffect: "destructive",
       platformSensitivity: "shell_specific",
       requiresConfirmation: true,
+      concurrency: "exclusive",
     });
+  });
+
+  it("requires explicit capability opt-in and fails unknown tools closed", () => {
+    expect(getToolConcurrencyMode("file_read", { path: "README.md" }, "built-in")).toBe(
+      "parallel",
+    );
+    expect(getToolConcurrencyMode("file_stat", { path: "README.md" }, "built-in")).toBe(
+      "parallel",
+    );
+    expect(getToolConcurrencyMode("code_search", { query: "symbol" }, "built-in")).toBe(
+      "parallel",
+    );
+    expect(getToolConcurrencyMode("web_fetch", { url: "https://example.com" }, "built-in")).toBe("parallel");
+    expect(getToolConcurrencyMode("file_read", { path: "README.md" }, "mcp:custom")).toBe(
+      "exclusive",
+    );
+    expect(getToolConcurrencyMode("file_write", { path: "report.md" }, "built-in")).toBe(
+      "exclusive",
+    );
+    expect(getToolConcurrencyMode("test_run", { command: "npm test" }, "built-in")).toBe(
+      "exclusive",
+    );
+    expect(getToolConcurrencyMode("dynamic_mcp_tool", {}, "mcp:custom")).toBe("exclusive");
+    expect(getToolConcurrencyMode("file_read", null, "built-in")).toBe("exclusive");
   });
 
   it("keeps the registry keyed by tool name", () => {

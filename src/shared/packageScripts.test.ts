@@ -167,6 +167,22 @@ describe("package scripts", () => {
         definitionOfDone?: string[];
       }>;
     };
+    const runtimeProgram = JSON.parse(
+      readFileSync(
+        path.join(
+          process.cwd(),
+          ".zerox/runtime-convergence-program.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      activeFeatureId: string | null;
+      maxActiveFeatures: number;
+      workstreams: Array<{ featureId: string }>;
+    };
+    const convergenceFeatureIds = new Set(
+      runtimeProgram.workstreams.map((workstream) => workstream.featureId),
+    );
 
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
@@ -310,10 +326,18 @@ describe("package scripts", () => {
             "P68-session-runtime-context-and-progress-projection" ||
           featureId === "P69-goal-acceptance-execution-contract" ||
           featureId === "P70-goal-plan-contract-lineage" ||
-          featureId === "P71-debate-first-pass-reliability",
+          featureId === "P71-debate-first-pass-reliability" ||
+          convergenceFeatureIds.has(featureId),
       ),
     ).toBe(true);
-    expect(openFeatureIds.length).toBeLessThanOrEqual(1);
+    expect(openFeatureIds.length).toBeLessThanOrEqual(
+      runtimeProgram.maxActiveFeatures,
+    );
+    expect(openFeatureIds).toEqual(
+      runtimeProgram.activeFeatureId
+        ? [runtimeProgram.activeFeatureId]
+        : [],
+    );
     expect(p56?.status === "in_progress" || p56?.status === "done").toBe(true);
     expect(p56).toEqual(
       expect.objectContaining({
@@ -902,6 +926,7 @@ describe("package scripts", () => {
 
     expect(packageJson.scripts).toMatchObject({
       "harness:check": "node scripts/check-harness-state.mjs",
+      "program:check": "node scripts/check-runtime-convergence-program.mjs",
       "harness:score": "npm run build && node scripts/run-harness-score.mjs",
       "episode:export":
         "npm run build && node scripts/export-agent-episode.mjs",

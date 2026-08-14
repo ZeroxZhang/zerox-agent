@@ -31,6 +31,12 @@ export interface FeatureFlags {
   ZEROX_COMPACTION_STRATEGY: "auto" | "rebuild" | "summarize";
   /** Multi-segment system prompt for Claude extended thinking: "0" (default) or "1". */
   ZEROX_MULTI_SEGMENT_SYSTEM: "0" | "1";
+  /** Model-reachable subprocess policy. "deny" never means unconfined. */
+  ZEROX_PROCESS_SANDBOX: "required" | "deny";
+  /** Production Kernel cutover scope. */
+  ZEROX_PRODUCTION_KERNEL: "scheduled" | "off";
+  /** Typed read-only Code Mode pilot. */
+  ZEROX_READ_CODE_MODE: "on" | "off";
   /** Override for user data directory path. */
   ZEROX_AGENT_USER_DATA_DIR: string;
 }
@@ -48,6 +54,9 @@ const DEFAULTS: FeatureFlags = {
   ZEROX_MAX_MODE: "off",
   ZEROX_COMPACTION_STRATEGY: "auto",
   ZEROX_MULTI_SEGMENT_SYSTEM: "0",
+  ZEROX_PROCESS_SANDBOX: "required",
+  ZEROX_PRODUCTION_KERNEL: "scheduled",
+  ZEROX_READ_CODE_MODE: "on",
   ZEROX_AGENT_USER_DATA_DIR: "",
 };
 
@@ -105,6 +114,21 @@ export function readFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureF
       ["0", "1"],
       DEFAULTS.ZEROX_MULTI_SEGMENT_SYSTEM,
     ) as "0" | "1",
+    ZEROX_PROCESS_SANDBOX: resolveEnum(
+      env.ZEROX_PROCESS_SANDBOX,
+      ["required", "deny"],
+      DEFAULTS.ZEROX_PROCESS_SANDBOX,
+    ),
+    ZEROX_PRODUCTION_KERNEL: resolveEnum(
+      env.ZEROX_PRODUCTION_KERNEL,
+      ["scheduled", "off"],
+      DEFAULTS.ZEROX_PRODUCTION_KERNEL,
+    ),
+    ZEROX_READ_CODE_MODE: resolveEnum(
+      env.ZEROX_READ_CODE_MODE,
+      ["on", "off"],
+      DEFAULTS.ZEROX_READ_CODE_MODE,
+    ),
     ZEROX_AGENT_USER_DATA_DIR:
       (env.ZEROX_AGENT_USER_DATA_DIR ?? env.BUILDING_AGENT_USER_DATA_DIR ?? "").trim(),
   };

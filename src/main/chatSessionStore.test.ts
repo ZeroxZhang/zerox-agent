@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createChatSessionStore } from "./chatSessionStore";
+import { createInMemoryStorage } from "./storage/storageDb";
+import type { Storage } from "../shared/storageContract";
 
 describe("chat session store", () => {
   let configDir: string;
@@ -999,6 +1001,218 @@ describe("chat session store", () => {
         }),
       }),
     ]);
+  });
+});
+
+describe("SQLite chat session store", () => {
+  let configDir: string;
+  let storage: Storage;
+
+  beforeEach(async () => {
+    configDir = await mkdtemp(path.join(os.tmpdir(), "zerox-chat-sqlite-"));
+    storage = await createInMemoryStorage();
+  });
+
+  afterEach(async () => {
+    storage.close();
+    await rm(configDir, { recursive: true, force: true });
+  });
+
+  it("matches message, list, activity, goal, usage, archive, and search behavior", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      backend: "sqlite",
+      storage,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+    const first = await store.appendMessage({
+      role: "user",
+      content: "帮我整理下载文件夹，并生成报告",
+      workspaceId: "workspace_1",
+    });
+    const second = await store.appendMessage({
+      sessionId: first.session.id,
+      role: "assistant",
+      content: "报告已保存为 Markdown。",
+    });
+    await store.addTokenUsage(first.session.id, {
+      totalTokens: 12,
+      estimated: false,
+    });
+    await store.appendActivityEvent(first.session.id, {
+      sessionId: first.session.id,
+      state: "completed",
+      message: "done",
+      createdAt: "2026-06-06T08:03:00.000Z",
+      elapsedMs: 10,
+    });
+    await store.attachGoal(first.session.id, {
+      id: "goal_1",
+      description: "发布报告",
+      status: "executing",
+      updatedAt: "2026-06-06T08:04:00.000Z",
+    });
+    await store.clearActiveGoal(first.session.id, "goal_1");
+    await store.rename(first.session.id, "下载报告");
+
+    const stored = await store.get(first.session.id);
+    expect(stored).toMatchObject({
+      id: first.session.id,
+      title: "下载报告",
+      workspaceId: "workspace_1",
+      messages: [first.message, second.message],
+      tokenUsage: { totalTokens: 12, estimated: false },
+      goalIds: ["goal_1"],
+    });
+    expect(stored).not.toHaveProperty("activeGoalId");
+    expect(await store.list()).toEqual([
+      expect.objectContaining({
+        id: first.session.id,
+        title: "下载报告",
+        messageCount: 2,
+        lastAssistantMessageAt: second.message.createdAt,
+      }),
+    ]);
+    const searchResults = await store.searchMessages({
+      query: "报告 markdown",
+      limit: 5,
+    });
+    expect(searchResults[0]).toEqual(
+      expect.objectContaining({
+        messageId: second.message.id,
+        score: 5,
+      }),
+    );
+    const archived = await store.archive(first.session.id);
+    expect(archived?.archivedAt).toBeDefined();
+    expect((await store.restore(first.session.id))?.archivedAt).toBeUndefined();
+  });
+
+  it("serializes concurrent message appends with monotonic event order", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      backend: "sqlite",
+      storage,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+    const first = await store.appendMessage({
+      role: "user",
+      content: "start",
+    });
+
+    await Promise.all([
+      store.appendMessage({
+        sessionId: first.session.id,
+        role: "assistant",
+        content: "first",
+      }),
+      store.appendMessage({
+        sessionId: first.session.id,
+        role: "assistant",
+        content: "second",
+      }),
+    ]);
+
+    expect(
+      (await store.get(first.session.id))?.messages.map(
+        (message) => message.content,
+      ),
+    ).toEqual(["start", "first", "second"]);
+    expect(
+      storage.db
+        .prepare(
+          `SELECT seq, type
+             FROM chat_session_events
+            WHERE session_id = ?
+            ORDER BY seq ASC`,
+        )
+        .all(first.session.id),
+    ).toEqual([
+      { seq: 1, type: "message_appended" },
+      { seq: 2, type: "message_appended" },
+      { seq: 3, type: "message_appended" },
+    ]);
+  });
+
+  it("generates a fresh session id when a requested session does not exist", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      backend: "sqlite",
+      storage,
+      createId: createSequentialId("chat"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+
+    const appended = await store.appendMessage({
+      sessionId: "missing_session",
+      role: "user",
+      content: "new conversation",
+    });
+
+    expect(appended.session.id).toBe("chat_1");
+    expect(appended.session.id).not.toBe("missing_session");
+  });
+
+  it("imports legacy JSON once, verifies parity, and leaves the source untouched", async () => {
+    const legacy = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("legacy"),
+      now: createSteppedClock("2026-06-06T08:00:00.000Z"),
+    });
+    const created = await legacy.appendMessage({
+      role: "user",
+      content: "legacy message",
+    });
+    const jsonPath = path.join(configDir, "chat-sessions.json");
+    const before = await readFile(jsonPath, "utf8");
+
+    const sqlite = createChatSessionStore({
+      configDir,
+      backend: "sqlite",
+      storage,
+    });
+    expect(await sqlite.get(created.session.id)).toEqual(created.session);
+    await sqlite.appendMessage({
+      sessionId: created.session.id,
+      role: "assistant",
+      content: "sqlite-only message",
+    });
+    expect(await readFile(jsonPath, "utf8")).toBe(before);
+
+    await sqlite.delete(created.session.id);
+    const restarted = createChatSessionStore({
+      configDir,
+      backend: "sqlite",
+      storage,
+    });
+    expect(await restarted.get(created.session.id)).toBeNull();
+  });
+
+  it("imports the legacy corrupt-file recovery notice into SQLite", async () => {
+    await writeFile(
+      path.join(configDir, "chat-sessions.json"),
+      "",
+      "utf8",
+    );
+    const sqlite = createChatSessionStore({
+      configDir,
+      backend: "sqlite",
+      storage,
+    });
+
+    await expect(sqlite.list()).resolves.toEqual([
+      expect.objectContaining({
+        title: "会话存储恢复通知",
+        messageCount: 1,
+      }),
+    ]);
+    expect(
+      (await readdir(configDir)).some((file) =>
+        file.startsWith("chat-sessions.json.corrupt-"),
+      ),
+    ).toBe(true);
   });
 });
 

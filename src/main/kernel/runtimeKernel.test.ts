@@ -159,6 +159,65 @@ describe("runRuntimeKernel", () => {
       },
     ]);
   });
+
+  it.each(["paused", "failed", "canceled"] as const)(
+    "preserves an explicit %s production segment terminal status",
+    async (terminalStatus) => {
+      const bus = new KernelEventBus();
+      const result = await runRuntimeKernel(createContext({
+        mode: "scheduled_task",
+      }), {
+        bus,
+        now: fixedNow,
+        async runTurn() {
+          return {
+            terminalStatus,
+            reason: `segment ${terminalStatus}`,
+            summary: `${terminalStatus} summary`,
+          };
+        },
+      });
+
+      expect(result).toMatchObject({
+        status: terminalStatus,
+        reason: `segment ${terminalStatus}`,
+        summary: `${terminalStatus} summary`,
+      });
+      expect(
+        bus.history().filter((event) => event.type === "run_end"),
+      ).toEqual([
+        expect.objectContaining({
+          status: terminalStatus,
+          reason: `segment ${terminalStatus}`,
+        }),
+      ]);
+    },
+  );
+
+  it("gives parent cancellation precedence over a stale successful segment", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+    const result = await runRuntimeKernel(createContext({
+      mode: "scheduled_task",
+      signal: controller.signal,
+    }), {
+      bus,
+      now: fixedNow,
+      async runTurn() {
+        controller.abort(new Error("user canceled"));
+        return {
+          terminalStatus: "succeeded",
+          summary: "stale success",
+        };
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "canceled",
+      reason: "Agent run canceled.",
+      summary: "stale success",
+    });
+  });
 });
 
 function createContext(overrides: Partial<RunContext> = {}): RunContext {

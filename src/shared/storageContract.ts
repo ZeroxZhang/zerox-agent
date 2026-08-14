@@ -116,6 +116,11 @@ export interface RunRepository {
     runId: string,
     event: AgentTrajectoryEvent,
   ): boolean;
+  appendTrajectoryPublication(
+    runId: string,
+    publicationKey: string,
+    event: AgentTrajectoryEvent,
+  ): { appended: boolean; event: AgentTrajectoryEvent };
   getTrajectory(
     runId: string,
     opts?: { fromSeq?: number },

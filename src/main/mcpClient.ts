@@ -2,6 +2,10 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { env as nodeEnv } from "node:process";
 import type { ToolDefinition } from "./openAiCompatibleClient";
+import type {
+  ProcessSandboxPolicy,
+  ProcessSandboxProvider,
+} from "./processSandbox";
 
 export type McpServerConfig = {
   name: string;
@@ -9,6 +13,8 @@ export type McpServerConfig = {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  processSandbox?: ProcessSandboxProvider;
+  sandboxPolicy?: ProcessSandboxPolicy;
 };
 
 type JsonRpcRequest = {
@@ -66,6 +72,11 @@ export function buildMcpChildEnv(
 }
 
 export function createMcpClient(config: McpServerConfig): McpClient {
+  if (Boolean(config.processSandbox) !== Boolean(config.sandboxPolicy)) {
+    throw new Error(
+      "MCP processSandbox and sandboxPolicy must be configured together.",
+    );
+  }
   let childProcess: ReturnType<typeof spawn> | null = null;
   let nextId = 1;
   const pendingRequests = new Map<
@@ -263,7 +274,17 @@ export function createMcpClient(config: McpServerConfig): McpClient {
   }
 
   async function connectInternal(): Promise<void> {
-    const proc = spawn(config.command, config.args ?? [], {
+    let command = config.command;
+    let commandArgs = config.args ?? [];
+    if (config.processSandbox && config.sandboxPolicy) {
+      const confined = config.processSandbox.confine(
+        [command, ...commandArgs],
+        config.sandboxPolicy,
+      );
+      command = confined.argv[0]!;
+      commandArgs = [...confined.argv.slice(1)];
+    }
+    const proc = spawn(command, commandArgs, {
       stdio: ["pipe", "pipe", "pipe"],
       env: buildMcpChildEnv(nodeEnv, config.env),
       shell: false,

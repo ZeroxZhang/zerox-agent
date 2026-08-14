@@ -66,13 +66,12 @@ describe("RunRepository", () => {
     storage.close();
   });
 
-  it("updateStatus updates the denormalized column", async () => {
+  it("updateStatus keeps the denormalized column and canonical payload aligned", async () => {
     const storage = await createInMemoryStorage();
     const runs = createRunRepository(storage);
     runs.create(makeRun());
     runs.updateStatus("run-1", "done");
-    expect(runs.get("run-1")?.status).toBe("executing"); // payload NOT auto-updated
-    // denormalized status column reflects the update
+    expect(runs.get("run-1")?.status).toBe("done");
     const row = storage.db.prepare("SELECT status FROM runs WHERE id = ?").get<{ status: string }>("run-1");
     expect(row.status).toBe("done");
     storage.close();
@@ -84,6 +83,47 @@ describe("RunRepository", () => {
     for (const seq of [1, 2, 3]) runs.appendTrajectory("run-1", makeEvent(seq));
     expect(runs.getTrajectory("run-1").map((e) => e.sequence)).toEqual([1, 2, 3]);
     expect(runs.getTrajectory("run-1", { fromSeq: 2 }).map((e) => e.sequence)).toEqual([2, 3]);
+    storage.close();
+  });
+
+  it("atomically allocates monotonic publication sequences per run", async () => {
+    const storage = await createInMemoryStorage();
+    const runs = createRunRepository(storage);
+    runs.appendTrajectory("run-1", makeEvent(4));
+
+    const first = runs.appendTrajectoryPublication(
+      "run-1",
+      "publication:a",
+      makeEvent(0, {
+        id: "publication-a",
+        payload: { publicationKey: "publication:a" },
+      }),
+    );
+    const duplicate = runs.appendTrajectoryPublication(
+      "run-1",
+      "publication:a",
+      makeEvent(0, {
+        id: "publication-a-competing",
+        payload: { publicationKey: "publication:a", competing: true },
+      }),
+    );
+    const second = runs.appendTrajectoryPublication(
+      "run-1",
+      "publication:b",
+      makeEvent(0, {
+        id: "publication-b",
+        payload: { publicationKey: "publication:b" },
+      }),
+    );
+
+    expect(first).toMatchObject({ appended: true, event: { sequence: 5 } });
+    expect(duplicate).toEqual({ appended: false, event: first.event });
+    expect(second).toMatchObject({ appended: true, event: { sequence: 6 } });
+    expect(runs.getTrajectory("run-1").map((event) => event.sequence)).toEqual([
+      4,
+      5,
+      6,
+    ]);
     storage.close();
   });
 

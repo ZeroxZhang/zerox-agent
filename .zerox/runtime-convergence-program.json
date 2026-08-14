@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "programId": "runtime-convergence-2026",
+  "title": "Zerox Runtime Convergence Program",
+  "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
+  "operatingGuide": ".zerox/runtime-convergence-program.md",
+  "updatedAt": "2026-08-14T20:00:00.000+08:00",
+  "status": "completed",
+  "activeFeatureId": null,
+  "nextFeatureId": null,
+  "maxActiveFeatures": 1,
+  "requiredClosureGates": [
+    "focused_tests",
+    "full_tests",
+    "build",
+    "verify",
+    "runtime_smoke",
+    "harness_check",
+    "program_check",
+    "diff_check",
+    "progress_evidence"
+  ],
+  "workstreams": [
+    {
+      "id": "RC01",
+      "title": "Program controls and trajectory integrity",
+      "state": "completed",
+      "featureId": "P72-runtime-convergence-program-and-trajectory-integrity",
+      "findings": ["F3", "F5"],
+      "dependsOn": [],
+      "architectureDecisionRequired": false,
+      "rollback": "Restore caller-owned trajectory sequences and payload-only run reads; no persisted schema changes are introduced.",
+      "verification": [
+        "npm run program:check",
+        "npm test -- --run src/shared/runtimeConvergenceProgram.test.ts src/main/agentTrajectoryStore.test.ts src/main/multiAgentCoordinator.test.ts src/main/storage/repositories/runRepository.test.ts src/main/storage/storeProxy.test.ts src/shared/packageScripts.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "RC02",
+      "title": "Quiescent tool and workflow cancellation",
+      "state": "completed",
+      "featureId": "P73-quiescent-tool-and-workflow-cancellation",
+      "findings": ["F1", "F2"],
+      "dependsOn": ["RC01"],
+      "architectureDecisionRequired": false,
+      "rollback": "Return to cooperative cancellation while preserving the new regression fixtures and keep non-quiescent handlers disabled.",
+      "verification": [
+        "focused cancellation and late-side-effect tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "RC03",
+      "title": "Unified Tool Runtime pipeline",
+      "state": "completed",
+      "featureId": "P74-unified-tool-runtime-pipeline",
+      "findings": ["F9"],
+      "dependsOn": ["RC02"],
+      "architectureDecisionRequired": true,
+      "rollback": "Keep the existing ToolAuthorizationService and AgentToolExecutor adapters as the authoritative path until parity tests pass.",
+      "verification": [
+        "tool pipeline contract and authorization non-bypass tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "RC04",
+      "title": "OS-enforced process sandbox",
+      "state": "completed",
+      "featureId": "P75-os-enforced-process-sandbox",
+      "findings": ["F7"],
+      "dependsOn": ["RC03"],
+      "architectureDecisionRequired": true,
+      "rollback": "Keep the sandbox behind an explicit feature flag and fall back only to denied execution, never to unconfined execution.",
+      "verification": [
+        "macOS world-verified sandbox escape tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "RC05",
+      "title": "Append-only Chat storage and incremental projections",
+      "state": "completed",
+      "featureId": "P76-chat-event-storage-and-projections",
+      "findings": ["F4"],
+      "dependsOn": ["RC01"],
+      "architectureDecisionRequired": true,
+      "rollback": "Retain JSON as a read-only recovery source until dual-read projection parity and backup restoration pass.",
+      "verification": [
+        "JSON/SQLite/dual projection parity and long-history performance tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "RC06",
+      "title": "Replay-safe context surface and incremental token meter",
+      "state": "completed",
+      "featureId": "P77-replay-safe-context-surface",
+      "findings": ["F8"],
+      "dependsOn": ["RC05"],
+      "architectureDecisionRequired": true,
+      "rollback": "Keep existing checkpoint rebuild as the compatibility projection until cited surface replacement parity passes.",
+      "verification": [
+        "surface provenance, tool-pair, replay, and token-delta tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "RC07",
+      "title": "Safe ordered parallel tool scheduling",
+      "state": "completed",
+      "featureId": "P78-safe-ordered-tool-scheduling",
+      "findings": ["F6"],
+      "dependsOn": ["RC03", "RC06"],
+      "architectureDecisionRequired": false,
+      "rollback": "Set every tool to exclusive and retain the scheduler ordering tests.",
+      "verification": [
+        "parallel/exclusive barrier, cancellation, and ordered commit tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "RC08",
+      "title": "Production Kernel convergence and read-only Code Mode pilot",
+      "state": "completed",
+      "featureId": "P79-production-kernel-convergence-and-code-mode",
+      "findings": ["F10"],
+      "dependsOn": ["RC04", "RC06", "RC07"],
+      "architectureDecisionRequired": true,
+      "rollback": "Keep each production entry on the legacy driver until event, checkpoint, cancellation, and acceptance parity passes; Code Mode remains disabled.",
+      "verification": [
+        "production entry parity, worker isolation, and model-round efficiency tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    }
+  ]
+}

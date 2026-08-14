@@ -3,6 +3,7 @@ import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import { buildGoalMilestoneRuntimeTask } from "./goalRuntimeEngine";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
+import { createToolRuntime } from "./toolRuntime";
 
 export function createAuthorizedGoalAcceptanceToolExecutor(options: {
   taskId: string;
@@ -15,52 +16,27 @@ export function createAuthorizedGoalAcceptanceToolExecutor(options: {
     options.goal,
     options.runContext,
   );
+  const toolRuntime = createToolRuntime({
+    authorizationService: options.toolAuthorizationService,
+    toolExecutor: options.toolExecutor,
+  });
 
   return {
     async execute(request, executionOptions) {
       throwIfAborted(executionOptions?.signal);
-      const authorization = await options.toolAuthorizationService.authorize(
-        options.taskId,
-        {
-          toolName: request.toolName as never,
-          args: request.args,
-        },
-        {
-          ...(executionOptions?.signal
-            ? { signal: executionOptions.signal }
-            : {}),
+      const outcome = await toolRuntime.execute({
+        taskId: options.taskId,
+        request,
+        authorizationOptions: { runtimeTask },
+        executionOptions: {
+          ...executionOptions,
+          // Authorization and dispatch use one canonical context. Callers
+          // cannot replace it with a wider sandbox.
           runContext: options.runContext,
-          runtimeTask,
         },
-      );
-      throwIfAborted(executionOptions?.signal);
-      if (!authorization.ok || !authorization.decision.allowed) {
-        const reason = authorization.ok
-          ? authorization.decision.reason
-          : authorization.message;
-        return {
-          ok: false,
-          error: reason,
-          errorDetails: {
-            kind: authorization.ok
-              ? "authorization_denied"
-              : "authorization_unavailable",
-            toolName: request.toolName,
-            reason,
-          },
-        };
-      }
-
-      return options.toolExecutor.execute(request, {
-        ...executionOptions,
-        // The authorization decision and execution must use the exact same
-        // canonical context. Callers cannot replace it with a wider sandbox.
-        runContext: options.runContext,
-        signal: executionOptions?.signal,
-        ...(request.toolName === "shell_exec" || request.toolName === "test_run"
-          ? { authorizedShellCommand: String(request.args.command ?? "") }
-          : {}),
       });
+      throwIfAborted(executionOptions?.signal);
+      return outcome.result;
     },
   };
 }

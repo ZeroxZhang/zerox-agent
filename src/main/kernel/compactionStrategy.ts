@@ -26,6 +26,10 @@ export interface CompactionContext {
   messages: ChatMessage[];
   budget: number; // effective input budget resolved from the model context window
   runId: string;
+  /** Incremental pre-compaction total supplied by the active surface. */
+  estimatedTokens?: number;
+  /** Stable visible surface node ids aligned with messages. */
+  surfaceNodeIds?: string[];
   latestCheckpoint?: unknown; // hint; RebuildFromCheckpoint fetches fresh
   protectedMarkers: string[]; // incl NEVER_COMPACT_MARKER
   /** Optional query seed for memory injection (e.g. goal description). */
@@ -87,13 +91,14 @@ export function createSummarizeCompaction(
   return {
     id: "summarize",
     shouldCompact(ctx) {
-      return estimateMessageTokens(ctx.messages) > ctx.budget;
+      return resolveBeforeTokens(ctx) > ctx.budget;
     },
     async compact(ctx) {
-      const beforeTokens = estimateMessageTokens(ctx.messages);
+      const beforeTokens = resolveBeforeTokens(ctx);
       const compressed = deps.contextManager.compressMessages(
         ctx.messages,
         ctx.budget,
+        beforeTokens,
       );
       const compacted = compressed !== ctx.messages;
       const afterTokens = estimateMessageTokens(compressed);
@@ -121,10 +126,10 @@ export function createRebuildFromCheckpoint(
   return {
     id: "rebuild",
     shouldCompact(ctx) {
-      return estimateMessageTokens(ctx.messages) > ctx.budget;
+      return resolveBeforeTokens(ctx) > ctx.budget;
     },
     async compact(ctx) {
-      const beforeTokens = estimateMessageTokens(ctx.messages);
+      const beforeTokens = resolveBeforeTokens(ctx);
       const summarize = createSummarizeCompaction(deps);
 
       // P5: trigger the fork-agent checkpoint writer before reading, so a fresh
@@ -166,7 +171,13 @@ export function createRebuildFromCheckpoint(
 
       // 2. Retain the recent tail (by token budget), microcompacting
       //    regenerable tool results to placeholders.
-      const { tail, microcompactedRefs } = retainTail(ctx.messages, tailTokens, regenerable, ctx.protectedMarkers);
+      const { tail, microcompactedRefs } = retainTail(
+        ctx.messages,
+        tailTokens,
+        regenerable,
+        ctx.protectedMarkers,
+        ctx.surfaceNodeIds,
+      );
 
       // 3. Assemble: [checkpoint anchor system msg] + [memory injection] + [boundary] + [tail].
       const rebuilt: ChatMessage[] = [
@@ -245,6 +256,7 @@ function retainTail(
   tailTokenBudget: number,
   regenerable: string[],
   protectedMarkers: string[],
+  surfaceNodeIds?: string[],
 ): { tail: ChatMessage[]; microcompactedRefs: string[] } {
   const microcompactedRefs: string[] = [];
   // Walk backwards collecting messages until the tail token budget is spent.
@@ -264,6 +276,7 @@ function retainTail(
   }
 
   completeToolPairIndexes(messages, retainedIndexes);
+  const toolNamesByCallId = resolveToolNamesByCallId(messages);
 
   const tail: ChatMessage[] = [];
   for (const index of [...retainedIndexes].sort((left, right) => left - right)) {
@@ -272,8 +285,14 @@ function retainTail(
       continue;
     }
     // Microcompact regenerable tool results to a placeholder.
-    if (msg.role === "tool" && isRegenerableToolMessage(msg, regenerable)) {
-      const ref = `checkpoint-tail-message-${index}`;
+    if (
+      msg.role === "tool" &&
+      isRegenerableToolMessage(msg, regenerable, toolNamesByCallId)
+    ) {
+      const ref =
+        surfaceNodeIds?.length === messages.length && surfaceNodeIds[index]
+          ? surfaceNodeIds[index]!
+          : `checkpoint-tail-message-${index}`;
       microcompactedRefs.push(ref);
       tail.push({
         ...msg,
@@ -327,13 +346,39 @@ function completeToolPairIndexes(messages: ChatMessage[], retainedIndexes: Set<n
   }
 }
 
-function isRegenerableToolMessage(msg: ChatMessage, regenerable: string[]): boolean {
-  // A tool result message's preceding assistant tool_call carries the tool name;
-  // we approximate by checking the tool_call_id/name heuristically. The tool
-  // name is not on the tool message itself in the OpenAI shape, so we conservatively
-  // microcompact any large tool result (the regenerable set is a hint for callers
-  // that can resolve the tool name; here we treat all large tool results as
-  // regenerable candidates, matching the legacy kernel prune behavior).
-  void regenerable;
-  return msg.role === "tool" && msg.content.length > 480;
+function isRegenerableToolMessage(
+  message: ChatMessage,
+  regenerable: string[],
+  toolNamesByCallId: Map<string, string>,
+): boolean {
+  if (
+    message.role !== "tool" ||
+    !message.tool_call_id ||
+    message.content.length <= 480
+  ) {
+    return false;
+  }
+  const toolName =
+    toolNamesByCallId.get(message.tool_call_id) ?? message.name;
+  return Boolean(toolName && regenerable.includes(toolName));
+}
+
+function resolveToolNamesByCallId(
+  messages: ChatMessage[],
+): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const message of messages) {
+    for (const toolCall of message.tool_calls ?? []) {
+      names.set(toolCall.id, toolCall.function.name);
+    }
+  }
+  return names;
+}
+
+function resolveBeforeTokens(ctx: CompactionContext): number {
+  return typeof ctx.estimatedTokens === "number" &&
+    Number.isFinite(ctx.estimatedTokens) &&
+    ctx.estimatedTokens >= 0
+    ? Math.floor(ctx.estimatedTokens)
+    : estimateMessageTokens(ctx.messages);
 }

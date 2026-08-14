@@ -6,6 +6,7 @@ import {
   type AgentExecutionCheckpoint,
   type AgentExecutionStep,
 } from "./agentExecution";
+import { CONTEXT_SURFACE_VERSION } from "./contextSurface";
 
 describe("agent execution model", () => {
   it("allows expected non-terminal and terminal status transitions", () => {
@@ -63,6 +64,24 @@ describe("agent execution model", () => {
           content: "Organize Downloads",
         },
       ],
+      contextSurface: {
+        version: CONTEXT_SURFACE_VERSION,
+        runId: "run-1",
+        nextSequence: 2,
+        events: [
+          {
+            kind: "source",
+            id: "surface:run-1:source:1",
+            sequence: 1,
+            message: {
+              role: "user",
+              content: "Organize Downloads",
+            },
+            estimatedTokens: 8,
+            createdAt: "2026-06-07T00:00:00.000Z",
+          },
+        ],
+      },
       toolCallCount: 0,
       createdAt: "2026-06-07T00:00:00.000Z",
       updatedAt: "2026-06-07T00:00:00.000Z",
@@ -70,6 +89,7 @@ describe("agent execution model", () => {
 
     expect(checkpoint.steps[0]).toEqual(step);
     expect(checkpoint.messages[0]?.content).toBe("Organize Downloads");
+    expect(checkpoint.contextSurface?.events).toHaveLength(1);
     expect(checkpoint.goalId).toBe("goal-1");
     expect(checkpoint.milestoneId).toBe("milestone-1");
   });

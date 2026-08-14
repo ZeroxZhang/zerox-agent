@@ -11,6 +11,7 @@
 import { readFileSync, readdirSync, existsSync, writeFileSync, appendFileSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 const args = parseArgs(process.argv.slice(2));
 const configDir = args.configDir;
@@ -30,6 +31,8 @@ const ckRepo = await import(path.join(root, "dist-electron/main/storage/reposito
 const goalRepo = await import(path.join(root, "dist-electron/main/storage/repositories/goalRepository.js"));
 const memRepo = await import(path.join(root, "dist-electron/main/storage/repositories/memoryRepository.js"));
 const sessRepo = await import(path.join(root, "dist-electron/main/storage/repositories/sessionRepository.js"));
+const chatRepo = await import(path.join(root, "dist-electron/main/storage/repositories/chatSessionEventRepository.js"));
+const chatStore = await import(path.join(root, "dist-electron/main/chatSessionStore.js"));
 
 const errorsPath = path.join(configDir, "migration-errors.jsonl");
 if (existsSync(errorsPath)) writeFileSync(errorsPath, "");
@@ -80,21 +83,42 @@ function dryRunOnly() { return args["dry-run"] === true; }
 // 2. chat sessions + messages
 {
   const data = readJson(path.join(configDir, "chat-sessions.json"), { sessions: [] });
-  for (const s of data.sessions ?? []) {
-    if (dryRunOnly()) { bump("sessions", 1); bump("chat_messages", s.messages?.length ?? 0); continue; }
-    try {
-      sessRepo.createSessionRepository(storage).createSession({
-        id: s.id, kind: "chat", title: s.title, payload: s,
-        createdAt: s.createdAt, updatedAt: s.updatedAt,
-      });
+  const sessions = (data.sessions ?? []).map((session) =>
+    chatStore.normalizeChatSessionRecord(session),
+  );
+  if (dryRunOnly()) {
+    for (const session of sessions) {
       bump("sessions", 1);
-      for (const m of s.messages ?? []) {
-        sessRepo.createSessionRepository(storage).appendMessage({
-          sessionId: s.id, role: m.role, content: m.content, createdAt: m.createdAt, message: m,
-        });
-        bump("chat_messages", 1);
+      bump("chat_messages", session.messages?.length ?? 0);
+      bump("chat_session_events", 1);
+    }
+  } else {
+    try {
+      const repository = chatRepo.createChatSessionEventRepository(storage);
+      repository.importSnapshots(
+        sessions.map((session) => ({
+          eventId: `chat_import_${session.id}`,
+          session,
+        })),
+      );
+      for (const session of sessions) {
+        if (!isDeepStrictEqual(repository.getSession(session.id), session)) {
+          throw new Error(`Chat migration parity failed for ${session.id}`);
+        }
       }
-    } catch (e) { logError("sessions", String(e)); }
+      repository.completeBootstrap(new Date().toISOString());
+      bump("sessions", sessions.length);
+      bump(
+        "chat_messages",
+        sessions.reduce(
+          (total, session) => total + (session.messages?.length ?? 0),
+          0,
+        ),
+      );
+      bump("chat_session_events", sessions.length);
+    } catch (e) {
+      logError("sessions", String(e));
+    }
   }
 }
 

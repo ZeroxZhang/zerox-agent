@@ -7,10 +7,13 @@ export type ToolSideEffect =
   | "destructive"
   | "external";
 
+export type ToolConcurrencyMode = "parallel" | "exclusive";
+
 export type ToolCapability = {
   name: string;
   domain: string;
   sideEffect: ToolSideEffect;
+  concurrency: ToolConcurrencyMode;
   supportsBatch: boolean;
   supportsRecursive: boolean;
   resultSizeRisk: "low" | "medium" | "high";
@@ -25,7 +28,19 @@ export type NativeToolPreference = {
   reason: string;
 };
 
-const capabilities: ToolCapability[] = [
+const capabilityDefinitions: Array<Omit<ToolCapability, "concurrency">> = [
+  {
+    name: "file_stat",
+    domain: "files",
+    sideEffect: "local_read",
+    supportsBatch: false,
+    supportsRecursive: false,
+    resultSizeRisk: "low",
+    platformSensitivity: "none",
+    requiresConfirmation: false,
+    preferredFor: ["files:stat"],
+    antiPatterns: [],
+  },
   {
     name: "file_list",
     domain: "files",
@@ -200,6 +215,27 @@ const capabilities: ToolCapability[] = [
   },
 ];
 
+const PARALLEL_TOOL_OPT_INS = new Set([
+  "file_stat",
+  "file_list",
+  "file_search",
+  "file_inventory",
+  "file_move_plan",
+  "file_verify_moves",
+  "file_read",
+  "code_search",
+  "web_fetch",
+]);
+
+const capabilities: ToolCapability[] = capabilityDefinitions.map(
+  (capability) => ({
+    ...capability,
+    concurrency: PARALLEL_TOOL_OPT_INS.has(capability.name)
+      ? "parallel"
+      : "exclusive",
+  }),
+);
+
 const registry = new Map(capabilities.map((capability) => [capability.name, capability]));
 
 export function getToolCapabilityRegistry(): ReadonlyMap<string, ToolCapability> {
@@ -208,6 +244,25 @@ export function getToolCapabilityRegistry(): ReadonlyMap<string, ToolCapability>
 
 export function getToolCapability(name: string): ToolCapability | undefined {
   return registry.get(name);
+}
+
+export function getToolConcurrencyMode(
+  name: string,
+  args: unknown,
+  source: string | null = null,
+): ToolConcurrencyMode {
+  if (!isRecord(args) || source !== "built-in") {
+    return "exclusive";
+  }
+  const capability = registry.get(name);
+  if (
+    !capability ||
+    capability.concurrency !== "parallel" ||
+    capability.requiresConfirmation
+  ) {
+    return "exclusive";
+  }
+  return "parallel";
 }
 
 export function preferNativeToolForOperation(input: {
@@ -265,4 +320,8 @@ function classifyOperation(
   }
 
   return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

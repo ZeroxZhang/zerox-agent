@@ -32,7 +32,7 @@ export interface WorkflowToolDeps {
 }
 
 export function createWorkflowToolHandler(deps: WorkflowToolDeps): ToolHandler {
-  return async (args) => {
+  return async (args, options) => {
     const op = String(args.op ?? "");
     switch (op) {
       case "list":
@@ -42,6 +42,7 @@ export function createWorkflowToolHandler(deps: WorkflowToolDeps): ToolHandler {
         if (!name) return { ok: false, error: "name required for run" };
         const result = await deps.workflowRuntime.run(name, args.args, {
           runId: String(args.runId ?? "workflow-run"),
+          ...(options?.signal ? { signal: options.signal } : {}),
         });
         return { ok: true, result: { status: result.status, ...(result.error ? { error: result.error } : {}), ...(result.value !== undefined ? { value: result.value } : {}), phases: result.phases.length, actorSpawns: result.actorSpawns.length } };
       }

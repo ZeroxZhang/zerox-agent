@@ -28,6 +28,7 @@ import type {
   RuntimeToolAuthorizationTask,
   ToolAuthorizationService,
 } from "./toolAuthorizationService";
+import { createToolRuntime } from "./toolRuntime";
 import { getAcceptanceCommandVariants } from "../shared/acceptanceCommand";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { estimateMessageTokens } from "./contextManager";
@@ -98,6 +99,10 @@ export function createGoalRuntimeEngine(options: {
   const createId = options.createId ?? (() => `goal_run_${randomUUID()}`);
   const now = options.now ?? (() => new Date().toISOString());
   const runLoop = options.runAgentLoop ?? runAgentLoop;
+  const toolRuntime = createToolRuntime({
+    authorizationService: options.toolAuthorizationService,
+    toolExecutor: options.toolExecutor,
+  });
   let sequence = 0;
   const nextSequence =
     options.nextSequence ??
@@ -386,94 +391,78 @@ export function createGoalRuntimeEngine(options: {
             await appendInvocation(invocation);
             await transitionInvocation({ status: "visible" });
 
-            if (options.toolAuthorizationService) {
-              const auth = await options.toolAuthorizationService.authorize(
-                taskId,
-                {
-                  toolName: toolName as never,
-                  ...(registeredToolSource
-                    ? { source: registeredToolSource }
-                    : {}),
-                  args,
-                },
-                {
-                  ...(runSignal ? { signal: runSignal } : {}),
-                  runContext,
-                  runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
-                },
-              );
-              if (!auth.ok || !auth.decision.allowed) {
-                const rejectedResult = {
-                  ok: false as const,
-                  error: auth.ok ? auth.decision.reason : auth.message,
-                };
-                await transitionInvocation({
-                  status: "error",
-                  ok: false,
-                  error: rejectedResult.error,
-                });
-                await appendRunTrajectory("tool_result", {
-                  ...payload,
-                  toolName,
-                  ok: false,
-                  error: rejectedResult.error,
-                });
-                return rejectedResult;
-              }
-              await transitionInvocation({
-                status: "authorized",
-                reason: auth.decision.reason,
-              });
-            } else {
-              await transitionInvocation({
-                status: "error",
-                ok: false,
-                error: "工具授权服务未配置，已拒绝执行。",
-              });
-              const rejectedResult = {
-                ok: false as const,
-                error: "工具授权服务未配置，已拒绝执行。",
-              };
-              await appendRunTrajectory("tool_result", {
-                ...payload,
+            const runtimeOutcome = await toolRuntime.execute({
+              taskId,
+              request: {
                 toolName,
-                ok: false,
-                error: rejectedResult.error,
-              });
-              return rejectedResult;
-            }
-
-            await appendRunTrajectory("tool_call", {
-              ...payload,
-              toolName,
-              args,
-            });
-            events.push(
-              createEvent("info", "executing", `Tool called: ${toolName}`, {
-                ...payload,
-                toolName,
-                }),
-            );
-            await transitionInvocation({ status: "running" });
-            const result = await options.toolExecutor.execute(
-              {
-                toolName: toolName as never,
                 ...(registeredToolSource
                   ? { source: registeredToolSource }
                   : {}),
                 args,
               },
-              {
+              authorizationOptions: {
+                runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
+              },
+              executionOptions: {
                 ...(runSignal ? { signal: runSignal } : {}),
                 runContext,
-                ...(toolName === "shell_exec" || toolName === "test_run"
-                  ? { authorizedShellCommand: String(args.command ?? "") }
-                  : {}),
                 ...(deterministicOptions?.artifactWrite
                   ? { artifactWrite: deterministicOptions.artifactWrite }
                   : {}),
               },
-            );
+              async onStage(event) {
+                if (event.stage === "authorized") {
+                  await transitionInvocation({
+                    status: "authorized",
+                    reason: event.reason,
+                  });
+                }
+                if (event.stage === "dispatching") {
+                  await appendRunTrajectory("tool_call", {
+                    ...payload,
+                    toolName,
+                    args,
+                  });
+                  events.push(
+                    createEvent(
+                      "info",
+                      "executing",
+                      `Tool called: ${toolName}`,
+                      {
+                        ...payload,
+                        toolName,
+                      },
+                    ),
+                  );
+                  await transitionInvocation({ status: "running" });
+                }
+              },
+            });
+            const result = runtimeOutcome.result;
+            if (!runtimeOutcome.dispatched) {
+              const reason = result.ok
+                ? "工具调用未执行。"
+                : result.error;
+              await transitionInvocation({
+                status: "error",
+                ok: false,
+                error: reason,
+              });
+              await appendRunTrajectory("tool_result", {
+                ...payload,
+                toolName,
+                ok: false,
+                error: reason,
+              });
+              return {
+                ok: false as const,
+                error: reason,
+                ...(!result.ok && result.errorDetails
+                  ? { errorDetails: result.errorDetails }
+                  : {}),
+              };
+            }
+
             observedToolCalls += 1;
             const artifactEvidence = extractArtifactEvidence(result);
             await transitionInvocation(

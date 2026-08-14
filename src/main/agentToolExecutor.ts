@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { access, lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -40,6 +40,7 @@ import {
   type ToolCallRequest,
 } from "../shared/toolPermissions";
 import { isSafeToolResultRef } from "../shared/toolResultRefs";
+import type { RuntimeToolAuthorizationTask } from "./toolAuthorizationService";
 import {
   normalizeLocationBoundaryPath,
   normalizeLocationEnvironment,
@@ -50,15 +51,24 @@ import {
 } from "../shared/agentArtifactProvenance";
 import type { SkillDiscoveryResult } from "../shared/skills";
 import { authorizePlanModeTool } from "./planModePolicy";
+import {
+  isProcessSandboxUnavailableError,
+  processSandboxPolicyFromRunContext,
+  type ConfinedProcess,
+  type ProcessSandboxProvider,
+} from "./processSandbox";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; error: string; errorDetails?: Record<string, unknown> };
 
 export type AgentToolExecutionOptions = {
+  taskId?: string;
   runContext?: AgentRunContext;
+  runtimeTask?: RuntimeToolAuthorizationTask;
   signal?: AbortSignal;
   /** Exact shell command already approved by ToolAuthorizationService. */
   authorizedShellCommand?: string;
@@ -91,6 +101,7 @@ export function createAgentToolExecutor(options?: {
   discoverSkills?: () => Promise<SkillDiscoveryResult>;
   historyIndexStore?: Pick<HistoryIndexStore, "search" | "around">;
   toolTimeoutMs?: number;
+  processSandbox?: ProcessSandboxProvider;
 }): AgentToolExecutor {
   const webTools = options?.webTools ?? createWebTools();
   const registry = options?.registry ?? createDynamicToolRegistry();
@@ -103,6 +114,7 @@ export function createAgentToolExecutor(options?: {
     toolResultOffloadStore: options?.toolResultOffloadStore,
     discoverSkills: options?.discoverSkills,
     historyIndexStore: options?.historyIndexStore,
+    processSandbox: options?.processSandbox,
   });
 
   return {
@@ -128,6 +140,7 @@ export function createAgentToolExecutor(options?: {
           request.args,
           executionOptions?.runContext,
           executionOptions?.signal,
+          options?.processSandbox,
         );
       }
 
@@ -142,9 +155,7 @@ export function createAgentToolExecutor(options?: {
           once: true,
         });
         let timer: ReturnType<typeof setTimeout> | undefined;
-        let forceTimer: ReturnType<typeof setTimeout> | undefined;
         let timeoutError: Error | undefined;
-        let rejectForceTimeout: ((error: Error) => void) | undefined;
         try {
           const execution = registry.execute(request.toolName, request.args, {
             ...executionOptions,
@@ -153,30 +164,19 @@ export function createAgentToolExecutor(options?: {
               ? { parentSignal: executionOptions.signal }
               : {}),
           });
-          const forceTimeout = new Promise<AgentToolExecutionResult>((_, reject) => {
-            rejectForceTimeout = reject;
-          });
           timer = setTimeout(() => {
             timeoutError = new Error(
               `${request.toolName} timed out after ${toolTimeoutMs}ms.`,
             );
             controller.abort(timeoutError);
-            forceTimer = setTimeout(() => {
-              rejectForceTimeout?.(
-                new Error(
-                  `${request.toolName} did not stop within 1500ms after timeout.`,
-                ),
-              );
-            }, 1_500);
-            forceTimer.unref?.();
           }, toolTimeoutMs);
-          const result = await Promise.race([execution, forceTimeout]);
+          // A timeout or parent cancellation is not terminal until the handler
+          // promise settles. Returning earlier would allow unowned late writes.
+          const result = await execution;
           if (timeoutError) throw timeoutError;
           return result;
         } finally {
           if (timer) clearTimeout(timer);
-          if (forceTimer) clearTimeout(forceTimer);
-          rejectForceTimeout = undefined;
           executionOptions?.signal?.removeEventListener(
             "abort",
             abortFromParent,
@@ -425,6 +425,7 @@ function registerBuiltinTools(
     toolResultOffloadStore?: Pick<ToolResultOffloadStore, "read">;
     discoverSkills?: () => Promise<SkillDiscoveryResult>;
     historyIndexStore?: Pick<HistoryIndexStore, "search" | "around">;
+    processSandbox?: ProcessSandboxProvider;
   },
 ) {
   const researchTools = createNativeResearchTools({
@@ -922,6 +923,8 @@ function registerBuiltinTools(
         command: String(args.command ?? ""),
         timeoutMs: optionalNumber(args.timeoutMs),
         signal: executionOptions?.signal,
+        processSandbox: options.processSandbox,
+        runContext: executionOptions?.runContext,
       }),
     "built-in",
     defineNativeToolDescriptor({
@@ -2204,6 +2207,7 @@ async function executeShellCommand(
   args: Record<string, unknown>,
   runContext?: AgentRunContext,
   signal?: AbortSignal,
+  processSandbox?: ProcessSandboxProvider,
 ): Promise<AgentToolExecutionResult> {
   const command = String(args.command ?? "");
   if (!command) {
@@ -2212,15 +2216,45 @@ async function executeShellCommand(
 
   const timeoutMs = clampNumber(args.timeoutMs, 120_000, 25, 600_000);
   const startedAt = Date.now();
+  let confined: ConfinedProcess | undefined;
+
+  if (processSandbox) {
+    if (!runContext) {
+      return processSandboxUnavailableResult(
+        "shell_exec requires a run context for process confinement.",
+      );
+    }
+    try {
+      confined = processSandbox.confine(
+        [getShellExecShell() ?? "/bin/sh", "-lc", command],
+        processSandboxPolicyFromRunContext(runContext),
+      );
+    } catch (error) {
+      if (isProcessSandboxUnavailableError(error)) {
+        return processSandboxUnavailableResult(error.message, error.backend);
+      }
+      return processSandboxUnavailableResult(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
 
   try {
-    const result = await execAsync(command, {
-      timeout: timeoutMs,
-      maxBuffer: 1024 * 1024,
-      shell: getShellExecShell(),
-      ...(signal ? { signal } : {}),
-      ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
-    });
+    const result = confined
+      ? await execFileAsync(confined.argv[0]!, [...confined.argv.slice(1)], {
+          timeout: timeoutMs,
+          maxBuffer: 1024 * 1024,
+          shell: false,
+          ...(signal ? { signal } : {}),
+          ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
+        })
+      : await execAsync(command, {
+          timeout: timeoutMs,
+          maxBuffer: 1024 * 1024,
+          shell: getShellExecShell(),
+          ...(signal ? { signal } : {}),
+          ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
+        });
     const durationMs = Date.now() - startedAt;
 
     return {
@@ -2232,6 +2266,12 @@ async function executeShellCommand(
         exitCode: 0,
         durationMs,
         timeoutMs,
+        ...(confined
+          ? {
+              sandboxBackend: confined.backend,
+              sandboxEnforcement: confined.enforcement,
+            }
+          : {}),
       },
     };
   } catch (error) {
@@ -2249,6 +2289,7 @@ async function executeShellCommand(
       durationMs,
       signal,
       error: execError,
+      confined,
     });
 
     return {
@@ -2257,6 +2298,21 @@ async function executeShellCommand(
       errorDetails: details,
     };
   }
+}
+
+function processSandboxUnavailableResult(
+  reason: string,
+  backend = "unavailable",
+): AgentToolExecutionResult {
+  return {
+    ok: false,
+    error: `Process sandbox unavailable: ${reason}`,
+    errorDetails: {
+      kind: "process_sandbox_unavailable",
+      backend,
+      reason,
+    },
+  };
 }
 
 export function getShellExecShell(
@@ -2371,14 +2427,23 @@ function buildShellErrorDetails(options: {
     signal?: NodeJS.Signals;
     killed?: boolean;
   };
+  confined?: ConfinedProcess;
 }): Record<string, unknown> {
   const stdout = options.error.stdout ?? "";
   const stderr = options.error.stderr ?? "";
   const exitCode = typeof options.error.code === "number" ? options.error.code : 1;
+  const sandboxDenied = Boolean(
+    options.confined &&
+      options.confined.denialSignatures.some((signature) =>
+        stderr.toLowerCase().includes(signature),
+      ),
+  );
   const kind = options.signal?.aborted
     ? "canceled"
     : options.durationMs >= options.timeoutMs - 5
       ? "timeout"
+      : sandboxDenied
+        ? "sandbox_denied"
       : !stdout.trim() && !stderr.trim()
         ? "empty_exit"
         : "exit";
@@ -2395,6 +2460,13 @@ function buildShellErrorDetails(options: {
     killed: Boolean(options.error.killed),
     durationMs: options.durationMs,
     timeoutMs: options.timeoutMs,
+    ...(options.confined
+      ? {
+          sandboxBackend: options.confined.backend,
+          sandboxEnforcement: options.confined.enforcement,
+          sandboxDenied,
+        }
+      : {}),
   };
 }
 
@@ -2405,6 +2477,9 @@ function summarizeShellError(details: Record<string, unknown>): string {
   }
   if (kind === "timeout") {
     return `shell_exec 超时：命令超过 ${details.timeoutMs} ms 仍未结束。`;
+  }
+  if (kind === "sandbox_denied") {
+    return "shell_exec 被 OS 进程沙箱拒绝：命令尝试了未授权的文件写入或网络访问。";
   }
 
   const exitCode = Number(details.exitCode ?? 1);

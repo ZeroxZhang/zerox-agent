@@ -8,6 +8,8 @@ const requiredFiles = [
   ".zerox/feature_list.json",
   ".zerox/progress.md",
   ".zerox/golden-principles.md",
+  ".zerox/runtime-convergence-program.json",
+  ".zerox/runtime-convergence-program.md",
   "docs/superpowers/specs/2026-06-09-harness-engineering-iteration-spec.md",
   "docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md",
 ];
@@ -21,6 +23,7 @@ const requiredScripts = [
   "eval:agent",
   "eval:memory",
   "harness:check",
+  "program:check",
 ];
 
 const missing = [];
@@ -50,5 +53,7 @@ if (missing.length) {
   }
   process.exit(1);
 }
+
+await import("./check-runtime-convergence-program.mjs");
 
 console.log("Harness check passed.");

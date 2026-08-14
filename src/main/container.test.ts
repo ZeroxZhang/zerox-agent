@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -959,6 +959,27 @@ describe("app container goal drafts", () => {
       id: goal.id,
       status: "canceled",
     });
+  });
+
+  it("uses SQLite as the production Chat source without creating legacy JSON", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "SQLite Chat source",
+    });
+    await container.chatSessionStore().flush();
+
+    await expect(
+      access(path.join(tempDir, "config", "zerox.db")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(path.join(tempDir, "config", "chat-sessions.json")),
+    ).rejects.toThrow();
   });
 
   it("reconciles stale progress events against irreversible persisted goal status", () => {

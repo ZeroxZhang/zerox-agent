@@ -117,6 +117,112 @@ describe("agent trajectory store", () => {
     },
   );
 
+  it.each(["json", "sqlite"] as const)(
+    "allocates monotonic %s publication sequences independently of caller input",
+    async (backend) => {
+      const storage = backend === "sqlite"
+        ? await createInMemoryStorage()
+        : undefined;
+      const store = createAgentTrajectoryStore({
+        configDir,
+        backend,
+        storage,
+      });
+      await store.append("run_1", {
+        ...createEvent("tool_call", "event_7"),
+        sequence: 7,
+      });
+
+      const first = await store.appendIfAbsent(
+        "run_1",
+        "publication:a",
+        { ...createEvent("goal_judged", "event_1"), sequence: 1 },
+      );
+      const secondStore = createAgentTrajectoryStore({
+        configDir,
+        backend,
+        storage,
+      });
+      const second = await secondStore.appendIfAbsent(
+        "run_1",
+        "publication:b",
+        { ...createEvent("goal_stopped", "event_1"), sequence: 1 },
+      );
+
+      expect(first).toMatchObject({
+        appended: true,
+        event: { sequence: 8 },
+      });
+      expect(second).toMatchObject({
+        appended: true,
+        event: { sequence: 9 },
+      });
+      await expect(store.list("run_1")).resolves.toEqual([
+        expect.objectContaining({ sequence: 7 }),
+        expect.objectContaining({ sequence: 8 }),
+        expect.objectContaining({ sequence: 9 }),
+      ]);
+      storage?.close();
+    },
+  );
+
+  it("keeps dual-write publication sequences identical", async () => {
+    const storage = await createInMemoryStorage();
+    const store = createAgentTrajectoryStore({
+      configDir,
+      backend: "dual",
+      storage,
+    });
+    await store.append("run_1", createEvent("tool_call", "event_1"));
+    await store.appendIfAbsent(
+      "run_1",
+      "publication:a",
+      { ...createEvent("goal_judged", "event_9"), sequence: 99 },
+    );
+    await store.flushShadowWrites();
+
+    const jsonStore = createAgentTrajectoryStore({
+      configDir,
+      backend: "json",
+    });
+    const [sqliteEvents, jsonEvents] = await Promise.all([
+      store.list("run_1"),
+      jsonStore.list("run_1"),
+    ]);
+    expect(jsonEvents).toEqual(sqliteEvents);
+    storage.close();
+  });
+
+  it("repairs a missing dual-write JSON publication on idempotent retry", async () => {
+    const storage = await createInMemoryStorage();
+    const store = createAgentTrajectoryStore({
+      configDir,
+      backend: "dual",
+      storage,
+    });
+    const event = { ...createEvent("goal_judged", "event_9"), sequence: 99 };
+    await store.appendIfAbsent("run_1", "publication:a", event);
+    await store.flushShadowWrites();
+    await rm(
+      path.join(configDir, "agent-trajectories", "run_1.jsonl"),
+      { force: true },
+    );
+
+    await expect(
+      store.appendIfAbsent("run_1", "publication:a", event),
+    ).resolves.toMatchObject({ appended: false, event: { sequence: 1 } });
+    await store.flushShadowWrites();
+
+    const jsonStore = createAgentTrajectoryStore({
+      configDir,
+      backend: "json",
+    });
+    await expect(jsonStore.list("run_1")).resolves.toEqual(
+      await store.list("run_1"),
+    );
+    storage.close();
+  });
+
   it("does not confuse a SQLite sequence collision with an existing publication", async () => {
     const storage = await createInMemoryStorage();
     const store = createAgentTrajectoryStore({

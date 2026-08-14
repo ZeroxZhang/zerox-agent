@@ -100,26 +100,39 @@ export function createMultiAgentCoordinator(options: {
       }
 
       if (input.handoff) {
-        await appendParentTrajectory(input.parentRunId, "child_handoff_created", {
-          handoff: input.handoff,
-        }, input.runContext);
+        await appendParentTrajectory(
+          input.parentRunId,
+          "child_handoff_created",
+          { handoff: input.handoff },
+          `handoff-created:${input.handoff.handoffId}`,
+          input.runContext,
+        );
       }
 
-      await appendParentTrajectory(input.parentRunId, "child_run_scheduled", {
-        sessionId: input.sessionId,
-        parentRunId: input.parentRunId,
-        childRunId: input.childRunId,
-        agentRole: input.agentRole,
-        ...(input.handoff ? { handoffId: input.handoff.handoffId } : {}),
-      }, input.runContext);
+      await appendParentTrajectory(
+        input.parentRunId,
+        "child_run_scheduled",
+        {
+          sessionId: input.sessionId,
+          parentRunId: input.parentRunId,
+          childRunId: input.childRunId,
+          agentRole: input.agentRole,
+          ...(input.handoff ? { handoffId: input.handoff.handoffId } : {}),
+        },
+        `child-scheduled:${input.sessionId}:${input.childRunId}`,
+        input.runContext,
+      );
 
       return session;
     },
 
     async recordChildOutput(input) {
-      await appendParentTrajectory(input.parentRunId, "child_handoff_completed", {
-        output: input.output,
-      });
+      await appendParentTrajectory(
+        input.parentRunId,
+        "child_handoff_completed",
+        { output: input.output },
+        `handoff-completed:${input.output.handoffId}:${input.output.childRunId}`,
+      );
     },
 
     async recordHandoffReview(input) {
@@ -128,9 +141,12 @@ export function createMultiAgentCoordinator(options: {
         createdAt: input.createdAt ?? now().toISOString(),
       });
 
-      await appendParentTrajectory(input.parentRunId, "child_handoff_reviewed", {
-        decision,
-      });
+      await appendParentTrajectory(
+        input.parentRunId,
+        "child_handoff_reviewed",
+        { decision },
+        `handoff-reviewed:${decision.handoffId}:${decision.childRunId}`,
+      );
 
       return decision;
     },
@@ -144,21 +160,26 @@ export function createMultiAgentCoordinator(options: {
       | "child_handoff_completed"
       | "child_handoff_reviewed",
     payload: Record<string, unknown>,
+    publicationKey: string,
     runContext?: AgentRunContext,
   ) {
-    await options.trajectoryStore?.append(runId, {
-      id: createId(),
+    await options.trajectoryStore?.appendIfAbsent(
       runId,
-      type,
-      sequence: 1,
-      ...(runContext ? { runContext } : {}),
-      payload,
-      redaction: {
-        containsApiKey: false,
-        containsFileContent: false,
-        containsUserText: false,
+      `multi-agent:${publicationKey}`,
+      {
+        id: createId(),
+        runId,
+        type,
+        sequence: 0,
+        ...(runContext ? { runContext } : {}),
+        payload,
+        redaction: {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: false,
+        },
+        createdAt: now().toISOString(),
       },
-      createdAt: now().toISOString(),
-    });
+    );
   }
 }

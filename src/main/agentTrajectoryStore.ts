@@ -69,14 +69,18 @@ export function createAgentTrajectoryStore(
       const filePath = trajectoryPath(runId);
       return serializeTrajectoryMutation(filePath, async () => {
         throwIfAborted(appendOptions?.signal);
-        const existing = (
-          await readRecoverableJsonl<AgentTrajectoryEvent>(filePath)
-        ).find(
+        const trajectory =
+          await readRecoverableJsonl<AgentTrajectoryEvent>(filePath);
+        const existing = trajectory.find(
           (candidate) =>
             candidate.payload.publicationKey === publicationKey,
         );
         if (existing) return { appended: false, event: existing };
-        const stored = createPublicationEvent(runId, publicationKey, event);
+        const stored = {
+          ...createPublicationEvent(runId, publicationKey, event),
+          sequence:
+            Math.max(0, ...trajectory.map((candidate) => candidate.sequence)) + 1,
+        };
         await jsonImpl.append(runId, stored, appendOptions);
         return { appended: true, event: stored };
       });
@@ -89,21 +93,45 @@ export function createAgentTrajectoryStore(
     },
   };
 
+  function appendJsonPublicationExact(
+    runId: string,
+    publicationKey: string,
+    event: AgentTrajectoryEvent,
+    appendOptions?: { signal?: AbortSignal },
+  ): Promise<{ appended: boolean; event: AgentTrajectoryEvent }> {
+    const filePath = trajectoryPath(runId);
+    return serializeTrajectoryMutation(filePath, async () => {
+      throwIfAborted(appendOptions?.signal);
+      const existing = (
+        await readRecoverableJsonl<AgentTrajectoryEvent>(filePath)
+      ).find(
+        (candidate) =>
+          candidate.payload.publicationKey === publicationKey,
+      );
+      if (existing) return { appended: false, event: existing };
+      await jsonImpl.append(runId, event, appendOptions);
+      return { appended: true, event };
+    });
+  }
+
   if (backend === "json" || !repo) {
     return jsonImpl;
   }
 
   // --- sqlite / dual (hot path stays sync) ---
   const shadowWrites = new Set<Promise<void>>();
-  function enqueueShadowWrite(promise: Promise<unknown>): void {
+  let shadowTail: Promise<void> = Promise.resolve();
+  function enqueueShadowWrite(operation: () => Promise<unknown>): void {
     let tracked: Promise<void>;
-    tracked = promise
+    const write = shadowTail.then(operation, operation);
+    tracked = write
       .catch(shadowWriteError)
       .then(() => undefined)
       .finally(() => {
         shadowWrites.delete(tracked);
       });
     shadowWrites.add(tracked);
+    shadowTail = tracked;
   }
 
   return {
@@ -111,41 +139,28 @@ export function createAgentTrajectoryStore(
       throwIfAborted(appendOptions?.signal);
       repo.appendTrajectory(runId, event); // sync hot path
       if (backend === "dual") {
-        enqueueShadowWrite(jsonImpl.append(runId, event, appendOptions));
+        enqueueShadowWrite(() => jsonImpl.append(runId, event, appendOptions));
       }
       return event;
     },
     async appendIfAbsent(runId, publicationKey, event, appendOptions) {
       throwIfAborted(appendOptions?.signal);
-      const trajectory = repo.getTrajectory(runId);
-      const existing = trajectory.find(
-        (candidate) =>
-          candidate.payload.publicationKey === publicationKey,
+      const result = repo.appendTrajectoryPublication(
+        runId,
+        publicationKey,
+        createPublicationEvent(runId, publicationKey, event),
       );
-      if (existing) return { appended: false, event: existing };
-      const stored = {
-        ...createPublicationEvent(runId, publicationKey, event),
-        sequence:
-          Math.max(0, ...trajectory.map((candidate) => candidate.sequence)) + 1,
-      };
-      const appended = repo.appendTrajectoryIfAbsent(runId, stored);
-      if (appended && backend === "dual") {
-        enqueueShadowWrite(
-          jsonImpl.appendIfAbsent(
+      if (backend === "dual") {
+        enqueueShadowWrite(() =>
+          appendJsonPublicationExact(
             runId,
             publicationKey,
-            stored,
+            result.event,
             appendOptions,
           ),
         );
       }
-      const canonical = appended
-        ? stored
-        : repo.getTrajectory(runId).find(
-            (candidate) =>
-              candidate.payload.publicationKey === publicationKey,
-          ) ?? stored;
-      return { appended, event: canonical };
+      return result;
     },
     async list(runId) {
       return repo.getTrajectory(runId);

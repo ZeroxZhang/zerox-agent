@@ -8,6 +8,7 @@ import type {
   ChatCompletionResponse,
   StreamingChatClient,
   StreamEvent,
+  ToolCall,
   ToolDefinition,
 } from "./openAiCompatibleClient";
 import type {
@@ -318,6 +319,58 @@ describe("agent loop", () => {
         afterTokens: 300,
       }),
     });
+    const replacement = result.contextSurface?.events.find(
+      (event) => event.kind === "replace" && event.reason === "summarize",
+    );
+    expect(replacement).toMatchObject({
+      shadowedNodeIds: expect.arrayContaining([
+        expect.stringContaining("surface:"),
+      ]),
+      sourceNodeIds: expect.arrayContaining([
+        expect.stringContaining("surface:"),
+      ]),
+    });
+    if (replacement?.kind === "replace") {
+      expect(replacement.replacementNodes.map((node) => node.message)).toEqual(
+        requests[0].messages,
+      );
+      expect(replacement.shadowedNodeIds).toHaveLength(4);
+      expect(replacement.sourceNodeIds).toHaveLength(4);
+    }
+  });
+
+  it("uses one-message token deltas instead of rescanning steady-state context", async () => {
+    const estimatedBatchSizes: number[] = [];
+    const result = await runAgentLoop(
+      [{ role: "user", content: "answer once" }],
+      { ...modelProfile, maxTokens: 128, contextWindow: 8_000 },
+      {
+        chatClient: {
+          async complete() {
+            return {
+              content: "done",
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        contextManager: {
+          estimateTokens(messages) {
+            estimatedBatchSizes.push(messages.length);
+            return messages.length * 10;
+          },
+          compressMessages(messages) {
+            return messages;
+          },
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(estimatedBatchSizes.length).toBeGreaterThan(0);
+    expect(estimatedBatchSizes.every((size) => size === 1)).toBe(true);
   });
 
   it("routes overflow compaction through the injected strategy when provided (P2)", async () => {
@@ -868,6 +921,252 @@ describe("agent loop", () => {
     expect(guardEvents).toEqual([]);
   });
 
+  it("runs opted-in reads concurrently while authorizing and committing in model order", async () => {
+    const requests: ChatCompletionRequest[] = [];
+    const completionOrder: string[] = [];
+    const committedOrder: string[] = [];
+    let activeAuthorization = 0;
+    let authorizationHighWater = 0;
+    let activeExecution = 0;
+    let executionHighWater = 0;
+    const authorization: ToolAuthorizationService = {
+      async authorize(taskId, request) {
+        activeAuthorization += 1;
+        authorizationHighWater = Math.max(
+          authorizationHighWater,
+          activeAuthorization,
+        );
+        await Promise.resolve();
+        activeAuthorization -= 1;
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: `audit_${request.args.path}`,
+            taskId,
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-08-14T10:00:00.000Z",
+          },
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute(request) {
+        const path = String(request.args.path);
+        const index = Number(path.at(-1));
+        activeExecution += 1;
+        executionHighWater = Math.max(
+          executionHighWater,
+          activeExecution,
+        );
+        await testDelay((3 - index) * 5);
+        activeExecution -= 1;
+        completionOrder.push(path);
+        return { ok: true, result: { path } };
+      },
+      getRegistry() {
+        return createBuiltInSourceRegistry();
+      },
+      hasTool() {
+        return true;
+      },
+    };
+    const chatClient: ChatClient = {
+      async complete(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            content: null,
+            finishReason: "tool_calls",
+            toolCalls: [0, 1, 2].map((index) => ({
+              id: `parallel_${index}`,
+              type: "function" as const,
+              function: {
+                name: "file_list",
+                arguments: JSON.stringify({ path: `/tmp/read_${index}` }),
+              },
+            })),
+          };
+        }
+        return {
+          content: "parallel reads complete",
+          finishReason: "stop",
+          toolCalls: [],
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "read three directories" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService: authorization,
+        tools: testTools,
+        maxParallelToolCalls: 3,
+        onToolResult(_toolName, _ok, _result, event) {
+          committedOrder.push(event.toolCallId);
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(authorizationHighWater).toBe(1);
+    expect(executionHighWater).toBe(3);
+    expect(completionOrder).toEqual([
+      "/tmp/read_2",
+      "/tmp/read_1",
+      "/tmp/read_0",
+    ]);
+    expect(committedOrder).toEqual([
+      "parallel_0",
+      "parallel_1",
+      "parallel_2",
+    ]);
+    expect(
+      requests[1]?.messages
+        .filter((message) => message.role === "tool")
+        .map((message) => message.tool_call_id),
+    ).toEqual(["parallel_0", "parallel_1", "parallel_2"]);
+  });
+
+  it("uses a write tool as a barrier between parallel read groups", async () => {
+    const events: string[] = [];
+    const tools: ToolDefinition[] = [
+      testTools[0]!,
+      {
+        type: "function",
+        function: {
+          name: "file_write",
+          description: "Write file",
+          parameters: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["path", "content"],
+          },
+        },
+      },
+    ];
+    let modelCalls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "read, write, then verify" }],
+      modelProfile,
+      {
+        tools,
+        maxParallelToolCalls: 2,
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            if (modelCalls === 1) {
+              return {
+                content: null,
+                finishReason: "tool_calls",
+                toolCalls: [
+                  toolCall("read_0", "file_list", { path: "/tmp/read_0" }),
+                  toolCall("read_1", "file_list", { path: "/tmp/read_1" }),
+                  toolCall("write_0", "file_write", {
+                    path: "/tmp/report.md",
+                    content: "report",
+                  }),
+                  toolCall("verify_0", "file_list", { path: "/tmp/verify_0" }),
+                  toolCall("verify_1", "file_list", { path: "/tmp/verify_1" }),
+                ],
+              };
+            }
+            return {
+              content: "barrier complete",
+              finishReason: "stop",
+              toolCalls: [],
+            };
+          },
+        },
+        toolExecutor: {
+          async execute(request) {
+            const id = String(
+              request.args.path ?? request.args.content ?? request.toolName,
+            );
+            events.push(`start:${id}`);
+            await testDelay(request.toolName === "file_write" ? 2 : 5);
+            events.push(`end:${id}`);
+            return { ok: true, result: { id } };
+          },
+          getRegistry() {
+            return createBuiltInSourceRegistry();
+          },
+          hasTool() {
+            return true;
+          },
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    const writeStart = events.indexOf("start:/tmp/report.md");
+    const writeEnd = events.indexOf("end:/tmp/report.md");
+    expect(writeStart).toBeGreaterThan(events.indexOf("end:/tmp/read_0"));
+    expect(writeStart).toBeGreaterThan(events.indexOf("end:/tmp/read_1"));
+    expect(events.indexOf("start:/tmp/verify_0")).toBeGreaterThan(writeEnd);
+    expect(events.indexOf("start:/tmp/verify_1")).toBeGreaterThan(writeEnd);
+  });
+
+  it("drains started parallel reads and never admits queued calls after cancellation", async () => {
+    const controller = new AbortController();
+    const started: string[] = [];
+    const settled: string[] = [];
+    const run = runAgentLoop(
+      [{ role: "user", content: "read five directories" }],
+      modelProfile,
+      {
+        signal: controller.signal,
+        tools: testTools,
+        maxParallelToolCalls: 2,
+        chatClient: {
+          async complete() {
+            return {
+              content: null,
+              finishReason: "tool_calls",
+              toolCalls: Array.from({ length: 5 }, (_, index) =>
+                toolCall(`cancel_${index}`, "file_list", {
+                  path: `/tmp/cancel_${index}`,
+                }),
+              ),
+            };
+          },
+        },
+        toolExecutor: {
+          async execute(request, options) {
+            const path = String(request.args.path);
+            started.push(path);
+            await waitForTestAbort(options?.signal);
+            await testDelay(5);
+            settled.push(path);
+            throw options?.signal?.reason;
+          },
+          getRegistry() {
+            return createBuiltInSourceRegistry();
+          },
+          hasTool() {
+            return true;
+          },
+        },
+      },
+    );
+
+    await waitForTestCondition(() => started.length === 2);
+    controller.abort(new Error("user canceled"));
+    const result = await run;
+
+    expect(result.status).toBe("canceled");
+    expect(started).toEqual(["/tmp/cancel_0", "/tmp/cancel_1"]);
+    expect(settled).toEqual(["/tmp/cancel_0", "/tmp/cancel_1"]);
+    expect(everyAssistantToolCallHasResult(result.messages)).toBe(true);
+  });
+
   it("keeps paused multi-tool histories provider-valid by not leaving unmatched tool calls", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
@@ -919,7 +1218,80 @@ describe("agent loop", () => {
 
     expect(result.status).toBe("paused");
     expect(result.toolCallsExecuted).toBe(4);
+    expect(
+      result.messages.filter(
+        (message) =>
+          message.role === "tool" &&
+          (message.tool_call_id === "provider_call_first" ||
+            message.tool_call_id === "provider_call_second"),
+      ),
+    ).toHaveLength(1);
     expect(everyAssistantToolCallHasResult(result.messages)).toBe(true);
+  });
+
+  it("defers strategy notes until every committed tool result in the batch", async () => {
+    let modelCalls = 0;
+    let finalRequest: ChatCompletionRequest | undefined;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "inspect several directories" }],
+      modelProfile,
+      {
+        tools: testTools,
+        toolExecutor: createToolExecutor(),
+        chatClient: {
+          async complete(request) {
+            modelCalls += 1;
+            if (modelCalls <= 3) {
+              return toolCallResponse(
+                `warmup_${modelCalls}`,
+                `/tmp/warmup_${modelCalls}`,
+              );
+            }
+            if (modelCalls === 4) {
+              return {
+                content: null,
+                finishReason: "tool_calls",
+                toolCalls: [
+                  toolCall("batch_first", "file_list", {
+                    path: "/tmp/first",
+                  }),
+                  toolCall("batch_second", "file_list", {
+                    path: "/tmp/second",
+                  }),
+                ],
+              };
+            }
+            finalRequest = request;
+            return {
+              content: "inspection complete",
+              finishReason: "stop",
+              toolCalls: [],
+            };
+          },
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(everyAssistantToolCallHasResult(result.messages)).toBe(true);
+    const firstResultIndex = finalRequest!.messages.findIndex(
+      (message) =>
+        message.role === "tool" &&
+        message.tool_call_id === "batch_first",
+    );
+    const secondResultIndex = finalRequest!.messages.findIndex(
+      (message) =>
+        message.role === "tool" &&
+        message.tool_call_id === "batch_second",
+    );
+    const strategyNoteIndex = finalRequest!.messages.findIndex(
+      (message) =>
+        message.role === "system" &&
+        message.content.startsWith("Strategy guard warning"),
+    );
+    expect(firstResultIndex).toBeGreaterThanOrEqual(0);
+    expect(secondResultIndex).toBeGreaterThan(firstResultIndex);
+    expect(strategyNoteIndex).toBeGreaterThan(secondResultIndex);
   });
 
   it("blocks shell fallback after chrome_bookmarks_read has returned structured data", async () => {
@@ -1460,6 +1832,77 @@ describe("agent loop", () => {
       nextAction:
         "Checkpoint interval reached; state saved and execution continues automatically.",
     });
+  });
+
+  it("resumes from the replayed surface and rejects checkpoint message drift", async () => {
+    const first = await runAgentLoop(
+      [{ role: "user", content: "first request" }],
+      modelProfile,
+      {
+        runId: "run_surface_resume",
+        chatClient: {
+          async complete() {
+            return {
+              content: "first answer",
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      },
+    );
+    expect(first.contextSurface).toBeDefined();
+
+    const requests: ChatCompletionRequest[] = [];
+    const resumed = await runAgentLoop(
+      [],
+      modelProfile,
+      {
+        runId: "run_surface_resume",
+        resumeMessages: first.messages,
+        resumeContextSurface: first.contextSurface,
+        chatClient: {
+          async complete(request) {
+            requests.push(request);
+            return {
+              content: "second answer",
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      },
+    );
+
+    expect(requests[0]?.messages).toEqual(first.messages);
+    expect(resumed.contextSurface?.events.length).toBeGreaterThan(
+      first.contextSurface?.events.length ?? 0,
+    );
+    await expect(
+      runAgentLoop([], modelProfile, {
+        runId: "run_surface_resume",
+        resumeMessages: [
+          ...first.messages.slice(0, -1),
+          { role: "assistant", content: "tampered" },
+        ],
+        resumeContextSurface: first.contextSurface,
+        chatClient: {
+          async complete() {
+            return {
+              content: "unreachable",
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      }),
+    ).rejects.toThrow(/parity/i);
   });
 
   it("pauses when the model keeps hitting the same class of tool failure after recovery", async () => {
@@ -2507,6 +2950,56 @@ function everyAssistantToolCallHasResult(
   }
 
   return true;
+}
+
+function toolCall(
+  id: string,
+  name: string,
+  args: Record<string, unknown>,
+): ToolCall {
+  return {
+    id,
+    type: "function",
+    function: {
+      name,
+      arguments: JSON.stringify(args),
+    },
+  };
+}
+
+function testDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForTestCondition(
+  predicate: () => boolean,
+): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for AgentLoop test condition.");
+    }
+    await testDelay(1);
+  }
+}
+
+async function waitForTestAbort(
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!signal || signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
+function createBuiltInSourceRegistry(): ReturnType<
+  typeof createDynamicToolRegistry
+> {
+  return {
+    getSource() {
+      return "built-in";
+    },
+  } as unknown as ReturnType<typeof createDynamicToolRegistry>;
 }
 
 function createToolExecutor(

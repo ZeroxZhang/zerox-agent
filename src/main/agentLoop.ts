@@ -1,4 +1,7 @@
-import type { AgentToolExecutor } from "./agentToolExecutor";
+import type {
+  AgentToolExecutionResult,
+  AgentToolExecutor,
+} from "./agentToolExecutor";
 import { createContextManager, type ContextManager } from "./contextManager";
 import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import { NEVER_COMPACT_MARKER } from "../shared/compactionMarkers";
@@ -22,6 +25,10 @@ import type {
   RuntimeToolAuthorizationTask,
   ToolAuthorizationService,
 } from "./toolAuthorizationService";
+import {
+  createToolRuntime,
+  type ToolRuntimeOutcome,
+} from "./toolRuntime";
 import type { ToolRuntimeEvent } from "./dynamicToolRegistry";
 import {
   buildAgentSystemPrompt,
@@ -31,7 +38,11 @@ import {
 import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
-import { getToolCapability } from "../shared/agentToolCapabilities";
+import {
+  getToolCapability,
+  getToolConcurrencyMode,
+  type ToolConcurrencyMode,
+} from "../shared/agentToolCapabilities";
 import {
   modelServiceNoticeFromError,
   modelServiceNoticeFromFinishReason,
@@ -57,6 +68,12 @@ import {
   type AgentContextCompactionSummary,
   type AgentContextUsage,
 } from "../shared/contextUsage";
+import type { ContextSurfaceState } from "../shared/contextSurface";
+import { createContextSurface } from "./contextSurface";
+import {
+  createSerialToolPolicyAdmission,
+  scheduleToolBatch,
+} from "./toolBatchScheduler";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -84,7 +101,9 @@ export type AgentLoopOptions = {
   pauseOnTurnLimit?: boolean;
   pauseOnStrategyGuard?: boolean;
   resumeMessages?: ChatMessage[];
+  resumeContextSurface?: ContextSurfaceState;
   initialToolCallsExecuted?: number;
+  maxParallelToolCalls?: number;
   pauseOnFailureLoop?: boolean;
   contextManager?: ContextManager;
   /** @deprecated Kept for caller compatibility. Token usage is telemetry-only. */
@@ -133,6 +152,7 @@ export type AgentLoopOptions = {
 
 export type AgentLoopCheckpoint = {
   messages: ChatMessage[];
+  contextSurface: ContextSurfaceState;
   turns: number;
   toolCallsExecuted: number;
   nextAction: string;
@@ -147,6 +167,9 @@ export type AgentLoopContextCompaction = {
   compactedTokens: number;
   tokenBudget: number;
   strategy: AgentContextCompactionSummary["strategy"];
+  surfaceReplacementId?: string;
+  shadowedNodeCount?: number;
+  sourceNodeCount?: number;
 };
 
 export type AgentLoopStrategyGuardEvent = {
@@ -165,6 +188,25 @@ export type AgentLoopToolEvent = {
   workspaceRunId?: string;
   resultRef?: string;
   resultBytes?: number;
+};
+
+type PreparedAgentToolCall = {
+  toolCall: ToolCall;
+  toolName: string;
+  args: Record<string, unknown> | null;
+  signature: string | null;
+  mode: ToolConcurrencyMode;
+  registeredToolSource: string | null;
+};
+
+type ExecutedAgentToolCall = {
+  prepared: PreparedAgentToolCall;
+  args: Record<string, unknown> | null;
+  toolEventBase: AgentLoopToolEvent;
+  runtimeOutcome?: ToolRuntimeOutcome;
+  transitionInvocation?: (
+    transition: Omit<ToolInvocationTransition, "at"> & { at?: string },
+  ) => void;
 };
 
 export type AgentLoopContinuation = {
@@ -195,6 +237,7 @@ export type AgentLoopResult = {
   tokensConsumed?: number;
   tokensEstimated?: boolean;
   contextUsage?: AgentContextUsage;
+  contextSurface?: ContextSurfaceState;
   continuation?: AgentLoopContinuation;
   modelServiceNotice?: ModelServiceNotice;
 };
@@ -230,7 +273,9 @@ export async function runAgentLoop(
     workspaceRunId,
     pauseOnStrategyGuard = false,
     resumeMessages,
+    resumeContextSurface,
     initialToolCallsExecuted = 0,
+    maxParallelToolCalls = 4,
     pauseOnFailureLoop = false,
     contextManager = createContextManager(),
     compactionStrategy,
@@ -256,12 +301,8 @@ export async function runAgentLoop(
 
   async function emitCheckpoint(nextAction: string): Promise<void> {
     await onCheckpoint?.({
-      messages: messages.map((message) => ({
-        ...message,
-        ...(message.tool_calls
-          ? { tool_calls: message.tool_calls.map((call) => ({ ...call, function: { ...call.function } })) }
-          : {}),
-      })),
+      messages: contextSurface.messages(),
+      contextSurface: contextSurface.snapshot(),
       turns: turns + 1,
       toolCallsExecuted,
       nextAction,
@@ -271,16 +312,16 @@ export async function runAgentLoop(
   }
 
   const toolDefinitions = customTools ?? buildToolDefinitions();
-  const messages: ChatMessage[] = resumeMessages ? [...resumeMessages] : [];
+  const initialSurfaceMessages: ChatMessage[] = [];
   // Anchor date to loop creation, interpreted in the user's system timezone.
   const loopTimeZone = getSystemTimeZone();
   const loopDate = formatDateInTimeZone(new Date(), loopTimeZone);
 
   if (!resumeMessages) {
     if (systemPrompt) {
-      messages.push({ role: "system", content: systemPrompt });
+      initialSurfaceMessages.push({ role: "system", content: systemPrompt });
     } else {
-      messages.push({
+      initialSurfaceMessages.push({
         role: "system",
         content: buildAgentSystemPrompt({
           modelId: modelProfile.model,
@@ -290,7 +331,54 @@ export async function runAgentLoop(
       });
     }
 
-    messages.push(...initialMessages);
+    initialSurfaceMessages.push(...initialMessages);
+  } else {
+    initialSurfaceMessages.push(...resumeMessages);
+  }
+  const contextSurface = createContextSurface({
+    runId: runId ?? taskId ?? requestId ?? "agent_loop",
+    ...(resumeContextSurface
+      ? {
+          state: resumeContextSurface,
+          expectedMessages: initialSurfaceMessages,
+        }
+      : { initialMessages: initialSurfaceMessages }),
+    estimateMessageTokens: (message) =>
+      contextManager.estimateTokens([message]),
+  });
+  const messages: ChatMessage[] = contextSurface.messages();
+
+  function refreshMessagesFromSurface(): void {
+    messages.splice(0, messages.length, ...contextSurface.messages());
+  }
+
+  function appendMessage(message: ChatMessage): ChatMessage {
+    const event = contextSurface.append(message);
+    messages.push(event.message);
+    return messages.at(-1)!;
+  }
+
+  function insertMessage(index: number, message: ChatMessage): void {
+    const event = contextSurface.insert(index, message);
+    messages.splice(index, 0, event.message);
+  }
+
+  function replaceSurface(
+    replacement: ChatMessage[],
+    input: {
+      reason:
+        | "summarize"
+        | "rebuild"
+        | "summarize-degraded"
+        | "message-integrity"
+        | "tool-batch-trim";
+      strategy?: "summarize" | "rebuild" | "summarize-degraded";
+      checkpointRef?: string;
+    },
+  ) {
+    const event = contextSurface.replace(replacement, input);
+    refreshMessagesFromSurface();
+    return event;
   }
 
   let summary = "";
@@ -311,10 +399,31 @@ export async function runAgentLoop(
     kind: string;
     count: number;
   } | null = null;
+  const currentToolFailureStreak = () => toolFailureStreak;
+  const currentLoopStatus = (): AgentLoopResult["status"] => status;
   let toolFailureLoopRecoveryAttempts = 0;
   const toolCallCounts = new Map<string, number>();
   const emittedStrategyGuards = new Set<string>();
   const successfulToolNames = new Set<string>();
+  const toolRuntime = createToolRuntime({
+    authorizationService: toolAuthorizationService,
+    toolExecutor,
+    guards: [
+      {
+        name: "native_fallback",
+        evaluate(context) {
+          const reason = rejectNativeToolFallback({
+            toolName: context.request.toolName,
+            args: context.request.args,
+            successfulToolNames,
+          });
+          return reason
+            ? { allowed: false as const, reason }
+            : { allowed: true as const };
+        },
+      },
+    ],
+  });
   // Exploration dedup: track successful read-class calls per run so
   // cross-turn duplicate exploration is surfaced to the model instead of
   // silently burning turns (observed in production: same files re-read
@@ -335,7 +444,7 @@ export async function runAgentLoop(
   function estimateConsumedTokens(): number {
     return cumulativeTokensConsumed > 0
       ? cumulativeTokensConsumed
-      : Math.max(1, contextManager.estimateTokens(messages));
+      : Math.max(1, contextSurface.estimatedTokens());
   }
 
   function areConsumedTokensEstimated(): boolean {
@@ -358,7 +467,7 @@ export async function runAgentLoop(
     if (repairs.length === 0) {
       return repairs;
     }
-    messages.splice(0, messages.length, ...sanitized);
+    replaceSurface(sanitized, { reason: "message-integrity" });
     return repairs;
   }
 
@@ -369,7 +478,12 @@ export async function runAgentLoop(
     const turnTokens = hasReportedUsage
       ? (response.usage?.inputTokens ?? 0) +
         (response.usage?.outputTokens ?? 0)
-      : estimateCompletionTokens(messages, response, contextManager);
+      : estimateCompletionTokens(
+          contextSurface.messages(),
+          response,
+          contextManager,
+          contextSurface.estimatedTokens(),
+        );
     if (!hasReportedUsage) {
       cumulativeTokensEstimated = true;
     }
@@ -380,7 +494,7 @@ export async function runAgentLoop(
     const usage = createAgentContextUsage({
       estimatedTokens,
       tokenBudget: contextTokenBudget,
-      messageCount: messages.length,
+      messageCount: contextSurface.stats().visibleMessageCount,
       compactionCount: contextCompactionCount,
       ...(modelProfile.contextWindow
         ? { contextWindow: modelProfile.contextWindow }
@@ -396,7 +510,7 @@ export async function runAgentLoop(
   }
 
   async function compactMessagesBeforeModelRequest() {
-    const estimatedTokens = contextManager.estimateTokens(messages);
+    const estimatedTokens = contextSurface.estimatedTokens();
     if (estimatedTokens <= contextTokenBudget) {
       reportContextUsage(estimatedTokens);
       return;
@@ -409,17 +523,25 @@ export async function runAgentLoop(
     // exists — byte-equivalent to the legacy path unless a rebuild happens.
     if (compactionStrategy) {
       const result = await compactionStrategy.compact({
-        messages: [...messages],
+        messages: contextSurface.messages(),
         budget: contextTokenBudget,
         runId: runId ?? taskId ?? requestId ?? modelProfile.model,
+        estimatedTokens,
+        surfaceNodeIds: contextSurface.visibleNodeIds(),
         protectedMarkers: [NEVER_COMPACT_MARKER],
       });
       if (!result.compacted) {
         reportContextUsage(estimatedTokens);
         return;
       }
-      messages.splice(0, messages.length, ...result.messages);
-      const compactedTokens = contextManager.estimateTokens(messages);
+      const replacement = replaceSurface(result.messages, {
+        reason: result.strategy,
+        strategy: result.strategy,
+        ...(result.checkpointRef
+          ? { checkpointRef: result.checkpointRef }
+          : {}),
+      });
+      const compactedTokens = contextSurface.estimatedTokens();
       contextCompactionCount += 1;
       lastContextCompaction = {
         strategy: result.strategy,
@@ -436,22 +558,33 @@ export async function runAgentLoop(
         compactedTokens,
         tokenBudget: contextTokenBudget,
         strategy: result.strategy,
+        surfaceReplacementId: replacement.id,
+        shadowedNodeCount: replacement.shadowedNodeIds.length,
+        sourceNodeCount: replacement.sourceNodeIds.length,
       });
       reportContextUsage(compactedTokens);
       return;
     }
 
+    const surfaceMessages = contextSurface.messages();
     const compacted = contextManager.compressMessages(
-      messages,
+      surfaceMessages,
       contextTokenBudget,
+      estimatedTokens,
     );
-    if (compacted.length === originalMessageCount && compacted === messages) {
+    if (
+      compacted.length === originalMessageCount &&
+      compacted === surfaceMessages
+    ) {
       reportContextUsage(estimatedTokens);
       return;
     }
 
-    messages.splice(0, messages.length, ...compacted);
-    const compactedTokens = contextManager.estimateTokens(messages);
+    const replacement = replaceSurface(compacted, {
+      reason: "summarize",
+      strategy: "summarize",
+    });
+    const compactedTokens = contextSurface.estimatedTokens();
     contextCompactionCount += 1;
     lastContextCompaction = {
       strategy: "summarize",
@@ -468,6 +601,9 @@ export async function runAgentLoop(
       compactedTokens,
       tokenBudget: contextTokenBudget,
       strategy: "summarize",
+      surfaceReplacementId: replacement.id,
+      shadowedNodeCount: replacement.shadowedNodeIds.length,
+      sourceNodeCount: replacement.sourceNodeIds.length,
     });
     reportContextUsage(compactedTokens);
   }
@@ -489,7 +625,7 @@ export async function runAgentLoop(
           break;
         }
       }
-      messages.splice(lastUserIdx + 1, 0, { role: "user", content: reminder });
+      insertMessage(lastUserIdx + 1, { role: "user", content: reminder });
     }
   }
 
@@ -511,12 +647,12 @@ export async function runAgentLoop(
     fallbackSummary: string;
   }) {
     onTurn?.(turns, "finalizing");
-    messages.push({
+    appendMessage({
       role: "system",
       content: options.prompt,
     });
     injectSystemReminders({
-      estimatedTokens: contextManager.estimateTokens(messages),
+      estimatedTokens: contextSurface.estimatedTokens(),
       tokenBudget: contextTokenBudget,
     });
     await compactMessagesBeforeModelRequest();
@@ -525,7 +661,7 @@ export async function runAgentLoop(
     try {
       const response = await raceWithCancellation(completeModelRequest({
         ...modelProfile,
-        messages: [...messages],
+        messages: contextSurface.messages(),
         ...(signal ? { signal } : {}),
       }, turns + 1), signal);
 
@@ -534,7 +670,7 @@ export async function runAgentLoop(
       if (response.content) {
         summary = `${options.summaryPrefix}\n\n${response.content}`;
         status = "succeeded";
-        messages.push({
+        appendMessage({
           role: "assistant",
           content: response.content,
         });
@@ -698,10 +834,10 @@ export async function runAgentLoop(
 
       onTurn?.(turns, "executing");
       injectSystemReminders({
-        estimatedTokens: contextManager.estimateTokens(messages),
+        estimatedTokens: contextSurface.estimatedTokens(),
         tokenBudget: contextTokenBudget,
         loopSignature: lastExecutedToolSignature,
-        loopCount: toolFailureStreak?.count,
+        loopCount: currentToolFailureStreak()?.count,
         // Only signal "execution" on the first turn after planning,
         // so mode_transition fires exactly once at the boundary.
         mode: turns === 0 ? "planning" : turns === 1 ? "execution" : undefined,
@@ -711,7 +847,7 @@ export async function runAgentLoop(
 
       const response = await raceWithCancellation(completeModelRequest({
         ...modelProfile,
-        messages: [...messages],
+        messages: contextSurface.messages(),
         tools: toolDefinitions,
         tool_choice: "auto",
         ...(signal ? { signal } : {}),
@@ -733,7 +869,7 @@ export async function runAgentLoop(
           response.content?.trim() ||
           response.reasoningContent?.trim() ||
           modelServiceNotice.message;
-        messages.push({ role: "assistant", content: partialContent });
+        appendMessage({ role: "assistant", content: partialContent });
         status = "paused";
         continuation = {
           reason: continuationReasonForNotice(modelServiceNotice),
@@ -748,14 +884,14 @@ export async function runAgentLoop(
       if (!response.toolCalls.length && response.content) {
         summary = response.content;
         status = "succeeded";
-        messages.push({ role: "assistant", content: response.content });
+        appendMessage({ role: "assistant", content: response.content });
         break;
       }
 
       if (!response.toolCalls.length && response.reasoningContent?.trim()) {
         summary = buildFinalReplyFromReasoningContent(response.reasoningContent);
         status = "succeeded";
-        messages.push({
+        appendMessage({
           role: "assistant",
           content: summary,
         });
@@ -773,6 +909,10 @@ export async function runAgentLoop(
           } catch {
             // Keep the existing parse-error path below.
           }
+          const registeredToolSource = getToolSource(
+            toolExecutor,
+            toolCall.function.name,
+          );
 
           return {
             toolCall,
@@ -781,7 +921,13 @@ export async function runAgentLoop(
             signature: args
               ? createToolCallSignature(toolCall.function.name, args)
               : null,
-          };
+            mode: getToolConcurrencyMode(
+              toolCall.function.name,
+              args,
+              registeredToolSource,
+            ),
+            registeredToolSource,
+          } satisfies PreparedAgentToolCall;
         });
         const repeatedToolCall =
           preparedToolCalls.length === 1 &&
@@ -807,235 +953,86 @@ export async function runAgentLoop(
         }
 
         // Add assistant message with tool calls
-        messages.push({
+        appendMessage({
           role: "assistant",
           content: response.content ?? "",
           tool_calls: response.toolCalls,
         });
-        const assistantToolMessage = messages.at(-1);
+        const assistantToolMessageIndex = messages.length - 1;
         const processedToolCalls: ToolCall[] = [];
 
-        // Process each tool call
-        for (const preparedToolCall of preparedToolCalls) {
-          // v3.6.0: Check cancel signal inside inner tool-call iteration loop
-          // (CORE-06). Previously cancel only checked at turn boundaries,
-          // allowing the loop to continue processing tools after a cancel.
-          if (signal?.aborted) {
-            status = "canceled";
-            summary = "Agent loop canceled during tool execution.";
-            break;
-          }
-          const { toolCall, toolName, signature } = preparedToolCall;
-          const toolEventBase = buildToolEvent({
-            toolCallId: toolCall.id,
-            runId: taskId,
-            sessionId: runContext?.sessionId,
-            requestId,
-            workspaceRunId,
-          });
-          if (!preparedToolCall.args) {
-            messages.push({
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify({
-                type: "tool_result",
-                tool: toolCall.function.name,
-                ok: false,
-                error: "参数 JSON 解析失败",
-              }),
-            });
-            processedToolCalls.push(toolCall);
-            rememberToolFailure(toolName, "参数 JSON 解析失败");
-            onToolResult?.(toolName, false, {
+        const policyAdmission = createSerialToolPolicyAdmission();
+        let firstDispatchError: unknown;
+        let stopRemainingToolBatch = false;
+        const pendingBatchSystemMessages: ChatMessage[] = [];
+
+        const commitToolExecution = async (
+          execution: ExecutedAgentToolCall,
+        ): Promise<void> => {
+          const {
+            prepared,
+            args,
+            toolEventBase,
+            runtimeOutcome,
+            transitionInvocation,
+          } = execution;
+          const { toolCall, toolName, signature } = prepared;
+          if (!args || !runtimeOutcome || !transitionInvocation) {
+            const parseFailure: AgentToolExecutionResult = {
               ok: false,
               error: "参数 JSON 解析失败",
-            }, toolEventBase);
-            continue;
-          }
-
-          const args = applyRunContextDefaultsToToolArgs(
-            toolName,
-            preparedToolCall.args,
-            runContext,
-          );
-          const registeredToolSource = getToolSource(toolExecutor, toolName);
-          const toolSource = registeredToolSource ?? "built-in";
-          let toolInvocation = createToolInvocation({
-            id: `tool_invocation_${toolCall.id}`,
-            runId: taskId ?? workspaceRunId ?? requestId ?? runContext?.runId ?? "agent_loop",
-            toolCallId: toolCall.id,
-            toolName,
-            source: toolSource,
-            args,
-            createdAt: new Date().toISOString(),
-          });
-          const emitToolInvocation = () => {
-            onToolInvocation?.(toolInvocation);
-          };
-          const transitionInvocation = (
-            transition: Omit<ToolInvocationTransition, "at"> & { at?: string },
-          ) => {
-            toolInvocation = transitionToolInvocation(toolInvocation, {
-              ...transition,
-              at: transition.at ?? new Date().toISOString(),
-            });
-            emitToolInvocation();
-          };
-          emitToolInvocation();
-          transitionInvocation({ status: "visible" });
-
-          const nativeFallbackRejection = rejectNativeToolFallback({
-            toolName,
-            args,
-            successfulToolNames,
-          });
-          if (nativeFallbackRejection) {
-            transitionInvocation({
-              status: "error",
-              error: nativeFallbackRejection,
-            });
-            const rejectedResult = {
-              ok: false as const,
-              error: nativeFallbackRejection,
             };
-            messages.push({
+            appendMessage({
               role: "tool",
               tool_call_id: toolCall.id,
-              content: serializeToolObservation({
-                tool: toolName as never,
+              name: toolName,
+              content: JSON.stringify({
+                type: "tool_result",
+                tool: toolName,
                 ok: false,
-                error: nativeFallbackRejection,
-                toolCallId: toolCall.id,
+                error: parseFailure.error,
               }),
             });
             processedToolCalls.push(toolCall);
-            rememberToolFailure(toolName, nativeFallbackRejection, args);
-            onToolResult?.(toolName, false, rejectedResult, toolEventBase);
-            continue;
-          }
-
-          // Authorization check (if authorizer is available)
-          if (toolAuthorizationService && taskId) {
-            const auth = await toolAuthorizationService.authorize(taskId, {
-              toolName: toolName as never,
-              ...(registeredToolSource ? { source: registeredToolSource } : {}),
-              args,
-            }, {
-              ...(signal ? { signal } : {}),
-              ...(runContext ? { runContext } : {}),
-              ...(runtimeTask ? { runtimeTask } : {}),
-              onApprovalRequested: async (request) => {
-                transitionInvocation({
-                  status: "waiting_approval",
-                  reason: request.deniedReason,
-                });
-              },
-              onApprovalResolved: async (result) => {
-                if (result.approved) {
-                  transitionInvocation({
-                    status: "authorized",
-                    reason: result.reason ?? "user approved",
-                  });
-                }
-              },
-            });
-
-            if (!auth.ok || !auth.decision.allowed) {
-              transitionInvocation({
-                status: "error",
-                error: auth.ok ? auth.decision.reason : auth.message,
-              });
-              messages.push({
-                role: "tool",
-                tool_call_id: toolCall.id,
-                content: serializeToolObservation({
-                  tool: toolName as never,
-                  ok: false,
-                  error: auth.ok
-                    ? auth.decision.reason
-                    : auth.message,
-                  toolCallId: toolCall.id,
-                }),
-              });
-              processedToolCalls.push(toolCall);
-              rememberToolFailure(
-                toolName,
-                auth.ok ? auth.decision.reason : auth.message,
-                args,
-              );
-              onToolResult?.(toolName, false, {
-                ok: false,
-                error: auth.ok ? auth.decision.reason : auth.message,
-              }, toolEventBase);
-              continue;
-            }
-            if (toolInvocation.status !== "authorized") {
-              transitionInvocation({
-                status: "authorized",
-                reason: auth.decision.reason,
-              });
-            }
-          } else {
-            transitionInvocation({
-              status: "error",
-              error: "工具授权服务未配置，已拒绝执行。",
-            });
-            messages.push({
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: serializeToolObservation({
-                tool: toolName as never,
-                ok: false,
-                error: "工具授权服务未配置，已拒绝执行。",
-                toolCallId: toolCall.id,
-              }),
-            });
-            processedToolCalls.push(toolCall);
-            rememberToolFailure(
-              toolName,
-              "工具授权服务未配置，已拒绝执行。",
-              args,
-            );
+            rememberToolFailure(toolName, parseFailure.error);
             onToolResult?.(
               toolName,
               false,
-              { ok: false, error: "工具授权服务未配置，已拒绝执行。" },
+              parseFailure,
               toolEventBase,
             );
-            continue;
+            return;
           }
 
-          onToolCall?.(toolName, args, toolEventBase);
-          // Exploration dedup: check before execution so a cross-turn
-          // duplicate read is flagged even if the call itself fails.
-          const explorationDedupCheck = explorationDedup.check(
-            toolName,
-            args,
-            turns + 1,
-          );
-          transitionInvocation({ status: "running" });
-
-          // Execute tool
-          const result = await raceWithCancellation(toolExecutor.execute({
-            toolName: toolName as never,
-            ...(registeredToolSource ? { source: registeredToolSource } : {}),
-            args,
-          }, {
-            ...(signal ? { signal } : {}),
-            ...(runContext ? { runContext } : {}),
-            ...(toolName === "shell_exec" || toolName === "test_run"
-              ? { authorizedShellCommand: String(args.command ?? "") }
-              : {}),
-            onRuntimeEvent(runtimeEvent) {
-              onToolRuntimeEvent?.(toolName, runtimeEvent, toolEventBase);
-            },
-            toolResultReadScope: {
-              ...(taskId ? { runId: taskId } : {}),
-              ...(runContext?.sessionId ? { sessionId: runContext.sessionId } : {}),
-              ...(requestId ? { requestId } : {}),
-              ...(workspaceRunId ? { workspaceRunId } : {}),
-            },
-          }), signal);
+          const result = runtimeOutcome.result;
+          if (!runtimeOutcome.dispatched) {
+            const failure = result.ok ? "工具调用未执行。" : result.error;
+            transitionInvocation({
+              status: "error",
+              error: failure,
+            });
+            appendMessage({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              name: toolName,
+              content: serializeToolObservation({
+                tool: toolName as never,
+                ok: false,
+                error: failure,
+                toolCallId: toolCall.id,
+              }),
+            });
+            processedToolCalls.push(toolCall);
+            rememberToolFailure(toolName, failure, args);
+            onToolResult?.(toolName, false, {
+              ok: false,
+              error: failure,
+              ...(!result.ok && result.errorDetails
+                ? { errorDetails: result.errorDetails }
+                : {}),
+            }, toolEventBase);
+            return;
+          }
 
           toolCallsExecuted += 1;
           const strategyGuardEvent = recordToolStrategySignals(toolName);
@@ -1060,18 +1057,15 @@ export async function runAgentLoop(
               tool: toolName as never,
               ok: result.ok,
               ...(result.ok
-                ? { result: (result as { result: Record<string, unknown> }).result }
+                ? {
+                    result: (
+                      result as { result: Record<string, unknown> }
+                    ).result,
+                  }
                 : {
-                    error: (result as { error: string }).error,
-                    ...((result as { errorDetails?: Record<string, unknown> })
-                      .errorDetails
-                      ? {
-                          errorDetails: (
-                            result as {
-                              errorDetails: Record<string, unknown>;
-                            }
-                          ).errorDetails,
-                        }
+                    error: result.error,
+                    ...(result.errorDetails
+                      ? { errorDetails: result.errorDetails }
                       : {}),
                   }),
               toolCallId: toolCall.id,
@@ -1110,20 +1104,20 @@ export async function runAgentLoop(
                     : {}),
                 },
           );
-
-          messages.push({
+          appendMessage({
             role: "tool",
             tool_call_id: toolCall.id,
+            name: toolName,
             content: serializedObservation.content,
           });
           processedToolCalls.push(toolCall);
           onToolResult?.(toolName, result.ok, result, toolResultEvent);
 
-          // Exploration dedup bookkeeping: a successful mutation may change
-          // what earlier reads observed, so it invalidates the recorded read
-          // state; a successful read extends it. The digest keeps a compact
-          // excerpt of the result so a later dedup note can carry real
-          // evidence even after transcript bounding drops the original.
+          const explorationDedupCheck = explorationDedup.check(
+            toolName,
+            args,
+            turns + 1,
+          );
           if (result.ok) {
             if (isMutatingToolCall(toolName, args)) {
               explorationDedup.recordMutation(toolName);
@@ -1137,6 +1131,9 @@ export async function runAgentLoop(
             }
           }
 
+          if (isTerminalToolBatchStatus(currentLoopStatus())) {
+            return;
+          }
           const selfFinalizingSummary = buildSelfFinalizingToolSummary(
             toolName,
             result,
@@ -1144,9 +1141,8 @@ export async function runAgentLoop(
           if (selfFinalizingSummary) {
             status = "succeeded";
             summary = selfFinalizingSummary;
-            break;
+            return;
           }
-
           if (pauseOnStrategyGuard && strategyGuardEvent) {
             status = "paused";
             continuation = {
@@ -1160,10 +1156,10 @@ export async function runAgentLoop(
               strategyGuardEvent,
               toolCallsExecuted,
             );
-            break;
+            return;
           }
           if (strategyGuardEvent) {
-            messages.push({
+            pendingBatchSystemMessages.push({
               role: "system",
               content: [
                 `Strategy guard warning (${strategyGuardEvent.code}): ${strategyGuardEvent.message}`,
@@ -1171,12 +1167,8 @@ export async function runAgentLoop(
               ].join("\n"),
             });
           }
-
-          // Exploration dedup: nudge the model when it re-reads a target it
-          // already has, and surface a guard event once duplicates pile up.
-          // Never blocks the call and never pauses the run.
           if (explorationDedupCheck?.isDuplicate && result.ok) {
-            messages.push({
+            pendingBatchSystemMessages.push({
               role: "system",
               content: buildExplorationDedupNote({
                 toolName,
@@ -1189,7 +1181,8 @@ export async function runAgentLoop(
                   : {}),
               }),
             });
-            const nextGuardThreshold = (emittedExplorationGuards + 1) * 3;
+            const nextGuardThreshold =
+              (emittedExplorationGuards + 1) * 3;
             if (explorationDedup.duplicateCount() >= nextGuardThreshold) {
               emittedExplorationGuards += 1;
               onStrategyGuard?.({
@@ -1201,7 +1194,6 @@ export async function runAgentLoop(
               });
             }
           }
-
           if (
             pauseOnFailureLoop &&
             failureLoop.shouldPause &&
@@ -1212,7 +1204,8 @@ export async function runAgentLoop(
             if (toolFailureLoopRecoveryAttempts < 1) {
               toolFailureLoopRecoveryAttempts += 1;
               toolFailureStreak = null;
-              messages.push({
+              stopRemainingToolBatch = true;
+              pendingBatchSystemMessages.push({
                 role: "system",
                 content: buildToolFailureLoopRecoveryPrompt({
                   toolName,
@@ -1223,9 +1216,8 @@ export async function runAgentLoop(
                   count: failureCount,
                 }),
               });
-              break;
+              return;
             }
-
             status = "paused";
             continuation = {
               reason: "tool_failure_loop",
@@ -1244,11 +1236,206 @@ export async function runAgentLoop(
               toolCallsExecuted,
               count: failureCount,
             });
-            break;
           }
-        }
+        };
 
-        trimUnansweredToolCalls(assistantToolMessage, processedToolCalls);
+        await scheduleToolBatch(
+          preparedToolCalls.map((prepared) => ({
+            value: prepared,
+            mode: prepared.mode,
+          })),
+          {
+            maxParallel: maxParallelToolCalls,
+            ...(signal ? { signal } : {}),
+            async execute(prepared): Promise<ExecutedAgentToolCall> {
+              const { toolCall, toolName } = prepared;
+              const toolEventBase = buildToolEvent({
+                toolCallId: toolCall.id,
+                runId: taskId,
+                sessionId: runContext?.sessionId,
+                requestId,
+                workspaceRunId,
+              });
+              if (!prepared.args) {
+                return {
+                  prepared,
+                  args: null,
+                  toolEventBase,
+                };
+              }
+              const args = applyRunContextDefaultsToToolArgs(
+                toolName,
+                prepared.args,
+                runContext,
+              );
+              return policyAdmission.run(async (release) => {
+                const registeredToolSource =
+                  prepared.registeredToolSource;
+                const toolSource =
+                  registeredToolSource ?? "built-in";
+                let toolInvocation = createToolInvocation({
+                  id: `tool_invocation_${toolCall.id}`,
+                  runId:
+                    taskId ??
+                    workspaceRunId ??
+                    requestId ??
+                    runContext?.runId ??
+                    "agent_loop",
+                  toolCallId: toolCall.id,
+                  toolName,
+                  source: toolSource,
+                  args,
+                  createdAt: new Date().toISOString(),
+                });
+                const emitToolInvocation = () => {
+                  onToolInvocation?.(toolInvocation);
+                };
+                const transitionInvocation = (
+                  transition: Omit<
+                    ToolInvocationTransition,
+                    "at"
+                  > & { at?: string },
+                ) => {
+                  toolInvocation = transitionToolInvocation(
+                    toolInvocation,
+                    {
+                      ...transition,
+                      at:
+                        transition.at ??
+                        new Date().toISOString(),
+                    },
+                  );
+                  emitToolInvocation();
+                };
+                emitToolInvocation();
+                transitionInvocation({ status: "visible" });
+
+                let runtimeOutcome: ToolRuntimeOutcome;
+                try {
+                  runtimeOutcome = await toolRuntime.execute({
+                    taskId: taskId ?? "",
+                    request: {
+                      toolName,
+                      ...(registeredToolSource
+                        ? { source: registeredToolSource }
+                        : {}),
+                      args,
+                    },
+                    authorizationOptions: {
+                      ...(runtimeTask ? { runtimeTask } : {}),
+                      onApprovalRequested: async (request) => {
+                        transitionInvocation({
+                          status: "waiting_approval",
+                          reason: request.deniedReason,
+                        });
+                      },
+                      onApprovalResolved: async (approval) => {
+                        if (approval.approved) {
+                          transitionInvocation({
+                            status: "authorized",
+                            reason:
+                              approval.reason ?? "user approved",
+                          });
+                        }
+                      },
+                    },
+                    executionOptions: {
+                      ...(signal ? { signal } : {}),
+                      ...(runContext ? { runContext } : {}),
+                      onRuntimeEvent(runtimeEvent) {
+                        onToolRuntimeEvent?.(
+                          toolName,
+                          runtimeEvent,
+                          toolEventBase,
+                        );
+                      },
+                      toolResultReadScope: {
+                        ...(taskId ? { runId: taskId } : {}),
+                        ...(runContext?.sessionId
+                          ? { sessionId: runContext.sessionId }
+                          : {}),
+                        ...(requestId ? { requestId } : {}),
+                        ...(workspaceRunId
+                          ? { workspaceRunId }
+                          : {}),
+                      },
+                    },
+                    onStage(event) {
+                      if (
+                        event.stage === "authorized" &&
+                        toolInvocation.status !== "authorized"
+                      ) {
+                        transitionInvocation({
+                          status: "authorized",
+                          reason: event.reason,
+                        });
+                      }
+                      if (event.stage === "dispatching") {
+                        onToolCall?.(
+                          toolName,
+                          args,
+                          toolEventBase,
+                        );
+                        transitionInvocation({ status: "running" });
+                        release();
+                      }
+                    },
+                  });
+                } catch (error) {
+                  transitionInvocation({
+                    status: "error",
+                    error:
+                      error instanceof Error
+                        ? error.message
+                        : String(error),
+                  });
+                  throw error;
+                }
+                return {
+                  prepared,
+                  args,
+                  toolEventBase,
+                  runtimeOutcome,
+                  transitionInvocation,
+                };
+              }, signal ? { signal } : {});
+            },
+            async commit(batchResult) {
+              if (batchResult.status === "rejected") {
+                firstDispatchError ??= batchResult.reason;
+                return;
+              }
+              if (batchResult.status === "fulfilled") {
+                await commitToolExecution(batchResult.value);
+              }
+            },
+            afterGroup() {
+              return (
+                !stopRemainingToolBatch &&
+                !isTerminalToolBatchStatus(currentLoopStatus())
+              );
+            },
+          },
+        );
+
+        if (
+          trimUnansweredToolCalls(
+            messages[assistantToolMessageIndex],
+            processedToolCalls,
+          )
+        ) {
+          replaceSurface(messages, { reason: "tool-batch-trim" });
+        }
+        for (const pendingMessage of pendingBatchSystemMessages) {
+          appendMessage(pendingMessage);
+        }
+        if (firstDispatchError && !signal?.aborted) {
+          throw firstDispatchError;
+        }
+        if (signal?.aborted) {
+          status = "canceled";
+          summary = "Agent loop canceled during tool execution.";
+        }
         if (!signal?.aborted && processedToolCalls.length > 0) {
           const reachedCheckpointInterval =
             (turns + 1) % checkpointInterval === 0;
@@ -1259,10 +1446,11 @@ export async function runAgentLoop(
           );
         }
 
-        if (status === "paused") {
+        const batchStatus = currentLoopStatus();
+        if (batchStatus === "paused") {
           break;
         }
-        if (status === "succeeded") {
+        if (batchStatus === "succeeded" || batchStatus === "canceled") {
           break;
         }
 
@@ -1311,10 +1499,11 @@ export async function runAgentLoop(
     summary,
     status,
     turns,
-    messages,
+    messages: contextSurface.messages(),
     toolCallsExecuted,
     tokensConsumed: estimateConsumedTokens(),
     tokensEstimated: areConsumedTokensEstimated(),
+    contextSurface: contextSurface.snapshot(),
     ...(latestContextUsage ? { contextUsage: latestContextUsage } : {}),
     ...(continuation ? { continuation } : {}),
     ...(modelServiceNotice ? { modelServiceNotice } : {}),
@@ -1547,17 +1736,28 @@ function buildToolEvent(input: AgentLoopToolEvent): AgentLoopToolEvent {
 function trimUnansweredToolCalls(
   assistantMessage: ChatMessage | undefined,
   processedToolCalls: ToolCall[],
-) {
+): boolean {
   if (
     !assistantMessage ||
     assistantMessage.role !== "assistant" ||
     !assistantMessage.tool_calls ||
     processedToolCalls.length >= assistantMessage.tool_calls.length
   ) {
-    return;
+    return false;
   }
 
   assistantMessage.tool_calls = processedToolCalls;
+  return true;
+}
+
+function isTerminalToolBatchStatus(
+  status: AgentLoopResult["status"],
+): boolean {
+  return (
+    status === "paused" ||
+    status === "succeeded" ||
+    status === "canceled"
+  );
 }
 
 function applyRunContextDefaultsToToolArgs(
@@ -1898,6 +2098,7 @@ function estimateCompletionTokens(
   requestMessages: ChatMessage[],
   response: ChatCompletionResponse,
   contextManager: ContextManager,
+  knownRequestTokens?: number,
 ): number {
   const output = [
     response.content ?? "",
@@ -1905,7 +2106,7 @@ function estimateCompletionTokens(
     ...response.toolCalls.map((call) => call.function.arguments),
   ].join("\n");
   return (
-    contextManager.estimateTokens(requestMessages) +
+    (knownRequestTokens ?? contextManager.estimateTokens(requestMessages)) +
     Math.max(1, Math.ceil(output.length / 4))
   );
 }

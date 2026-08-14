@@ -2,7 +2,7 @@ export const KERNEL_EVENT_VERSION = 1;
 
 export type KernelEventVersion = typeof KERNEL_EVENT_VERSION;
 
-export type KernelRunMode = "chat" | "goal";
+export type KernelRunMode = "chat" | "goal" | "scheduled_task";
 
 export type KernelRunStatus =
   | "queued"

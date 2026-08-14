@@ -1,4 +1,5 @@
 import type { AgentRunContext } from "./agentWorkspace";
+import type { ContextSurfaceState } from "./contextSurface";
 
 export type AgentExecutionStatus =
   | "queued"
@@ -32,6 +33,11 @@ export type AgentExecutionMessage = {
   content: string;
   tool_call_id?: string;
   tool_calls?: unknown[];
+  name?: string;
+  images?: Array<{
+    mediaType: string;
+    data: string;
+  }>;
 };
 
 export type AgentExecutionStep = {
@@ -58,6 +64,8 @@ export type AgentExecutionCheckpoint = {
   currentStepId?: string;
   steps: AgentExecutionStep[];
   messages: AgentExecutionMessage[];
+  /** Versioned model-facing projection provenance; absent on legacy checkpoints. */
+  contextSurface?: ContextSurfaceState;
   toolCallCount: number;
   createdAt: string;
   updatedAt: string;

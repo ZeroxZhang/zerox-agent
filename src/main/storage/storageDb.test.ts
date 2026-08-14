@@ -10,6 +10,9 @@ import { readFileSync, readdirSync } from "node:fs";
 const ALL_TABLES = [
   "sessions",
   "chat_messages",
+  "chat_session_events",
+  "chat_session_projections",
+  "chat_store_metadata",
   "runs",
   "trajectory_events",
   "checkpoints",

@@ -70,7 +70,11 @@ export function createRunRepository(storage: Storage): RunRepository {
     },
 
     updateStatus(runId: string, status: AgentRunStatus): void {
-      db.prepare("UPDATE runs SET status = ? WHERE id = ?").run(status, runId);
+      db.prepare(
+        `UPDATE runs
+         SET status = ?, payload = json_set(payload, '$.status', ?)
+         WHERE id = ?`,
+      ).run(status, status, runId);
     },
 
     appendTrajectory(
@@ -117,6 +121,71 @@ export function createRunRepository(storage: Storage): RunRepository {
         event.createdAt,
       );
       return result.changes === 1;
+    },
+
+    appendTrajectoryPublication(runId, publicationKey, event) {
+      const row = db.prepare(
+        `INSERT INTO trajectory_events (id, run_id, seq, type, payload, created_at)
+         SELECT
+           ?,
+           ?,
+           (SELECT COALESCE(MAX(seq), 0) + 1
+              FROM trajectory_events
+             WHERE run_id = ?),
+           ?,
+           json_set(
+             ?,
+             '$.sequence',
+             (SELECT COALESCE(MAX(seq), 0) + 1
+                FROM trajectory_events
+               WHERE run_id = ?)
+           ),
+           ?
+         WHERE NOT EXISTS (
+           SELECT 1
+             FROM trajectory_events
+            WHERE run_id = ?
+              AND json_extract(payload, '$.payload.publicationKey') = ?
+         )
+         RETURNING payload`,
+      ).get<{ payload: string }>(
+        event.id,
+        runId,
+        runId,
+        event.type,
+        jsonify(event),
+        runId,
+        event.createdAt,
+        runId,
+        publicationKey,
+      );
+      if (row) {
+        const stored = parseJson<AgentTrajectoryEvent>(row.payload);
+        if (!stored) {
+          throw new Error(
+            `Stored trajectory publication for run ${runId} is invalid.`,
+          );
+        }
+        return { appended: true, event: stored };
+      }
+
+      const existing = db.prepare(
+        `SELECT payload
+           FROM trajectory_events
+          WHERE run_id = ?
+            AND json_extract(payload, '$.payload.publicationKey') = ?
+          ORDER BY seq ASC
+          LIMIT 1`,
+      ).get<{ payload: string }>(runId, publicationKey);
+      const stored = existing
+        ? parseJson<AgentTrajectoryEvent>(existing.payload)
+        : null;
+      if (!stored) {
+        throw new Error(
+          `Trajectory publication ${publicationKey} for run ${runId} was not inserted or found.`,
+        );
+      }
+      return { appended: false, event: stored };
     },
 
     getTrajectory(

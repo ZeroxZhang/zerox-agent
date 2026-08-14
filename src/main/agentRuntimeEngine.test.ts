@@ -23,6 +23,7 @@ import type {
 } from "./toolResultOffloadStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
+import type { ContextSurfaceState } from "../shared/contextSurface";
 import {
   buildPrimaryRunContext,
   type AgentRunContext,
@@ -38,14 +39,17 @@ import type { ScheduledTask } from "../shared/scheduledTasks";
 import type { SkillRecord } from "../shared/skills";
 import { defineNativeToolDescriptor } from "../shared/nativeCapabilities";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
+import { KernelEventBus } from "./kernel/eventBus";
+import { createProductionKernelDriver } from "./kernel/productionKernelDriver";
 
 describe("agent runtime engine", () => {
   it("routes scheduled production execution through the shared agent loop", async () => {
     let sharedLoopCalls = 0;
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore({ ...createTask(), skillName: "" }),
       runStore: createMemoryRunStore(),
-      executionStore: createMemoryExecutionStore([]),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
       resolveSkill: async () => null,
       chatClient: { async complete() { return finalResponse("unused"); } },
       getModelProfile: async () => createModelProfile(),
@@ -53,14 +57,33 @@ describe("agent runtime engine", () => {
       toolExecutor: createToolExecutor(),
       async runLoop(_initialMessages, _profile, loopOptions) {
         sharedLoopCalls += 1;
+        const checkpointMessages = loopOptions.resumeMessages ?? [];
+        const checkpointSurface = createTestContextSurface(
+          "runtime_shared_1",
+          checkpointMessages,
+        );
+        await loopOptions.onCheckpoint?.({
+          messages: checkpointMessages,
+          contextSurface: checkpointSurface,
+          turns: 1,
+          toolCallsExecuted: loopOptions.initialToolCallsExecuted ?? 0,
+          nextAction: "continue",
+          tokensConsumed: 12,
+          tokensEstimated: true,
+        });
+        const messages = [
+          ...checkpointMessages,
+          { role: "assistant" as const, content: "shared loop complete" },
+        ];
         return {
           status: "succeeded",
           summary: "shared loop complete",
           turns: 1,
-          messages: [
-            ...(loopOptions.resumeMessages ?? []),
-            { role: "assistant", content: "shared loop complete" },
-          ],
+          messages,
+          contextSurface: createTestContextSurface(
+            "runtime_shared_1",
+            messages,
+          ),
           toolCallsExecuted: loopOptions.initialToolCallsExecuted ?? 0,
           tokensConsumed: 12,
         };
@@ -76,6 +99,181 @@ describe("agent runtime engine", () => {
       ok: true,
       run: { status: "succeeded", summary: "shared loop complete" },
     });
+    expect(
+      savedCheckpoints.some(
+        (checkpoint) => checkpoint.contextSurface?.version === 1,
+      ),
+    ).toBe(true);
+  });
+
+  it("drives scheduled lifecycle, evidence, checkpoint, and terminal events through Kernel", async () => {
+    const bus = new KernelEventBus();
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({
+        bus,
+        now: () => "2026-08-14T10:00:00.000Z",
+      }),
+      async runLoop(_initialMessages, _profile, loopOptions) {
+        loopOptions.onModelRetry?.({
+          attempt: 1,
+          maxRetries: 2,
+          delayMs: 5,
+          error: "transient",
+        });
+        loopOptions.onToolCall?.(
+          "file_read",
+          { path: "README.md" },
+          { toolCallId: "call_1" },
+        );
+        const messages = loopOptions.resumeMessages ?? [];
+        const surface = createTestContextSurface(
+          loopOptions.runId!,
+          messages,
+        );
+        await loopOptions.onCheckpoint?.({
+          messages,
+          contextSurface: surface,
+          turns: 1,
+          toolCallsExecuted: 1,
+          nextAction: "continue",
+          tokensConsumed: 10,
+          tokensEstimated: true,
+        });
+        return {
+          status: "succeeded",
+          summary: "kernel scheduled complete",
+          turns: 1,
+          messages,
+          contextSurface: surface,
+          toolCallsExecuted: 1,
+          tokensConsumed: 10,
+        };
+      },
+      createId: createSequentialId("kernel_scheduled"),
+      now: createSteppedClock("2026-08-14T10:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        status: "succeeded",
+        summary: "kernel scheduled complete",
+      },
+    });
+    if (!result.ok) return;
+    const kernelEvents = bus.history().filter(
+      (event) => event.runId === result.run.id,
+    );
+    expect(kernelEvents.map((event) => event.type)).toEqual([
+      "turn_start",
+      "retry",
+      "tool_call",
+      "checkpoint_written",
+      "run_end",
+    ]);
+    expect(kernelEvents.at(-1)).toMatchObject({
+      type: "run_end",
+      status: result.run.status,
+    });
+    expect(
+      kernelEvents.filter((event) => event.type === "run_end"),
+    ).toHaveLength(1);
+    expect(
+      kernelEvents.find((event) => event.type === "checkpoint_written"),
+    ).toMatchObject({
+      ref: expect.stringMatching(
+        /^agent-executions\/kernel_scheduled_1\/kernel_scheduled_/,
+      ),
+    });
+  });
+
+  it("passes a persisted context surface into shared-loop resume", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const executionStore = createMemoryExecutionStore(savedCheckpoints);
+    const checkpointMessages = [
+      { role: "system" as const, content: "system" },
+      { role: "user" as const, content: "resume" },
+    ];
+    const contextSurface = createTestContextSurface(
+      "run_surface_resume",
+      checkpointMessages,
+    );
+    await executionStore.save({
+      id: "checkpoint_surface_resume",
+      runId: "run_surface_resume",
+      taskId: "task_123",
+      status: "paused",
+      currentStepId: "step_resume",
+      steps: [{
+        id: "step_resume",
+        description: "resume",
+        expectedOutcome: "done",
+        state: "pending",
+        attempts: 0,
+      }],
+      messages: checkpointMessages,
+      contextSurface,
+      toolCallCount: 0,
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+    });
+    let observedSurface: ContextSurfaceState | undefined;
+    const bus = new KernelEventBus();
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore,
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({
+        bus,
+        now: () => "2026-08-14T10:00:00.000Z",
+      }),
+      async runLoop(_initialMessages, _profile, loopOptions) {
+        observedSurface = loopOptions.resumeContextSurface;
+        return {
+          status: "succeeded",
+          summary: "resumed",
+          turns: 1,
+          messages: loopOptions.resumeMessages ?? [],
+          contextSurface: loopOptions.resumeContextSurface,
+          toolCallsExecuted: 0,
+          tokensConsumed: 10,
+        };
+      },
+      createId: createSequentialId("surface_resume"),
+      now: createSteppedClock("2026-07-12T00:00:01.000Z"),
+    });
+
+    await expect(engine.resumeRun("run_surface_resume")).resolves.toMatchObject({
+      ok: true,
+      run: { status: "succeeded" },
+    });
+    expect(observedSurface).toEqual(contextSurface);
+    expect(savedCheckpoints.at(-1)?.contextSurface).toEqual(contextSurface);
+    expect(
+      bus.history().filter(
+        (event) =>
+          event.runId === "run_surface_resume" &&
+          event.type === "run_end",
+      ),
+    ).toEqual([
+      expect.objectContaining({ status: "succeeded" }),
+    ]);
   });
 
   it("preserves a provider limit on a paused scheduled run for manual recovery", async () => {
@@ -1873,6 +2071,25 @@ function createMemoryExecutionStore(
     async delete(runId) {
       return byRunId.delete(runId);
     },
+  };
+}
+
+function createTestContextSurface(
+  runId: string,
+  messages: ChatMessage[],
+): ContextSurfaceState {
+  return {
+    version: 1,
+    runId,
+    nextSequence: messages.length + 1,
+    events: messages.map((message, index) => ({
+      kind: "source" as const,
+      id: `surface:${runId}:source:${index + 1}`,
+      sequence: index + 1,
+      message: structuredClone(message),
+      estimatedTokens: message.content.length,
+      createdAt: "2026-07-12T00:00:00.000Z",
+    })),
   };
 }
 

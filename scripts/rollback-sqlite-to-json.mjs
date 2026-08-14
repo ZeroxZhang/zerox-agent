@@ -28,6 +28,7 @@ const repos = await import(path.join(root, "dist-electron/main/storage/repositor
 const goalRepo = await import(path.join(root, "dist-electron/main/storage/repositories/goalRepository.js"));
 const memRepo = await import(path.join(root, "dist-electron/main/storage/repositories/memoryRepository.js"));
 const sessRepo = await import(path.join(root, "dist-electron/main/storage/repositories/sessionRepository.js"));
+const chatRepo = await import(path.join(root, "dist-electron/main/storage/repositories/chatSessionEventRepository.js"));
 
 const dbPath = path.join(configDir, "zerox.db");
 if (!existsSync(dbPath)) {
@@ -107,14 +108,32 @@ const counts = {};
   counts.goals = rows.length;
 }
 
-// chat sessions (reconstruct messages from chat_messages)
+// chat sessions (authoritative event projection + message rows)
 {
-  const sessions = sessRepo.createSessionRepository(storage).listSessions({ kind: "chat" });
-  const out = [];
-  for (const s of sessions) {
-    const payload = s.payload ?? {};
-    const msgRows = db.prepare("SELECT payload FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC").all(s.id).map((r) => JSON.parse(r.payload));
-    out.push({ ...payload, messages: msgRows.length ? msgRows : (payload.messages ?? []) });
+  const repository = chatRepo.createChatSessionEventRepository(storage);
+  let out = repository
+    .listProjections()
+    .map((projection) => repository.getSession(projection.session.id))
+    .filter(Boolean);
+  // Compatibility with databases created before RC05 and never opened by the
+  // new runtime.
+  if (out.length === 0) {
+    const sessions = sessRepo.createSessionRepository(storage).listSessions({ kind: "chat" });
+    out = sessions.map((session) => {
+      const payload = session.payload ?? {};
+      const messages = db
+        .prepare(
+          `SELECT payload FROM chat_messages
+           WHERE session_id = ?
+           ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(session.id)
+        .map((row) => JSON.parse(row.payload));
+      return {
+        ...payload,
+        messages: messages.length ? messages : (payload.messages ?? []),
+      };
+    });
   }
   if (out.length) { freeze(path.join(configDir, "chat-sessions.json")); writeJson(path.join(configDir, "chat-sessions.json"), { schemaVersion: 1, sessions: out }); }
   counts.sessions = out.length;

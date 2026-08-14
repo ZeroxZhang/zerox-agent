@@ -162,6 +162,73 @@ describe("RebuildFromCheckpoint", () => {
     );
     storage.close();
   });
+
+  it("microcompacts only an exactly resolved regenerable tool result", async () => {
+    const storage = await createInMemoryStorage();
+    const ck = createCheckpointRepository(storage);
+    writeMarkdownCheckpoint({
+      runId: "r1",
+      goal: baseGoal(),
+      checkpointRepository: ck,
+      now: "2026-06-19T00:00:00.000Z",
+    });
+    const messages: ChatMessage[] = [
+      msg("user", "inspect"),
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call_write",
+            type: "function",
+            function: { name: "database_write", arguments: "{}" },
+          },
+          {
+            id: "call_read",
+            type: "function",
+            function: { name: "file_read", arguments: "{}" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_write",
+        content: "W".repeat(600),
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_read",
+        content: "R".repeat(600),
+      },
+    ];
+    const strategy = createRebuildFromCheckpoint({
+      contextManager,
+      checkpointRepository: ck,
+      rebuildTailTokens: 10_000,
+      regenerableToolNames: ["file_read"],
+    });
+
+    const result = await strategy.compact({
+      messages,
+      budget: 1,
+      runId: "r1",
+      protectedMarkers: [NEVER_COMPACT_MARKER],
+      surfaceNodeIds: ["source:1", "source:2", "source:3", "source:4"],
+    });
+
+    expect(
+      result.messages.find(
+        (message) => message.tool_call_id === "call_write",
+      )?.content,
+    ).toBe("W".repeat(600));
+    expect(
+      result.messages.find(
+        (message) => message.tool_call_id === "call_read",
+      )?.content,
+    ).toContain("source:4");
+    expect(result.microcompactedRefs).toEqual(["source:4"]);
+    storage.close();
+  });
 });
 
 describe("selectCompactionStrategy + flag", () => {

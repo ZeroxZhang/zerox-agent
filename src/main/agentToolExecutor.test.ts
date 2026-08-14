@@ -1,4 +1,5 @@
 import {
+  access,
   mkdir,
   mkdtemp,
   readFile,
@@ -9,13 +10,18 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentToolExecutor, getShellExecShell } from "./agentToolExecutor";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
 import type { MemoryRecord } from "../shared/memory";
 import type { SkillDiscoveryResult } from "../shared/skills";
+import {
+  createProcessSandboxProvider,
+  type ProcessSandboxPolicy,
+  type ProcessSandboxProvider,
+} from "./processSandbox";
 
 describe("agent tool executor", () => {
   let tempDir: string;
@@ -25,6 +31,7 @@ describe("agent tool executor", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -59,6 +66,109 @@ describe("agent tool executor", () => {
       executor.execute({ toolName: "slow_fixture", args: {} }),
     ).rejects.toThrow("slow_fixture timed out after 10ms");
     expect(observedAbort).toBe(true);
+  });
+
+  it("does not report timeout before an uncooperative handler settles", async () => {
+    vi.useFakeTimers();
+    const registry = createDynamicToolRegistry();
+    let release!: () => void;
+    let observedAbort = false;
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "uncooperative_fixture",
+          description: "Uncooperative fixture",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      async (_args, options) => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              observedAbort = true;
+            },
+            { once: true },
+          );
+        });
+        return { ok: true, result: { settled: true } };
+      },
+      "test",
+    );
+    const executor = createAgentToolExecutor({ registry, toolTimeoutMs: 10 });
+    let settled = false;
+    const outcome = executor
+      .execute({ toolName: "uncooperative_fixture", args: {} })
+      .then(
+        (value) => {
+          settled = true;
+          return { value };
+        },
+        (error: unknown) => {
+          settled = true;
+          return { error };
+        },
+      );
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(observedAbort).toBe(true);
+    expect(settled).toBe(false);
+
+    release();
+    await expect(outcome).resolves.toMatchObject({
+      error: expect.objectContaining({
+        message: "uncooperative_fixture timed out after 10ms.",
+      }),
+    });
+  });
+
+  it("waits for parent-canceled work to settle before returning", async () => {
+    const registry = createDynamicToolRegistry();
+    const parent = new AbortController();
+    let cleanupFinished = false;
+    registry.register(
+      {
+        type: "function",
+        function: {
+          name: "parent_cancel_fixture",
+          description: "Parent cancellation fixture",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      async (_args, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              setTimeout(() => {
+                cleanupFinished = true;
+                resolve({ ok: false, error: "canceled after cleanup" });
+              }, 20);
+            },
+            { once: true },
+          );
+        }),
+      "test",
+    );
+    const executor = createAgentToolExecutor({
+      registry,
+      toolTimeoutMs: 10_000,
+    });
+    const outcome = executor.execute(
+      { toolName: "parent_cancel_fixture", args: {} },
+      { signal: parent.signal },
+    );
+
+    parent.abort(new Error("parent stopped"));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(cleanupFinished).toBe(false);
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      error: "canceled after cleanup",
+    });
+    expect(cleanupFinished).toBe(true);
   });
 
   it("reads a local text file", async () => {
@@ -1260,6 +1370,104 @@ describe("agent tool executor", () => {
     });
   });
 
+  it("routes shell_exec through the process sandbox provider", async () => {
+    const policies: ProcessSandboxPolicy[] = [];
+    const executor = createAgentToolExecutor({
+      processSandbox: passthroughSandbox(policies),
+    });
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+
+    const result = await executor.execute(
+      {
+        toolName: "shell_exec",
+        args: { command: "printf sandboxed" },
+      },
+      {
+        runContext,
+        authorizedShellCommand: "printf sandboxed",
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        stdout: "sandboxed",
+        sandboxBackend: "seatbelt",
+        sandboxEnforcement: "write-and-network-none",
+      },
+    });
+    expect(policies).toEqual([
+      expect.objectContaining({
+        workspaceRoot: tempDir,
+        mode: "workspace_write",
+      }),
+    ]);
+  });
+
+  it("fails closed when process sandbox mode is deny", async () => {
+    const marker = path.join(tempDir, "must-not-exist.txt");
+    const executor = createAgentToolExecutor({
+      processSandbox: createProcessSandboxProvider({
+        mode: "deny",
+        platform: "darwin",
+      }),
+    });
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+    const command = `printf unsafe > ${JSON.stringify(marker)}`;
+
+    const result = await executor.execute(
+      { toolName: "shell_exec", args: { command } },
+      { runContext, authorizedShellCommand: command },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorDetails: {
+        kind: "process_sandbox_unavailable",
+        backend: "deny",
+      },
+    });
+    await expect(access(marker)).rejects.toThrow();
+  });
+
+  it("routes test_run through the process sandbox provider", async () => {
+    const policies: ProcessSandboxPolicy[] = [];
+    const executor = createAgentToolExecutor({
+      processSandbox: passthroughSandbox(policies),
+    });
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+
+    const result = await executor.execute(
+      {
+        toolName: "test_run",
+        args: { command: "printf test-sandboxed" },
+      },
+      {
+        runContext,
+        authorizedShellCommand: "printf test-sandboxed",
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        stdout: "test-sandboxed",
+        sandboxBackend: "seatbelt",
+        sandboxEnforcement: "write-and-network-none",
+      },
+    });
+    expect(policies).toHaveLength(1);
+  });
+
   it("keeps macOS zsh behavior while using a portable shell on Linux CI", () => {
     expect(getShellExecShell("darwin", "/bin/bash")).toBe("/bin/zsh");
     expect(getShellExecShell("linux", "/bin/bash")).toBe("/bin/bash");
@@ -1724,6 +1932,31 @@ describe("agent tool executor", () => {
     expect(searchOptions).toEqual([{ query: "报告", limit: 1 }]);
   });
 });
+
+function passthroughSandbox(
+  policies: ProcessSandboxPolicy[],
+): ProcessSandboxProvider {
+  return {
+    status() {
+      return {
+        available: true,
+        backend: "seatbelt",
+        enforcement: "write-and-network-none",
+      };
+    },
+    confine(argv, policy) {
+      policies.push(structuredClone(policy));
+      return {
+        argv,
+        backend: "seatbelt",
+        enforcement: "write-and-network-none",
+        denialSignatures: ["operation not permitted"],
+        writableRoots: [policy.workspaceRoot],
+        network: policy.network,
+      };
+    },
+  };
+}
 
 function createMemoryRecord(
   partial: Pick<MemoryRecord, "id" | "kind" | "title" | "content">,

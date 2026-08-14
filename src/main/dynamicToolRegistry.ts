@@ -3,13 +3,16 @@ import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { ToolResultOffloadReadScope } from "./toolResultOffloadStore";
 import { isPlanModeToolAllowed } from "./planModePolicy";
+import type { RuntimeToolAuthorizationTask } from "./toolAuthorizationService";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; error: string; errorDetails?: Record<string, unknown> };
 
 export type ToolExecutionOptions = {
+  taskId?: string;
   runContext?: AgentRunContext;
+  runtimeTask?: RuntimeToolAuthorizationTask;
   signal?: AbortSignal;
   /** Parent run/request lifecycle; remains valid after a background tool returns. */
   parentSignal?: AbortSignal;
@@ -23,6 +26,13 @@ export type ToolRuntimeEvent =
       actorId: string;
       task: string;
       status: "running";
+    }
+  | {
+      type: "read_code_subcall";
+      callId: string;
+      toolName: string;
+      status: "started" | "completed";
+      ok?: boolean;
     };
 
 export type ToolHandler = (

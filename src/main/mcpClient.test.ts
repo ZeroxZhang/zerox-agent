@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { buildMcpChildEnv, createMcpClient } from "./mcpClient";
+import type {
+  ProcessSandboxPolicy,
+  ProcessSandboxProvider,
+} from "./processSandbox";
+import { createProcessSandboxProvider } from "./processSandbox";
 
 describe("MCP child environment", () => {
   it("inherits only process essentials and explicitly configured values", () => {
@@ -30,6 +35,53 @@ describe("MCP child environment", () => {
 });
 
 describe("stdio MCP cancellation", () => {
+  it("requires process sandbox provider and policy together", () => {
+    expect(() =>
+      createMcpClient({
+        name: "invalid-sandbox-config",
+        transport: "stdio",
+        command: process.execPath,
+        processSandbox: passthroughSandbox([]),
+      }),
+    ).toThrow("must be configured together");
+  });
+
+  it("does not spawn an MCP server when the process sandbox denies execution", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "zerox-mcp-denied-"));
+    const marker = path.join(dir, "started.txt");
+    const script = path.join(dir, "server.mjs");
+    await writeFile(
+      script,
+      `import { writeFile } from "node:fs/promises"; await writeFile(${JSON.stringify(marker)}, "started");`,
+      "utf8",
+    );
+    const client = createMcpClient({
+      name: "denied-fixture",
+      transport: "stdio",
+      command: process.execPath,
+      args: [script],
+      processSandbox: createProcessSandboxProvider({
+        mode: "deny",
+        platform: "darwin",
+      }),
+      sandboxPolicy: {
+        mode: "workspace_write",
+        workspaceRoot: dir,
+        network: "allow",
+      },
+    });
+
+    try {
+      await expect(client.connect()).rejects.toThrow(
+        'MCP server "denied-fixture" failed to connect.',
+      );
+      await expect(access(marker)).rejects.toThrow();
+    } finally {
+      await client.disconnect();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reaps a child that ignores SIGTERM when initialization fails", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "zerox-mcp-init-failure-"));
     const script = path.join(dir, "server.mjs");
@@ -90,11 +142,18 @@ lines.on("line", (line) => {
 });\n`,
       "utf8",
     );
+    const sandboxPolicies: ProcessSandboxPolicy[] = [];
     const client = createMcpClient({
       name: "fixture",
       transport: "stdio",
       command: process.execPath,
       args: [script],
+      processSandbox: passthroughSandbox(sandboxPolicies),
+      sandboxPolicy: {
+        mode: "workspace_write",
+        workspaceRoot: dir,
+        network: "allow",
+      },
     });
     try {
       await client.connect();
@@ -109,6 +168,7 @@ lines.on("line", (line) => {
         ok: true,
         result: { content: "reconnected" },
       });
+      expect(sandboxPolicies).toHaveLength(2);
     } finally {
       await client.disconnect();
       await rm(dir, { recursive: true, force: true });
@@ -196,6 +256,31 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
     }
   }, 12_000);
 });
+
+function passthroughSandbox(
+  policies: ProcessSandboxPolicy[],
+): ProcessSandboxProvider {
+  return {
+    status() {
+      return {
+        available: true,
+        backend: "seatbelt",
+        enforcement: "write-and-network-none",
+      };
+    },
+    confine(argv, policy) {
+      policies.push(structuredClone(policy));
+      return {
+        argv,
+        backend: "seatbelt",
+        enforcement: "write-and-network-none",
+        denialSignatures: ["operation not permitted"],
+        writableRoots: [policy.workspaceRoot],
+        network: policy.network,
+      };
+    },
+  };
+}
 
 function isProcessAlive(pid: number): boolean {
   try {

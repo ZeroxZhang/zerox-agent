@@ -81,6 +81,35 @@ describe("P1 migration scripts round-trip", () => {
         path.join(dir, "scheduled-tasks.json"),
         JSON.stringify({ schemaVersion: 1, tasks: [{ id: "task_1", name: "Disabled daily", skillName: "noop", enabled: false, schedule: { kind: "daily", time: "09:30" }, input: {}, permissions: { filesystem: "read_only", network: "none", shell: "none", mcpServers: [] }, createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z", lastRunAt: null, nextRunAt: null }] }),
       );
+      writeFileSync(
+        path.join(dir, "chat-sessions.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          sessions: [
+            {
+              id: "chat_1",
+              title: "Migration chat",
+              summary: "hello",
+              messages: [
+                {
+                  id: "message_1",
+                  role: "user",
+                  content: "hello",
+                  createdAt: "2026-06-19T00:00:00.000Z",
+                },
+                {
+                  id: "message_2",
+                  role: "assistant",
+                  content: "world",
+                  createdAt: "2026-06-19T00:00:01.000Z",
+                },
+              ],
+              createdAt: "2026-06-19T00:00:00.000Z",
+              updatedAt: "2026-06-19T00:00:01.000Z",
+            },
+          ],
+        }),
+      );
       mkdirSync(path.join(dir, "tool-result-refs"), { recursive: true });
       writeFileSync(path.join(dir, "tool-result-refs", "tool_ref_1.json"), "raw tool output");
       writeFileSync(
@@ -133,6 +162,7 @@ describe("P1 migration scripts round-trip", () => {
       expect(migrateOut).toContain('"memory_records": 1');
       expect(migrateOut).toContain('"learning_candidates": 2');
       expect(migrateOut).toContain('"goals": 1');
+      expect(migrateOut).toContain('"chat_session_events": 1');
       expect(existsSync(path.join(dir, "zerox.db"))).toBe(true);
       const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
       try {
@@ -172,6 +202,13 @@ describe("P1 migration scripts round-trip", () => {
           status: "completed_unverified",
         });
         expect(migratedGoal).not.toHaveProperty("acceptanceCertificate");
+        expect(
+          db
+            .prepare(
+              "SELECT message_count, watermark FROM chat_session_projections WHERE session_id = ?",
+            )
+            .get("chat_1"),
+        ).toEqual({ message_count: 2, watermark: 1 });
       } finally {
         db.close();
       }
@@ -195,6 +232,18 @@ describe("P1 migration scripts round-trip", () => {
       expect(mem).toContain("hello");
       expect(readFileSync(path.join(dir, "agent-workspaces.json"), "utf8")).toContain("workspace_1");
       expect(readFileSync(path.join(dir, "scheduled-tasks.json"), "utf8")).toContain("task_1");
+      const rolledBackChat = JSON.parse(
+        readFileSync(path.join(dir, "chat-sessions.json"), "utf8"),
+      );
+      expect(rolledBackChat.sessions).toEqual([
+        expect.objectContaining({
+          id: "chat_1",
+          messages: [
+            expect.objectContaining({ id: "message_1", content: "hello" }),
+            expect.objectContaining({ id: "message_2", content: "world" }),
+          ],
+        }),
+      ]);
       expect(readFileSync(path.join(dir, "tool-result-refs", "tool_ref_1.json"), "utf8")).toBe("raw tool output");
       const learning = JSON.parse(readFileSync(path.join(dir, "agent-learning-candidates.json"), "utf8"));
       expect(learning.candidates).toEqual([

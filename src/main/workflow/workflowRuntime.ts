@@ -10,7 +10,11 @@
 // dream/distill consumes. A QuickJS-backed sandbox can replace the executor
 // behind the same `WorkflowSandbox` interface without touching callers.
 
-import type { ActorOutcome, SpawnInput } from "../actors/actorRuntime";
+import type {
+  ActorOutcome,
+  ActorRuntime,
+  SpawnInput,
+} from "../actors/actorRuntime";
 
 export interface SearchHit {
   url: string;
@@ -19,7 +23,8 @@ export interface SearchHit {
 }
 
 export interface WorkflowSandbox {
-  agent(input: SpawnInput): Promise<ActorOutcome>; // never throws; failure → error outcome
+  signal: AbortSignal;
+  agent(input: SpawnInput): Promise<ActorOutcome>;
   webfetch(url: string): Promise<string>;
   websearch(q: string): Promise<SearchHit[]>;
   parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]>;
@@ -65,9 +70,24 @@ export interface WorkflowJournal {
 export const WORKFLOW_PARALLEL_MAX = 8;
 
 export interface WorkflowHostHooks {
-  spawnActor: (input: SpawnInput) => Promise<ActorOutcome>;
-  webfetch: (url: string) => Promise<string>;
-  websearch: (q: string) => Promise<SearchHit[]>;
+  spawnActor: (
+    input: SpawnInput,
+    options: WorkflowHostOperationOptions,
+  ) => Promise<ActorOutcome>;
+  webfetch: (
+    url: string,
+    options: WorkflowHostOperationOptions,
+  ) => Promise<string>;
+  websearch: (
+    q: string,
+    options: WorkflowHostOperationOptions,
+  ) => Promise<SearchHit[]>;
+}
+
+export interface WorkflowHostOperationOptions {
+  signal: AbortSignal;
+  runId: string;
+  parentActorId?: string;
 }
 
 export interface WorkflowRuntime {
@@ -80,66 +100,162 @@ export interface WorkflowRuntime {
 export function createWorkflowRuntime(hooks: WorkflowHostHooks): WorkflowRuntime {
   const registry = new Map<string, WorkflowFn>();
 
-  function makeSandbox(opts: WorkflowOpts): WorkflowSandbox {
+  function makeSandbox(options: {
+    opts: WorkflowOpts;
+    signal: AbortSignal;
+    hostOperations: Set<Promise<unknown>>;
+    isAdmissionOpen: () => boolean;
+  }): WorkflowSandbox {
+    const hostOptions: WorkflowHostOperationOptions = {
+      signal: options.signal,
+      runId: options.opts.runId,
+      ...(options.opts.parentActorId
+        ? { parentActorId: options.opts.parentActorId }
+        : {}),
+    };
+
+    function assertAdmission(): void {
+      throwIfWorkflowAborted(options.signal);
+      if (!options.isAdmissionOpen()) {
+        throw new Error("Workflow host operation admission is closed.");
+      }
+    }
+
+    function track<T>(operation: Promise<T>): Promise<T> {
+      options.hostOperations.add(operation);
+      void operation.then(
+        () => options.hostOperations.delete(operation),
+        () => options.hostOperations.delete(operation),
+      );
+      return operation;
+    }
+
     return {
-      async agent(input: SpawnInput): Promise<ActorOutcome> {
-        try {
-          return await hooks.spawnActor(input);
-        } catch (error) {
-          return { status: "error", summary: String(error), filesTouched: [] };
-        }
+      signal: options.signal,
+      agent(input: SpawnInput): Promise<ActorOutcome> {
+        assertAdmission();
+        const operation = Promise.resolve()
+          .then(() =>
+            hooks.spawnActor(
+              {
+                ...input,
+                parentRunId: input.parentRunId ?? options.opts.runId,
+              },
+              hostOptions,
+            ),
+          )
+          .then(
+            (outcome) => {
+              throwIfWorkflowAborted(options.signal);
+              return outcome;
+            },
+            (error: unknown) => {
+              throwIfWorkflowAborted(options.signal);
+              return {
+                status: "error" as const,
+                summary: String(error),
+                filesTouched: [],
+              };
+            },
+          );
+        return track(operation);
       },
-      async webfetch(url: string): Promise<string> {
-        return hooks.webfetch(url);
+      webfetch(url: string): Promise<string> {
+        assertAdmission();
+        return track(
+          Promise.resolve()
+            .then(() => hooks.webfetch(url, hostOptions))
+            .then((result) => {
+              throwIfWorkflowAborted(options.signal);
+              return result;
+            }),
+        );
       },
-      async websearch(q: string): Promise<SearchHit[]> {
-        return hooks.websearch(q);
+      websearch(q: string): Promise<SearchHit[]> {
+        assertAdmission();
+        return track(
+          Promise.resolve()
+            .then(() => hooks.websearch(q, hostOptions))
+            .then((result) => {
+              throwIfWorkflowAborted(options.signal);
+              return result;
+            }),
+        );
       },
-      async parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {
+      parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {
+        assertAdmission();
         // Concurrency cap WORKFLOW_PARALLEL_MAX; aggregate errors (Patch 20).
-        const out: T[] = [];
-        const errors: Error[] = [];
-        for (let i = 0; i < thunks.length; i += WORKFLOW_PARALLEL_MAX) {
-          const batch = thunks.slice(i, i + WORKFLOW_PARALLEL_MAX);
-          const settled = await Promise.allSettled(batch.map((t) => t()));
-          for (const s of settled) {
-            if (s.status === "fulfilled") out.push(s.value);
-            else errors.push(s.reason instanceof Error ? s.reason : new Error(String(s.reason)));
-          }
-        }
-        if (errors.length) {
-          throw new AggregateError(errors, `parallel: ${errors.length} thunk(s) failed`);
-        }
-        return out;
-      },
-      async pipeline<T>(items: T[], ...stages: Array<(prev: unknown, item: T, i: number) => unknown>): Promise<unknown[]> {
-        const results: unknown[] = [];
-        for (let i = 0; i < items.length; i++) {
-          let prev: unknown = undefined;
-          let itemError: Error | null = null;
-          for (const stage of stages) {
-            try {
-              prev = await stage(prev, items[i]!, i);
-            } catch (error) {
-              itemError = error instanceof Error ? error : new Error(String(error));
-              if (opts.failFast) throw itemError;
-              break;
+        return track((async () => {
+          const out: T[] = [];
+          const errors: Error[] = [];
+          for (let i = 0; i < thunks.length; i += WORKFLOW_PARALLEL_MAX) {
+            assertAdmission();
+            const batch = thunks.slice(i, i + WORKFLOW_PARALLEL_MAX);
+            const settled = await Promise.allSettled(
+              batch.map(async (thunk) => {
+                assertAdmission();
+                const value = await thunk();
+                throwIfWorkflowAborted(options.signal);
+                return value;
+              }),
+            );
+            throwIfWorkflowAborted(options.signal);
+            for (const s of settled) {
+              if (s.status === "fulfilled") out.push(s.value);
+              else errors.push(s.reason instanceof Error ? s.reason : new Error(String(s.reason)));
             }
           }
-          results.push(itemError ? { error: itemError.message } : prev);
-        }
-        return results;
+          if (errors.length) {
+            throw new AggregateError(errors, `parallel: ${errors.length} thunk(s) failed`);
+          }
+          return out;
+        })());
+      },
+      pipeline<T>(items: T[], ...stages: Array<(prev: unknown, item: T, i: number) => unknown>): Promise<unknown[]> {
+        assertAdmission();
+        return track((async () => {
+          const results: unknown[] = [];
+          for (let i = 0; i < items.length; i++) {
+            assertAdmission();
+            let prev: unknown = undefined;
+            let itemError: Error | null = null;
+            for (const stage of stages) {
+              try {
+                assertAdmission();
+                prev = await stage(prev, items[i]!, i);
+                throwIfWorkflowAborted(options.signal);
+              } catch (error) {
+                throwIfWorkflowAborted(options.signal);
+                itemError = error instanceof Error ? error : new Error(String(error));
+                if (options.opts.failFast) throw itemError;
+                break;
+              }
+            }
+            results.push(itemError ? { error: itemError.message } : prev);
+          }
+          return results;
+        })());
       },
     };
   }
 
-  function makeJournal(): WorkflowJournal {
+  function makeJournal(
+    signal: AbortSignal,
+    isAdmissionOpen: () => boolean,
+  ): WorkflowJournal {
     const phases: WorkflowPhase[] = [];
     const actorSpawns: string[] = [];
+    const assertAdmission = () => {
+      throwIfWorkflowAborted(signal);
+      if (!isAdmissionOpen()) {
+        throw new Error("Workflow journal admission is closed.");
+      }
+    };
     return {
       phases,
       actorSpawns,
       phase(name: string, meta?: Record<string, unknown>) {
+        assertAdmission();
         closeRunningPhases(phases, "done");
         const existing = phases.find((p) => p.name === name && p.status === "running");
         if (existing) {
@@ -156,9 +272,11 @@ export function createWorkflowRuntime(hooks: WorkflowHostHooks): WorkflowRuntime
         });
       },
       factCapped(reason: string) {
+        assertAdmission();
         phases.push({ name: "fact_capped", startedAt: new Date().toISOString(), status: "done", meta: { reason } });
       },
       actorSpawned(actorId: string) {
+        assertAdmission();
         actorSpawns.push(actorId);
       },
     };
@@ -179,42 +297,125 @@ export function createWorkflowRuntime(hooks: WorkflowHostHooks): WorkflowRuntime
       if (!fn) {
         return { status: "error", error: `unknown workflow "${name}"`, phases: [], actorSpawns: [] };
       }
-      const journal = makeJournal();
+      const controller = new AbortController();
+      const hostOperations = new Set<Promise<unknown>>();
+      let admissionOpen = true;
+      let terminalReason: "canceled" | "deadline_exceeded" | null = null;
+      const abortFromParent = () => {
+        if (controller.signal.aborted) return;
+        terminalReason = "canceled";
+        controller.abort(
+          opts.signal?.reason ??
+            new DOMException("Workflow canceled.", "AbortError"),
+        );
+      };
+      if (opts.signal?.aborted) {
+        abortFromParent();
+      } else {
+        opts.signal?.addEventListener("abort", abortFromParent, { once: true });
+      }
+      const journal = makeJournal(
+        controller.signal,
+        () => admissionOpen,
+      );
       const result: WorkflowResult = { status: "done", phases: journal.phases, actorSpawns: journal.actorSpawns };
-      const sandbox = makeSandbox(opts);
-      const deadline = opts.deadlineMs ?? 12 * 60 * 60 * 1000;
+      const sandbox = makeSandbox({
+        opts,
+        signal: controller.signal,
+        hostOperations,
+        isAdmissionOpen: () => admissionOpen,
+      });
+      const deadline = Math.max(
+        1,
+        Math.floor(opts.deadlineMs ?? 12 * 60 * 60 * 1000),
+      );
       let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
-      let abortHandler: (() => void) | null = null;
+      let value: unknown;
+      let failure: unknown;
       try {
-        if (opts.signal?.aborted) throw new Error("canceled");
-        const value = await Promise.race([
-          fn(args, sandbox, journal),
-          new Promise<never>((_, reject) => {
-            deadlineTimer = setTimeout(() => reject(new Error("deadline")), deadline);
-            abortHandler = () => {
-              if (deadlineTimer) clearTimeout(deadlineTimer);
-              reject(new Error("canceled"));
-            };
-            opts.signal?.addEventListener("abort", abortHandler, { once: true });
-          }),
-        ]);
+        if (!controller.signal.aborted) {
+          deadlineTimer = setTimeout(() => {
+            if (controller.signal.aborted) return;
+            terminalReason = "deadline_exceeded";
+            controller.abort(
+              new Error(`Workflow deadline exceeded after ${deadline}ms.`),
+            );
+          }, deadline);
+          value = await fn(args, sandbox, journal);
+        } else {
+          failure = controller.signal.reason;
+        }
+      } catch (error) {
+        failure = error;
+      } finally {
+        admissionOpen = false;
+        await drainHostOperations(hostOperations);
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        opts.signal?.removeEventListener("abort", abortFromParent);
+      }
+
+      if (terminalReason) {
+        result.status = terminalReason;
+        result.error = errorMessage(controller.signal.reason);
+        closeRunningPhases(journal.phases, "error");
+      } else if (failure !== undefined) {
+        result.status = "error";
+        result.error = errorMessage(failure);
+        closeRunningPhases(journal.phases, "error");
+      } else {
         result.value = value;
         result.status = "done";
         closeRunningPhases(journal.phases, "done");
-      } catch (error) {
-        const msg = String(error);
-        result.status = msg === "canceled" ? "canceled" : msg === "deadline" ? "deadline_exceeded" : "error";
-        result.error = msg;
-        closeRunningPhases(journal.phases, "error");
-      } finally {
-        if (deadlineTimer) clearTimeout(deadlineTimer);
-        if (abortHandler) {
-          opts.signal?.removeEventListener("abort", abortHandler);
-        }
       }
       return result;
     },
   };
+}
+
+export function createWorkflowActorHostHook(
+  runtime: Pick<ActorRuntime, "spawn" | "wait" | "cancel">,
+): WorkflowHostHooks["spawnActor"] {
+  return async (input, options) => {
+    throwIfWorkflowAborted(options.signal);
+    const handle = runtime.spawn(input);
+    const cancelFromWorkflow = () => {
+      runtime.cancel(handle.actorId, errorMessage(options.signal.reason));
+    };
+    if (options.signal.aborted) {
+      cancelFromWorkflow();
+    } else {
+      options.signal.addEventListener("abort", cancelFromWorkflow, {
+        once: true,
+      });
+    }
+    try {
+      const outcome = await runtime.wait(handle.actorId);
+      throwIfWorkflowAborted(options.signal);
+      return outcome;
+    } finally {
+      options.signal.removeEventListener("abort", cancelFromWorkflow);
+    }
+  };
+}
+
+async function drainHostOperations(
+  hostOperations: Set<Promise<unknown>>,
+): Promise<void> {
+  while (hostOperations.size > 0) {
+    await Promise.allSettled([...hostOperations]);
+  }
+}
+
+function throwIfWorkflowAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  if (signal.reason instanceof Error) {
+    throw signal.reason;
+  }
+  throw new DOMException("Workflow canceled.", "AbortError");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? "unknown error");
 }
 
 function closeRunningPhases(

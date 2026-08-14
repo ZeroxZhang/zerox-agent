@@ -70,6 +70,17 @@ export async function runRuntimeKernel(
       return endRun(ctx, deps.bus, now, "canceled", "Agent run canceled.", summary);
     }
 
+    if (lastTurn.terminalStatus) {
+      return endRun(
+        ctx,
+        deps.bus,
+        now,
+        lastTurn.terminalStatus,
+        lastTurn.reason ?? `segment ${lastTurn.terminalStatus}`,
+        summary,
+      );
+    }
+
     let decision;
     try {
       decision = await ctx.stopPolicy.shouldStop(ctx, lastTurn);
