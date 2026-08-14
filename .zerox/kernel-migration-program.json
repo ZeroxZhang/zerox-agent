@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "programId": "chat-goal-kernel-migration-2026-08",
   "title": "Chat And Goal Production Kernel Migration",
-  "updatedAt": "2026-08-14T23:10:55.000+08:00",
+  "updatedAt": "2026-08-14T23:22:39.000+08:00",
   "sourceBaseline": {
     "release": "v3.8.2",
     "releaseCommit": "9d343ab0424e4a78287d6c38d929ee4269f5c7ec",
@@ -13,7 +13,7 @@
   "architectureDecision": ".zerox/decisions/KM01-kernel-migration-program.md",
   "status": "active",
   "activeFeatureId": null,
-  "nextFeatureId": "P86-chat-kernel-segment-adapter",
+  "nextFeatureId": "P87-chat-kernel-production-cutover",
   "maxActiveFeatures": 1,
   "migrationCompletionWorkstreamId": "KM07",
   "postMigrationGates": [
@@ -106,7 +106,7 @@
     {
       "id": "KM03",
       "title": "Chat Kernel segment adapter and persistence parity",
-      "state": "planned",
+      "state": "completed",
       "featureId": "P86-chat-kernel-segment-adapter",
       "findings": [
         "CHAT_SEGMENT_ADAPTER",

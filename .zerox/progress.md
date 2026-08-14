@@ -9996,3 +9996,31 @@
   - active-state program, harness, and whitespace checks passed.
 - P85 and KM02 are complete. The program is in controlled idle state with
   `P86-chat-kernel-segment-adapter` as the only next Feature.
+
+## 2026-08-14 - KM03 Chat Kernel Segment Adapter Started
+
+- Activated `P86-chat-kernel-segment-adapter`.
+- Accepted `.zerox/decisions/KM03-chat-kernel-segment-adapter.md`.
+- Chose a receipt-validated adapter boundary instead of wrapping AgentLoop:
+  Chat persistence and stream terminal emission must complete before the
+  adapter returns a segment and Kernel publishes `run_end`.
+- KM03 adds no ChatService dependency or production cutover; that remains
+  exclusively owned by KM04.
+
+## 2026-08-14 - KM03 Chat Kernel Segment Adapter Completed
+
+- Added `runChatKernelSegment()` as a typed `mode: "chat"` adapter.
+- Added receipt validation for domain persistence, one compatible stream
+  terminal, assistant/final-message ID parity, paused continuation durability,
+  and failed/canceled terminal activity durability.
+- Verified success, pause, failure rethrow, pre-cancel settlement, invalid
+  stream parity, message ID mismatch, missing continuation/activity, and
+  duplicate terminal rejection.
+- Verification evidence:
+  - focused gate: 3 files / 29 tests;
+  - full serial and verify gates: 269 files / 2,756 tests;
+  - Agent evaluations 26/26 and Memory evaluations 2/2;
+  - build and production JSON fallback smoke passed;
+  - program, harness, and whitespace checks passed.
+- P86 and KM03 are complete. ChatService remains on the direct path;
+  `P87-chat-kernel-production-cutover` is the only next Feature.

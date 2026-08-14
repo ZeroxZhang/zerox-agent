@@ -10,6 +10,7 @@ describe("production Kernel boundary", () => {
     const runtime = read("src/main/agentRuntimeEngine.ts");
     const goal = read("src/main/goalRuntimeEngine.ts");
     const chat = read("src/main/chatService.ts");
+    const chatAdapter = read("src/main/kernel/chatKernelSegment.ts");
 
     expect(container).toContain(
       'readFeatureFlags().ZEROX_PRODUCTION_KERNEL !== "scheduled"',
@@ -32,6 +33,9 @@ describe("production Kernel boundary", () => {
     expect(driverModeContract(runtime)).toBe(true);
     expect(goal).not.toContain("productionKernelDriver");
     expect(chat).not.toContain("productionKernelDriver");
+    expect(chatAdapter).toContain('mode: "chat"');
+    expect(chatAdapter).toContain("validateChatKernelSettlement");
+    expect(chatAdapter).toContain("input.settleFailed");
   });
 
   it("projects shared AgentLoop evidence and exact terminal parity", () => {

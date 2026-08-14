@@ -1,7 +1,40 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T23:10:55.000+08:00",
+  "updatedAt": "2026-08-14T23:22:39.000+08:00",
   "features": [
+    {
+      "id": "P86-chat-kernel-segment-adapter",
+      "priority": 116,
+      "status": "done",
+      "title": "Add a receipt-validated Chat Kernel segment adapter",
+      "files": [
+        ".zerox/decisions/KM03-chat-kernel-segment-adapter.md",
+        ".zerox/feature_list.json",
+        ".zerox/kernel-migration-program.json",
+        ".zerox/progress.md",
+        "src/main/kernel/chatKernelSegment.ts",
+        "src/main/kernel/chatKernelSegment.test.ts",
+        "src/shared/productionKernelBoundary.test.ts"
+      ],
+      "definitionOfDone": [
+        "the Chat adapter always invokes ProductionKernelDriver with chat mode and returns a typed settled result",
+        "settlement receipts prove required domain persistence and exactly one compatible Chat stream terminal before run_end",
+        "assistant-backed settlements require matching persisted and terminal final message identifiers",
+        "paused settlements require durable continuation state while canceled and failed settlements require durable terminal activity",
+        "failure and pre-abort settlement complete before run_end and preserve original errors or cancellation status",
+        "ChatService remains on its direct path until KM04 production cutover"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm test -- --run src/main/kernel/chatKernelSegment.test.ts src/main/kernel/productionKernelDriver.test.ts src/shared/productionKernelBoundary.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P85-kernel-mode-aware-production-driver",
       "priority": 115,
