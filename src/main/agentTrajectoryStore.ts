@@ -32,11 +32,6 @@ export interface AgentTrajectoryStoreOptions {
   storage?: Storage;
 }
 
-function shadowWriteError(error: unknown): void {
-  // eslint-disable-next-line no-console
-  console.warn("[storage] dual-write JSON shadow write failed:", String(error));
-}
-
 export function createAgentTrajectoryStore(
   options: AgentTrajectoryStoreOptions,
 ): AgentTrajectoryStore {
@@ -97,11 +92,9 @@ export function createAgentTrajectoryStore(
     runId: string,
     publicationKey: string,
     event: AgentTrajectoryEvent,
-    appendOptions?: { signal?: AbortSignal },
   ): Promise<{ appended: boolean; event: AgentTrajectoryEvent }> {
     const filePath = trajectoryPath(runId);
     return serializeTrajectoryMutation(filePath, async () => {
-      throwIfAborted(appendOptions?.signal);
       const existing = (
         await readRecoverableJsonl<AgentTrajectoryEvent>(filePath)
       ).find(
@@ -109,8 +102,30 @@ export function createAgentTrajectoryStore(
           candidate.payload.publicationKey === publicationKey,
       );
       if (existing) return { appended: false, event: existing };
-      await jsonImpl.append(runId, event, appendOptions);
+      await jsonImpl.append(runId, event);
       return { appended: true, event };
+    });
+  }
+
+  function appendJsonEventExact(
+    runId: string,
+    event: AgentTrajectoryEvent,
+  ): Promise<AgentTrajectoryEvent> {
+    const filePath = trajectoryPath(runId);
+    return serializeTrajectoryMutation(filePath, async () => {
+      const existing = (
+        await readRecoverableJsonl<AgentTrajectoryEvent>(filePath)
+      ).find((candidate) => candidate.id === event.id);
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(event)) {
+          throw new Error(
+            `Trajectory event id collision for run ${runId}: ${event.id}.`,
+          );
+        }
+        return existing;
+      }
+      await jsonImpl.append(runId, event);
+      return event;
     });
   }
 
@@ -121,17 +136,18 @@ export function createAgentTrajectoryStore(
   // --- sqlite / dual (hot path stays sync) ---
   const shadowWrites = new Set<Promise<void>>();
   let shadowTail: Promise<void> = Promise.resolve();
-  function enqueueShadowWrite(operation: () => Promise<unknown>): void {
-    let tracked: Promise<void>;
-    const write = shadowTail.then(operation, operation);
-    tracked = write
-      .catch(shadowWriteError)
-      .then(() => undefined)
-      .finally(() => {
-        shadowWrites.delete(tracked);
-      });
-    shadowWrites.add(tracked);
-    shadowTail = tracked;
+  function enqueueShadowWrite(operation: () => Promise<unknown>): Promise<void> {
+    const write = shadowTail.then(operation, operation).then(() => undefined);
+    shadowWrites.add(write);
+    shadowTail = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    void write.then(
+      () => shadowWrites.delete(write),
+      () => shadowWrites.delete(write),
+    );
+    return write;
   }
 
   return {
@@ -139,7 +155,7 @@ export function createAgentTrajectoryStore(
       throwIfAborted(appendOptions?.signal);
       repo.appendTrajectory(runId, event); // sync hot path
       if (backend === "dual") {
-        enqueueShadowWrite(() => jsonImpl.append(runId, event, appendOptions));
+        await enqueueShadowWrite(() => appendJsonEventExact(runId, event));
       }
       return event;
     },
@@ -151,12 +167,11 @@ export function createAgentTrajectoryStore(
         createPublicationEvent(runId, publicationKey, event),
       );
       if (backend === "dual") {
-        enqueueShadowWrite(() =>
+        await enqueueShadowWrite(() =>
           appendJsonPublicationExact(
             runId,
             publicationKey,
             result.event,
-            appendOptions,
           ),
         );
       }

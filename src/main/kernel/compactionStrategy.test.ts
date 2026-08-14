@@ -71,6 +71,31 @@ describe("SummarizeCompaction", () => {
     expect(strategy.shouldCompact({ messages: bigMessages(), budget: 500, runId: "r1", protectedMarkers: [] })).toBe(true);
     expect(strategy.shouldCompact({ messages: [msg("system", "hi")], budget: 500, runId: "r1", protectedMarkers: [] })).toBe(false);
   });
+
+  it("does not report an equivalent over-budget clone as compacted", async () => {
+    const noProgressManager = createContextManager({
+      maxTokens: 20,
+      recentTurnsToKeep: 6,
+    });
+    const strategy = createSummarizeCompaction({
+      contextManager: noProgressManager,
+    });
+    const messages = [
+      msg("system", "system"),
+      msg("user", "x".repeat(400)),
+    ];
+
+    const result = await strategy.compact({
+      messages,
+      budget: 20,
+      runId: "r_no_progress",
+      protectedMarkers: [],
+    });
+
+    expect(result.compacted).toBe(false);
+    expect(result.messages).toBe(messages);
+    expect(result.afterTokens).toBe(result.beforeTokens);
+  });
 });
 
 describe("RebuildFromCheckpoint", () => {

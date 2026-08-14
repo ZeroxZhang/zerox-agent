@@ -21,7 +21,13 @@ describe("production Kernel boundary", () => {
     expect(runtime).toContain(
       "await options.productionKernelDriver.run({",
     );
-    expect(runtime).toContain("return executeLoopSegment();");
+    expect(runtime).toContain(
+      "const result = await persistLoopResult(settled);",
+    );
+    expect(runtime).toContain(
+      "return (await executePersistedSegment()).result;",
+    );
+    expect(runtime).toContain("settleAborted(status) {");
     expect(goal).not.toContain("productionKernelDriver");
     expect(chat).not.toContain("productionKernelDriver");
   });
@@ -39,7 +45,11 @@ describe("production Kernel boundary", () => {
     expect(driver).toContain(
       "if (kernel.summary !== settledSegment.summary)",
     );
-    expect(driver).toContain("expected one new run_end event");
+    expect(driver).toContain(
+      "const unsubscribe = options.bus.subscribe((event) => {",
+    );
+    expect(driver).toContain("expected one run_end event");
+    expect(driver).not.toContain("options.bus.history()");
   });
 
   it("keeps rollback explicit and scheduled checkpoint refs resumable", () => {

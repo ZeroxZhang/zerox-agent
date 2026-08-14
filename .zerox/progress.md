@@ -9666,3 +9666,59 @@
   Kernel cutover, arbitrary Code Mode, compressed context-event segments, and
   external subagent providers require new Features and architecture decisions;
   they are not silently included in this closure.
+
+## 2026-08-14 - RC09 Post-Review Hardening Started
+
+- Reopened the completed runtime convergence program with one bounded
+  post-review workstream and one active Feature:
+  `P80-post-review-runtime-and-recovery-hardening`.
+- Independent code and security review of commit `4daf812` found no exploitable
+  security vulnerability and confirmed thirteen correctness/recovery defects
+  with 2/2 validator agreement.
+- Accepted `.zerox/decisions/RC09-post-review-hardening.md`.
+- Scope is limited to:
+  - cancellation-before-dispatch and scheduled Kernel terminal parity;
+  - pre-canceled/defaulted Code Mode, effective compaction, and resume token
+    telemetry;
+  - corrupt migration, empty/mixed rollback, orphan trajectory export, and
+    cancellation-independent dual shadow writes.
+- The verified `4daf812` baseline remains committed. RC09 fixes will be a
+  separate commit after all closure gates pass.
+
+## 2026-08-14 - RC09 Post-Review Hardening Completed
+
+- Closed all thirteen independently confirmed review findings:
+  - ToolRuntime rechecks cancellation through the final dispatch boundary.
+  - Scheduled Kernel terminal events use invocation-local subscriptions and
+    publish only after success, failure, pause, or cancellation persistence.
+  - Pre-aborted Code Mode starts no Worker, and nested workspace tools inherit
+    the run workspace root.
+  - No-progress compaction fails before a model request and writes no context
+    replacement.
+  - Scheduled checkpoints preserve cumulative token telemetry across resume.
+  - Corrupt Chat JSON cannot complete bootstrap; authoritative empty and
+    mixed-generation SQLite Chat states rollback without omission or
+    resurrection.
+  - Orphan trajectories are exported, and committed dual trajectory writes
+    await cancellation-independent, failure-visible, idempotently repairable
+    JSON shadows.
+- Final diff review found and closed one terminal-order edge before closure:
+  pre-aborted and directly thrown shared-loop outcomes now settle their final
+  checkpoint and run inside the Kernel segment before the unique `run_end`.
+- Verification evidence:
+  - P80 focused gate: 15 files / 186 tests passed.
+  - Full serial gate: 266 files / 2,719 tests passed.
+  - `npm run build` passed.
+  - `npm run verify` passed with 266 files / 2,719 tests, Agent evaluations
+    26/26, and Memory evaluations 2/2.
+  - `npm run smoke:prod` rendered the Agent Chat UI through explicit JSON
+    fallback while the native module had the Node ABI.
+  - After `electron-rebuild -f -w better-sqlite3`,
+    `npm run smoke:prod:built` rendered with SQLite loaded and no fallback;
+    `npm rebuild better-sqlite3` restored the Node ABI.
+  - Post-ABI storage gate: 2 files / 19 tests passed.
+  - Active-state `npm run program:check`, `npm run harness:check`, and
+    `git diff --check` passed before closure.
+- P80 and RC09 are complete. The runtime convergence program is closed again
+  with no active or next Feature; the verified `4daf812` baseline remains
+  unchanged and these fixes form a separate follow-up commit.

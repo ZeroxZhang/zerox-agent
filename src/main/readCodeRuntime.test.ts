@@ -216,6 +216,26 @@ describe("read Code Mode Worker runtime", () => {
     expect(settled).toEqual(started);
   });
 
+  it("rejects a pre-aborted signal before invoking any Worker subcall", async () => {
+    const controller = new AbortController();
+    const reason = new Error("already canceled");
+    controller.abort(reason);
+    let invoked = false;
+
+    await expect(
+      runReadCodeProgram({
+        steps: [{ id: "read", tool: "file_read", args: { path: "a.ts" } }],
+      }, {
+        signal: controller.signal,
+        async invoke() {
+          invoked = true;
+          return { ok: true, result: {} };
+        },
+      }),
+    ).rejects.toBe(reason);
+    expect(invoked).toBe(false);
+  });
+
   it("times out, aborts subcalls, and waits for their settlement", async () => {
     let started = false;
     let settled = false;

@@ -4,7 +4,7 @@
   "title": "Zerox Runtime Convergence Program",
   "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
   "operatingGuide": ".zerox/runtime-convergence-program.md",
-  "updatedAt": "2026-08-14T20:00:00.000+08:00",
+  "updatedAt": "2026-08-14T21:43:26.000+08:00",
   "status": "completed",
   "activeFeatureId": null,
   "nextFeatureId": null,
@@ -165,6 +165,40 @@
         "npm run verify",
         "npm run smoke:prod",
         "npm run program:check"
+      ]
+    },
+    {
+      "id": "RC09",
+      "title": "Post-review runtime and recovery hardening",
+      "state": "completed",
+      "featureId": "P80-post-review-runtime-and-recovery-hardening",
+      "findings": [
+        "CR1",
+        "CR2",
+        "CR3",
+        "CR4",
+        "CR5",
+        "CR6",
+        "CR7",
+        "CR8",
+        "CR9",
+        "CR10",
+        "CR11",
+        "CR12",
+        "CR13"
+      ],
+      "dependsOn": ["RC03", "RC05", "RC06", "RC08"],
+      "architectureDecisionRequired": true,
+      "rollback": "Use the existing Kernel, Code Mode, and storage rollback flags; no schema rollback is required and legacy checkpoints remain readable.",
+      "verification": [
+        "thirteen focused review reproductions",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
       ]
     }
   ]

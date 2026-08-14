@@ -218,6 +218,37 @@ describe("runRuntimeKernel", () => {
       summary: "stale success",
     });
   });
+
+  it("preserves a pre-aborted pause signal as paused", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+    controller.abort("pause");
+    let turns = 0;
+
+    const result = await runRuntimeKernel(createContext({
+      mode: "scheduled_task",
+      signal: controller.signal,
+    }), {
+      bus,
+      now: fixedNow,
+      async runTurn() {
+        turns += 1;
+        return { terminalStatus: "succeeded" };
+      },
+    });
+
+    expect(turns).toBe(0);
+    expect(result).toMatchObject({
+      status: "paused",
+      reason: "Agent run paused.",
+    });
+    expect(bus.history()).toEqual([
+      expect.objectContaining({
+        type: "run_end",
+        status: "paused",
+      }),
+    ]);
+  });
 });
 
 function createContext(overrides: Partial<RunContext> = {}): RunContext {

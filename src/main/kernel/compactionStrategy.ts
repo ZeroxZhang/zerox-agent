@@ -100,10 +100,11 @@ export function createSummarizeCompaction(
         ctx.budget,
         beforeTokens,
       );
-      const compacted = compressed !== ctx.messages;
       const afterTokens = estimateMessageTokens(compressed);
+      const compacted =
+        compressed !== ctx.messages && afterTokens < beforeTokens;
       return {
-        messages: compressed,
+        messages: compacted ? compressed : ctx.messages,
         compacted,
         beforeTokens,
         afterTokens,

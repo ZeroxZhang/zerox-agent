@@ -118,6 +118,64 @@ describe("read_code tool", () => {
     expect(subcallRan).toBe(false);
   });
 
+  it("injects the run workspace for nested native workspace tools", async () => {
+    const registry = createDynamicToolRegistry();
+    let observedArgs: Record<string, unknown> | undefined;
+    registerReadCodeTool(registry, {
+      async executeSubcall(input) {
+        observedArgs = input.request.args;
+        await input.onStage({
+          stage: "dispatching",
+          taskId: input.taskId,
+          request: input.request,
+        });
+        return {
+          request: input.request,
+          result: { ok: true, result: {} },
+          dispatched: true,
+          diagnostics: [],
+        };
+      },
+    });
+
+    await registry.execute(
+      READ_CODE_TOOL_NAME,
+      {
+        program: {
+          steps: [
+            {
+              id: "search",
+              tool: "code_search",
+              args: { query: "ToolRuntime" },
+            },
+          ],
+        },
+      },
+      {
+        taskId: "task_1",
+        runContext: {
+          workspaceId: "workspace_1",
+          workspaceRoot: "/workspace/project",
+          sandbox: {
+            mode: "workspace_write",
+            network: "none",
+            shell: "disabled",
+            allowWorkspaceEscape: false,
+            extraReadRoots: [],
+            extraWriteRoots: [],
+          },
+          agentRole: "primary",
+          depth: 0,
+        },
+      },
+    );
+
+    expect(observedArgs).toEqual({
+      query: "ToolRuntime",
+      workspaceRoot: "/workspace/project",
+    });
+  });
+
   it("rejects a mutating or nested subcall before the ToolRuntime bridge", async () => {
     for (const tool of ["file_write", "shell_exec", "read_code"]) {
       const registry = createDynamicToolRegistry();

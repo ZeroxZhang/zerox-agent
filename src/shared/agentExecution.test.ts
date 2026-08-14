@@ -83,6 +83,8 @@ describe("agent execution model", () => {
         ],
       },
       toolCallCount: 0,
+      tokensConsumed: 120,
+      tokensEstimated: false,
       createdAt: "2026-06-07T00:00:00.000Z",
       updatedAt: "2026-06-07T00:00:00.000Z",
     };
@@ -90,6 +92,7 @@ describe("agent execution model", () => {
     expect(checkpoint.steps[0]).toEqual(step);
     expect(checkpoint.messages[0]?.content).toBe("Organize Downloads");
     expect(checkpoint.contextSurface?.events).toHaveLength(1);
+    expect(checkpoint.tokensConsumed).toBe(120);
     expect(checkpoint.goalId).toBe("goal-1");
     expect(checkpoint.milestoneId).toBe("milestone-1");
   });

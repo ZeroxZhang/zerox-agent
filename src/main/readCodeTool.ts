@@ -100,12 +100,17 @@ export function registerReadCodeTool(
         limits: options.limits,
         async invoke(toolName, toolArgs, signal, call) {
           let dispatched = false;
+          const normalizedArgs = applyReadCodeRunContextDefaults(
+            toolName,
+            toolArgs,
+            executionOptions?.runContext,
+          );
           const outcome = await admission.run(async (release) =>
             options.executeSubcall({
               taskId,
               request: {
                 toolName,
-                args: toolArgs,
+                args: normalizedArgs,
               },
               ...(executionOptions?.runContext
                 ? { runContext: executionOptions.runContext }
@@ -161,4 +166,23 @@ export function registerReadCodeTool(
     },
     "built-in",
   );
+}
+
+function applyReadCodeRunContextDefaults(
+  toolName: string,
+  args: Record<string, unknown>,
+  runContext: AgentRunContext | undefined,
+): Record<string, unknown> {
+  if (
+    !runContext ||
+    !["code_search", "git_status", "git_diff"].includes(toolName) ||
+    (typeof args.workspaceRoot === "string" &&
+      args.workspaceRoot.trim().length > 0)
+  ) {
+    return args;
+  }
+  return {
+    ...args,
+    workspaceRoot: runContext.workspaceRoot,
+  };
 }

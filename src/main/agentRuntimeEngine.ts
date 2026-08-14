@@ -423,6 +423,8 @@ export function createAgentRuntimeEngine(options: {
           ? { resumeContextSurface: current.contextSurface }
           : {}),
         initialToolCallsExecuted: current.toolCallCount,
+        initialTokensConsumed: current.tokensConsumed ?? 0,
+        initialTokensEstimated: current.tokensEstimated ?? false,
         tools: toolDefinitions,
         maxTurns,
         pauseOnTurnLimit: false,
@@ -609,6 +611,8 @@ export function createAgentRuntimeEngine(options: {
             messages: loopCheckpoint.messages.map(toExecutionMessage),
             contextSurface: loopCheckpoint.contextSurface,
             toolCallCount: loopCheckpoint.toolCallsExecuted,
+            tokensConsumed: loopCheckpoint.tokensConsumed,
+            tokensEstimated: loopCheckpoint.tokensEstimated,
           });
           const event = createEvent("info", "Agent checkpoint saved.", {
             checkpointId: current.id,
@@ -623,74 +627,160 @@ export function createAgentRuntimeEngine(options: {
         },
       },
     );
-    const loopResult = options.productionKernelDriver
-      ? (
-          await options.productionKernelDriver.run({
-            runId: current.runId,
-            ...(signal ? { signal } : {}),
-            checkpointEvery: maxTurns,
-            async execute(reporter) {
-              kernelReporter = reporter;
-              return executeLoopSegment();
-            },
-          })
-        ).segment
-      : await executeLoopSegment();
-    await observationTail;
+    const persistLoopResult = async (
+      loopResult: Awaited<ReturnType<typeof executeLoopSegment>>,
+    ): Promise<RunScheduledTaskResult> => {
+      await observationTail;
+      current = await saveCheckpoint(
+        current,
+        loopResult.status === "paused" ? "paused" : "running",
+        {
+          messages: loopResult.messages.map(toExecutionMessage),
+          ...(loopResult.contextSurface
+            ? { contextSurface: loopResult.contextSurface }
+            : {}),
+          toolCallCount: loopResult.toolCallsExecuted,
+          tokensConsumed: loopResult.tokensConsumed ?? 0,
+          tokensEstimated: loopResult.tokensEstimated ?? true,
+          ...(loopResult.status === "succeeded"
+            ? {
+                steps: markCurrentStepCompleted(
+                  current.steps,
+                  current.currentStepId,
+                  now().toISOString(),
+                ),
+              }
+            : {}),
+        },
+      );
+      if (loopResult.status === "succeeded") {
+        await appendTrajectory(current.runId, "final_summary", {
+          status: "succeeded",
+          summaryLength: loopResult.summary.length,
+          tokensConsumed: loopResult.tokensConsumed ?? 0,
+        }, {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: true,
+        }, current.runContext);
+      }
 
-    current = await saveCheckpoint(current, loopResult.status === "paused" ? "paused" : "running", {
-      messages: loopResult.messages.map(toExecutionMessage),
-      ...(loopResult.contextSurface
-        ? { contextSurface: loopResult.contextSurface }
-        : {}),
-      toolCallCount: loopResult.toolCallsExecuted,
-      ...(loopResult.status === "succeeded"
-        ? {
-            steps: markCurrentStepCompleted(
-              current.steps,
-              current.currentStepId,
-              now().toISOString(),
-            ),
-          }
-        : {}),
-    });
-    if (loopResult.status === "succeeded") {
-      await appendTrajectory(current.runId, "final_summary", {
-        status: "succeeded",
-        summaryLength: loopResult.summary.length,
-        tokensConsumed: loopResult.tokensConsumed ?? 0,
-      }, {
-        containsApiKey: false,
-        containsFileContent: false,
-        containsUserText: true,
-      }, current.runContext);
-    }
-
-    const status = loopResult.status;
-    const terminalEvent = createEvent(
-      status === "succeeded" ? "info" : status === "paused" ? "warn" : "error",
-      `Shared agent loop ${status}.`,
-      { tokensConsumed: loopResult.tokensConsumed ?? 0 },
-    );
-    events.push(terminalEvent);
-    onEvent?.(terminalEvent);
-    return finishRun({
-      checkpoint: current,
-      taskId: task.id,
-      taskName: task.name,
-      skillName: getRunSkillName(task),
+      const status = loopResult.status;
+      const terminalEvent = createEvent(
+        status === "succeeded" ? "info" : status === "paused" ? "warn" : "error",
+        `Shared agent loop ${status}.`,
+        { tokensConsumed: loopResult.tokensConsumed ?? 0 },
+      );
+      events.push(terminalEvent);
+      onEvent?.(terminalEvent);
+      return finishRun({
+        checkpoint: current,
+        taskId: task.id,
+        taskName: task.name,
+        skillName: getRunSkillName(task),
+        status,
+        summary: loopResult.summary,
+        events,
+        startedAt,
+        ...(onEvent ? { onEvent } : {}),
+        ...(loopResult.modelServiceNotice
+          ? { modelServiceNotice: loopResult.modelServiceNotice }
+          : {}),
+        ...(status === "failed" || status === "canceled"
+          ? { failure: new Error(loopResult.summary) }
+          : {}),
+      });
+    };
+    type LoopSegmentResult = Awaited<
+      ReturnType<typeof executeLoopSegment>
+    >;
+    const createSettledLoopResult = (
+      status: LoopSegmentResult["status"],
+      summary: string,
+      modelServiceNotice?: ModelServiceNotice,
+    ): LoopSegmentResult => ({
       status,
-      summary: loopResult.summary,
-      events,
-      startedAt,
-      ...(onEvent ? { onEvent } : {}),
-      ...(loopResult.modelServiceNotice
-        ? { modelServiceNotice: loopResult.modelServiceNotice }
+      summary,
+      turns: 0,
+      messages: current.messages.map(toChatMessage),
+      ...(current.contextSurface
+        ? { contextSurface: current.contextSurface }
         : {}),
-      ...(status === "failed" || status === "canceled"
-        ? { failure: new Error(loopResult.summary) }
-        : {}),
+      toolCallsExecuted: current.toolCallCount,
+      tokensConsumed: current.tokensConsumed ?? 0,
+      tokensEstimated: current.tokensEstimated ?? false,
+      ...(modelServiceNotice ? { modelServiceNotice } : {}),
     });
+    const normalizeAbortedLoopResult = (
+      loopResult: LoopSegmentResult,
+    ): LoopSegmentResult => {
+      if (!signal?.aborted) return loopResult;
+      const paused = isPauseSignal(signal);
+      return {
+        ...loopResult,
+        status: paused ? "paused" : "canceled",
+        summary: paused ? "运行已暂停。" : "运行已取消。",
+      };
+    };
+    const persistSegment = async (
+      loopResult: LoopSegmentResult,
+    ) => {
+      const settled = normalizeAbortedLoopResult(loopResult);
+      const result = await persistLoopResult(settled);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return {
+        status: settled.status,
+        summary: settled.summary,
+        result,
+      };
+    };
+    const executePersistedSegment = async (
+      reporter?: ProductionKernelReporter,
+    ) => {
+      kernelReporter = reporter;
+      let loopResult: LoopSegmentResult;
+      try {
+        loopResult = await executeLoopSegment();
+      } catch (error) {
+        const modelServiceNotice = modelServiceNoticeFromError(error);
+        loopResult = createSettledLoopResult(
+          isPauseError(error, signal)
+            ? "paused"
+            : isCancellationError(error, signal)
+              ? "canceled"
+              : modelServiceNotice
+                ? "paused"
+                : "failed",
+          modelServiceNotice?.message ?? formatFailureMessage(error),
+          modelServiceNotice,
+        );
+      }
+      return persistSegment(loopResult);
+    };
+
+    if (!options.productionKernelDriver) {
+      return (await executePersistedSegment()).result;
+    }
+    return (
+      await options.productionKernelDriver.run({
+        runId: current.runId,
+        ...(signal ? { signal } : {}),
+        checkpointEvery: maxTurns,
+        execute: executePersistedSegment,
+        settleAborted(status) {
+          return persistSegment(
+            createSettledLoopResult(
+              status,
+              status === "paused"
+                ? "运行已暂停。"
+                : "运行已取消。",
+            ),
+          );
+        },
+      })
+    ).segment.result;
   }
 
   async function runFromCheckpoint(

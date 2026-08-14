@@ -7,7 +7,7 @@
 // there. That keeps script behavior realistic without depending on whatever
 // repository-level dist-electron happens to contain.
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   copyFileSync,
   existsSync,
@@ -44,6 +44,16 @@ function createFreshMigrationScriptRoot(): string {
 }
 
 describe("P1 migration scripts round-trip", () => {
+  let scriptRoot: string;
+
+  beforeAll(() => {
+    scriptRoot = createFreshMigrationScriptRoot();
+  }, 20_000);
+
+  afterAll(() => {
+    rmSync(scriptRoot, { recursive: true, force: true });
+  });
+
   it("refuses to overwrite authoritative JSON without explicit SQLite confirmation", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "zerox-rollback-guard-"));
     try {
@@ -61,9 +71,7 @@ describe("P1 migration scripts round-trip", () => {
 
   it("migrates legacy JSON→SQLite then rolls back SQLite→JSON, preserving data", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-rt-"));
-    let scriptRoot: string | undefined;
     try {
-      scriptRoot = createFreshMigrationScriptRoot();
       // Seed legacy files.
       writeFileSync(
         path.join(dir, "agent-runs.jsonl"),
@@ -268,7 +276,223 @@ describe("P1 migration scripts round-trip", () => {
       expect(rolledBackGoal).not.toHaveProperty("acceptanceCertificate");
     } finally {
       rmSync(dir, { recursive: true, force: true });
-      if (scriptRoot) rmSync(scriptRoot, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it("does not complete Chat bootstrap when legacy JSON is corrupt", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-corrupt-chat-"));
+    try {
+      writeFileSync(path.join(dir, "chat-sessions.json"), "{not-json");
+
+      execFileSync(
+        process.execPath,
+        [
+          path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"),
+          "--configDir",
+          dir,
+        ],
+        { encoding: "utf8", cwd: root },
+      );
+
+      const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
+      try {
+        expect(
+          db
+            .prepare(
+              "SELECT value FROM chat_store_metadata WHERE key = 'legacy_json_import'",
+            )
+            .get(),
+        ).toBeUndefined();
+      } finally {
+        db.close();
+      }
+      expect(
+        readFileSync(path.join(dir, "migration-errors.jsonl"), "utf8"),
+      ).toMatch(/sessions.*parse failed/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("overwrites stale Chat JSON when authoritative SQLite is empty", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-rollback-empty-chat-"));
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"),
+          "--configDir",
+          dir,
+        ],
+        { encoding: "utf8", cwd: root },
+      );
+      writeFileSync(
+        path.join(dir, "chat-sessions.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          sessions: [{ id: "stale_chat", title: "stale" }],
+        }),
+      );
+
+      execFileSync(
+        process.execPath,
+        [
+          path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"),
+          "--configDir",
+          dir,
+          "--confirmSqliteAuthoritative",
+        ],
+        { encoding: "utf8", cwd: root },
+      );
+
+      expect(
+        JSON.parse(
+          readFileSync(path.join(dir, "chat-sessions.json"), "utf8"),
+        ),
+      ).toEqual({ schemaVersion: 1, sessions: [] });
+      expect(
+        readFileSync(
+          path.join(dir, "chat-sessions.legacy.json"),
+          "utf8",
+        ),
+      ).toContain("stale_chat");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("exports mixed-generation Chat sessions and orphan trajectories", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-rollback-mixed-chat-"));
+    const modernSession = {
+      id: "chat_modern",
+      title: "Modern",
+      summary: "projected",
+      messages: [],
+      createdAt: "2026-06-19T00:00:00.000Z",
+      updatedAt: "2026-06-19T00:00:01.000Z",
+    };
+    const legacySession = {
+      id: "chat_legacy",
+      title: "Legacy",
+      summary: "generic row",
+      messages: [],
+      createdAt: "2026-06-19T00:00:02.000Z",
+      updatedAt: "2026-06-19T00:00:03.000Z",
+    };
+    const legacyMessage = {
+      id: "message_legacy",
+      role: "user",
+      content: "legacy message",
+      createdAt: "2026-06-19T00:00:03.000Z",
+    };
+    const orphanEvent = {
+      id: "event_orphan",
+      runId: "run_orphan",
+      type: "tool_call",
+      sequence: 1,
+      payload: { label: "orphan" },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-06-19T00:00:04.000Z",
+    };
+    try {
+      writeFileSync(
+        path.join(dir, "chat-sessions.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          sessions: [modernSession],
+        }),
+      );
+      execFileSync(
+        process.execPath,
+        [
+          path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"),
+          "--configDir",
+          dir,
+        ],
+        { encoding: "utf8", cwd: root },
+      );
+
+      const db = new Database(path.join(dir, "zerox.db"));
+      try {
+        db.prepare(
+          `INSERT INTO sessions
+            (id, kind, title, payload, created_at, updated_at)
+           VALUES (?, 'chat', ?, ?, ?, ?)`,
+        ).run(
+          legacySession.id,
+          legacySession.title,
+          JSON.stringify(legacySession),
+          legacySession.createdAt,
+          legacySession.updatedAt,
+        );
+        db.prepare(
+          `INSERT INTO chat_messages
+            (id, session_id, role, content, payload, created_at, seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          legacyMessage.id,
+          legacySession.id,
+          legacyMessage.role,
+          legacyMessage.content,
+          JSON.stringify(legacyMessage),
+          legacyMessage.createdAt,
+          1,
+        );
+        db.prepare(
+          `INSERT INTO trajectory_events
+            (id, run_id, seq, type, payload, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        ).run(
+          orphanEvent.id,
+          orphanEvent.runId,
+          orphanEvent.sequence,
+          orphanEvent.type,
+          JSON.stringify(orphanEvent),
+          orphanEvent.createdAt,
+        );
+      } finally {
+        db.close();
+      }
+
+      execFileSync(
+        process.execPath,
+        [
+          path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"),
+          "--configDir",
+          dir,
+          "--confirmSqliteAuthoritative",
+        ],
+        { encoding: "utf8", cwd: root },
+      );
+
+      const chat = JSON.parse(
+        readFileSync(path.join(dir, "chat-sessions.json"), "utf8"),
+      );
+      expect(chat.sessions.map((session: { id: string }) => session.id)).toEqual([
+        "chat_modern",
+        "chat_legacy",
+      ]);
+      expect(
+        chat.sessions.find(
+          (session: { id: string }) => session.id === "chat_legacy",
+        ).messages,
+      ).toEqual([legacyMessage]);
+      expect(
+        readFileSync(
+          path.join(
+            dir,
+            "agent-trajectories",
+            "run_orphan.jsonl",
+          ),
+          "utf8",
+        ),
+      ).toContain("event_orphan");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

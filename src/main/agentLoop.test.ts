@@ -373,6 +373,50 @@ describe("agent loop", () => {
     expect(estimatedBatchSizes.every((size) => size === 1)).toBe(true);
   });
 
+  it("fails before the model request when compaction makes no token progress", async () => {
+    let modelCalls = 0;
+
+    const result = await runAgentLoop(
+        [{ role: "user", content: "x".repeat(400) }],
+        { ...modelProfile, maxTokens: 128, contextWindow: 300 },
+        {
+          chatClient: {
+            async complete() {
+              modelCalls += 1;
+              return {
+                content: "unreachable",
+                toolCalls: [],
+                finishReason: "stop",
+              };
+            },
+          },
+          toolExecutor: createToolExecutor(),
+          tools: testTools,
+          contextManager: {
+            estimateTokens(messages) {
+              return messages.reduce(
+                (total, message) => total + message.content.length,
+                0,
+              );
+            },
+            compressMessages(messages) {
+              return [...messages];
+            },
+          },
+        },
+      );
+    expect(result).toMatchObject({
+      status: "failed",
+      summary: expect.stringMatching(/compaction made no progress/i),
+    });
+    expect(
+      result.contextSurface?.events.filter(
+        (event) => event.kind === "replace",
+      ),
+    ).toHaveLength(0);
+    expect(modelCalls).toBe(0);
+  });
+
   it("routes overflow compaction through the injected strategy when provided (P2)", async () => {
     const requests: ChatCompletionRequest[] = [];
     const chatClient: ChatClient = {
@@ -2216,6 +2260,32 @@ describe("agent loop", () => {
     );
 
     expect(result.tokensConsumed).toBe(150);
+    expect(result.tokensEstimated).toBe(false);
+  });
+
+  it("continues cumulative token telemetry across a resumed segment", async () => {
+    const result = await runAgentLoop(
+      [{ role: "user", content: "resume usage" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            return {
+              content: "done",
+              toolCalls: [],
+              finishReason: "stop",
+              usage: { inputTokens: 20, outputTokens: 5 },
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        initialTokensConsumed: 150,
+        initialTokensEstimated: false,
+      },
+    );
+
+    expect(result.tokensConsumed).toBe(175);
     expect(result.tokensEstimated).toBe(false);
   });
 

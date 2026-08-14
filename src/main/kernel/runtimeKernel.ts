@@ -14,6 +14,9 @@ export type RuntimeKernelDependencies = {
   bus: KernelEventBus;
   runTurn: (ctx: RunContext) => Promise<TurnResult>;
   onCheckpoint?: (ctx: RunContext) => Promise<string | undefined>;
+  beforeAbortedEnd?: (
+    ctx: RunContext,
+  ) => Promise<{ summary?: string } | void>;
   now?: () => string;
 };
 
@@ -37,7 +40,8 @@ export async function runRuntimeKernel(
   let summary = "";
 
   if (ctx.signal?.aborted) {
-    return endRun(ctx, deps.bus, now, "canceled", "Agent run canceled.", summary);
+    summary = await settleAbortedRun(ctx, deps, summary);
+    return endRunForAbortedSignal(ctx, deps.bus, now, summary);
   }
 
   while (Number.isFinite(ctx.turn)) {
@@ -67,7 +71,8 @@ export async function runRuntimeKernel(
     }
 
     if (ctx.signal?.aborted) {
-      return endRun(ctx, deps.bus, now, "canceled", "Agent run canceled.", summary);
+      summary = await settleAbortedRun(ctx, deps, summary);
+      return endRunForAbortedSignal(ctx, deps.bus, now, summary);
     }
 
     if (lastTurn.terminalStatus) {
@@ -160,4 +165,30 @@ function endRun(
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+
+async function settleAbortedRun(
+  ctx: RunContext,
+  deps: RuntimeKernelDependencies,
+  summary: string,
+): Promise<string> {
+  const settlement = await deps.beforeAbortedEnd?.(ctx);
+  return settlement?.summary ?? summary;
+}
+
+function endRunForAbortedSignal(
+  ctx: RunContext,
+  bus: KernelEventBus,
+  now: () => string,
+  summary: string,
+): RuntimeKernelResult {
+  const paused = ctx.signal?.reason === "pause";
+  return endRun(
+    ctx,
+    bus,
+    now,
+    paused ? "paused" : "canceled",
+    paused ? "Agent run paused." : "Agent run canceled.",
+    summary,
+  );
 }

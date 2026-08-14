@@ -73,6 +73,7 @@ export async function runReadCodeProgram(
     limits.maxCalls,
     limits.maxProgramBytes,
   );
+  throwIfAborted(options.signal);
   const controller = new AbortController();
   const abortFromParent = () =>
     controller.abort(
@@ -120,6 +121,10 @@ export async function runReadCodeProgram(
       );
     };
     controller.signal.addEventListener("abort", onAbort, { once: true });
+    if (controller.signal.aborted) {
+      void finish(abortReason(controller.signal));
+      return;
+    }
 
     worker.on("message", (message: unknown) => {
       if (settled || !isRecord(message)) return;
@@ -354,6 +359,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw abortReason(signal);
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("Read Code Mode canceled.", "AbortError");
 }
 
 const READ_CODE_WORKER_SOURCE = String.raw`

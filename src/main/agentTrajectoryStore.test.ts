@@ -193,6 +193,59 @@ describe("agent trajectory store", () => {
     storage.close();
   });
 
+  it("finishes a committed dual-write JSON shadow after caller cancellation", async () => {
+    const storage = await createInMemoryStorage();
+    const store = createAgentTrajectoryStore({
+      configDir,
+      backend: "dual",
+      storage,
+    });
+    const controller = new AbortController();
+    const event = createEvent("tool_call", "event_1");
+
+    const append = store.append("run_1", event, {
+      signal: controller.signal,
+    });
+    controller.abort(new DOMException("Run canceled.", "AbortError"));
+
+    await expect(append).resolves.toEqual(event);
+    const jsonStore = createAgentTrajectoryStore({
+      configDir,
+      backend: "json",
+    });
+    await expect(jsonStore.list("run_1")).resolves.toEqual(
+      await store.list("run_1"),
+    );
+    storage.close();
+  });
+
+  it("reports a dual shadow failure and repairs it on an idempotent retry", async () => {
+    const storage = await createInMemoryStorage();
+    const store = createAgentTrajectoryStore({
+      configDir,
+      backend: "dual",
+      storage,
+    });
+    const event = createEvent("tool_call", "event_1");
+    const trajectoriesDir = path.join(configDir, "agent-trajectories");
+    await writeFile(trajectoriesDir, "blocks directory creation", "utf8");
+
+    await expect(store.append("run_1", event)).rejects.toMatchObject({
+      code: "ENOTDIR",
+    });
+    await expect(store.list("run_1")).resolves.toEqual([event]);
+
+    await rm(trajectoriesDir, { force: true });
+    await expect(store.append("run_1", event)).resolves.toEqual(event);
+
+    const jsonStore = createAgentTrajectoryStore({
+      configDir,
+      backend: "json",
+    });
+    await expect(jsonStore.list("run_1")).resolves.toEqual([event]);
+    storage.close();
+  });
+
   it("repairs a missing dual-write JSON publication on idempotent retry", async () => {
     const storage = await createInMemoryStorage();
     const store = createAgentTrajectoryStore({

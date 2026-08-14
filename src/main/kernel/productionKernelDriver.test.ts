@@ -103,6 +103,74 @@ describe("production Kernel driver", () => {
     ]);
   });
 
+  it("publishes paused for a pre-paused production segment", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+    controller.abort("pause");
+    let executed = false;
+
+    await expect(
+      createProductionKernelDriver({ bus, now: fixedNow }).run({
+        runId: "run_pre_paused",
+        signal: controller.signal,
+        async execute() {
+          executed = true;
+          return { status: "succeeded", summary: "unreachable" };
+        },
+      }),
+    ).rejects.toThrow(/without an execution segment/i);
+    expect(executed).toBe(false);
+    expect(bus.history()).toEqual([
+      expect.objectContaining({
+        type: "run_end",
+        status: "paused",
+      }),
+    ]);
+  });
+
+  it("settles a pre-paused segment before publishing its terminal event", async () => {
+    const bus = new KernelEventBus();
+    const controller = new AbortController();
+    controller.abort("pause");
+    const lifecycle: string[] = [];
+    const unsubscribe = bus.subscribe((event) => {
+      if (event.type === "run_end") {
+        lifecycle.push("run_end");
+      }
+    });
+
+    const result = await createProductionKernelDriver({
+      bus,
+      now: fixedNow,
+    }).run({
+      runId: "run_pre_paused_settled",
+      signal: controller.signal,
+      async execute() {
+        throw new Error("pre-paused segment must not execute");
+      },
+      async settleAborted(status) {
+        lifecycle.push("persisted");
+        return {
+          status,
+          summary: "Agent run paused.",
+        };
+      },
+    });
+    unsubscribe();
+
+    expect(result).toMatchObject({
+      kernel: {
+        status: "paused",
+        summary: "Agent run paused.",
+      },
+      segment: {
+        status: "paused",
+        summary: "Agent run paused.",
+      },
+    });
+    expect(lifecycle).toEqual(["persisted", "run_end"]);
+  });
+
   it("rejects a stale success when cancellation wins before segment settlement", async () => {
     const bus = new KernelEventBus();
     const controller = new AbortController();
@@ -127,6 +195,40 @@ describe("production Kernel driver", () => {
     expect(bus.history().at(-1)).toMatchObject({
       type: "run_end",
       status: "canceled",
+    });
+  });
+
+  it("validates this invocation without depending on bounded event history", async () => {
+    const bus = new KernelEventBus();
+    const driver = createProductionKernelDriver({
+      bus,
+      now: fixedNow,
+    });
+    await driver.run({
+      runId: "run_long_resume",
+      async execute() {
+        return { status: "paused", summary: "first segment" };
+      },
+    });
+
+    await expect(
+      driver.run({
+        runId: "run_long_resume",
+        async execute(reporter) {
+          for (let index = 0; index < 1_005; index += 1) {
+            reporter.toolCall("file_read", { index });
+          }
+          return {
+            status: "succeeded",
+            summary: "resumed segment complete",
+          };
+        },
+      }),
+    ).resolves.toMatchObject({
+      kernel: {
+        status: "succeeded",
+        summary: "resumed segment complete",
+      },
     });
   });
 });

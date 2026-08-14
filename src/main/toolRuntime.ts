@@ -254,12 +254,15 @@ export function createToolRuntime(options: {
         });
       }
 
+      throwIfAborted(executionOptions?.signal);
       await emit({
         stage: "authorized",
         guard: "authorization",
         reason: authorization.decision.reason,
       });
+      throwIfAborted(executionOptions?.signal);
       await emit({ stage: "dispatching" });
+      throwIfAborted(executionOptions?.signal);
       dispatchStarted = true;
       let rawResult: AgentToolExecutionResult;
       try {
@@ -443,4 +446,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("Tool runtime canceled.", "AbortError");
 }

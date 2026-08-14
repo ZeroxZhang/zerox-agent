@@ -67,6 +67,10 @@ export type AgentExecutionCheckpoint = {
   /** Versioned model-facing projection provenance; absent on legacy checkpoints. */
   contextSurface?: ContextSurfaceState;
   toolCallCount: number;
+  /** Cumulative provider usage across resumable execution segments. */
+  tokensConsumed?: number;
+  /** True when any portion of tokensConsumed is locally estimated. */
+  tokensEstimated?: boolean;
   createdAt: string;
   updatedAt: string;
 };

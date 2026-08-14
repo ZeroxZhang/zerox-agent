@@ -109,9 +109,20 @@ describe("agent runtime engine", () => {
   it("drives scheduled lifecycle, evidence, checkpoint, and terminal events through Kernel", async () => {
     const bus = new KernelEventBus();
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    runStore.append = async (run) => {
+      expect(
+        bus.history().some(
+          (event) =>
+            event.runId === run.id && event.type === "run_end",
+        ),
+      ).toBe(false);
+      return appendRun(run);
+    };
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore({ ...createTask(), skillName: "" }),
-      runStore: createMemoryRunStore(),
+      runStore,
       executionStore: createMemoryExecutionStore(savedCheckpoints),
       resolveSkill: async () => null,
       chatClient: { async complete() { return finalResponse("unused"); } },
@@ -198,6 +209,63 @@ describe("agent runtime engine", () => {
     });
   });
 
+  it("persists a shared-loop failure before publishing the Kernel terminal event", async () => {
+    const bus = new KernelEventBus();
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    let runAppends = 0;
+    runStore.append = async (run) => {
+      runAppends += 1;
+      expect(
+        bus.history().some(
+          (event) =>
+            event.runId === run.id && event.type === "run_end",
+        ),
+      ).toBe(false);
+      return appendRun(run);
+    };
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore,
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({
+        bus,
+        now: () => "2026-08-14T10:00:00.000Z",
+      }),
+      async runLoop() {
+        throw new Error("shared loop exploded");
+      },
+      createId: createSequentialId("kernel_failed"),
+      now: createSteppedClock("2026-08-14T10:00:00.000Z"),
+    });
+
+    await expect(engine.startTask("task_123")).resolves.toMatchObject({
+      ok: true,
+      run: {
+        status: "failed",
+        summary: "shared loop exploded",
+      },
+    });
+    expect(runAppends).toBe(1);
+    expect(
+      bus.history().filter(
+        (event) =>
+          event.runId === "kernel_failed_1" &&
+          event.type === "run_end",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        reason: "segment failed",
+      }),
+    ]);
+  });
+
   it("passes a persisted context surface into shared-loop resume", async () => {
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const executionStore = createMemoryExecutionStore(savedCheckpoints);
@@ -225,10 +293,13 @@ describe("agent runtime engine", () => {
       messages: checkpointMessages,
       contextSurface,
       toolCallCount: 0,
+      tokensConsumed: 150,
+      tokensEstimated: false,
       createdAt: "2026-07-12T00:00:00.000Z",
       updatedAt: "2026-07-12T00:00:00.000Z",
     });
     let observedSurface: ContextSurfaceState | undefined;
+    let observedInitialTokens = 0;
     const bus = new KernelEventBus();
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore(createTask()),
@@ -245,6 +316,7 @@ describe("agent runtime engine", () => {
       }),
       async runLoop(_initialMessages, _profile, loopOptions) {
         observedSurface = loopOptions.resumeContextSurface;
+        observedInitialTokens = loopOptions.initialTokensConsumed ?? 0;
         return {
           status: "succeeded",
           summary: "resumed",
@@ -252,7 +324,8 @@ describe("agent runtime engine", () => {
           messages: loopOptions.resumeMessages ?? [],
           contextSurface: loopOptions.resumeContextSurface,
           toolCallsExecuted: 0,
-          tokensConsumed: 10,
+          tokensConsumed: observedInitialTokens + 25,
+          tokensEstimated: loopOptions.initialTokensEstimated,
         };
       },
       createId: createSequentialId("surface_resume"),
@@ -264,7 +337,12 @@ describe("agent runtime engine", () => {
       run: { status: "succeeded" },
     });
     expect(observedSurface).toEqual(contextSurface);
+    expect(observedInitialTokens).toBe(150);
     expect(savedCheckpoints.at(-1)?.contextSurface).toEqual(contextSurface);
+    expect(savedCheckpoints.at(-1)).toMatchObject({
+      tokensConsumed: 175,
+      tokensEstimated: false,
+    });
     expect(
       bus.history().filter(
         (event) =>
@@ -791,15 +869,34 @@ describe("agent runtime engine", () => {
     const controller = new AbortController();
     controller.abort("pause");
     const executionStore = createMemoryExecutionStore(savedCheckpoints);
+    const bus = new KernelEventBus();
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    runStore.append = async (run) => {
+      expect(
+        bus.history().some(
+          (event) =>
+            event.runId === run.id && event.type === "run_end",
+        ),
+      ).toBe(false);
+      return appendRun(run);
+    };
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore(createTask()),
-      runStore: createMemoryRunStore(),
+      runStore,
       executionStore,
       resolveSkill: async () => createSkillRecord(),
       chatClient: createChatClient([finalResponse("unused")]),
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: createToolExecutor([]),
+      productionKernelDriver: createProductionKernelDriver({
+        bus,
+        now: () => "2026-08-14T10:00:00.000Z",
+      }),
+      async runLoop() {
+        throw new Error("pre-paused segment must not execute");
+      },
       createId: createSequentialId("pause"),
       now: createSteppedClock("2026-06-07T00:00:00.000Z"),
     });
@@ -825,6 +922,15 @@ describe("agent runtime engine", () => {
         runId: "pause_1",
         status: "paused",
       }),
+    ]);
+    expect(
+      bus.history().filter(
+        (event) =>
+          event.runId === "pause_1" &&
+          event.type === "run_end",
+      ),
+    ).toEqual([
+      expect.objectContaining({ status: "paused" }),
     ]);
   });
 

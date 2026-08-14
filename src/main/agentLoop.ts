@@ -103,6 +103,8 @@ export type AgentLoopOptions = {
   resumeMessages?: ChatMessage[];
   resumeContextSurface?: ContextSurfaceState;
   initialToolCallsExecuted?: number;
+  initialTokensConsumed?: number;
+  initialTokensEstimated?: boolean;
   maxParallelToolCalls?: number;
   pauseOnFailureLoop?: boolean;
   contextManager?: ContextManager;
@@ -275,6 +277,8 @@ export async function runAgentLoop(
     resumeMessages,
     resumeContextSurface,
     initialToolCallsExecuted = 0,
+    initialTokensConsumed = 0,
+    initialTokensEstimated = false,
     maxParallelToolCalls = 4,
     pauseOnFailureLoop = false,
     contextManager = createContextManager(),
@@ -438,8 +442,12 @@ export async function runAgentLoop(
   let latestContextUsage: AgentContextUsage | undefined;
   let lastContextCompaction: AgentContextCompactionSummary | undefined;
   // Token consumption is observability-only and never changes run status.
-  let cumulativeTokensConsumed = 0;
-  let cumulativeTokensEstimated = false;
+  let cumulativeTokensConsumed = Math.max(
+    0,
+    Math.floor(initialTokensConsumed),
+  );
+  let cumulativeTokensEstimated =
+    cumulativeTokensConsumed > 0 && initialTokensEstimated;
 
   function estimateConsumedTokens(): number {
     return cumulativeTokensConsumed > 0
@@ -530,9 +538,15 @@ export async function runAgentLoop(
         surfaceNodeIds: contextSurface.visibleNodeIds(),
         protectedMarkers: [NEVER_COMPACT_MARKER],
       });
-      if (!result.compacted) {
-        reportContextUsage(estimatedTokens);
-        return;
+      if (
+        !result.compacted ||
+        result.messages.length === 0 ||
+        result.afterTokens >= estimatedTokens
+      ) {
+        throwContextCompactionNoProgress(
+          estimatedTokens,
+          contextTokenBudget,
+        );
       }
       const replacement = replaceSurface(result.messages, {
         reason: result.strategy,
@@ -572,12 +586,15 @@ export async function runAgentLoop(
       contextTokenBudget,
       estimatedTokens,
     );
+    const nextTokens = contextManager.estimateTokens(compacted);
     if (
-      compacted.length === originalMessageCount &&
-      compacted === surfaceMessages
+      compacted.length === 0 ||
+      nextTokens >= estimatedTokens
     ) {
-      reportContextUsage(estimatedTokens);
-      return;
+      throwContextCompactionNoProgress(
+        estimatedTokens,
+        contextTokenBudget,
+      );
     }
 
     const replacement = replaceSurface(compacted, {
@@ -1757,6 +1774,15 @@ function isTerminalToolBatchStatus(
     status === "paused" ||
     status === "succeeded" ||
     status === "canceled"
+  );
+}
+
+function throwContextCompactionNoProgress(
+  estimatedTokens: number,
+  tokenBudget: number,
+): never {
+  throw new Error(
+    `Context compaction made no progress: ${estimatedTokens} estimated tokens exceed the ${tokenBudget} token budget.`,
   );
 }
 

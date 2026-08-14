@@ -281,6 +281,70 @@ describe("ToolRuntime", () => {
     expect(dispatchOptions?.runtimeTask).toEqual(runtimeTask);
   });
 
+  it("does not dispatch when authorization aborts the run before returning", async () => {
+    const controller = new AbortController();
+    const reason = new Error("canceled during authorization");
+    let dispatches = 0;
+    const runtime = createToolRuntime({
+      authorizationService: {
+        async authorize(taskId, request) {
+          controller.abort(reason);
+          return {
+            ok: true,
+            decision: { allowed: true, reason: "allowed" },
+            auditEvent: {
+              id: "audit_abort",
+              taskId,
+              request,
+              decision: { allowed: true, reason: "allowed" },
+              createdAt: "2026-08-14T00:00:00.000Z",
+            },
+          };
+        },
+      },
+      toolExecutor: executor(async () => {
+        dispatches += 1;
+        return { ok: true, result: {} };
+      }),
+    });
+
+    await expect(
+      runtime.execute({
+        taskId: "task_abort",
+        request: { toolName: "file_write", args: {} },
+        executionOptions: { signal: controller.signal },
+      }),
+    ).rejects.toBe(reason);
+    expect(dispatches).toBe(0);
+  });
+
+  it("rechecks cancellation after dispatch lifecycle observers", async () => {
+    const controller = new AbortController();
+    const reason = new Error("canceled by dispatch observer");
+    let dispatches = 0;
+    const runtime = createToolRuntime({
+      authorizationService: allowAuthorization(),
+      toolExecutor: executor(async () => {
+        dispatches += 1;
+        return { ok: true, result: {} };
+      }),
+    });
+
+    await expect(
+      runtime.execute({
+        taskId: "task_observer_abort",
+        request: { toolName: "file_write", args: {} },
+        executionOptions: { signal: controller.signal },
+        onStage(event) {
+          if (event.stage === "dispatching") {
+            controller.abort(reason);
+          }
+        },
+      }),
+    ).rejects.toBe(reason);
+    expect(dispatches).toBe(0);
+  });
+
   it("normalizes invalid output and deep-freezes detached outcomes", async () => {
     const mutableResult = {
       ok: true,

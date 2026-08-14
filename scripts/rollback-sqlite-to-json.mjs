@@ -70,9 +70,18 @@ const counts = {};
   counts.runs = runs.length;
   const trajDir = path.join(configDir, "agent-trajectories");
   let trajCount = 0;
-  for (const r of runs) {
-    const events = runsRepo.createRunRepository(storage).getTrajectory(r.id);
-    if (events.length) { writeJsonl(path.join(trajDir, `${r.id}.jsonl`), events); trajCount += events.length; }
+  const trajectoryRunIds = db
+    .prepare("SELECT DISTINCT run_id FROM trajectory_events ORDER BY run_id ASC")
+    .all()
+    .map((row) => row.run_id);
+  for (const runId of trajectoryRunIds) {
+    const events = runsRepo
+      .createRunRepository(storage)
+      .getTrajectory(runId);
+    if (events.length) {
+      writeJsonl(path.join(trajDir, `${runId}.jsonl`), events);
+      trajCount += events.length;
+    }
   }
   counts.trajectory_events = trajCount;
 }
@@ -111,31 +120,39 @@ const counts = {};
 // chat sessions (authoritative event projection + message rows)
 {
   const repository = chatRepo.createChatSessionEventRepository(storage);
-  let out = repository
+  const projected = repository
     .listProjections()
     .map((projection) => repository.getSession(projection.session.id))
     .filter(Boolean);
-  // Compatibility with databases created before RC05 and never opened by the
-  // new runtime.
-  if (out.length === 0) {
-    const sessions = sessRepo.createSessionRepository(storage).listSessions({ kind: "chat" });
-    out = sessions.map((session) => {
+  const projectedIds = new Set(projected.map((session) => session.id));
+  // Merge compatibility rows from databases created before RC05. A mixed
+  // database can contain both projected and not-yet-projected Chat sessions.
+  const legacy = sessRepo
+    .createSessionRepository(storage)
+    .listSessions({ kind: "chat" })
+    .filter((session) => !projectedIds.has(session.id))
+    .map((session) => {
       const payload = session.payload ?? {};
       const messages = db
         .prepare(
           `SELECT payload FROM chat_messages
            WHERE session_id = ?
-           ORDER BY created_at ASC, rowid ASC`,
+           ORDER BY COALESCE(seq, 9223372036854775807) ASC,
+                    created_at ASC, rowid ASC`,
         )
         .all(session.id)
         .map((row) => JSON.parse(row.payload));
       return {
         ...payload,
+        id: payload.id ?? session.id,
         messages: messages.length ? messages : (payload.messages ?? []),
       };
     });
-  }
-  if (out.length) { freeze(path.join(configDir, "chat-sessions.json")); writeJson(path.join(configDir, "chat-sessions.json"), { schemaVersion: 1, sessions: out }); }
+  const out = [...projected, ...legacy];
+  writeJson(path.join(configDir, "chat-sessions.json"), {
+    schemaVersion: 1,
+    sessions: out,
+  });
   counts.sessions = out.length;
 }
 

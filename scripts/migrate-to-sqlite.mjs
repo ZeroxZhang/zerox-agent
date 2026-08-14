@@ -48,6 +48,14 @@ function readJson(file, fallback) {
     return fallback;
   }
 }
+function readJsonStrict(file, fallback) {
+  if (!existsSync(file)) return fallback;
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`${file} parse failed: ${String(error)}`);
+  }
+}
 function readJsonl(file) {
   if (!existsSync(file)) return [];
   const rows = [];
@@ -82,18 +90,21 @@ function dryRunOnly() { return args["dry-run"] === true; }
 
 // 2. chat sessions + messages
 {
-  const data = readJson(path.join(configDir, "chat-sessions.json"), { sessions: [] });
-  const sessions = (data.sessions ?? []).map((session) =>
-    chatStore.normalizeChatSessionRecord(session),
-  );
-  if (dryRunOnly()) {
-    for (const session of sessions) {
-      bump("sessions", 1);
-      bump("chat_messages", session.messages?.length ?? 0);
-      bump("chat_session_events", 1);
-    }
-  } else {
-    try {
+  try {
+    const data = readJsonStrict(
+      path.join(configDir, "chat-sessions.json"),
+      { sessions: [] },
+    );
+    const sessions = (data.sessions ?? []).map((session) =>
+      chatStore.normalizeChatSessionRecord(session),
+    );
+    if (dryRunOnly()) {
+      for (const session of sessions) {
+        bump("sessions", 1);
+        bump("chat_messages", session.messages?.length ?? 0);
+        bump("chat_session_events", 1);
+      }
+    } else {
       const repository = chatRepo.createChatSessionEventRepository(storage);
       repository.importSnapshots(
         sessions.map((session) => ({
@@ -116,9 +127,9 @@ function dryRunOnly() { return args["dry-run"] === true; }
         ),
       );
       bump("chat_session_events", sessions.length);
-    } catch (e) {
-      logError("sessions", String(e));
     }
+  } catch (e) {
+    logError("sessions", String(e));
   }
 }
 
