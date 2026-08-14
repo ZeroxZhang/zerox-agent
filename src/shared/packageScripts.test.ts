@@ -187,6 +187,24 @@ describe("package scripts", () => {
     const convergenceFeatureIds = new Set(
       runtimeProgram.workstreams.map((workstream) => workstream.featureId),
     );
+    const kernelMigrationProgram = JSON.parse(
+      readFileSync(
+        path.join(
+          process.cwd(),
+          ".zerox/kernel-migration-program.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      activeFeatureId: string | null;
+      maxActiveFeatures: number;
+      workstreams: Array<{ featureId: string }>;
+    };
+    const kernelMigrationFeatureIds = new Set(
+      kernelMigrationProgram.workstreams.map(
+        (workstream) => workstream.featureId,
+      ),
+    );
 
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
@@ -331,16 +349,22 @@ describe("package scripts", () => {
           featureId === "P69-goal-acceptance-execution-contract" ||
           featureId === "P70-goal-plan-contract-lineage" ||
           featureId === "P71-debate-first-pass-reliability" ||
-          convergenceFeatureIds.has(featureId),
+          convergenceFeatureIds.has(featureId) ||
+          kernelMigrationFeatureIds.has(featureId),
       ),
     ).toBe(true);
     expect(openFeatureIds.length).toBeLessThanOrEqual(
-      runtimeProgram.maxActiveFeatures,
+      Math.min(
+        runtimeProgram.maxActiveFeatures,
+        kernelMigrationProgram.maxActiveFeatures,
+      ),
     );
+    const activeProgramFeatureIds = [
+      runtimeProgram.activeFeatureId,
+      kernelMigrationProgram.activeFeatureId,
+    ].filter((featureId): featureId is string => Boolean(featureId));
     expect(openFeatureIds).toEqual(
-      runtimeProgram.activeFeatureId
-        ? [runtimeProgram.activeFeatureId]
-        : [],
+      activeProgramFeatureIds,
     );
     expect(p56?.status === "in_progress" || p56?.status === "done").toBe(true);
     expect(p56).toEqual(
@@ -930,7 +954,8 @@ describe("package scripts", () => {
 
     expect(packageJson.scripts).toMatchObject({
       "harness:check": "node scripts/check-harness-state.mjs",
-      "program:check": "node scripts/check-runtime-convergence-program.mjs",
+      "program:check":
+        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs",
       "harness:score": "npm run build && node scripts/run-harness-score.mjs",
       "episode:export":
         "npm run build && node scripts/export-agent-episode.mjs",

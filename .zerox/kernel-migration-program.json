@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "programId": "chat-goal-kernel-migration-2026-08",
+  "title": "Chat And Goal Production Kernel Migration",
+  "updatedAt": "2026-08-14T22:53:40.000+08:00",
+  "sourceBaseline": {
+    "release": "v3.8.2",
+    "releaseCommit": "9d343ab0424e4a78287d6c38d929ee4269f5c7ec",
+    "governanceCommit": "6420114595e6034c7a1944c6c4b84ae058fc745e"
+  },
+  "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
+  "operatingGuide": ".zerox/kernel-migration-program.md",
+  "architectureDecision": ".zerox/decisions/KM01-kernel-migration-program.md",
+  "status": "active",
+  "activeFeatureId": null,
+  "nextFeatureId": "P85-kernel-mode-aware-production-driver",
+  "maxActiveFeatures": 1,
+  "migrationCompletionWorkstreamId": "KM07",
+  "postMigrationGates": [
+    "KM08",
+    "KM09"
+  ],
+  "invariants": [
+    "Kernel run_end is published exactly once and only after surface-owned terminal persistence and quiescent drain complete.",
+    "Chat preserves request idempotency, same-session serialization, persisted assistant output, stream terminal parity, continuation recovery, and required activity persistence.",
+    "Goal preserves milestone run records, trajectory order, checkpoints, pause and cancel settlement, acceptance certificates, plan lineage, and canonical terminal publication.",
+    "Every tool call continues through ToolRuntime, ToolAuthorizationService, workspace guards, and the existing OS sandbox.",
+    "Scheduled Task behavior and the immutable v3.8.2 release remain unchanged while Chat and Goal migrate.",
+    "Each production cutover has an explicit off switch until post-migration review and stress gates pass."
+  ],
+  "nonGoals": [
+    "No Context event compaction without measured pressure evidence.",
+    "No external subagent provider without an approved product and trust-boundary decision.",
+    "No arbitrary Code Mode or model-authored mutation runtime in this program.",
+    "No cloud worker, permission bypass, storage rewrite, or unreviewed self-modification."
+  ],
+  "deferredCapabilities": [
+    {
+      "id": "context_event_compaction",
+      "status": "deferred_pending_pressure_evidence",
+      "decisionGate": "KM09",
+      "currentEvidence": "RC11 passed 25000 Context events plus replay in 89 ms and 10000 Chat messages in 456 ms on the recorded baseline.",
+      "trigger": "Consider compaction only after repeatable stress or production telemetry demonstrates nonlinear replay memory, a breached stress budget, or user-visible p95 startup or turn latency attributable to Context event volume.",
+      "prohibitedCurrentAction": "Do not add compaction formats, destructive pruning, or replacement-event rewriting during Kernel migration."
+    },
+    {
+      "id": "external_subagent_provider",
+      "status": "deferred_pending_product_decision",
+      "decisionGate": "KM09",
+      "currentEvidence": "The product has no approved requirement to send delegated task context to an external subagent service.",
+      "trigger": "Proceed only with an approved product requirement covering provider value, user consent, data residency, credentials, cost, observability, cancellation, and ToolRuntime-equivalent permissions.",
+      "prohibitedCurrentAction": "Do not add cloud workers, hidden delegation, or a provider-specific bypass around Actor and ToolRuntime contracts."
+    },
+    {
+      "id": "arbitrary_code_mode",
+      "status": "deferred_blocked_on_isolation",
+      "decisionGate": "KM09",
+      "currentEvidence": "Current Code Mode is intentionally a typed read-only DAG executed by a resource-limited Worker and workspace-scoped tools.",
+      "trigger": "Reconsider only after a separate process isolation design proves syscall, filesystem, network, credential, child-process, timeout, kill, audit, and capability-only I/O boundaries with adversarial tests.",
+      "prohibitedCurrentAction": "Do not add eval, Function, VM escape surfaces, arbitrary shell, mutating nested tools, or in-process model-authored code execution."
+    }
+  ],
+  "workstreams": [
+    {
+      "id": "KM01",
+      "title": "Program foundation and migration contracts",
+      "state": "completed",
+      "featureId": "P84-kernel-migration-program-foundation",
+      "findings": [
+        "PROGRAM_CONTROL",
+        "SURFACE_INVARIANTS",
+        "DEFERRED_CAPABILITIES"
+      ],
+      "dependsOn": [],
+      "architectureDecisionRequired": true,
+      "rollback": "Remove the independent migration program artifacts and restore program:check to the completed runtime convergence checker; no runtime or user data changes are involved.",
+      "verification": [
+        "migration program checker tests",
+        "runtime convergence checker regression tests",
+        "package script and harness contract tests",
+        "npm run program:check",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "KM02",
+      "title": "Mode-aware Production Kernel segment contract",
+      "state": "planned",
+      "featureId": "P85-kernel-mode-aware-production-driver",
+      "findings": [
+        "KERNEL_MODE_PROPAGATION",
+        "SEGMENT_SETTLEMENT_CONTRACT",
+        "TERMINAL_PERSISTENCE_ORDER"
+      ],
+      "dependsOn": [
+        "KM01"
+      ],
+      "architectureDecisionRequired": true,
+      "rollback": "Keep the scheduled-only driver contract and remove mode-aware adapter additions before either new surface is enabled.",
+      "verification": [
+        "driver mode and terminal parity tests",
+        "pre-abort pause and cancel settlement tests",
+        "production Kernel boundary tests"
+      ]
+    },
+    {
+      "id": "KM03",
+      "title": "Chat Kernel segment adapter and persistence parity",
+      "state": "planned",
+      "featureId": "P86-chat-kernel-segment-adapter",
+      "findings": [
+        "CHAT_SEGMENT_ADAPTER",
+        "CHAT_STREAM_PARITY",
+        "CHAT_DURABLE_TERMINAL"
+      ],
+      "dependsOn": [
+        "KM02"
+      ],
+      "architectureDecisionRequired": true,
+      "rollback": "Disable the Chat Kernel adapter and continue direct AgentLoop execution without changing Chat event storage.",
+      "verification": [
+        "Chat success, failure, pause, cancel, and continuation parity tests",
+        "assistant message before run_end ordering tests",
+        "same-session serialization and duplicate request tests"
+      ]
+    },
+    {
+      "id": "KM04",
+      "title": "Chat production Kernel cutover",
+      "state": "planned",
+      "featureId": "P87-chat-kernel-production-cutover",
+      "findings": [
+        "CHAT_PRODUCTION_CUTOVER",
+        "CHAT_RESTART_RECOVERY",
+        "CHAT_ROLLBACK_FLAG"
+      ],
+      "dependsOn": [
+        "KM03"
+      ],
+      "architectureDecisionRequired": true,
+      "rollback": "Set the production Kernel surface flag back to scheduled-only and retain the verified direct Chat path until migration closure.",
+      "verification": [
+        "container integration and Kernel event tests",
+        "Chat restart and persisted continuation tests",
+        "JSON fallback and SQLite production smoke"
+      ]
+    },
+    {
+      "id": "KM05",
+      "title": "Goal milestone Kernel segment adapter",
+      "state": "planned",
+      "featureId": "P88-goal-kernel-segment-adapter",
+      "findings": [
+        "GOAL_SEGMENT_ADAPTER",
+        "GOAL_CHECKPOINT_PARITY",
+        "GOAL_RUN_TRAJECTORY_ORDER"
+      ],
+      "dependsOn": [
+        "KM04"
+      ],
+      "architectureDecisionRequired": true,
+      "rollback": "Disable the Goal Kernel adapter and continue direct milestone AgentLoop execution without changing Goal or run schemas.",
+      "verification": [
+        "Goal milestone success, failure, pause, and cancel parity tests",
+        "checkpoint and resume tests",
+        "run and trajectory before run_end ordering tests"
+      ]
+    },
+    {
+      "id": "KM06",
+      "title": "Goal controller production Kernel cutover",
+      "state": "planned",
+      "featureId": "P89-goal-kernel-production-cutover",
+      "findings": [
+        "GOAL_PRODUCTION_CUTOVER",
+        "GOAL_ACCEPTANCE_PARITY",
+        "GOAL_TERMINAL_PUBLICATION"
+      ],
+      "dependsOn": [
+        "KM05"
+      ],
+      "architectureDecisionRequired": true,
+      "rollback": "Set the production Kernel surface flag back to Chat plus scheduled execution and retain the direct Goal path until migration closure.",
+      "verification": [
+        "Goal controller and container integration tests",
+        "acceptance certificate and plan lineage tests",
+        "pause, cancel, review, repair, and canonical terminal race tests"
+      ]
+    },
+    {
+      "id": "KM07",
+      "title": "Unified production Kernel convergence and legacy cleanup",
+      "state": "planned",
+      "featureId": "P90-kernel-runtime-convergence-cleanup",
+      "findings": [
+        "ALL_SURFACE_CUTOVER",
+        "LEGACY_PATH_REMOVAL",
+        "ROLLBACK_AND_OBSERVABILITY"
+      ],
+      "dependsOn": [
+        "KM06"
+      ],
+      "architectureDecisionRequired": true,
+      "rollback": "Restore the last surface-specific cutover flags and adapters; do not restore any duplicate terminal publisher or bypass ToolRuntime.",
+      "verification": [
+        "all-surface Kernel boundary tests",
+        "full serial tests, build, verify, and production smoke",
+        "program and harness checks"
+      ]
+    },
+    {
+      "id": "KM08",
+      "title": "Post-migration code and security review",
+      "state": "planned",
+      "featureId": "P91-post-kernel-migration-review",
+      "findings": [
+        "POST_MIGRATION_CODE_REVIEW",
+        "POST_MIGRATION_SECURITY_REVIEW"
+      ],
+      "dependsOn": [
+        "KM07"
+      ],
+      "architectureDecisionRequired": false,
+      "rollback": "Keep migration complete but do not close the program; remediate every confirmed review finding in bounded follow-up Features.",
+      "verification": [
+        "independent code review",
+        "independent security review",
+        "two-pass confirmation for actionable findings"
+      ]
+    },
+    {
+      "id": "KM09",
+      "title": "Post-migration stress and deferred capability assessment",
+      "state": "planned",
+      "featureId": "P92-post-kernel-migration-stress-and-deferrals",
+      "findings": [
+        "POST_MIGRATION_STRESS",
+        "DEFERRED_CAPABILITY_DECISIONS"
+      ],
+      "dependsOn": [
+        "KM08"
+      ],
+      "architectureDecisionRequired": false,
+      "rollback": "Keep the migration and review evidence, leave failed stress scenarios or deferred decisions open, and do not approve a capability without its stated gate.",
+      "verification": [
+        "long Chat and Context stress",
+        "parallel tool and cancellation stress",
+        "Worker timeout and SQLite volume stress",
+        "explicit keep-deferred or approve decision for each deferred capability"
+      ]
+    }
+  ]
+}

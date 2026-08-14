@@ -1,7 +1,41 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T22:37:59.000+08:00",
+  "updatedAt": "2026-08-14T22:53:40.000+08:00",
   "features": [
+    {
+      "id": "P84-kernel-migration-program-foundation",
+      "priority": 114,
+      "status": "done",
+      "title": "Establish the independent Chat and Goal Kernel migration program",
+      "files": [
+        "AGENTS.md",
+        ".zerox/decisions/KM01-kernel-migration-program.md",
+        ".zerox/feature_list.json",
+        ".zerox/kernel-migration-program.json",
+        ".zerox/kernel-migration-program.md",
+        ".zerox/progress.md",
+        "package.json",
+        "scripts/check-harness-state.mjs",
+        "scripts/check-kernel-migration-program.mjs",
+        "src/shared/kernelMigrationProgram.test.ts",
+        "src/shared/packageScripts.test.ts"
+      ],
+      "definitionOfDone": [
+        "an independent machine-readable program orders Chat and Goal Kernel migration without reopening the completed runtime convergence program",
+        "the checker enforces one active Feature, dependency order, rollback and verification evidence, and post-migration review/stress gates",
+        "Chat persistence/streaming/cancellation and Goal milestone/acceptance/recovery invariants are explicit before production edits",
+        "context event compaction, external subagent providers, and arbitrary Code Mode remain deferred behind machine-readable decision gates",
+        "program and harness commands validate both the completed historical program and the active migration program",
+        "focused governance tests, full build, program, harness, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm test -- --run src/shared/kernelMigrationProgram.test.ts src/shared/runtimeConvergenceProgram.test.ts src/shared/packageScripts.test.ts",
+        "npm run build",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P83-v3.8.2-runtime-convergence-release",
       "priority": 113,

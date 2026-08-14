@@ -9898,3 +9898,54 @@
   - validity through `2027-08-14T14:34:33.992Z`.
 - P83 and RC12 are complete. The program is closed with no active or next
   Feature; the release tag remains on the exact verified release commit.
+
+## 2026-08-14 - KM01 Chat And Goal Kernel Migration Started
+
+- Started a new independent engineering program after the immutable v3.8.2
+  release; the completed Runtime Convergence Program remains closed.
+- Activated one Feature: `P84-kernel-migration-program-foundation`.
+- Accepted `.zerox/decisions/KM01-kernel-migration-program.md`.
+- Code-level baseline:
+  - Scheduled Tasks use `ProductionKernelDriver` through
+    `agentRuntimeEngine`.
+  - Chat still invokes `runAgentLoop` directly inside `chatService` while
+    owning stream terminal events, assistant persistence, continuation state,
+    request idempotency, and workspace-run settlement.
+  - Goal still invokes `runAgentLoop` directly inside `goalRuntimeEngine` while
+    owning milestone checkpoints, run and trajectory persistence, progress,
+    pause/cancel transcripts, and token telemetry.
+- Defined nine dependency-ordered workstreams:
+  - KM01-KM07 implement and converge the migration;
+  - KM08 repeats independent code and security review;
+  - KM09 repeats long-session, parallel, cancellation, Worker timeout, and
+    SQLite volume stress before program closure.
+- Registered three machine-readable deferrals:
+  - Context event compaction requires measured pressure evidence;
+  - external subagent providers require a product and trust-boundary decision;
+  - arbitrary Code Mode remains blocked on a stronger process-isolation
+    design.
+- KM01 changes governance and tests only; no Chat, Goal, Kernel, storage, or
+  permission runtime behavior is changed.
+
+## 2026-08-14 - KM01 Program Foundation Completed
+
+- Added the independent machine-readable Kernel Migration Program, operating
+  guide, ADR, checker, and nine focused checker tests.
+- `npm run program:check` now validates both:
+  - the completed 12-workstream Runtime Convergence Program;
+  - the active 9-workstream Chat and Goal Kernel Migration Program.
+- Harness and package-script contracts now understand the independent active
+  program while preserving the global one-unfinished-Feature limit.
+- Verification evidence:
+  - focused governance gate: 3 files / 26 tests;
+  - full serial gate: 268 files / 2,738 tests, with the six opt-in stress tests
+    skipped by default;
+  - `npm run build` passed;
+  - `npm run verify` passed with 2,738 tests, Agent evaluations 26/26, and
+    Memory evaluations 2/2;
+  - active-state program, harness, and whitespace checks passed.
+- P84 and KM01 are complete. The program is in controlled idle state with no
+  active Feature and exactly one next Feature:
+  `P85-kernel-mode-aware-production-driver`.
+- All three deferred capabilities remain locked behind KM09 decision gates.
+  No production runtime or persisted data changed.
