@@ -10069,3 +10069,14 @@
   Electron SQLite smoke passed; Node ABI restored.
 - P89/KM06 complete; all three production surfaces now use Kernel. P90/KM07 is
   next for convergence cleanup.
+
+## 2026-08-14 - KM07 Production Kernel Convergence Completed
+
+- Centralized all/scheduled_chat/scheduled/off coverage in one typed scope
+  matrix consumed by container wiring.
+- Direct surface implementations remain documented rollback delegates, not
+  competing terminal publishers.
+- Focused 67 tests; full/verify 2,771 tests; Agent 26/26; Memory 2/2; build and
+  production smoke passed.
+- KM01-KM07 migration implementation is complete. P91/KM08 post-migration code
+  and security review is next.

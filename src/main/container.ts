@@ -98,6 +98,7 @@ import { createTaskSchedulerService } from "./taskSchedulerService";
 import { createToolAuditLog } from "./toolAuditLog";
 import { KernelEventBus } from "./kernel/eventBus";
 import { createProductionKernelDriver } from "./kernel/productionKernelDriver";
+import { productionKernelCovers } from "./kernel/productionKernelScope";
 import { createToolRuntime } from "./toolRuntime";
 import { registerReadCodeTool } from "./readCodeTool";
 import { createStorageImpl } from "./storage/storageDb";
@@ -1111,10 +1112,13 @@ export function createAppContainer(options: {
     return lazy("kernelEventBus", () => new KernelEventBus());
   }
 
-  function productionKernelDriver() {
-    if (
-      readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "off"
-    ) {
+  function productionKernelDriver(
+    mode: "scheduled_task" | "chat" | "goal" = "scheduled_task",
+  ) {
+    if (!productionKernelCovers(
+      readFeatureFlags().ZEROX_PRODUCTION_KERNEL,
+      mode,
+    )) {
       return undefined;
     }
     return lazy("productionKernelDriver", () =>
@@ -1125,16 +1129,11 @@ export function createAppContainer(options: {
   }
 
   function chatProductionKernelDriver() {
-    const scope = readFeatureFlags().ZEROX_PRODUCTION_KERNEL;
-    return scope === "scheduled_chat" || scope === "all"
-      ? productionKernelDriver()
-      : undefined;
+    return productionKernelDriver("chat");
   }
 
   function goalProductionKernelDriver() {
-    return readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "all"
-      ? productionKernelDriver()
-      : undefined;
+    return productionKernelDriver("goal");
   }
 
   function setKernelPermissionRules(rules: PermissionRule[]): {

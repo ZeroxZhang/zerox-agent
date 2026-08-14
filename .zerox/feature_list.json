@@ -1,7 +1,40 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T23:46:51.000+08:00",
+  "updatedAt": "2026-08-14T23:51:47.000+08:00",
   "features": [
+    {
+      "id": "P90-kernel-runtime-convergence-cleanup",
+      "priority": 120,
+      "status": "done",
+      "title": "Converge all Production Kernel scope and rollback decisions",
+      "files": [
+        ".zerox/decisions/KM07-production-kernel-scope-convergence.md",
+        ".zerox/feature_list.json",
+        ".zerox/kernel-migration-program.json",
+        ".zerox/progress.md",
+        "src/main/kernel/productionKernelScope.ts",
+        "src/main/kernel/productionKernelScope.test.ts",
+        "src/main/container.ts",
+        "src/shared/productionKernelBoundary.test.ts"
+      ],
+      "definitionOfDone": [
+        "one typed scope policy decides Kernel coverage for Scheduled Task, Chat, and Goal",
+        "all, scheduled_chat, scheduled, and off form an explicit rollback matrix",
+        "container contains no duplicated surface-specific scope predicates",
+        "direct delegates remain only as documented rollback paths",
+        "all focused, full, verify, dual smoke, program, harness, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm test -- --run src/main/kernel/productionKernelScope.test.ts src/shared/productionKernelBoundary.test.ts src/main/container.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run verify",
+        "npm run smoke:prod",
+        "Electron SQLite smoke",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P89-goal-kernel-production-cutover",
       "priority": 119,

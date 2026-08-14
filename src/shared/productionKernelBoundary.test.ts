@@ -12,10 +12,9 @@ describe("production Kernel boundary", () => {
     const chat = read("src/main/chatService.ts");
     const chatAdapter = read("src/main/kernel/chatKernelSegment.ts");
     const goalAdapter = read("src/main/kernel/goalKernelSegment.ts");
+    const scope = read("src/main/kernel/productionKernelScope.ts");
 
-    expect(container).toContain(
-      'readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "off"',
-    );
+    expect(container).toContain("productionKernelCovers(");
     expect(container).toContain("createProductionKernelDriver({");
     expect(container).toContain(
       "productionKernelDriver:\n                productionKernelDriver()!",
@@ -36,12 +35,10 @@ describe("production Kernel boundary", () => {
     expect(goal).toContain("runGoalKernelSegment({");
     expect(chat).toContain("productionKernelDriver?: ProductionKernelDriver");
     expect(chat).toContain("runChatKernelSegment<SendChatMessageResult>");
-    expect(container).toContain(
-      'scope === "scheduled_chat" || scope === "all"',
-    );
-    expect(container).toContain(
-      'readFeatureFlags().ZEROX_PRODUCTION_KERNEL === "all"',
-    );
+    expect(container).toContain('productionKernelDriver("chat")');
+    expect(container).toContain('productionKernelDriver("goal")');
+    expect(scope).toContain('scope === "scheduled_chat"');
+    expect(scope).toContain('mode !== "goal"');
     expect(chatAdapter).toContain('mode: "chat"');
     expect(chatAdapter).toContain("validateChatKernelSettlement");
     expect(chatAdapter).toContain("input.settleFailed");
