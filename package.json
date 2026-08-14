@@ -36,7 +36,8 @@
     "release:publish": "node scripts/publish-github-release.mjs",
     "clean": "rm -rf dist dist-electron",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "stress:runtime": "ZEROX_RUNTIME_STRESS=1 vitest run --run src/main/runtimeStress.test.ts --maxWorkers=1"
   },
   "keywords": [],
   "author": "",

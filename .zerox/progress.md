@@ -9768,3 +9768,48 @@
   - Active-state program, harness, and whitespace checks passed.
 - P81 and RC10 are complete. The program is closed with no active or next
   Feature, and no application data or schema migration was required.
+
+## 2026-08-14 - RC11 Runtime Stress And Stability Started
+
+- Reopened the program with one bounded Feature:
+  `P82-runtime-stress-and-stability-gate`.
+- Accepted `.zerox/decisions/RC11-runtime-stress-and-stability.md`.
+- Defined deterministic local workloads for long context and Chat histories,
+  SQLite trajectory volume, ordered parallel execution, cancellation drain,
+  and saturated Code Mode timeout recovery.
+- The stress suite is opt-in through `npm run stress:runtime`; ordinary
+  `npm test` must collect but skip it so release feedback stays fast.
+- No production behavior or persisted schema change is planned. Any failure
+  exposed by the stress gate requires a separately evidenced runtime fix.
+
+## 2026-08-14 - RC11 Runtime Stress And Stability Completed
+
+- Added `npm run stress:runtime` and a deterministic six-scenario stress suite.
+  Ordinary `npm test` collects the suite but skips all six scenarios unless
+  `ZEROX_RUNTIME_STRESS=1`.
+- Final stress workloads and observed local elapsed times:
+  - 25,000 context events plus replay: 89 ms;
+  - 10,000 Chat messages, bounded projection, and search: 456 ms;
+  - 25,000 file-backed SQLite trajectory events plus tail read: 1,182 ms;
+  - 5,000 parallel items with high-water 32 and ordered commit: 18 ms;
+  - 5,000 cancellation candidates with exactly 32 admitted and drained: 3 ms;
+  - saturated 128-step Worker timeout plus healthy recovery: 232 ms.
+- The first stress run exposed an over-broad test query because the session
+  title matched one search term. The query fixture was narrowed; no production
+  defect or runtime change was required.
+- Verification evidence:
+  - stress gate: 1 file / 6 tests passed on two final runs;
+  - focused runtime/storage gate: 6 files / 48 tests passed, with the stress
+    file's six tests skipped by default;
+  - full serial gate: 267 files / 2,728 tests passed, 1 file / 6 stress tests
+    skipped by default;
+  - `npm run build` passed;
+  - `npm run verify` passed with 2,728 tests, Agent evaluations 26/26, and
+    Memory evaluations 2/2;
+  - standard production smoke rendered through explicit JSON fallback;
+  - Electron-ABI smoke rendered with SQLite loaded and no fallback;
+  - Node-ABI restoration passed 14 storage and migration tests;
+  - dependency audit remained at zero vulnerabilities;
+  - active-state program, harness, and whitespace checks passed.
+- P82 and RC11 are complete. The program is closed with no active or next
+  Feature. No production source or persisted schema changed.

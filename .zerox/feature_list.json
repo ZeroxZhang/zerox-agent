@@ -1,7 +1,47 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14T21:58:10.000+08:00",
+  "updatedAt": "2026-08-14T22:08:43.000+08:00",
   "features": [
+    {
+      "id": "P82-runtime-stress-and-stability-gate",
+      "priority": 112,
+      "status": "done",
+      "title": "Add deterministic runtime stress and stability coverage",
+      "files": [
+        ".zerox/decisions/RC11-runtime-stress-and-stability.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/runtime-convergence-program.json",
+        "package.json",
+        "src/shared/packageScripts.test.ts",
+        "src/main/runtimeStress.test.ts",
+        "src/main/contextSurface.ts",
+        "src/main/toolBatchScheduler.ts",
+        "src/main/readCodeRuntime.ts",
+        "src/main/storage/storageDb.ts",
+        "src/main/storage/repositories/chatSessionEventRepository.ts",
+        "src/main/storage/repositories/runRepository.ts"
+      ],
+      "definitionOfDone": [
+        "an explicit opt-in stress command covers long context, Chat, trajectory, scheduler, cancellation, and Worker timeout workloads",
+        "normal npm test collects but skips the heavyweight suite unless the stress environment flag is set",
+        "25000 context and trajectory events plus 10000 Chat messages preserve replay, projection, search, and tail-read invariants",
+        "5000-item parallel and cancellation batches preserve bounded admission, ordered commit, and quiescent drain",
+        "a saturated Code Mode timeout drains active subcalls and a subsequent Worker run succeeds",
+        "all stress, focused, full, build, verify, smoke, harness, program, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run program:check",
+        "npm run stress:runtime",
+        "npm test -- --run src/main/runtimeStress.test.ts src/main/contextSurface.test.ts src/main/toolBatchScheduler.test.ts src/main/readCodeRuntime.test.ts src/main/storage/repositories/chatSessionEventRepository.test.ts src/main/storage/repositories/runRepository.test.ts src/shared/packageScripts.test.ts",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P81-dependency-vulnerability-remediation",
       "priority": 111,

@@ -116,6 +116,9 @@ describe("package scripts", () => {
     expect(packageJson.scripts?.["smoke:providers"]).toContain(
       "smoke-multi-provider.mjs",
     );
+    expect(packageJson.scripts?.["stress:runtime"]).toBe(
+      "ZEROX_RUNTIME_STRESS=1 vitest run --run src/main/runtimeStress.test.ts --maxWorkers=1",
+    );
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
     expect(packageLock.version).toBe("3.8.1");

@@ -4,7 +4,7 @@
   "title": "Zerox Runtime Convergence Program",
   "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
   "operatingGuide": ".zerox/runtime-convergence-program.md",
-  "updatedAt": "2026-08-14T21:58:10.000+08:00",
+  "updatedAt": "2026-08-14T22:08:43.000+08:00",
   "status": "completed",
   "activeFeatureId": null,
   "nextFeatureId": null,
@@ -221,6 +221,33 @@
       "verification": [
         "full and production-only npm audit at high severity",
         "focused dependency and compatibility tests",
+        "npm test -- --maxWorkers=1",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "RC11",
+      "title": "Runtime stress and stability gate",
+      "state": "completed",
+      "featureId": "P82-runtime-stress-and-stability-gate",
+      "findings": [
+        "STRESS_LONG_SESSION",
+        "STRESS_PARALLEL",
+        "STRESS_CANCEL",
+        "STRESS_WORKER_TIMEOUT",
+        "STRESS_SQLITE_VOLUME"
+      ],
+      "dependsOn": ["RC09", "RC10"],
+      "architectureDecisionRequired": false,
+      "rollback": "Remove the opt-in stress command and test file; no production behavior or data schema changes are involved.",
+      "verification": [
+        "npm run stress:runtime",
+        "focused runtime and storage tests",
         "npm test -- --maxWorkers=1",
         "npm run build",
         "npm run verify",
