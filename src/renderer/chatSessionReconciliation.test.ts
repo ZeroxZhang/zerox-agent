@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isChatSessionSelectionCurrent,
   rollbackFailedAttachmentTurn,
+  shouldApplyChatRequestSettlement,
   shouldApplyPersistedSessionRefresh,
   shouldApplySequencedSessionResult,
 } from "./chatSessionReconciliation";
@@ -57,6 +58,18 @@ describe("chat session reconciliation", () => {
         7,
         8,
       ),
+    ).toBe(false);
+  });
+
+  it("applies an IPC settlement only while that request still owns the UI", () => {
+    expect(
+      shouldApplyChatRequestSettlement("request_a", "request_a", 4, 4),
+    ).toBe(true);
+    expect(
+      shouldApplyChatRequestSettlement("request_b", "request_a", 4, 4),
+    ).toBe(false);
+    expect(
+      shouldApplyChatRequestSettlement("request_a", "request_a", 4, 5),
     ).toBe(false);
   });
 

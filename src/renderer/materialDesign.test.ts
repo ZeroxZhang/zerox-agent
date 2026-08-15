@@ -50,6 +50,13 @@ describe("Design System — Obsidian desktop control surface", () => {
     path.join(process.cwd(), "src/renderer/components/GoalDetailDrawer.tsx"),
     "utf8",
   );
+  const dialogFocusTrapSource = readFileSync(
+    path.join(
+      process.cwd(),
+      "src/renderer/components/useDialogFocusTrap.ts",
+    ),
+    "utf8",
+  );
   const overviewPanelSource = readFileSync(
     path.join(process.cwd(), "src/renderer/components/OverviewPanel.tsx"),
     "utf8",
@@ -959,7 +966,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain(
       'const retryStarted = result.ok && result.goal?.status === "executing"',
     );
-    expect(chatPanelSource).toContain("重试未启动；目标仍处于受阻状态");
+    expect(chatPanelSource).toContain(
+      "outcomeMessage = applyCanonicalGoalState(result.goal)",
+    );
     expect(chatPanelSource).toContain('setComposerDraft("调整目标计划：")');
     expect(chatPanelSource).toContain("请说明需要改变的依赖、工具路径、执行方法或验收路径");
     expect(chatPanelSource).toContain("setActivePlan(result.plan)");
@@ -1060,7 +1069,9 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("keeps goal progress synced even before the active goal summary refreshes", () => {
     expect(chatPanelSource).toContain("const eventBelongsToActiveGoal");
-    expect(chatPanelSource).toContain("event.sessionId === activeSessionId");
+    expect(chatPanelSource).toContain(
+      "goalProgressEventMatchesActiveContext(event",
+    );
     expect(chatPanelSource).toContain("void refreshActiveGoalDetail(event.goalId)");
     expect(chatPanelSource).toContain("setActiveGoalDetail((currentGoal) =>");
     expect(chatPanelSource).toContain("status: event.status");
@@ -1121,6 +1132,9 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(cleanupSource).toContain("goalDraftActionPendingRef.current = null");
     expect(cleanupSource).toContain("setGoalDraftActionPending(null)");
     expect(cleanupSource).toContain("setSelectedWorkspaceId(null)");
+    expect(cleanupSource).toContain('setComposerDraft("", 0)');
+    expect(cleanupSource).toContain("setComposerAttachments([])");
+    expect(cleanupSource).toContain("setSelectedSkillName(null)");
     expect(cleanupSource).toContain("setChatStreamState(createChatStreamState([]))");
     expect(loadSessionSource).toContain("sessionLoadPendingRef.current = loadGeneration");
     expect(chatPanelSource).toContain("sessionLoadPendingRef.current !== null");
@@ -1602,6 +1616,58 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain("@media (max-width: 1180px)");
     expect(styles).toContain(".agent-context-panel { display: none; }");
     expect(styles).toContain(".guided-skill-input-form");
+    expect(chatPanelSource).toContain(
+      "guidedInputSubmissionPendingRef.current",
+    );
+    expect(chatPanelSource).toContain(
+      "<button disabled={pending} type=\"submit\">",
+    );
+  });
+
+  it("keeps compact new-chat and session-switch controls reachable on narrow windows", () => {
+    expect(appSource).toContain('aria-label="新会话"');
+    expect(appSource).toContain('className="new-chat-label"');
+    expect(styles).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*\.app-shell\.is-agent-chat \.sidebar-recents \{[\s\S]*display: grid;/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*\.new-chat-button \{[\s\S]*width: 44px;/,
+    );
+    expect(styles).toContain(
+      ".sidebar-session-list:has(.sidebar-session-row.has-open-menu)",
+    );
+  });
+
+  it("serializes modal keyboard ownership and traps rename focus", () => {
+    expect(dialogFocusTrapSource).toContain("openDialogStack");
+    expect(dialogFocusTrapSource).toContain(
+      "openDialogStack.isTop(dialogToken)",
+    );
+    expect(dialogFocusTrapSource).toContain("stopImmediatePropagation");
+    expect(dialogFocusTrapSource).toContain("const onEscapeRef = useRef(onEscape)");
+    expect(dialogFocusTrapSource).toContain(
+      "const removal = openDialogStack.remove(dialogToken)",
+    );
+    expect(dialogFocusTrapSource).not.toContain(
+      "[dialogRef, initialFocusRef, onEscape, open]",
+    );
+    expect(appSource).toContain("useDialogFocusTrap({");
+    expect(appSource).toContain("initialFocusRef: inputRef");
+  });
+
+  it("recovers App session mutations from rejected IPC promises", () => {
+    const renameSource = getFunctionSource(
+      appSource,
+      "handleSubmitRenameChatSession",
+    );
+    expect(renameSource).toContain("catch (error)");
+    expect(renameSource).toContain("pending: false");
+    expect(getFunctionSource(appSource, "handleArchiveChatSession")).toContain(
+      "catch (error)",
+    );
+    expect(getFunctionSource(appSource, "performDeleteChatSession")).toContain(
+      "catch (error)",
+    );
   });
 
   it("clears all active stream refs during new chat reset so stale events cannot repopulate the transcript", () => {

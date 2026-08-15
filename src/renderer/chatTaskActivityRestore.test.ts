@@ -139,4 +139,73 @@ describe("chat task activity restore", () => {
       },
     });
   });
+
+  it("restores guided input after a processing claim is interrupted", () => {
+    const inputRequest = {
+      id: "input_processing",
+      executionId: "execution_processing",
+      sessionId: "session_processing",
+      requestId: "request_processing",
+      skillName: "research",
+      reason: "Confirm the source path.",
+      fields: [
+        {
+          name: "source",
+          label: "Source",
+          type: "path" as const,
+          required: true,
+        },
+      ],
+      createdAt: "2026-08-15T00:00:00.000Z",
+    };
+    const pendingSkillInput = {
+      inputRequestId: inputRequest.id,
+      status: "processing" as const,
+      inputRequest,
+      sessionId: inputRequest.sessionId,
+      requestId: inputRequest.requestId,
+      userMessage: "research this",
+      selectedSkillName: "research",
+      partialValues: { source: "/workspace/docs" },
+    };
+    const snapshot: ChatSessionActivitySnapshot = {
+      updatedAt: "2026-08-15T00:00:02.000Z",
+      statusEvents: [
+        {
+          sessionId: inputRequest.sessionId,
+          requestId: inputRequest.requestId,
+          state: "checkpoint_boundary",
+          message: "Skill input execution claimed.",
+          inputRequest,
+          pendingSkillInput,
+          createdAt: "2026-08-15T00:00:01.000Z",
+          elapsedMs: 1_000,
+        },
+        {
+          sessionId: inputRequest.sessionId,
+          requestId: inputRequest.requestId,
+          state: "started",
+          message: "Runtime context snapshot recorded.",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          elapsedMs: 2_000,
+        },
+      ],
+    };
+
+    expect(restoreChatTaskActivity(snapshot)).toMatchObject({
+      status: {
+        kind: "paused",
+        message: "上次技能执行已中断，可从持久化输入继续。",
+      },
+      workPhase: "paused",
+      taskActivity: {
+        kind: "paused",
+        title: "技能输入可恢复",
+      },
+      pendingInputRequest: {
+        id: "input_processing",
+        requestId: "request_processing",
+      },
+    });
+  });
 });

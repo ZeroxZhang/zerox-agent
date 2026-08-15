@@ -45,6 +45,18 @@ export function shouldApplySequencedSessionResult(
   );
 }
 
+export function shouldApplyChatRequestSettlement(
+  activeRequestId: string | null,
+  requestId: string,
+  requestGeneration: number,
+  currentGeneration: number,
+): boolean {
+  return (
+    activeRequestId === requestId &&
+    requestGeneration === currentGeneration
+  );
+}
+
 export function rollbackFailedAttachmentTurn(
   messages: ChatStreamMessage[],
   options: { userMessageId: string; requestId: string },

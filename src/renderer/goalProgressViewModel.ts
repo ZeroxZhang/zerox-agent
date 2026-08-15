@@ -163,10 +163,11 @@ export function buildGoalProgressViewModel(
   summary: ChatSessionGoalSummary,
   goal: Goal | null,
 ): GoalProgressViewModel {
-  const status = goal
-    ? projectGoalStatusForInteraction(goal)
+  const matchingGoal = goal?.id === summary.id ? goal : null;
+  const status = matchingGoal
+    ? projectGoalStatusForInteraction(matchingGoal)
     : summary.status;
-  const milestones = goal?.milestones ?? [];
+  const milestones = matchingGoal?.milestones ?? [];
   const acceptedCount = milestones.filter((milestone) =>
     milestone.state === "accepted" || milestone.state === "skipped"
   ).length;
@@ -175,11 +176,11 @@ export function buildGoalProgressViewModel(
 
   return {
     status,
-    ...buildGoalStatusPresentation(status, goal, nextMilestone),
+    ...buildGoalStatusPresentation(status, matchingGoal, nextMilestone),
     progressText: totalCount > 0
       ? `${acceptedCount}/${totalCount} 已完成`
       : "尚未生成里程碑",
-    metricCards: buildMetricCards(goal),
+    metricCards: buildMetricCards(matchingGoal),
     milestoneRows: milestones.map(toMilestoneRow),
   };
 }
@@ -378,7 +379,9 @@ export function buildGoalStatusPresentation(
         recoveryActions:
           goal?.stopReason === "acceptance_integrity_failed"
             ? []
-            : ["retry_acceptance", "adjust_plan", "terminate"],
+            : goal?.stopReason === "goal_impossible"
+              ? ["adjust_plan", "terminate"]
+              : ["retry_acceptance", "adjust_plan", "terminate"],
       }, acceptance, certificate);
     case "failed":
       return {

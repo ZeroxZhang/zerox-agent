@@ -525,12 +525,24 @@ describe("goal progress view model", () => {
   });
 
   it.each([
-    ["external_blocked", "外部依赖"],
-    ["goal_impossible", "条件被判定为无法实现"],
-    ["acceptance_unavailable", "验收服务暂时不可用"],
+    [
+      "external_blocked",
+      "外部依赖",
+      ["retry_acceptance", "adjust_plan", "terminate"],
+    ],
+    [
+      "goal_impossible",
+      "条件被判定为无法实现",
+      ["adjust_plan", "terminate"],
+    ],
+    [
+      "acceptance_unavailable",
+      "验收服务暂时不可用",
+      ["retry_acceptance", "adjust_plan", "terminate"],
+    ],
   ] as const)(
     "projects %s as a recoverable blocked goal",
-    (stopReason, detailFragment) => {
+    (stopReason, detailFragment, recoveryActions) => {
       const goal = createGoal({
         status: "stopped_blocked",
         stopReason,
@@ -546,10 +558,31 @@ describe("goal progress view model", () => {
       expect(buildGoalStatusPresentation(goal.status, goal)).toMatchObject({
         statusLabel: "目标受阻",
         statusDetail: expect.stringContaining(detailFragment),
-        recoveryActions: ["retry_acceptance", "adjust_plan", "terminate"],
+        recoveryActions,
       });
     },
   );
+
+  it("ignores stale detail from a different Goal", () => {
+    const staleDetail = createGoal({
+      id: "goal_old",
+      status: "failed",
+    });
+    const currentSummary: ChatSessionGoalSummary = {
+      id: "goal_current",
+      description: "Current Goal",
+      status: "executing",
+    };
+
+    const viewModel = buildGoalProgressViewModel(
+      currentSummary,
+      staleDetail,
+    );
+
+    expect(viewModel.status).toBe("executing");
+    expect(viewModel.statusLabel).toBe("执行中");
+    expect(viewModel.milestoneRows).toEqual([]);
+  });
 
   it("projects a protocol-v2 certificate through an explicit safe allowlist", () => {
     const goal = certifiedGoal();

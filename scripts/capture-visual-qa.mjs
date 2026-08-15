@@ -4,12 +4,14 @@ import { app, BrowserWindow } from "electron";
 
 const projectRoot = process.cwd();
 const distIndexPath = path.join(projectRoot, "dist", "index.html");
-const outputDir = path.join(
-  projectRoot,
-  "docs",
-  "design",
-  "zerox-agent-3-4-0-qa",
-);
+const outputDir = process.env.ZEROX_VISUAL_QA_OUTPUT_DIR
+  ? path.resolve(process.env.ZEROX_VISUAL_QA_OUTPUT_DIR)
+  : path.join(
+      projectRoot,
+      "docs",
+      "design",
+      "zerox-agent-3-4-0-qa",
+    );
 
 const views = [
   {
@@ -62,6 +64,17 @@ const views = [
     width: 390,
   },
 ];
+
+if (process.env.ZEROX_VISUAL_QA_INCLUDE_INTERACTIONS === "1") {
+  views.push({
+    fileName: "08-chat-narrow-session-menu.png",
+    hash: "chat",
+    height: 844,
+    name: "Chat narrow session menu",
+    openSessionMenu: true,
+    width: 390,
+  });
+}
 
 function waitForLoad(windowInstance) {
   return new Promise((resolve, reject) => {
@@ -153,6 +166,13 @@ async function captureView(view) {
   await windowInstance.loadFile(distIndexPath, { hash: view.hash });
   await loadPromise;
   await waitForPaint(windowInstance);
+  if (view.openSessionMenu) {
+    await windowInstance.webContents.executeJavaScript(
+      `document.querySelector(".sidebar-session-actions")?.click()`,
+      true,
+    );
+    await waitForPaint(windowInstance);
+  }
 
   const image = await windowInstance.webContents.capturePage();
   const metrics = await collectMetrics(windowInstance);

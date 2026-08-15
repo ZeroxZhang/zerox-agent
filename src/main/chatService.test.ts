@@ -5287,6 +5287,11 @@ describe("chat service", () => {
       ]),
     );
     expect(activityEvents.filter((event) => event.state === "waiting_for_input")).toHaveLength(2);
+    expect(
+      Math.min(...responseStreamEvents.map((event) => event.sequence)),
+    ).toBeGreaterThan(
+      Math.max(...initialStreamEvents.map((event) => event.sequence)),
+    );
   });
 
   it("emits diagnostic output and a failed terminal event when guided input follow-up wait persistence fails", async () => {
@@ -5876,7 +5881,7 @@ describe("chat service", () => {
       chatSessionStore: {
         ...baseStore,
         async appendActivityEvent(sessionId, event) {
-          if (event.pendingSkillInput?.status === "completed") {
+          if (event.pendingSkillInput?.status === "processing") {
             throw new Error("claim write failed");
           }
           return baseStore.appendActivityEvent(sessionId, event);
@@ -5945,7 +5950,7 @@ describe("chat service", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      message: "Failed to persist skill input completion.",
+      message: "Failed to persist skill input processing claim.",
     });
     expect(agentLoopCalls).toBe(0);
     expect(chatMessages.filter((message) => message.role === "assistant")).toEqual(
@@ -5969,7 +5974,7 @@ describe("chat service", () => {
       chatSessionStore: {
         ...baseStore,
         async appendActivityEvent(sessionId, event, eventOptions) {
-          if (event.pendingSkillInput?.status === "completed") {
+          if (event.pendingSkillInput?.status === "processing") {
             return null;
           }
           return baseStore.appendActivityEvent(sessionId, event, eventOptions);
@@ -6038,7 +6043,7 @@ describe("chat service", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      message: "Failed to persist skill input completion.",
+      message: "Failed to persist skill input processing claim.",
     });
     expect(agentLoopCalls).toBe(0);
     expect(chatMessages.filter((message) => message.role === "assistant")).toEqual(
@@ -6236,6 +6241,23 @@ describe("chat service", () => {
         event.type === "waiting_for_input",
     )?.inputRequest;
     expect(inputRequest?.id).toBeTruthy();
+    const pendingState = (await persistentStore.get("session_1"))
+      ?.activity?.statusEvents
+      .find((event) => event.pendingSkillInput)
+      ?.pendingSkillInput;
+    expect(pendingState?.status).toBe("pending");
+    await persistentStore.appendActivityEvent("session_1", {
+      sessionId: "session_1",
+      requestId: "request_1",
+      state: "checkpoint_boundary",
+      message: "Skill input execution claimed.",
+      createdAt: "2026-06-23T08:00:01.000Z",
+      elapsedMs: 0,
+      pendingSkillInput: {
+        ...pendingState!,
+        status: "processing",
+      },
+    });
 
     const freshService = createChatService({
       ...dependencies,
@@ -6397,7 +6419,7 @@ describe("chat service", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      message: "Failed to persist skill input completion.",
+      message: "Failed to persist skill input processing claim.",
     });
     expect(agentLoopCalls).toBe(0);
     expect(chatMessages.filter((message) => message.role === "assistant")).toEqual(
@@ -7992,6 +8014,9 @@ describe("chat service", () => {
       code: "CANCELED",
     });
     expect(lifecycle).toContain("canceled_persisted");
+    expect(
+      lifecycle.filter((entry) => entry === "canceled_persisted"),
+    ).toHaveLength(1);
     expect(lifecycle.at(-1)).toBe("run_end");
     expect(bus.history().at(-1)).toMatchObject({
       type: "run_end",

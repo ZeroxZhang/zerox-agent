@@ -172,6 +172,86 @@ describe("chat session store", () => {
     });
   });
 
+  it("preserves a processing guided-input claim across restart", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("guided-processing"),
+    });
+    const session = await store.appendMessage({
+      role: "user",
+      content: "继续技能",
+    });
+    await store.appendActivityEvent(session.session.id, {
+      sessionId: session.session.id,
+      requestId: "request_processing",
+      state: "checkpoint_boundary",
+      message: "Skill input execution claimed.",
+      createdAt: "2026-08-15T00:00:00.000Z",
+      elapsedMs: 1,
+      inputRequest: {
+        id: "input_processing",
+        executionId: "execution_processing",
+        sessionId: session.session.id,
+        requestId: "request_processing",
+        skillName: "local-skill",
+        reason: "Confirm path.",
+        fields: [
+          {
+            name: "path",
+            label: "Path",
+            type: "path",
+            required: true,
+          },
+        ],
+        createdAt: "2026-08-15T00:00:00.000Z",
+      },
+      pendingSkillInput: {
+        inputRequestId: "input_processing",
+        status: "processing",
+        inputRequest: {
+          id: "input_processing",
+          executionId: "execution_processing",
+          sessionId: session.session.id,
+          requestId: "request_processing",
+          skillName: "local-skill",
+          reason: "Confirm path.",
+          fields: [
+            {
+              name: "path",
+              label: "Path",
+              type: "path",
+              required: true,
+            },
+          ],
+          createdAt: "2026-08-15T00:00:00.000Z",
+        },
+        sessionId: session.session.id,
+        requestId: "request_processing",
+        userMessage: "继续技能",
+        selectedSkillName: "local-skill",
+        partialValues: { path: "/workspace" },
+      },
+    });
+    await store.flush();
+
+    const restarted = createChatSessionStore({ configDir });
+    await expect(restarted.get(session.session.id)).resolves.toMatchObject({
+      activity: {
+        statusEvents: [
+          expect.objectContaining({
+            pendingSkillInput: expect.objectContaining({
+              inputRequestId: "input_processing",
+              status: "processing",
+              inputRequest: expect.objectContaining({
+                id: "input_processing",
+              }),
+            }),
+          }),
+        ],
+      },
+    });
+  });
+
   it("reuses the pending user record when the same attachment turn is retried", async () => {
     const store = createChatSessionStore({
       configDir,

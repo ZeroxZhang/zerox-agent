@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyChatStreamEvent,
   createChatStreamState,
+  finalizeChatStreamFailure,
   finalizeChatStreamResult,
 } from "./chatStreamReducer";
 import type { ChatStreamEvent, SkillUserInputRequest } from "../shared/chat";
@@ -271,6 +272,74 @@ describe("chat stream reducer", () => {
         detail: "2 files read",
       },
     ]);
+  });
+
+  it("settles a streamed diagnostic failure without appending a duplicate assistant message", () => {
+    let state = applyChatStreamEvent(
+      createChatStreamState([]),
+      createStreamEvent({
+        type: "output_part",
+        part: {
+          id: "diagnostic_1",
+          type: "diagnostic",
+          severity: "error",
+          title: "请求失败",
+          message: "Model unavailable.",
+        } satisfies ChatOutputPart,
+      }),
+      activeStream,
+    );
+
+    state = finalizeChatStreamFailure(state, {
+      requestId: "request_1",
+      message: "Model unavailable.",
+      createdAt: "2026-06-23T08:00:05.000Z",
+    });
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "",
+      streamRequestId: "request_1",
+      isStreaming: false,
+      outputParts: [
+        {
+          id: "diagnostic_1",
+          type: "diagnostic",
+          message: "Model unavailable.",
+        },
+      ],
+    });
+  });
+
+  it("keeps partial output and appends a diagnostic for a later transport failure", () => {
+    let state = applyChatStreamEvent(
+      createChatStreamState([]),
+      createStreamEvent({
+        type: "answer_delta",
+        text: "Partial answer.",
+      }),
+      activeStream,
+    );
+
+    state = finalizeChatStreamFailure(state, {
+      requestId: "request_1",
+      message: "Connection reset.",
+      createdAt: "2026-06-23T08:00:05.000Z",
+    });
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({
+      content: "Partial answer.",
+      isStreaming: false,
+      outputParts: [
+        {
+          type: "diagnostic",
+          severity: "error",
+          message: "Connection reset.",
+        },
+      ],
+    });
   });
 });
 

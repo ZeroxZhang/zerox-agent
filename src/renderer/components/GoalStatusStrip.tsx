@@ -164,16 +164,37 @@ function renderStatusAction(
         </>
       ) : null;
     case "stopped_blocked":
-      return props.onRetry ? (
-        <button
-          type="button"
-          className="goal-primary-action"
-          aria-label="重试验收"
-          onClick={props.onRetry}
-        >
-          重试验收
-        </button>
-      ) : null;
+      return (
+        <>
+          {progress.recoveryActions.includes("retry_acceptance") &&
+          props.onRetry ? (
+            <button
+              type="button"
+              className="goal-primary-action"
+              aria-label="重试验收"
+              onClick={props.onRetry}
+            >
+              重试验收
+            </button>
+          ) : null}
+          {progress.recoveryActions.includes("adjust_plan") &&
+          props.onReplan ? (
+            <button type="button" onClick={props.onReplan}>
+              调整计划
+            </button>
+          ) : null}
+          {progress.recoveryActions.includes("terminate") &&
+          props.onCancel ? (
+            <button
+              type="button"
+              className="goal-danger-action"
+              onClick={props.onCancel}
+            >
+              终止
+            </button>
+          ) : null}
+        </>
+      );
     case "waiting_for_acceptance":
       return props.onContinueAcceptance || props.onRetry ? (
         <button

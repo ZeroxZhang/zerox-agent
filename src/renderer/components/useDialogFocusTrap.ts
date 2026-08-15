@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 const focusableSelector = [
   "a[href]",
@@ -9,6 +9,14 @@ const focusableSelector = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+type DialogStackEntry<T extends { isConnected: boolean }> = {
+  containsTarget: (target: T) => boolean;
+  restoreTarget: T | null;
+  token: symbol;
+};
+
+const openDialogStack = createDialogFocusStack<HTMLElement>();
+
 export function useDialogFocusTrap(options: {
   dialogRef: RefObject<HTMLElement | null>;
   initialFocusRef?: RefObject<HTMLElement | null>;
@@ -16,6 +24,8 @@ export function useDialogFocusTrap(options: {
   open: boolean;
 }) {
   const { dialogRef, initialFocusRef, onEscape, open } = options;
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
 
   useEffect(() => {
     if (!open) {
@@ -27,9 +37,15 @@ export function useDialogFocusTrap(options: {
       return;
     }
     const activeDialog: HTMLElement = dialogElement;
+    const dialogToken = Symbol("dialog");
 
     const previousFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openDialogStack.push({
+      containsTarget: (target) => activeDialog.contains(target),
+      restoreTarget: previousFocus,
+      token: dialogToken,
+    });
 
     function getFocusableElements() {
       return Array.from(activeDialog.querySelectorAll<HTMLElement>(focusableSelector))
@@ -44,9 +60,13 @@ export function useDialogFocusTrap(options: {
     }, 0);
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && onEscape) {
+      if (!openDialogStack.isTop(dialogToken)) {
+        return;
+      }
+      if (event.key === "Escape" && onEscapeRef.current) {
         event.preventDefault();
-        onEscape();
+        event.stopImmediatePropagation();
+        onEscapeRef.current();
         return;
       }
 
@@ -81,7 +101,96 @@ export function useDialogFocusTrap(options: {
     return () => {
       window.clearTimeout(focusTimer);
       document.removeEventListener("keydown", handleKeyDown);
-      previousFocus?.focus();
+      const removal = openDialogStack.remove(dialogToken);
+      if (
+        shouldRestoreDialogFocus({
+          targetIsConnected: Boolean(removal.restoreTarget?.isConnected),
+          wasTopmost: removal.wasTopmost,
+        })
+      ) {
+        removal.restoreTarget?.focus();
+      }
     };
-  }, [dialogRef, initialFocusRef, onEscape, open]);
+  }, [dialogRef, initialFocusRef, open]);
+}
+
+export function shouldRestoreDialogFocus(options: {
+  targetIsConnected: boolean;
+  wasTopmost: boolean;
+}): boolean {
+  return options.wasTopmost && options.targetIsConnected;
+}
+
+export function chooseDialogRestoreTarget<T>(options: {
+  currentTarget: T | null;
+  currentTargetIsConnected: boolean;
+  currentTargetWasInsideRemovedDialog: boolean;
+  fallbackTarget: T | null;
+  fallbackTargetIsConnected: boolean;
+}): T | null {
+  if (
+    options.currentTargetIsConnected &&
+    !options.currentTargetWasInsideRemovedDialog
+  ) {
+    return options.currentTarget;
+  }
+  return options.fallbackTargetIsConnected
+    ? options.fallbackTarget
+    : null;
+}
+
+export function createDialogFocusStack<
+  T extends { isConnected: boolean },
+>() {
+  const entries: DialogStackEntry<T>[] = [];
+
+  return {
+    isTop(token: symbol): boolean {
+      return entries.at(-1)?.token === token;
+    },
+
+    push(entry: DialogStackEntry<T>): void {
+      entries.push(entry);
+    },
+
+    remove(token: symbol): {
+      restoreTarget: T | null;
+      wasTopmost: boolean;
+    } {
+      const stackIndex = entries.findIndex(
+        (entry) => entry.token === token,
+      );
+      if (stackIndex < 0) {
+        return {
+          restoreTarget: null,
+          wasTopmost: false,
+        };
+      }
+
+      const wasTopmost = stackIndex === entries.length - 1;
+      const [removedDialog] = entries.splice(stackIndex, 1);
+      const nextDialog = entries[stackIndex];
+      if (nextDialog) {
+        nextDialog.restoreTarget = chooseDialogRestoreTarget({
+          currentTarget: nextDialog.restoreTarget,
+          currentTargetIsConnected: Boolean(
+            nextDialog.restoreTarget?.isConnected,
+          ),
+          currentTargetWasInsideRemovedDialog: Boolean(
+            nextDialog.restoreTarget &&
+              removedDialog.containsTarget(nextDialog.restoreTarget),
+          ),
+          fallbackTarget: removedDialog.restoreTarget,
+          fallbackTargetIsConnected: Boolean(
+            removedDialog.restoreTarget?.isConnected,
+          ),
+        });
+      }
+
+      return {
+        restoreTarget: removedDialog.restoreTarget,
+        wasTopmost,
+      };
+    },
+  };
 }

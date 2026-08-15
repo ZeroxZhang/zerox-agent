@@ -1223,6 +1223,25 @@
   overflow: visible;
 }
 
+.goal-detail-load-error {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--status-error-border);
+  border-radius: var(--radius-10);
+  color: var(--status-error-text);
+  background: var(--status-error-bg);
+}
+
+.goal-detail-load-error p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.goal-detail-load-error button {
+  justify-self: start;
+}
+
 .goal-original-instructions {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-10);

@@ -407,6 +407,32 @@ export function restoreChatTaskActivity(
     latestEvent.state !== "failed"
   ) {
     const interruptedAt = parseEventTime(latestEvent.createdAt);
+    const resumableInputRequest =
+      findResumableSkillInputRequest(events);
+    if (resumableInputRequest) {
+      return {
+        status: {
+          kind: "paused",
+          message:
+            "上次技能执行已中断，可从持久化输入继续。",
+        },
+        workPhase: "paused",
+        taskActivity: createTaskActivity({
+          kind: "paused",
+          title: "技能输入可恢复",
+          detail:
+            resumableInputRequest.reason ||
+            "已保留输入，可继续执行技能。",
+          now: interruptedAt,
+          startedAt: interruptedAt - latestEvent.elapsedMs,
+          lastEventAt: interruptedAt,
+          toolCallsExecuted: latestEvent.toolCallsExecuted,
+          maxTurns: latestEvent.maxTurns,
+        }),
+        taskProcessEvents: events,
+        pendingInputRequest: resumableInputRequest,
+      };
+    }
     return {
       status: {
         kind: "error",
@@ -438,6 +464,30 @@ export function restoreChatTaskActivity(
       ? { pendingInputRequest: latestEvent.inputRequest }
       : {}),
   };
+}
+
+function findResumableSkillInputRequest(
+  events: ChatTaskStatusEvent[],
+): SkillUserInputRequest | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const pending = event.pendingSkillInput;
+    if (!pending) {
+      continue;
+    }
+    if (pending.status === "completed") {
+      return undefined;
+    }
+    const inputRequest = event.inputRequest ?? pending.inputRequest;
+    if (
+      (pending.status === "pending" ||
+        pending.status === "processing") &&
+      inputRequest
+    ) {
+      return inputRequest;
+    }
+  }
+  return undefined;
 }
 
 export function buildTaskActivityFromStatusEvent(

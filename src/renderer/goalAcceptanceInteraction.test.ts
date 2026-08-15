@@ -114,6 +114,7 @@ describe("goal acceptance renderer interaction fences", () => {
   it.each([
     ["achieved", "最终验收已通过", "已通过最终验收"],
     ["waiting_for_acceptance", "最终验收仍暂不可用", "进度已保留"],
+    ["waiting_for_model", "等待模型服务恢复", "未继续"],
     ["canceled", "目标已取消", "未继续"],
     ["stopped_blocked", "目标当前受阻", "未继续"],
   ] as const)(

@@ -1340,6 +1340,9 @@ function normalizeSkillPendingInputState(
   const requestId = normalizeOptionalString(pending.requestId);
   const userMessage = normalizeOptionalString(pending.userMessage);
   const selectedSkillName = normalizeOptionalString(pending.selectedSkillName);
+  const inputRequest = normalizeSkillUserInputRequest(
+    pending.inputRequest,
+  );
   const attachments = normalizeChatAttachmentMetadataList(pending.attachments);
   const attachmentPayloads = normalizeChatAttachmentInputList(
     pending.attachmentPayloads,
@@ -1350,7 +1353,13 @@ function normalizeSkillPendingInputState(
 
   return {
     inputRequestId,
-    status: pending.status === "completed" ? "completed" : "pending",
+    status:
+      pending.status === "completed"
+        ? "completed"
+        : pending.status === "processing"
+          ? "processing"
+          : "pending",
+    ...(inputRequest ? { inputRequest } : {}),
     sessionId,
     requestId,
     userMessage,

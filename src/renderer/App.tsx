@@ -2,6 +2,7 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -19,6 +20,7 @@ import { RunsPanel } from "./components/RunsPanel";
 import { ScheduledTasksPanel } from "./components/ScheduledTasksPanel";
 import { SkillLibraryPanel } from "./components/SkillLibraryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
+import { useDialogFocusTrap } from "./components/useDialogFocusTrap";
 import { getAppMeta, type AppMeta } from "../shared/appMeta";
 import type {
   ChatSessionListItem,
@@ -190,12 +192,23 @@ export function App() {
     if (!api) {
       return;
     }
-    if (appUpdateState.phase === "downloaded") {
-      const result = await api.installAppUpdate();
-      setAppUpdateState(result.state);
-      return;
+    try {
+      if (appUpdateState.phase === "downloaded") {
+        const result = await api.installAppUpdate();
+        setAppUpdateState(result.state);
+        return;
+      }
+      setAppUpdateState(await api.checkForAppUpdates());
+    } catch (error) {
+      setAppUpdateState({
+        phase: "error",
+        currentVersion: appVersion,
+        message:
+          error instanceof Error
+            ? error.message
+            : "检查更新失败，请稍后重试。",
+      });
     }
-    setAppUpdateState(await api.checkForAppUpdates());
   }
 
   useEffect(() => {
@@ -221,22 +234,90 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!renameSessionDraft) {
+    if (!openChatSessionMenuId) {
       return;
     }
 
-    const isRenamePending = renameSessionDraft.pending;
-    function handleRenameDialogKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !isRenamePending) {
-        setRenameSessionDraft(null);
+    const row = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-session-row-id]"),
+    ).find(
+      (candidate) =>
+        candidate.dataset.sessionRowId === openChatSessionMenuId,
+    );
+    const menu = row?.querySelector<HTMLElement>('[role="menu"]') ?? null;
+    const focusTimer = window.setTimeout(() => {
+      menu?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    }, 0);
+
+    function closeMenu(restoreFocus: boolean) {
+      setOpenChatSessionMenuId(null);
+      if (restoreFocus) {
+        window.setTimeout(() => {
+          const nextRow = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "[data-session-row-id]",
+            ),
+          ).find(
+            (candidate) =>
+              candidate.dataset.sessionRowId === openChatSessionMenuId,
+          );
+          nextRow
+            ?.querySelector<HTMLButtonElement>(
+              "[data-session-menu-trigger]",
+            )
+            ?.focus();
+        }, 0);
       }
     }
 
-    window.addEventListener("keydown", handleRenameDialogKeyDown);
+    function handleDocumentMouseDown(event: MouseEvent) {
+      if (event.target instanceof Node && row?.contains(event.target)) {
+        return;
+      }
+      closeMenu(false);
+    }
+
+    function handleMenuKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu(true);
+        return;
+      }
+      if (
+        !menu ||
+        !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
+      ) {
+        return;
+      }
+      const items = Array.from(
+        menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+      );
+      if (!items.length) {
+        return;
+      }
+      event.preventDefault();
+      const currentIndex = items.indexOf(
+        document.activeElement as HTMLButtonElement,
+      );
+      const nextIndex =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? items.length - 1
+            : event.key === "ArrowUp"
+              ? (currentIndex - 1 + items.length) % items.length
+              : (currentIndex + 1) % items.length;
+      items[nextIndex]?.focus();
+    }
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    document.addEventListener("keydown", handleMenuKeyDown);
     return () => {
-      window.removeEventListener("keydown", handleRenameDialogKeyDown);
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      document.removeEventListener("keydown", handleMenuKeyDown);
     };
-  }, [renameSessionDraft]);
+  }, [openChatSessionMenuId]);
 
   const activeSection =
     sections.find((section) => section.id === activeSectionId) ??
@@ -288,13 +369,20 @@ export function App() {
       return;
     }
 
-    const result = await window.buildingAgent.archiveChatSession(session.id);
-    if (!result.ok) {
-      showAppMessage("归档失败", result.message);
-      return;
+    try {
+      const result = await window.buildingAgent.archiveChatSession(session.id);
+      if (!result.ok) {
+        showAppMessage("归档失败", result.message);
+        return;
+      }
+      setArchiveGroupOpen(true);
+      await refreshChatSessions();
+    } catch (error) {
+      showAppMessage(
+        "归档失败",
+        error instanceof Error ? error.message : "归档会话失败，请稍后重试。",
+      );
     }
-    setArchiveGroupOpen(true);
-    await refreshChatSessions();
   }
 
   async function handleRestoreChatSession(session: ChatSessionListItem) {
@@ -312,12 +400,19 @@ export function App() {
       return;
     }
 
-    const result = await window.buildingAgent.restoreChatSession(session.id);
-    if (!result.ok) {
-      showAppMessage("恢复失败", result.message);
-      return;
+    try {
+      const result = await window.buildingAgent.restoreChatSession(session.id);
+      if (!result.ok) {
+        showAppMessage("恢复失败", result.message);
+        return;
+      }
+      await refreshChatSessions();
+    } catch (error) {
+      showAppMessage(
+        "恢复失败",
+        error instanceof Error ? error.message : "恢复会话失败，请稍后重试。",
+      );
     }
-    await refreshChatSessions();
   }
 
   function handleStartRenameChatSession(session: ChatSessionListItem) {
@@ -368,20 +463,35 @@ export function App() {
       return;
     }
 
-    const result = await window.buildingAgent.renameChatSession(
-      session.id,
-      nextTitle,
-    );
-    if (!result.ok) {
+    try {
+      const result = await window.buildingAgent.renameChatSession(
+        session.id,
+        nextTitle,
+      );
+      if (!result.ok) {
+        setRenameSessionDraft((current) =>
+          current && current.session.id === session.id
+            ? { ...current, error: result.message, pending: false }
+            : current,
+        );
+        return;
+      }
+      setRenameSessionDraft(null);
+      await refreshChatSessions();
+    } catch (error) {
       setRenameSessionDraft((current) =>
         current && current.session.id === session.id
-          ? { ...current, error: result.message, pending: false }
+          ? {
+              ...current,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "重命名会话失败，请稍后重试。",
+              pending: false,
+            }
           : current,
       );
-      return;
     }
-    setRenameSessionDraft(null);
-    await refreshChatSessions();
   }
 
   async function handleDeleteChatSession(session: ChatSessionListItem) {
@@ -410,16 +520,23 @@ export function App() {
       return;
     }
 
-    const result = await window.buildingAgent.deleteChatSession(session.id);
-    if (!result.ok) {
-      showAppMessage("删除失败", result.message);
-      return;
+    try {
+      const result = await window.buildingAgent.deleteChatSession(session.id);
+      if (!result.ok) {
+        showAppMessage("删除失败", result.message);
+        return;
+      }
+      if (selectedChatSessionId === session.id) {
+        setSelectedChatSessionId(null);
+        setNewChatRequestKey((current) => current + 1);
+      }
+      await refreshChatSessions();
+    } catch (error) {
+      showAppMessage(
+        "删除失败",
+        error instanceof Error ? error.message : "删除会话失败，请稍后重试。",
+      );
     }
-    if (selectedChatSessionId === session.id) {
-      setSelectedChatSessionId(null);
-      setNewChatRequestKey((current) => current + 1);
-    }
-    await refreshChatSessions();
   }
 
   function showAppMessage(title: string, message: string) {
@@ -457,9 +574,14 @@ export function App() {
             <small>本地桌面智能体</small>
           </div>
         </div>
-        <button className="new-chat-button" type="button" onClick={handleNewChat}>
+        <button
+          aria-label="新会话"
+          className="new-chat-button"
+          type="button"
+          onClick={handleNewChat}
+        >
           <Icon name="plus" size={16} />
-          新会话
+          <span className="new-chat-label">新会话</span>
         </button>
         <nav className="primary-nav" aria-label="功能分区">
           {sections.map((section) => {
@@ -861,6 +983,7 @@ function SidebarSessionRow(props: {
       className={`sidebar-session-row ${props.isActive ? "is-active" : ""} ${
         props.menuOpen ? "has-open-menu" : ""
       } ${isArchived ? "is-archived" : ""}`}
+      data-session-row-id={session.id}
     >
       <button
         className={`sidebar-session-item ${props.isActive ? "is-active" : ""}`}
@@ -899,6 +1022,7 @@ function SidebarSessionRow(props: {
         aria-label={`打开 ${session.title} 的会话操作`}
         aria-haspopup="menu"
         aria-expanded={props.menuOpen}
+        data-session-menu-trigger
         onClick={(event) => {
           event.stopPropagation();
           props.onToggleMenu(session.id);
@@ -954,6 +1078,15 @@ function RenameChatSessionDialog(props: {
 }) {
   const { draft } = props;
   const trimmedTitle = draft.title.trim();
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useDialogFocusTrap({
+    dialogRef,
+    initialFocusRef: inputRef,
+    onEscape: draft.pending ? undefined : props.onCancel,
+    open: true,
+  });
 
   return (
     <div
@@ -971,6 +1104,7 @@ function RenameChatSessionDialog(props: {
         aria-modal="true"
         aria-labelledby="session-rename-title"
         aria-describedby="session-rename-description"
+        ref={dialogRef}
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={props.onSubmit}
       >
@@ -983,9 +1117,9 @@ function RenameChatSessionDialog(props: {
         <label className="session-rename-field">
           <span>会话名称</span>
           <input
-            autoFocus
             aria-invalid={Boolean(draft.error)}
             maxLength={80}
+            ref={inputRef}
             value={draft.title}
             onChange={(event) => props.onTitleChange(event.target.value)}
             placeholder="输入会话名称"

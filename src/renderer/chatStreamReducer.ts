@@ -178,6 +178,90 @@ export function finalizeChatStreamResult(
   };
 }
 
+export function finalizeChatStreamFailure(
+  state: ChatStreamState,
+  result: {
+    requestId: string;
+    message: string;
+    createdAt: string;
+  },
+): ChatStreamState {
+  const existingIndex = state.messages.findIndex(
+    (message) =>
+      message.role === "assistant" &&
+      message.streamRequestId === result.requestId,
+  );
+  if (existingIndex === -1) {
+    return {
+      ...state,
+      messages: [
+        ...state.messages,
+        {
+          id: createStreamMessageId(result.requestId),
+          role: "assistant",
+          content: result.message,
+          createdAt: result.createdAt,
+          streamRequestId: result.requestId,
+          isStreaming: false,
+        },
+      ],
+      pendingInputRequest:
+        state.pendingInputRequest?.requestId === result.requestId
+          ? null
+          : state.pendingInputRequest,
+    };
+  }
+
+  return {
+    ...state,
+    messages: state.messages.map((message, index) =>
+      index === existingIndex
+        ? settleFailedStreamMessage(message, result)
+        : message,
+    ),
+    pendingInputRequest:
+      state.pendingInputRequest?.requestId === result.requestId
+        ? null
+        : state.pendingInputRequest,
+  };
+}
+
+function settleFailedStreamMessage(
+  message: ChatStreamMessage,
+  result: {
+    requestId: string;
+    message: string;
+    createdAt: string;
+  },
+): ChatStreamMessage {
+  const outputParts = message.outputParts ?? [];
+  const hasMatchingDiagnostic = outputParts.some(
+    (part) =>
+      part.type === "diagnostic" &&
+      part.severity === "error" &&
+      part.message === result.message,
+  );
+  return {
+    ...message,
+    isStreaming: false,
+    ...(!hasMatchingDiagnostic
+      ? {
+          outputParts: [
+            ...outputParts,
+            {
+              id: `diagnostic-${result.requestId}`,
+              type: "diagnostic" as const,
+              severity: "error" as const,
+              title: "请求失败",
+              message: result.message,
+              createdAt: result.createdAt,
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
 function isActiveStreamEvent(event: ChatStreamEvent, activeStream: ActiveChatStream): boolean {
   if (!activeStream.activeRequestId) {
     return false;

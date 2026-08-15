@@ -15,6 +15,7 @@ import { useDialogFocusTrap } from "./useDialogFocusTrap";
 
 type GoalDetailDrawerProps = {
   goal: Goal | null;
+  loadError?: string | null;
   activePlan?: PlanRecord | null;
   planCandidate?: PlanRecord | null;
   open: boolean;
@@ -32,6 +33,7 @@ type GoalDetailDrawerProps = {
   ) => void;
   goalAcceptanceContext: GoalAcceptanceUiContext;
   goalAcceptanceOperationPending?: boolean;
+  onReload?: () => void;
   onCancel?: () => void;
 };
 
@@ -130,6 +132,18 @@ export function GoalDetailDrawer(props: GoalDetailDrawerProps) {
         </header>
 
         <div className="goal-detail-drawer-body">
+          {props.loadError ? (
+            <section className="goal-detail-load-error" role="alert">
+              <strong>目标详情加载失败</strong>
+              <p>{props.loadError}</p>
+              {props.onReload ? (
+                <button type="button" onClick={props.onReload}>
+                  重试加载
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+
           <details className="goal-original-instructions" open>
             <summary>查看完整目标说明</summary>
             <div className="goal-original-instructions-content">
@@ -894,6 +908,7 @@ function canStartGoal(status: ChatSessionGoalSummary["status"]): boolean {
 function isRecoverableStatus(status: ChatSessionGoalSummary["status"]): boolean {
   return (
     status === "failed" ||
+    status === "waiting_for_model" ||
     status === "stopped_budget" ||
     status === "stopped_stalled" ||
     status === "stopped_blocked" ||
@@ -909,6 +924,8 @@ function getRecoveryHint(status: ChatSessionGoalSummary["status"]): string {
       return "目标没有可推进的里程碑。你可以重新规划、重试或结束目标。";
     case "failed":
       return "目标执行失败。你可以重试或结束目标。";
+    case "waiting_for_model":
+      return "模型服务暂时无法继续。当前检查点已保留，可继续生成或重试模型。";
     case "stopped_blocked":
       return "目标尚未完成。你可以重试验收、调整计划或终止目标。";
     case "waiting_for_acceptance":

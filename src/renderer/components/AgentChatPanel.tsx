@@ -84,6 +84,7 @@ import { createMarkdownPreview, shouldRenderMarkdownPreview } from "../chatMarkd
 import {
   isChatSessionSelectionCurrent,
   rollbackFailedAttachmentTurn,
+  shouldApplyChatRequestSettlement,
   shouldApplyPersistedSessionRefresh,
   shouldApplySequencedSessionResult,
   type ChatSessionSelectionContext,
@@ -121,9 +122,14 @@ import {
 import {
   applyChatStreamEvent,
   createChatStreamState,
+  finalizeChatStreamFailure,
   finalizeChatStreamResult,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
+import {
+  goalProgressEventMatchesActiveContext,
+  goalRunEventMatchesActiveContext,
+} from "../goalEventRouting";
 import type { AgentContextUsage } from "../../shared/contextUsage";
 import { outputPartsFromMessage, type RenderedOutputPart } from "../chatOutputModel";
 import { formatChatMessageTime } from "../chatMessageTime";
@@ -346,6 +352,8 @@ export function AgentChatPanel({
   );
   const pendingToolApproval = pendingToolApprovals[0] ?? null;
   const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
+  const [activeGoalDetailError, setActiveGoalDetailError] =
+    useState<string | null>(null);
   const [goalDrawerOpen, setGoalDrawerOpen] = useState(false);
   const [goalAcceptanceOperationPending, setGoalAcceptanceOperationPending] = useState<
     "continue_acceptance" | "mark_completed_unverified" | null
@@ -354,6 +362,8 @@ export function AgentChatPanel({
     "approve" | "reject" | null
   >(null);
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
+  const [guidedInputSubmissionPending, setGuidedInputSubmissionPending] =
+    useState(false);
   const [guidedInputValues, setGuidedInputValues] = useState<
     Record<string, string | number | boolean>
   >({});
@@ -366,12 +376,14 @@ export function AgentChatPanel({
   const sessionIdRef = useRef<string | null>(sessionId);
   const sessionSelectionGenerationRef = useRef(0);
   const sessionListRefreshSequenceRef = useRef(0);
+  const sessionMessageRefreshSequenceRef = useRef(0);
   const goalDetailRefreshSequenceRef = useRef(0);
   const goalMutationSequenceRef = useRef(0);
   const sessionLoadPendingRef = useRef<number | null>(null);
   const activeStatusSessionIdRef = useRef<string | null>(null);
   const activeChatRequestIdRef = useRef<string | null>(null);
   const submissionInFlightRef = useRef(false);
+  const guidedInputSubmissionPendingRef = useRef<string | null>(null);
   const pendingInputRequestRef = useRef<SkillUserInputRequest | null>(null);
   const activeGoalRef = useRef<ChatSessionGoalSummary | null>(null);
   const goalAcceptanceOperationPendingRef = useRef<GoalAcceptanceOperationToken | null>(null);
@@ -542,6 +554,11 @@ export function AgentChatPanel({
     setTaskActivity(idleTaskActivity);
     setTaskProcessEvents([]);
     setGoalRunEvents([]);
+    setComposerDraft("", 0);
+    setComposerAttachments([]);
+    setAttachmentReadPending(false);
+    setAttachmentError(null);
+    setAttachmentAnnouncement("");
     setSelectedSkillName(null);
     setPendingGoalDraft(null);
     setActivePlan(null);
@@ -558,7 +575,10 @@ export function AgentChatPanel({
     setWorkspaceMenuOpen(false);
     setWorkspaceSearch("");
     setActiveGoalDetail(null);
+    setActiveGoalDetailError(null);
     setGoalDrawerOpen(false);
+    guidedInputSubmissionPendingRef.current = null;
+    setGuidedInputSubmissionPending(false);
     goalAcceptanceOperationPendingRef.current = null;
     setGoalAcceptanceOperationPending(null);
   }, [newChatRequestKey]);
@@ -587,7 +607,10 @@ export function AgentChatPanel({
       const activeGoalId = activeGoalRef.current?.id;
       const activeSessionId = sessionIdRef.current;
       const eventBelongsToActiveGoal =
-        event.goalId === activeGoalId || event.sessionId === activeSessionId;
+        goalProgressEventMatchesActiveContext(event, {
+          activeGoalId: activeGoalId ?? null,
+          activeSessionId,
+        });
       if (eventBelongsToActiveGoal) {
         const goalUiState = getGoalUiSyncState(event.status);
         const description =
@@ -615,8 +638,9 @@ export function AgentChatPanel({
           });
         }
         if (goalUiState.shouldClearActiveRequest) {
-          activeStatusSessionIdRef.current = null;
-          setActiveChatRequest(null);
+          if (!activeChatRequestIdRef.current) {
+            activeStatusSessionIdRef.current = null;
+          }
         }
       }
       if (eventBelongsToActiveGoal) {
@@ -666,6 +690,14 @@ export function AgentChatPanel({
     }
 
     return window.buildingAgent.onGoalMilestoneRunEvent((event) => {
+      if (
+        !goalRunEventMatchesActiveContext(event, {
+          activeGoalId: activeGoalRef.current?.id ?? null,
+          activeSessionId: sessionIdRef.current,
+        })
+      ) {
+        return;
+      }
       setGoalRunEvents((current) => appendBoundedRuntimeEvent(current, event));
     });
   }, []);
@@ -722,11 +754,6 @@ export function AgentChatPanel({
             detail: event.inputRequest.reason || "等待技能输入",
           }),
         );
-        setActiveChatRequest(null);
-      }
-
-      if (event.type === "failed" || event.type === "canceled") {
-        setActiveChatRequest(null);
       }
     });
   }, []);
@@ -771,15 +798,6 @@ export function AgentChatPanel({
       setWorkPhase(getWorkPhaseFromChatStatusEvent(event));
       if (event.state === "waiting_for_input" && event.inputRequest) {
         setPendingInputRequest(event.inputRequest);
-      }
-      if (
-        event.state === "paused" ||
-        event.state === "waiting_for_input" ||
-        event.state === "canceled" ||
-        event.state === "completed" ||
-        event.state === "failed"
-      ) {
-        setActiveChatRequest(null);
       }
     });
   }, []);
@@ -863,18 +881,28 @@ export function AgentChatPanel({
           setLastValidationSnapshot(validation.snapshot);
         }
         const nextSessions = loadedSessions.map(toSessionRailItem);
-        setSessions(nextSessions);
-        setStatus({
-          kind: "ready",
-          message: settings.hasApiKey ? "模型已配置" : "还需要配置模型密钥",
-        });
+        if (
+          sessionSelectionGenerationRef.current === 0 &&
+          sessionIdRef.current === null &&
+          !activeChatRequestIdRef.current
+        ) {
+          setSessions(nextSessions);
+        }
         },
       )
       .catch((error) => {
-        setStatus({
-          kind: "error",
-          message: error instanceof Error ? error.message : "读取智能体状态失败",
-        });
+        if (
+          !activeChatRequestIdRef.current &&
+          sessionLoadPendingRef.current === null &&
+          sessionSelectionGenerationRef.current === 0 &&
+          sessionIdRef.current === null
+        ) {
+          setStatus({
+            kind: "error",
+            message:
+              error instanceof Error ? error.message : "读取智能体状态失败",
+          });
+        }
       });
   }, [onChatSessionsChange]);
 
@@ -905,7 +933,16 @@ export function AgentChatPanel({
     goalDraftActionPendingRef.current = null;
     setGoalDraftActionPending(null);
     setActiveGoalDetail(null);
+    setActiveGoalDetailError(null);
     setSelectedWorkspaceId(null);
+    setComposerDraft("", 0);
+    setComposerAttachments([]);
+    setAttachmentReadPending(false);
+    setAttachmentError(null);
+    setAttachmentAnnouncement("");
+    setSelectedSkillName(null);
+    guidedInputSubmissionPendingRef.current = null;
+    setGuidedInputSubmissionPending(false);
     setChatStreamState(createChatStreamState([]));
     setWorkPhase("idle");
     setStatus({ kind: "working", message: "正在加载会话..." });
@@ -941,10 +978,12 @@ export function AgentChatPanel({
       setSessionId(loadedSession.id);
       setSelectedWorkspaceId(loadedSession.workspaceId ?? null);
       const restoredActivity = restoreChatTaskActivity(loadedSession.activity);
+      shouldStickToLatestMessageRef.current = true;
       setChatStreamState({
         ...createChatStreamState(loadedSession.messages.map(toChatMessage)),
         pendingInputRequest: restoredActivity?.pendingInputRequest ?? null,
       });
+      window.requestAnimationFrame(scrollMessageListToBottom);
       if (restoredActivity) {
         setWorkPhase(restoredActivity.workPhase);
         setStatus(restoredActivity.status);
@@ -1039,6 +1078,7 @@ export function AgentChatPanel({
         setActiveGoalPlan(null);
         setGoalDrawerOpen(false);
       }
+      void refreshSessions(loadedSession.id);
     } catch (error) {
       if (
         sessionSelectionGenerationRef.current === loadGeneration &&
@@ -1092,32 +1132,53 @@ export function AgentChatPanel({
     const selection = captureSessionSelection();
     const requestSequence = goalDetailRefreshSequenceRef.current + 1;
     goalDetailRefreshSequenceRef.current = requestSequence;
-    const goal = await window.buildingAgent.getGoal(goalId);
-    const goalPlan = goal?.activePlanRef?.planId
-      ? await window.buildingAgent.getPlan(goal.activePlanRef.planId)
-      : null;
-    if (
-      !shouldApplySequencedSessionResult(
-        selection,
-        sessionIdRef.current,
-        sessionSelectionGenerationRef.current,
-        requestSequence,
-        goalDetailRefreshSequenceRef.current,
-      ) ||
-      (activeGoalRef.current && activeGoalRef.current.id !== goalId)
-    ) {
-      return;
-    }
-    setActiveGoalDetail(goal);
-    setActiveGoalPlan(goalPlan);
-    if (goalPlan) {
-      setActivePlan((current) =>
-        !current ||
-        current.id === goalPlan.id ||
-        current.executionGoalId === goalId
-          ? goalPlan
-          : current,
-      );
+    setActiveGoalDetailError(null);
+    try {
+      const goal = await window.buildingAgent.getGoal(goalId);
+      const goalPlan = goal?.activePlanRef?.planId
+        ? await window.buildingAgent.getPlan(goal.activePlanRef.planId)
+        : null;
+      if (
+        !shouldApplySequencedSessionResult(
+          selection,
+          sessionIdRef.current,
+          sessionSelectionGenerationRef.current,
+          requestSequence,
+          goalDetailRefreshSequenceRef.current,
+        ) ||
+        (activeGoalRef.current && activeGoalRef.current.id !== goalId)
+      ) {
+        return;
+      }
+      setActiveGoalDetail(goal);
+      setActiveGoalPlan(goalPlan);
+      if (!goal) {
+        setActiveGoalDetailError("目标详情不存在或已被删除。");
+        return;
+      }
+      if (goalPlan) {
+        setActivePlan((current) =>
+          !current ||
+          current.id === goalPlan.id ||
+          current.executionGoalId === goalId
+            ? goalPlan
+            : current,
+        );
+      }
+    } catch (error) {
+      if (
+        shouldApplySequencedSessionResult(
+          selection,
+          sessionIdRef.current,
+          sessionSelectionGenerationRef.current,
+          requestSequence,
+          goalDetailRefreshSequenceRef.current,
+        )
+      ) {
+        setActiveGoalDetailError(
+          error instanceof Error ? error.message : "加载目标详情失败。",
+        );
+      }
     }
   }
 
@@ -1131,13 +1192,16 @@ export function AgentChatPanel({
       return;
     }
     const refreshGeneration = sessionSelectionGenerationRef.current;
+    const refreshSequence = sessionMessageRefreshSequenceRef.current + 1;
+    sessionMessageRefreshSequenceRef.current = refreshSequence;
     if (
       !shouldApplyPersistedSessionRefresh(
         sessionIdRef.current,
         currentSessionId,
         sessionSelectionGenerationRef.current,
         refreshGeneration,
-      )
+      ) ||
+      refreshSequence !== sessionMessageRefreshSequenceRef.current
     ) {
       return;
     }
@@ -1155,7 +1219,8 @@ export function AgentChatPanel({
         currentSessionId,
         sessionSelectionGenerationRef.current,
         refreshGeneration,
-      )
+      ) ||
+      refreshSequence !== sessionMessageRefreshSequenceRef.current
     ) {
       return;
     }
@@ -1262,6 +1327,19 @@ export function AgentChatPanel({
       setGoalAcceptanceOperationPending(null);
     }
   }, [goalAcceptanceContext]);
+  useEffect(() => {
+    const goalId = activeGoal?.id;
+    setActiveGoalDetailError(null);
+    setActiveGoalDetail((current) =>
+      current?.id === goalId ? current : null,
+    );
+    setActiveGoalPlan((current) =>
+      current?.goalId === goalId ? current : null,
+    );
+    if (goalId) {
+      void refreshActiveGoalDetail(goalId);
+    }
+  }, [activeGoal?.id]);
   const planInputLocked = isPlanInputRoutingLocked(activePlan);
   const planAcceptsComposerInput =
     activePlan?.status === "awaiting_confirmation" ||
@@ -1316,13 +1394,15 @@ export function AgentChatPanel({
     [taskProcessEvents],
   );
   const hasActiveSubagents = subagentProcessItems.some((item) => item.status === "running");
+  const chatRequestInFlight = activeChatRequestId !== null;
   const canCancelChatTask =
     Boolean(window.buildingAgent) &&
-    (status.kind === "working" || taskActivity.kind === "working" || activeChatRequestId !== null);
+    (status.kind === "working" || taskActivity.kind === "working");
   const canInterruptCurrentWork = canCancelChatTask || Boolean(activeGoal?.status === "executing");
   const workspaceActionsDisabled =
     !window.buildingAgent ||
     Boolean(workspaceActionPending) ||
+    chatRequestInFlight ||
     status.kind === "working" ||
     planInputLocked;
   const activeSkillMention = useMemo(
@@ -1569,6 +1649,24 @@ export function AgentChatPanel({
     );
   }
 
+  function applyCanonicalGoalState(goal: Goal): string {
+    setActiveGoalDetail(goal);
+    setActiveGoalDetailError(null);
+    applyGoalSummaryToSessions(goal);
+    const activity = buildPersistedGoalActivity({
+      status: goal.status,
+      description: goal.description,
+    });
+    setStatus(activity.status);
+    setWorkPhase(activity.workPhase);
+    setTaskActivity(activity.taskActivity);
+    const syncState = getGoalUiSyncState(goal.status);
+    if (syncState.shouldClearActiveRequest && !activeChatRequestIdRef.current) {
+      activeStatusSessionIdRef.current = null;
+    }
+    return activity.taskActivity.title;
+  }
+
   function setActiveChatRequest(requestId: string | null) {
     activeChatRequestIdRef.current = requestId;
     setActiveChatRequestId(requestId);
@@ -1701,8 +1799,12 @@ export function AgentChatPanel({
     }
     setAttachmentReadPending(true);
     setAttachmentError(null);
+    const pasteGeneration = sessionSelectionGenerationRef.current;
     try {
       const attachments = await readPastedChatAttachments(files, draftAttachmentsRef.current);
+      if (pasteGeneration !== sessionSelectionGenerationRef.current) {
+        return;
+      }
       const nextAttachments = [...draftAttachmentsRef.current, ...attachments];
       setComposerAttachments(nextAttachments);
       setAttachmentAnnouncement(
@@ -1713,11 +1815,17 @@ export function AgentChatPanel({
         message: `已识别 ${attachments.length} 个粘贴附件`,
       });
     } catch (error) {
-      setAttachmentError(
-        error instanceof ChatAttachmentReadError ? error.message : "无法读取粘贴的附件。",
-      );
+      if (pasteGeneration === sessionSelectionGenerationRef.current) {
+        setAttachmentError(
+          error instanceof ChatAttachmentReadError
+            ? error.message
+            : "无法读取粘贴的附件。",
+        );
+      }
     } finally {
-      setAttachmentReadPending(false);
+      if (pasteGeneration === sessionSelectionGenerationRef.current) {
+        setAttachmentReadPending(false);
+      }
     }
   }
 
@@ -1793,22 +1901,18 @@ export function AgentChatPanel({
       if (!isGoalMutationCurrent(selection, mutationSequence)) {
         return;
       }
+      let outcomeMessage: string | null = null;
       if (result.ok && result.goal) {
-        applyGoalSummaryToSessions(result.goal);
-        setStatus({ kind: "working", message: "目标继续执行" });
-        setWorkPhase("tool");
-        setTaskActivity(
-          buildGoalTaskActivity({
-            status: result.goal.status,
-            description: result.goal.description,
-          }),
-        );
+        outcomeMessage = applyCanonicalGoalState(result.goal);
         void refreshActiveGoalDetail(goalId);
         void refreshSessions(sessionId ?? undefined);
       }
       appendMessage({
         role: "assistant",
-        content: result.ok ? "目标已继续执行。" : `目标继续失败：${result.message}`,
+        content:
+          result.ok && outcomeMessage
+            ? `${outcomeMessage}。`
+            : `目标继续失败：${result.message ?? "未返回目标状态。"}`,
       });
       return;
     }
@@ -1818,23 +1922,18 @@ export function AgentChatPanel({
       if (!isGoalMutationCurrent(selection, mutationSequence)) {
         return;
       }
+      let outcomeMessage: string | null = null;
       if (result.ok && result.goal) {
-        applyGoalSummaryToSessions(result.goal);
-        setStatus({ kind: "ready", message: "目标已终止" });
-        setWorkPhase("done");
-        setTaskActivity(
-          createTaskActivity({
-            kind: "done",
-            title: "目标已终止",
-            detail: "不会继续执行",
-          }),
-        );
+        outcomeMessage = applyCanonicalGoalState(result.goal);
         void refreshActiveGoalDetail(result.goal.id);
         void refreshSessions(sessionId ?? undefined);
       }
       appendMessage({
         role: "assistant",
-        content: result.ok ? "已终止目标。" : `终止目标失败：${result.message}`,
+        content:
+          result.ok && outcomeMessage
+            ? `${outcomeMessage}。`
+            : `终止目标失败：${result.message ?? "未返回目标状态。"}`,
       });
       return;
     }
@@ -1950,27 +2049,16 @@ export function AgentChatPanel({
       return;
     }
     const retryStarted = result.ok && result.goal?.status === "executing";
+    let outcomeMessage: string | null = null;
     if (result.ok && result.goal) {
-      applyGoalSummaryToSessions(result.goal);
-      const goalUiState = getGoalUiSyncState(result.goal.status);
-      setStatus({
-        kind: goalUiState.statusKind,
-        message: retryStarted ? "目标已恢复执行" : "目标仍未恢复执行",
-      });
-      setWorkPhase(goalUiState.workPhase);
-      setTaskActivity(
-        buildGoalTaskActivity({
-          status: result.goal.status,
-          description: result.goal.description,
-        }),
-      );
+      outcomeMessage = applyCanonicalGoalState(result.goal);
     }
     appendMessage({
       role: "assistant",
       content: result.ok
         ? retryStarted
           ? "已重试目标，继续执行。"
-          : "重试未启动；目标仍处于受阻状态。"
+          : `${outcomeMessage ?? "重试未启动"}。`
         : `重试目标失败：${result.message}`,
     });
     if (result.ok && result.goal) {
@@ -2191,22 +2279,16 @@ export function AgentChatPanel({
     if (!isGoalMutationCurrent(selection, mutationSequence)) {
       return;
     }
+    let outcomeMessage: string | null = null;
     if (result.ok && result.goal) {
-      applyGoalSummaryToSessions(result.goal);
-      setStatus({ kind: "paused", message: "目标已暂停，等待确认" });
-      setWorkPhase("paused");
-      setTaskActivity(
-        createTaskActivity({
-          kind: "paused",
-          title: "目标已暂停",
-          detail: "可在目标卡片中通过或调整后继续",
-          startedAt: taskActivity.startedAt,
-        }),
-      );
+      outcomeMessage = applyCanonicalGoalState(result.goal);
     }
     appendMessage({
       role: "assistant",
-      content: result.ok ? "已暂停目标，等待你的确认。" : `暂停目标失败：${result.message}`,
+      content:
+        result.ok && outcomeMessage
+          ? `${outcomeMessage}。`
+          : `暂停目标失败：${result.message ?? "未返回目标状态。"}`,
     });
     if (result.ok && result.goal) {
       void refreshActiveGoalDetail(result.goal.id);
@@ -2226,21 +2308,16 @@ export function AgentChatPanel({
     if (!isGoalMutationCurrent(selection, mutationSequence)) {
       return;
     }
+    let outcomeMessage: string | null = null;
     if (result.ok && result.goal) {
-      applyGoalSummaryToSessions(result.goal);
-      setStatus({ kind: "ready", message: "目标已取消" });
-      setWorkPhase("done");
-      setTaskActivity(
-        createTaskActivity({
-          kind: "done",
-          title: "目标已取消",
-          detail: "不会继续执行",
-        }),
-      );
+      outcomeMessage = applyCanonicalGoalState(result.goal);
     }
     appendMessage({
       role: "assistant",
-      content: result.ok ? "已取消目标。" : `取消目标失败：${result.message}`,
+      content:
+        result.ok && outcomeMessage
+          ? `${outcomeMessage}。`
+          : `取消目标失败：${result.message ?? "未返回目标状态。"}`,
     });
     if (result.ok && result.goal) {
       void refreshActiveGoalDetail(result.goal.id);
@@ -2900,10 +2977,16 @@ export function AgentChatPanel({
         retryable: true,
         message: error instanceof Error ? error.message : "会话请求失败，请稍后重试。",
       }));
-    if (activeChatRequestIdRef.current === requestId) {
+    const requestStillOwnsUi = shouldApplyChatRequestSettlement(
+      activeChatRequestIdRef.current,
+      requestId,
+      requestGeneration,
+      sessionSelectionGenerationRef.current,
+    );
+    if (requestStillOwnsUi) {
       setActiveChatRequest(null);
     }
-    if (requestGeneration !== sessionSelectionGenerationRef.current) {
+    if (!requestStillOwnsUi) {
       return;
     }
 
@@ -2965,10 +3048,13 @@ export function AgentChatPanel({
         }),
       );
       if (!wasCanceled && !restoredAttachmentSubmission) {
-        appendMessage({
-          role: "assistant",
-          content: result.message,
-        });
+        setChatStreamState((current) =>
+          finalizeChatStreamFailure(current, {
+            requestId,
+            message: result.message,
+            createdAt: new Date().toISOString(),
+          }),
+        );
       }
       return;
     }
@@ -2978,13 +3064,20 @@ export function AgentChatPanel({
 
   async function handleSubmitGuidedSkillInput(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!window.buildingAgent || !pendingInputRequest) {
+    if (
+      !window.buildingAgent ||
+      !pendingInputRequest ||
+      guidedInputSubmissionPendingRef.current
+    ) {
       return;
     }
 
     const inputRequest = pendingInputRequest;
     const requestId = inputRequest.requestId;
     const requestGeneration = sessionSelectionGenerationRef.current;
+    const submissionToken = `${inputRequest.id}:${requestGeneration}`;
+    guidedInputSubmissionPendingRef.current = submissionToken;
+    setGuidedInputSubmissionPending(true);
     setStatus({ kind: "working", message: "正在继续技能" });
     setWorkPhase("model");
     setTaskActivity(
@@ -2997,65 +3090,91 @@ export function AgentChatPanel({
     activeStatusSessionIdRef.current = inputRequest.sessionId;
     setActiveChatRequest(requestId);
 
-    const result = await window.buildingAgent
-      .respondSkillInput({
-        inputRequestId: inputRequest.id,
+    try {
+      const result = await window.buildingAgent
+        .respondSkillInput({
+          inputRequestId: inputRequest.id,
+          requestId,
+          values: buildSkillInputResponseValues(
+            inputRequest.fields,
+            guidedInputValues,
+          ),
+        })
+        .catch((error) => ({
+          ok: false as const,
+          code: "TRANSPORT_ERROR" as const,
+          retryable: true,
+          message:
+            error instanceof Error
+              ? error.message
+              : "技能输入提交失败，请稍后重试。",
+        }));
+
+      const requestStillOwnsUi = shouldApplyChatRequestSettlement(
+        activeChatRequestIdRef.current,
         requestId,
-        values: buildSkillInputResponseValues(inputRequest.fields, guidedInputValues),
-      })
-      .catch((error) => ({
-        ok: false as const,
-        code: "TRANSPORT_ERROR" as const,
-        retryable: true,
-        message: error instanceof Error ? error.message : "技能输入提交失败，请稍后重试。",
-      }));
+        requestGeneration,
+        sessionSelectionGenerationRef.current,
+      );
+      if (requestStillOwnsUi) {
+        setActiveChatRequest(null);
+      }
+      if (!requestStillOwnsUi) {
+        return;
+      }
 
-    if (activeChatRequestIdRef.current === requestId) {
-      setActiveChatRequest(null);
-    }
-    if (requestGeneration !== sessionSelectionGenerationRef.current) {
-      return;
-    }
+      if (!result.ok) {
+        if (result.code === "SKILL_INPUT_REQUIRED") {
+          setStatus({
+            kind: "paused",
+            message: pendingInputRequestRef.current?.reason || "等待技能输入",
+          });
+          setWorkPhase("paused");
+          setTaskActivity(
+            createTaskActivity({
+              kind: "paused",
+              title: "等待技能输入",
+              detail:
+                pendingInputRequestRef.current?.reason ||
+                "等待技能输入",
+            }),
+          );
+          return;
+        }
 
-    if (!result.ok) {
-      if (result.code === "SKILL_INPUT_REQUIRED") {
-        setStatus({
-          kind: "paused",
-          message: pendingInputRequestRef.current?.reason || "等待技能输入",
-        });
-        setWorkPhase("paused");
+        if (result.code === "ATTACHMENT_EXPIRED") {
+          setPendingInputRequest(null);
+        }
+
+        setStatus({ kind: "error", message: result.message });
+        setWorkPhase("error");
         setTaskActivity(
           createTaskActivity({
-            kind: "paused",
-            title: "等待技能输入",
-            detail: pendingInputRequestRef.current?.reason || "等待技能输入",
+            kind: "error",
+            title: "技能输入失败",
+            detail: result.message,
+          }),
+        );
+        setChatStreamState((current) =>
+          finalizeChatStreamFailure(current, {
+            requestId,
+            message: result.message,
+            createdAt: new Date().toISOString(),
           }),
         );
         return;
       }
 
-      if (result.code === "ATTACHMENT_EXPIRED") {
-        setPendingInputRequest(null);
+      setPendingInputRequest(null);
+      applySuccessfulChatResult(result, requestId);
+    } finally {
+      if (guidedInputSubmissionPendingRef.current === submissionToken) {
+        guidedInputSubmissionPendingRef.current = null;
+        if (requestGeneration === sessionSelectionGenerationRef.current) {
+          setGuidedInputSubmissionPending(false);
+        }
       }
-
-      setStatus({ kind: "error", message: result.message });
-      setWorkPhase("error");
-      setTaskActivity(
-        createTaskActivity({
-          kind: "error",
-          title: "技能输入失败",
-          detail: result.message,
-        }),
-      );
-      appendMessage({
-        role: "assistant",
-        content: result.message,
-      });
-      return;
     }
-
-    setPendingInputRequest(null);
-    applySuccessfulChatResult(result, requestId);
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -3105,17 +3224,7 @@ export function AgentChatPanel({
           }),
         );
       } else if (result.goal) {
-        applyGoalSummaryToSessions(result.goal);
-        setStatus({ kind: "ready", message: "目标已终止" });
-        setWorkPhase("done");
-        activeStatusSessionIdRef.current = null;
-        setTaskActivity(
-          createTaskActivity({
-            kind: "done",
-            title: "目标已终止",
-            detail: "不会继续执行",
-          }),
-        );
+        applyCanonicalGoalState(result.goal);
         void refreshActiveGoalDetail(result.goal.id);
         void refreshSessions(sessionId ?? undefined);
       }
@@ -3545,6 +3654,7 @@ export function AgentChatPanel({
             {pendingInputRequest ? (
               <GuidedSkillInputForm
                 inputRequest={pendingInputRequest}
+                pending={guidedInputSubmissionPending}
                 values={guidedInputValues}
                 onChange={(name, value) =>
                   setGuidedInputValues((current) => ({
@@ -3575,7 +3685,11 @@ export function AgentChatPanel({
                     aria-haspopup="menu"
                     aria-label="选择工作区"
                     className="workspace-picker-trigger"
-                    disabled={status.kind === "working" || planInputLocked}
+                    disabled={
+                      chatRequestInFlight ||
+                      status.kind === "working" ||
+                      planInputLocked
+                    }
                     onClick={() => setWorkspaceMenuOpen((open) => !open)}
                     type="button"
                   >
@@ -3818,7 +3932,11 @@ export function AgentChatPanel({
                     goalModeVisuallyEnabled ? " is-enabled" : ""
                   }`}
                   data-risk-tooltip={composerRiskTooltips.goal}
-                  disabled={status.kind === "working" || planInputLocked}
+                  disabled={
+                    chatRequestInFlight ||
+                    status.kind === "working" ||
+                    planInputLocked
+                  }
                   onClick={() => {
                     void handleSetGoalModeEnabled(!goalModeEnabled);
                   }}
@@ -3854,6 +3972,7 @@ export function AgentChatPanel({
                   data-testid="agent-send-button"
                   disabled={
                     status.kind === "working" ||
+                    chatRequestInFlight ||
                     attachmentReadPending ||
                     planModeDecisionOpen ||
                     (planInputLocked && !planAcceptsComposerInput)
@@ -3892,6 +4011,7 @@ export function AgentChatPanel({
         </form>
         <GoalDetailDrawer
           goal={activeGoalDetail}
+          loadError={activeGoalDetailError}
           activePlan={activeGoalPlan}
           planCandidate={activePlan}
           open={goalDrawerOpen}
@@ -3913,6 +4033,11 @@ export function AgentChatPanel({
           }
           goalAcceptanceContext={goalAcceptanceContext}
           goalAcceptanceOperationPending={goalAcceptanceOperationPending !== null}
+          onReload={
+            activeGoal?.id
+              ? () => void refreshActiveGoalDetail(activeGoal.id)
+              : undefined
+          }
           onCancel={handleCancelGoal}
         />
       </section>
@@ -5673,11 +5798,13 @@ function formatRiskCategory(category: ToolApprovalRequestPayload["risk"]["catego
 
 function GuidedSkillInputForm({
   inputRequest,
+  pending,
   values,
   onChange,
   onSubmit,
 }: {
   inputRequest: SkillUserInputRequest;
+  pending: boolean;
   values: Record<string, string | number | boolean>;
   onChange: (name: string, value: string | number | boolean) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -5696,14 +5823,19 @@ function GuidedSkillInputForm({
               {field.label}
               {field.required ? " *" : ""}
             </span>
-            {renderGuidedSkillInputControl(field, values[field.name], (value) =>
-              onChange(field.name, value),
+            {renderGuidedSkillInputControl(
+              field,
+              values[field.name],
+              (value) => onChange(field.name, value),
+              pending,
             )}
           </label>
         ))}
       </div>
       <div className="guided-skill-input-actions">
-        <button type="submit">继续</button>
+        <button disabled={pending} type="submit">
+          {pending ? "继续中" : "继续"}
+        </button>
       </div>
     </form>
   );
@@ -5713,11 +5845,13 @@ function renderGuidedSkillInputControl(
   field: SkillInputField,
   value: string | number | boolean | undefined,
   onChange: (value: string | number | boolean) => void,
+  disabled: boolean,
 ) {
   if (field.type === "boolean") {
     return (
       <input
         checked={value === true}
+        disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.checked)}
         type="checkbox"
       />
@@ -5727,6 +5861,7 @@ function renderGuidedSkillInputControl(
   if (field.type === "choice") {
     return (
       <select
+        disabled={disabled}
         required={field.required}
         value={typeof value === "string" ? value : ""}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -5744,6 +5879,7 @@ function renderGuidedSkillInputControl(
   if (field.type === "number") {
     return (
       <input
+        disabled={disabled}
         inputMode="decimal"
         required={field.required}
         type="number"
@@ -5756,6 +5892,7 @@ function renderGuidedSkillInputControl(
   if (field.type === "path") {
     return (
       <input
+        disabled={disabled}
         required={field.required}
         type="text"
         value={typeof value === "string" ? value : ""}
@@ -5767,6 +5904,7 @@ function renderGuidedSkillInputControl(
   if (field.type === "string") {
     return (
       <input
+        disabled={disabled}
         required={field.required}
         type="text"
         value={typeof value === "string" ? value : ""}

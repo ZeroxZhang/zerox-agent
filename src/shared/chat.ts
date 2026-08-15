@@ -201,7 +201,8 @@ export type SkillInputResponse = {
 
 export type SkillPendingInputState = {
   inputRequestId: string;
-  status: "pending" | "completed";
+  status: "pending" | "processing" | "completed";
+  inputRequest?: SkillUserInputRequest;
   sessionId: string;
   requestId: string;
   userMessage: string;

@@ -10199,3 +10199,43 @@
   metrics of 85 ms Context, 414 ms Chat, and 1,123 ms SQLite trajectory.
 - P92/KM09 and the program are ready to close again. Remote verification of
   the final closure commit remains mandatory before Goal completion.
+
+## 2026-08-15 - Frontend And Kernel Compatibility Review Started
+
+- Activated `P93-frontend-kernel-compatibility-and-interaction-review` as the
+  only unfinished Feature without reopening the completed Kernel migration.
+- Fixed the review scope across shared Chat and Goal contracts, preload and
+  IPC transport, Kernel-backed runtime settlement, renderer reconciliation,
+  stream and activity state, restart restoration, and responsive interaction.
+- Required real Electron acceptance for critical Chat and Goal paths in
+  addition to focused contract tests and the standard production gates.
+
+## 2026-08-15 - Frontend And Kernel Compatibility Review Completed
+
+- Completed two-pass review across shared contracts, preload and IPC, Chat and
+  Goal runtime settlement, renderer reconciliation, restart recovery, and
+  desktop and narrow interaction.
+- Fixed request ownership, Skill continuation sequence and processing
+  persistence, transcript refresh ordering, duplicate failure and activity
+  rendering, Goal event routing, canonical Goal outcomes, detail isolation,
+  blocked action parity, and startup/session async races.
+- Fixed compact session navigation, long-transcript positioning, stacked modal
+  keyboard ownership, rename and session-menu focus, rejected IPC recovery,
+  and duplicate guided-input submission.
+- Focused compatibility gate: 16 files / 527 tests.
+- Full verify: 273 files / 2,793 tests; Agent evaluations 26/26 and Memory
+  evaluations 2/2.
+- Runtime stress: all 6 scenarios passed with 82 ms Context, 410 ms Chat,
+  1,147 ms SQLite trajectory, and bounded scheduler/cancellation/Worker
+  recovery.
+- Production acceptance passed with JSON fallback and Electron-rebuilt SQLite
+  at desktop and 390 x 844. Node ABI was restored and 4 storage files / 70
+  tests passed.
+- Browser interaction verified session selection, new Chat, menu arrows,
+  Escape close, and focus restoration. Eight visual captures had no page-level
+  horizontal overflow; narrow Settings and the compact session menu rendered
+  without clipping.
+- Review evidence: `.zerox/reviews/P93-frontend-kernel-compatibility-review.md`.
+- Pre-commit review fixed nested modal cleanup so underlying dialogs neither
+  steal focus from the active modal nor lose the original restore target.
+- P93 is complete with no unfinished Feature.

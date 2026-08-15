@@ -167,6 +167,7 @@ type PersistedChatContinuation = ChatContinuationState & {
 
 type PendingSkillInputState = {
   persisted: SkillPendingInputState;
+  inputRequest?: SkillUserInputRequest;
   sessionId: string;
   requestId: string;
   userMessage: string;
@@ -178,6 +179,7 @@ type PendingSkillInputState = {
   partialValues: Record<string, SkillInputValue>;
   attachments?: SendChatMessageInput["attachments"];
   createdAtMs: number;
+  streamSequence: number;
 };
 
 type CachedHistoryAttachmentPayload = {
@@ -206,6 +208,7 @@ type ChatTurnInternalOptions = {
   resolvedSkillInput?: SkillInputResolution;
   preResolvedRunContext?: AgentRunContext;
   preResolvedWorkspaceSummary?: ChatWorkspaceSummary;
+  initialStreamSequence?: number;
 };
 
 type ChatGoalService = {
@@ -456,7 +459,11 @@ export function createChatService(options: {
       inputRequestId,
       chatSessionStore: options.chatSessionStore,
     });
-    if (!persisted || persisted.status !== "pending") {
+    if (
+      !persisted ||
+      (persisted.status !== "pending" &&
+        persisted.status !== "processing")
+    ) {
       return null;
     }
 
@@ -497,27 +504,50 @@ export function createChatService(options: {
     return recovered;
   }
 
-  async function markPersistedSkillInputCompleted(pending: PendingSkillInputState) {
+  async function persistSkillInputExecutionState(
+    pending: PendingSkillInputState,
+    status: "processing" | "completed",
+  ) {
     if (!options.chatSessionStore?.appendActivityEvent) {
       throw new Error("Chat session activity persistence is unavailable.");
     }
 
     const record = await options.chatSessionStore.appendActivityEvent(pending.sessionId, {
       sessionId: pending.sessionId,
-      state: "completed",
-      message: "Skill input completed.",
+      state: status === "completed" ? "completed" : "checkpoint_boundary",
+      message:
+        status === "completed"
+          ? "Skill input completed."
+          : "Skill input execution claimed.",
       createdAt: new Date(getNowMs(options.now)).toISOString(),
       elapsedMs: 0,
       selectedSkillName: pending.selectedSkill.manifest.name,
+      ...(status === "processing" && pending.inputRequest
+        ? { inputRequest: pending.inputRequest }
+        : {}),
       pendingSkillInput: {
         ...pending.persisted,
-        status: "completed",
-        attachmentPayloads: undefined,
+        status,
+        ...(status === "completed"
+          ? { attachmentPayloads: undefined }
+          : {}),
       },
     });
     if (!record) {
       throw new Error("Chat session activity persistence did not update a session.");
     }
+  }
+
+  function markPersistedSkillInputProcessing(
+    pending: PendingSkillInputState,
+  ) {
+    return persistSkillInputExecutionState(pending, "processing");
+  }
+
+  function markPersistedSkillInputCompleted(
+    pending: PendingSkillInputState,
+  ) {
+    return persistSkillInputExecutionState(pending, "completed");
   }
 
   async function executeMessageInternal(
@@ -579,6 +609,7 @@ export function createChatService(options: {
         sessionId,
         requestId,
         startedAtMs,
+        initialSequence: internalOptions.initialStreamSequence,
         now: options.now,
         onStatusEvent: runtimeOptions.onStatusEvent,
         onStreamEvent: runtimeOptions.onStreamEvent,
@@ -1167,6 +1198,7 @@ export function createChatService(options: {
                 : {}),
               ...(chatRunContext ? { runContext: chatRunContext } : {}),
             }),
+            streamSequence: emitStatus.getSequence(),
           });
           return {
             ok: false,
@@ -2297,6 +2329,18 @@ export function createChatService(options: {
           "Chat Kernel terminal activity persistence is unavailable.",
         );
       }
+      const persistedSession = options.chatSessionStore.get
+        ? await options.chatSessionStore.get(sessionId)
+        : null;
+      if (
+        persistedSession?.activity?.statusEvents.some(
+          (event) =>
+            event.requestId === requestId &&
+            event.state === status,
+        )
+      ) {
+        return true;
+      }
       await persistRequiredChatActivityEvent(
         options.chatSessionStore,
         {
@@ -2552,6 +2596,7 @@ export function createChatService(options: {
         sessionId: pending.sessionId,
         requestId: pending.requestId,
         startedAtMs: getNowMs(options.now),
+        initialSequence: pending.streamSequence,
         now: options.now,
         onStatusEvent: runtimeOptions.onStatusEvent,
         onStreamEvent: runtimeOptions.onStreamEvent,
@@ -2614,6 +2659,7 @@ export function createChatService(options: {
             : {}),
           ...(pending.runContext ? { runContext: pending.runContext } : {}),
         }),
+        streamSequence: emitStatus.getSequence(),
       });
       return {
         ok: false,
@@ -2623,14 +2669,13 @@ export function createChatService(options: {
     }
 
     try {
-      await markPersistedSkillInputCompleted(pending);
+      await markPersistedSkillInputProcessing(pending);
     } catch {
       return {
         ok: false,
-        message: "Failed to persist skill input completion.",
+        message: "Failed to persist skill input processing claim.",
       };
     }
-    pendingSkillInputRequests.delete(input.inputRequestId);
     const result = await sendMessageInternal(
       {
         sessionId: pending.sessionId,
@@ -2655,8 +2700,18 @@ export function createChatService(options: {
         ...(pending.workspaceSummary
           ? { preResolvedWorkspaceSummary: pending.workspaceSummary }
           : {}),
+        initialStreamSequence: pending.streamSequence,
       },
     );
+    try {
+      await markPersistedSkillInputCompleted(pending);
+    } catch {
+      return {
+        ok: false,
+        message: "Failed to persist skill input completion.",
+      };
+    }
+    pendingSkillInputRequests.delete(input.inputRequestId);
     return result;
   }
 
@@ -2694,6 +2749,7 @@ function createChatStatusEmitter(options: {
   sessionId: string;
   requestId: string;
   startedAtMs: number;
+  initialSequence?: number;
   now?: () => Date;
   onStatusEvent?: (event: ChatTaskStatusEvent) => void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
@@ -2702,7 +2758,7 @@ function createChatStatusEmitter(options: {
 }) {
   let sessionId = options.sessionId;
   let assistantMessageId: string | undefined;
-  let sequence = 0;
+  let sequence = Math.max(0, options.initialSequence ?? 0);
   const turnId = `turn-${options.requestId}`;
   const bufferedTextEvents: Array<{
     type: "answer_delta" | "thinking_delta";
@@ -2791,6 +2847,9 @@ function createChatStatusEmitter(options: {
   }
 
   return {
+    getSequence() {
+      return sequence;
+    },
     setSessionId(nextSessionId: string) {
       sessionId = nextSessionId;
     },
@@ -4571,6 +4630,7 @@ function createPendingSkillInputState(options: {
   return {
     inputRequestId: options.inputRequest.id,
     status: "pending",
+    inputRequest: options.inputRequest,
     sessionId: options.sessionId,
     requestId: options.requestId,
     userMessage: options.userMessage,
@@ -4592,9 +4652,13 @@ function toInMemoryPendingSkillInputState(options: {
   runContext?: AgentRunContext;
   attachments?: SendChatMessageInput["attachments"];
   createdAtMs: number;
+  streamSequence?: number;
 }): PendingSkillInputState {
   return {
     persisted: options.persisted,
+    ...(options.persisted.inputRequest
+      ? { inputRequest: options.persisted.inputRequest }
+      : {}),
     sessionId: options.persisted.sessionId,
     requestId: options.persisted.requestId,
     userMessage: options.persisted.userMessage,
@@ -4609,6 +4673,7 @@ function toInMemoryPendingSkillInputState(options: {
     ...(options.runContext ? { runContext: options.runContext } : {}),
     partialValues: options.persisted.partialValues,
     createdAtMs: options.createdAtMs,
+    streamSequence: Math.max(0, options.streamSequence ?? 0),
     ...(options.attachments?.length
       ? { attachments: options.attachments }
       : {}),
@@ -4637,7 +4702,10 @@ async function findPersistedPendingSkillInputState(options: {
     }
   }
 
-  return latest?.status === "pending" ? latest : null;
+  return latest &&
+      (latest.status === "pending" || latest.status === "processing")
+    ? latest
+    : null;
 }
 
 function toPersistedChatContinuation(

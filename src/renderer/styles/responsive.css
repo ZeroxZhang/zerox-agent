@@ -74,9 +74,53 @@
     overflow-x: auto;
   }
 
-  .sidebar-pinned,
+  .sidebar-pinned {
+    display: none;
+  }
+
   .sidebar-recents {
     display: none;
+  }
+
+  .app-shell.is-agent-chat .sidebar-recents {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .app-shell.is-agent-chat .sidebar-recents .sidebar-section-title,
+  .app-shell.is-agent-chat .sidebar-recents .sidebar-archive-group {
+    display: none;
+  }
+
+  .app-shell.is-agent-chat .sidebar-recents .sidebar-session-list {
+    display: flex;
+    gap: var(--space-2);
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .app-shell.is-agent-chat
+    .sidebar-recents
+    .sidebar-session-list:has(.sidebar-session-row.has-open-menu) {
+    padding-bottom: 116px;
+  }
+
+  .app-shell.is-agent-chat .sidebar-recents .sidebar-session-row {
+    flex: 0 0 min(240px, 72vw);
+  }
+
+  .app-shell.is-agent-chat
+    .sidebar-recents
+    .sidebar-session-row.has-open-menu {
+    z-index: 2;
+  }
+
+  .app-shell.is-agent-chat .sidebar-recents
+    .sidebar-session-row
+    .sidebar-session-item {
+    min-height: 48px;
   }
 
   .app-shell.is-agent-chat .workspace {
@@ -172,9 +216,24 @@
     box-shadow: none;
   }
 
-  .workspace-sidebar .material-brand-copy,
-  .new-chat-button {
+  .workspace-sidebar .material-brand-copy {
     display: none;
+  }
+
+  .new-chat-button {
+    flex: 0 0 44px;
+    width: 44px;
+    min-height: 44px;
+    align-self: flex-start;
+    padding: 0;
+  }
+
+  .new-chat-label {
+    display: none;
+  }
+
+  .app-shell.is-agent-chat .sidebar-recents .sidebar-session-row {
+    flex-basis: min(220px, 76vw);
   }
 
   .nav-item {

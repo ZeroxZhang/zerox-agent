@@ -40,6 +40,7 @@ const goalStatuses = new Set<GoalStatus>([
   "executing",
   "waiting_for_review",
   "waiting_for_acceptance",
+  "waiting_for_model",
   "achieved",
   "completed_unverified",
   "stopped_budget",
