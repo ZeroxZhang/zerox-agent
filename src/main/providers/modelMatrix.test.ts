@@ -18,6 +18,13 @@ describe("curated model matrix", () => {
       );
       expect(entry.verified).toBe(true);
       expect(entry.capabilities.streaming).toBe(true);
+      if (entry.contextWindow) {
+        expect(entry.contextWindowSource).toEqual({
+          kind: "public_catalog",
+          label: "Zerox 公开模型目录",
+          checkedAt: expect.any(String),
+        });
+      }
     }
   });
 

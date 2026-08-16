@@ -119,7 +119,7 @@ describe("agent runner service", () => {
         },
         compressMessages(messages, budget) {
           compactionBudgets.push(budget ?? 0);
-          return messages;
+          return messages.slice(-1);
         },
       },
     });

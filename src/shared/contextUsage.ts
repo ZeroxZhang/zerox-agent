@@ -1,3 +1,5 @@
+import type { ModelContextWindowSource } from "./modelSettings";
+
 export type AgentContextCompactionSummary = {
   strategy: "summarize" | "rebuild" | "summarize-degraded";
   beforeMessages: number;
@@ -13,32 +15,64 @@ export type AgentContextUsage = {
   occupancyRatio: number;
   messageCount: number;
   compactionCount: number;
+  budgetEnforcement?: "hard" | "advisory";
   contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
   lastCompaction?: AgentContextCompactionSummary;
   updatedAt: string;
 };
+
+export type AgentContextBudget = {
+  tokenBudget: number;
+  maxOutputTokens: number;
+  safetyMarginTokens: number;
+  enforcement: "hard" | "advisory";
+  contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
+};
+
+const ADVISORY_CONTEXT_WINDOW = 32_768;
+
+export function resolveAgentContextBudget(input: {
+  contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
+  maxOutputTokens: number;
+}): AgentContextBudget {
+  const knownContextWindow = normalizePositiveInteger(input.contextWindow);
+  const maxOutputTokens = Math.max(
+    1,
+    Math.floor(Number(input.maxOutputTokens) || 1),
+  );
+  const enforcement = knownContextWindow ? "hard" : "advisory";
+  const planningWindow =
+    enforcement === "hard"
+      ? knownContextWindow!
+      : Math.max(ADVISORY_CONTEXT_WINDOW, maxOutputTokens * 2);
+  const availableTokens = Math.max(1, planningWindow - maxOutputTokens);
+  const tokenBudget = Math.max(1, Math.floor(availableTokens * 0.9));
+  const safetyMarginTokens = Math.max(0, availableTokens - tokenBudget);
+
+  return {
+    tokenBudget,
+    maxOutputTokens,
+    safetyMarginTokens,
+    enforcement,
+    ...(enforcement === "hard"
+      ? {
+          contextWindow: knownContextWindow,
+          ...(input.contextWindowSource
+            ? { contextWindowSource: { ...input.contextWindowSource } }
+            : {}),
+        }
+      : {}),
+  };
+}
 
 export function resolveContextTokenBudget(input: {
   contextWindow?: number;
   maxOutputTokens: number;
 }): number {
-  const contextWindow = normalizePositiveInteger(input.contextWindow);
-  const maxOutputTokens = Math.max(
-    1,
-    Math.floor(Number(input.maxOutputTokens) || 1),
-  );
-  if (contextWindow && contextWindow > maxOutputTokens) {
-    // Reserve the configured maximum output plus a 10% provider/tokenizer
-    // safety margin. maxOutputTokens is not itself the model context window.
-    return Math.max(
-      1,
-      Math.floor((contextWindow - maxOutputTokens) * 0.9),
-    );
-  }
-
-  // Compatibility fallback for custom profiles whose context window is not
-  // known yet. This preserves the historical compaction threshold.
-  return Math.max(1, Math.floor(maxOutputTokens * 0.7));
+  return resolveAgentContextBudget(input).tokenBudget;
 }
 
 export function createAgentContextUsage(input: {
@@ -46,7 +80,9 @@ export function createAgentContextUsage(input: {
   tokenBudget: number;
   messageCount: number;
   compactionCount?: number;
+  budgetEnforcement?: "hard" | "advisory";
   contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
   lastCompaction?: AgentContextCompactionSummary;
   updatedAt: string;
 }): AgentContextUsage {
@@ -59,7 +95,13 @@ export function createAgentContextUsage(input: {
     occupancyRatio: Math.min(1, estimatedTokens / tokenBudget),
     messageCount: normalizeNonNegativeInteger(input.messageCount),
     compactionCount: normalizeNonNegativeInteger(input.compactionCount),
+    ...(input.budgetEnforcement
+      ? { budgetEnforcement: input.budgetEnforcement }
+      : {}),
     ...(contextWindow ? { contextWindow } : {}),
+    ...(contextWindow && input.contextWindowSource
+      ? { contextWindowSource: { ...input.contextWindowSource } }
+      : {}),
     ...(input.lastCompaction
       ? { lastCompaction: { ...input.lastCompaction } }
       : {}),

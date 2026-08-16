@@ -1551,6 +1551,9 @@ export function createAppContainer(options: {
       ...(resolved.binding.contextWindow
         ? { contextWindow: resolved.binding.contextWindow }
         : {}),
+      ...(resolved.binding.contextWindowSource
+        ? { contextWindowSource: { ...resolved.binding.contextWindowSource } }
+        : {}),
       thinking: resolved.binding.generation.thinkingEnabled
         ? {
             type: "enabled" as const,

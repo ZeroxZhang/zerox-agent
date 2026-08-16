@@ -1551,6 +1551,15 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".session-context-status-card");
   });
 
+  it("shows automatically resolved context windows and provenance without a manual window field", () => {
+    expect(modelSettingsPanelSource).toContain("contextWindowSource");
+    expect(modelSettingsPanelSource).toContain("公开模型目录");
+    expect(modelSettingsPanelSource).not.toContain('name="contextWindow"');
+    expect(chatPanelSource).toContain("模型窗口");
+    expect(chatPanelSource).toContain("budgetEnforcement");
+    expect(chatPanelSource).toContain("contextWindowSource");
+  });
+
   it("keeps tool and raw reasoning previews out of the main interface", () => {
     expect(chatPanelSource).not.toContain("RuntimeTextDisclosure");
     expect(chatPanelSource).not.toContain("ToolCallPreviewDisclosure");

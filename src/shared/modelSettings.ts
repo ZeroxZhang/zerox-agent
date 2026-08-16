@@ -29,6 +29,18 @@ export type ProviderCredentialSource =
   | "ambient"
   | "none";
 
+export type ModelContextWindowSource = {
+  kind: "public_catalog" | "provider_metadata";
+  label: string;
+  checkedAt?: string;
+};
+
+export type PublishedModelMetadata = {
+  modelId: string;
+  contextWindow: number;
+  contextWindowSource: ModelContextWindowSource;
+};
+
 export type ProviderConnectionVerification = {
   status: "passed" | "failed";
   checkedAt: string;
@@ -91,6 +103,7 @@ export type PublicProviderConnection = {
   hasCredential: boolean;
   availability?: "unknown" | "available" | "unavailable";
   availableModelIds?: string[];
+  publishedModels?: PublishedModelMetadata[];
   verification?: ProviderConnectionVerification;
   keySetAt?: string;
   lastUsedAt?: string;
@@ -113,6 +126,7 @@ export type ModelCatalogEntry = {
   modelId: string;
   label: string;
   contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
   capabilities: ModelCapabilities;
   verified: boolean;
   verifiedAt?: string;
@@ -178,6 +192,7 @@ export type ResolvedModelBinding = {
   providerKind: ProviderKind;
   modelId: string;
   contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
   revision: number;
   connectionRevision?: number;
   profileRevision?: number;

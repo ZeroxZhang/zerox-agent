@@ -198,6 +198,107 @@ describe("model connection service", () => {
     expect(second).toEqual(first);
   });
 
+  it("discovers an Ollama model context window from /api/show", async () => {
+    const recordPublishedModels = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.endsWith("/api/tags")) {
+        return new Response(
+          JSON.stringify({ models: [{ name: "llama3.3:70b" }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          model_info: {
+            "llama.context_length": 131_072,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const service = createModelConnectionService({
+      modelSettingsStore: {
+        resolveConnection: vi.fn(async () => ({
+          id: "ollama-local",
+          providerKind: "ollama" as const,
+          credentialSource: "none" as const,
+          connectionValues: { baseUrl: "http://localhost:11434" },
+          secrets: {},
+          revision: 1,
+        })),
+        recordPublishedModels,
+      } as unknown as ModelSettingsStore,
+      chatClient: createChatClient([], "unused"),
+      fetch: fetchMock as typeof fetch,
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
+    });
+
+    const result = await service.enrichCatalog({
+      schemaVersion: 2,
+      descriptors: [],
+      entries: [],
+      connections: [
+        {
+          id: "ollama-local",
+          name: "Local",
+          providerKind: "ollama",
+          values: { baseUrl: "http://localhost:11434" },
+          credentialSource: "none",
+          hasCredential: true,
+          verification: {
+            status: "passed",
+            checkedAt: "2026-08-15T00:00:00.000Z",
+            message: "ok",
+            connectionRevision: 1,
+          },
+          revision: 1,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          updatedAt: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+      profiles: [
+        {
+          id: "ollama-profile",
+          name: "Llama",
+          connectionId: "ollama-local",
+          modelId: "llama3.3:70b",
+          purpose: "chat",
+          generation: {
+            temperature: 0.2,
+            maxTokens: 8192,
+            thinkingEnabled: false,
+            thinkingBudgetTokens: 0,
+          },
+          custom: true,
+          revision: 1,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          updatedAt: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+      defaultChatProfileId: "ollama-profile",
+      defaultEmbeddingProfileId: null,
+      hiddenRoutedModelIds: [],
+      updatedAt: null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(recordPublishedModels).toHaveBeenCalledWith("ollama-local", [
+      {
+        modelId: "llama3.3:70b",
+        contextWindow: 131_072,
+        contextWindowSource: {
+          kind: "provider_metadata",
+          label: "Ollama /api/show",
+          checkedAt: "2026-08-16T00:00:00.000Z",
+        },
+      },
+    ]);
+    expect(result.connections[0]?.publishedModels?.[0]?.contextWindow).toBe(
+      131_072,
+    );
+  });
+
   it("does not report a credentialed cloud connection as available until it is verified", async () => {
     const service = createModelConnectionService({
       modelSettingsStore: createModelSettingsStore(
@@ -1038,6 +1139,121 @@ describe("model connection service", () => {
       expect.objectContaining({ status: "passed" }),
     );
   });
+
+  it("discovers and records a provider-published context window without manual input", async () => {
+    const recordPublishedModels = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              id: "vendor/published-model",
+              context_length: 196_608,
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const service = createModelConnectionService({
+      modelSettingsStore: {
+        resolveConnection: vi.fn(async () => ({
+          id: "openrouter-primary",
+          providerKind: "openrouter" as const,
+          credentialSource: "stored" as const,
+          connectionValues: {
+            baseUrl: "https://openrouter.ai/api/v1",
+          },
+          secrets: { apiKey: "router-secret" },
+          revision: 1,
+        })),
+        recordPublishedModels,
+      } as unknown as ModelSettingsStore,
+      chatClient: createChatClient([], "unused"),
+      fetch: fetchMock as typeof fetch,
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
+    });
+
+    const enriched = await service.enrichCatalog({
+      schemaVersion: 2,
+      descriptors: [],
+      entries: [],
+      connections: [
+        {
+          id: "openrouter-primary",
+          name: "OpenRouter",
+          providerKind: "openrouter",
+          values: { baseUrl: "https://openrouter.ai/api/v1" },
+          credentialSource: "stored",
+          hasCredential: true,
+          availability: "available",
+          verification: {
+            status: "passed",
+            checkedAt: "2026-08-15T00:00:00.000Z",
+            message: "ok",
+            connectionRevision: 1,
+          },
+          revision: 1,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          updatedAt: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+      profiles: [
+        {
+          id: "profile-published",
+          name: "Published model",
+          connectionId: "openrouter-primary",
+          modelId: "vendor/published-model",
+          purpose: "chat",
+          generation: {
+            temperature: 0.2,
+            maxTokens: 8192,
+            thinkingEnabled: false,
+            thinkingBudgetTokens: 0,
+          },
+          custom: true,
+          revision: 1,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          updatedAt: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+      defaultChatProfileId: "profile-published",
+      defaultEmbeddingProfileId: null,
+      hiddenRoutedModelIds: [],
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://openrouter.ai/api/v1/models",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: "Bearer router-secret",
+        }),
+      }),
+    );
+    expect(recordPublishedModels).toHaveBeenCalledWith(
+      "openrouter-primary",
+      [
+        {
+          modelId: "vendor/published-model",
+          contextWindow: 196_608,
+          contextWindowSource: {
+            kind: "provider_metadata",
+            label: "OpenRouter /models",
+            checkedAt: "2026-08-16T00:00:00.000Z",
+          },
+        },
+      ],
+    );
+    expect(enriched.connections[0]?.publishedModels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          modelId: "vendor/published-model",
+          contextWindow: 196_608,
+        }),
+      ]),
+    );
+  });
 });
 
 function createModelSettingsStore(
@@ -1079,6 +1295,9 @@ function createModelSettingsStore(
     },
     async recordProfileVerification() {
       throw new Error("Unexpected profile verification update.");
+    },
+    async recordPublishedModels() {
+      throw new Error("Unexpected published model metadata update.");
     },
     async deleteConnection() {
       throw new Error("Unexpected model connection delete.");

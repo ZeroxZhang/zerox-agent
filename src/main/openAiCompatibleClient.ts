@@ -81,6 +81,7 @@ export type ChatCompletionResponse = {
 
 export type ChatClient = {
   complete(request: ChatCompletionRequest): Promise<ChatCompletionResponse>;
+  countTokens?(request: ChatCompletionRequest): Promise<number>;
 };
 
 export type ChatClientLegacy = {

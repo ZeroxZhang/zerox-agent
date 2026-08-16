@@ -5746,6 +5746,24 @@ function SessionContextStatusCard(props: {
       </div>
       <dl className="session-context-facts">
         <div>
+          <dt>模型窗口</dt>
+          <dd
+            title={
+              props.context?.contextWindowSource?.checkedAt
+                ? `${props.context.contextWindowSource.label} · ${props.context.contextWindowSource.checkedAt}`
+                : undefined
+            }
+          >
+            {props.context?.contextWindow
+              ? `${formatCompactTokenCount(props.context.contextWindow)} · ${
+                  props.context.contextWindowSource?.label ?? "历史模型绑定"
+                }`
+              : props.context?.budgetEnforcement === "advisory"
+                ? "未公开 · 建议预算"
+                : "等待解析"}
+          </dd>
+        </div>
+        <div>
           <dt>范围</dt>
           <dd>当前会话 + 全局记忆</dd>
         </div>

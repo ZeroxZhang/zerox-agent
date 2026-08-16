@@ -13,6 +13,7 @@ import {
   type ModelProfileVerification,
   type ModelSettingsInput,
   type ModelSettingsValidationErrors,
+  type PublishedModelMetadata,
   type ProviderConnectionInput,
   type ProviderConnectionVerification,
   type ProviderCredentialSource,
@@ -58,6 +59,7 @@ type StoredProviderConnection = {
   credentialSource: ProviderCredentialSource;
   keySetAt?: string;
   lastUsedAt?: string;
+  publishedModels?: PublishedModelMetadata[];
   verification?: ProviderConnectionVerification;
   revision: number;
   createdAt: string;
@@ -125,6 +127,10 @@ export type ModelSettingsStore = {
       "profileRevision" | "connectionRevision"
     >,
   ): Promise<ModelCatalogMutationResult>;
+  recordPublishedModels(
+    connectionId: string,
+    models: PublishedModelMetadata[],
+  ): Promise<void>;
   deleteConnection(
     input: RevisionedModelResourceInput,
   ): Promise<ModelCatalogMutationResult>;
@@ -293,11 +299,22 @@ export function createModelSettingsStore(options: {
     const baseUrl =
       connection.values.baseUrl ||
       descriptor.fields.find((field) => field.key === "baseUrl")?.defaultValue;
-    const contextWindow = listModelCatalogEntries().find(
+    const catalogEntry = listModelCatalogEntries().find(
       (entry) =>
         entry.providerKind === connection.providerKind &&
         entry.modelId === profile.modelId,
-    )?.contextWindow;
+    );
+    const publishedModel = connection.publishedModels?.find(
+      (candidate) => candidate.modelId === profile.modelId,
+    );
+    const contextWindow =
+      frozenBinding?.contextWindow ??
+      catalogEntry?.contextWindow ??
+      publishedModel?.contextWindow;
+    const contextWindowSource =
+      frozenBinding?.contextWindowSource ??
+      catalogEntry?.contextWindowSource ??
+      publishedModel?.contextWindowSource;
     return {
       binding: {
         profileId: profile.id,
@@ -305,6 +322,9 @@ export function createModelSettingsStore(options: {
         providerKind: connection.providerKind,
         modelId: profile.modelId,
         ...(contextWindow ? { contextWindow } : {}),
+        ...(contextWindow && contextWindowSource
+          ? { contextWindowSource: { ...contextWindowSource } }
+          : {}),
         revision: pairRevisions(connection.revision, profile.revision),
         connectionRevision: connection.revision,
         profileRevision: profile.revision,
@@ -613,6 +633,9 @@ export function createModelSettingsStore(options: {
                 }
               : {}),
             ...(existing?.lastUsedAt ? { lastUsedAt: existing.lastUsedAt } : {}),
+            ...(!connectionTargetChanged && existing?.publishedModels
+              ? { publishedModels: structuredClone(existing.publishedModels) }
+              : {}),
             revision: (existing?.revision ?? 0) + 1,
             createdAt: existing?.createdAt ?? timestamp,
             updatedAt: timestamp,
@@ -885,6 +908,27 @@ export function createModelSettingsStore(options: {
         stored.updatedAt = timestamp;
         await writeStoredSettings(stored);
         return { ok: true, catalog: await loadCatalogFrom(stored) };
+      });
+    },
+
+    async recordPublishedModels(connectionId, models) {
+      await mutate(async (stored) => {
+        const connection = stored.connections.find(
+          (candidate) => candidate.id === connectionId,
+        );
+        if (!connection) {
+          return;
+        }
+        const normalized = normalizePublishedModels(models);
+        if (
+          JSON.stringify(connection.publishedModels ?? []) ===
+          JSON.stringify(normalized)
+        ) {
+          return;
+        }
+        connection.publishedModels = normalized;
+        stored.updatedAt = now();
+        await writeStoredSettings(stored);
       });
     },
 
@@ -1341,8 +1385,12 @@ function emptyV2(timestamp: string): StoredModelSettingsV2 {
 function normalizeStoredV2(stored: StoredModelSettingsV2): StoredModelSettingsV2 {
   return {
     schemaVersion: 2,
-    connections: Array.isArray(stored.connections) ? stored.connections : [],
-    connectionHistory: Array.isArray(stored.connectionHistory) ? stored.connectionHistory : [],
+    connections: Array.isArray(stored.connections)
+      ? stored.connections.map(normalizeStoredConnection)
+      : [],
+    connectionHistory: Array.isArray(stored.connectionHistory)
+      ? stored.connectionHistory.map(normalizeStoredConnection)
+      : [],
     profiles: Array.isArray(stored.profiles) ? stored.profiles : [],
     profileHistory: Array.isArray(stored.profileHistory) ? stored.profileHistory : [],
     defaultChatProfileId: stored.defaultChatProfileId ?? null,
@@ -1378,10 +1426,66 @@ function toPublicConnection(connection: StoredProviderConnection): PublicProvide
       : {}),
     ...(connection.keySetAt ? { keySetAt: connection.keySetAt } : {}),
     ...(connection.lastUsedAt ? { lastUsedAt: connection.lastUsedAt } : {}),
+    ...(connection.publishedModels?.length
+      ? { publishedModels: structuredClone(connection.publishedModels) }
+      : {}),
     revision: connection.revision,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
   };
+}
+
+function normalizeStoredConnection(
+  connection: StoredProviderConnection,
+): StoredProviderConnection {
+  return {
+    ...connection,
+    ...(connection.publishedModels
+      ? { publishedModels: normalizePublishedModels(connection.publishedModels) }
+      : {}),
+  };
+}
+
+function normalizePublishedModels(value: unknown): PublishedModelMetadata[] {
+  if (!Array.isArray(value)) return [];
+  const byModelId = new Map<string, PublishedModelMetadata>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const item = candidate as Partial<PublishedModelMetadata>;
+    const modelId =
+      typeof item.modelId === "string" ? item.modelId.trim() : "";
+    const contextWindow =
+      typeof item.contextWindow === "number" &&
+      Number.isFinite(item.contextWindow) &&
+      item.contextWindow > 0
+        ? Math.floor(item.contextWindow)
+        : 0;
+    const source = item.contextWindowSource;
+    if (
+      !modelId ||
+      !contextWindow ||
+      !source ||
+      source.kind !== "provider_metadata" ||
+      typeof source.label !== "string" ||
+      !source.label.trim()
+    ) {
+      continue;
+    }
+    byModelId.set(modelId, {
+      modelId,
+      contextWindow,
+      contextWindowSource: {
+        kind: "provider_metadata",
+        label: source.label.trim(),
+        ...(typeof source.checkedAt === "string" && source.checkedAt.trim()
+          ? { checkedAt: source.checkedAt }
+          : {}),
+      },
+    });
+  }
+  return [...byModelId.values()].sort((left, right) =>
+    left.modelId.localeCompare(right.modelId),
+  );
 }
 
 function toPublicProfile(

@@ -1210,13 +1210,17 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => ({
         ...createModelProfile(),
         maxTokens: 128,
-        contextWindow: 300,
+        contextWindow: 500,
       }),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: createToolExecutor([]),
       contextManager: {
         estimateTokens(messages) {
-          return messages.length * 100;
+          return messages.some((message) =>
+            message.content.includes("[之前对话摘要]"),
+          )
+            ? 300
+            : messages.length * 200;
         },
         compressMessages(messages) {
           return [
@@ -1250,7 +1254,7 @@ describe("agent runtime engine", () => {
             compactedMessageCount: 3,
             estimatedTokens: expect.any(Number),
             compactedTokens: expect.any(Number),
-            tokenBudget: 154,
+            tokenBudget: 334,
             strategy: "summarize",
           }),
         }),

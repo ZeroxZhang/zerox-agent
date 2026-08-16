@@ -14,6 +14,8 @@ describe("plan investigator service", () => {
     let observedSystemPrompt = "";
     let observedRunMode = "";
     let observedSandboxMode = "";
+    let observedContextWindow: number | undefined;
+    let observedContextWindowSource: unknown;
     const registry = {
       getVisibleDefinitions(filter: { runMode?: string }) {
         observedRunMode = filter.runMode ?? "";
@@ -66,6 +68,8 @@ describe("plan investigator service", () => {
       ) => {
         observedSystemPrompt = options.systemPrompt ?? "";
         observedSandboxMode = options.runContext?.sandbox.mode ?? "";
+        observedContextWindow = _profile.contextWindow;
+        observedContextWindowSource = _profile.contextWindowSource;
         const event = { toolCallId: "call-1", runId: options.runId };
         options.onToolCall?.(
           "file_read",
@@ -134,6 +138,12 @@ describe("plan investigator service", () => {
 
     expect(observedRunMode).toBe("plan");
     expect(observedSandboxMode).toBe("read_only");
+    expect(observedContextWindow).toBe(128_000);
+    expect(observedContextWindowSource).toEqual({
+      kind: "public_catalog",
+      label: "Zerox 公开模型目录",
+      checkedAt: "2026-08-16T00:00:00.000Z",
+    });
     expect(observedSystemPrompt).toContain("planningEvidenceRef");
     expect(observedSystemPrompt).toContain("本次 Goal 已开启自动模式");
     expect(
@@ -155,6 +165,92 @@ describe("plan investigator service", () => {
       kind: "investigation",
       status: "completed",
     });
+  });
+
+  it("projects initial evidence into the discovered model budget before the first request", async () => {
+    let prompt: Record<string, unknown> | undefined;
+    const registry = {
+      getVisibleDefinitions() {
+        return [];
+      },
+    } as unknown as DynamicToolRegistry;
+    const service = createPlanInvestigatorService({
+      toolExecutor: {
+        getRegistry: () => registry,
+        hasTool: () => false,
+        async execute() {
+          throw new Error("no tools expected");
+        },
+      },
+      toolAuthorizationService: {} as ToolAuthorizationService,
+      discoverSkills: async () => ({ skills: [], errors: [] }),
+      runLoop: async (messages) => {
+        prompt = JSON.parse(messages[0]!.content) as Record<string, unknown>;
+        return {
+          summary: JSON.stringify({
+            objective: "在预算内调查",
+            deliverables: ["规划摘要"],
+            inScope: ["工作区"],
+            outOfScope: ["写操作"],
+            constraints: ["只读"],
+            assumptions: [],
+            unresolvedQuestions: [],
+            targetRefs: ["README.md"],
+            evidenceRefs: ["evidence_user_request"],
+            skillCandidates: [],
+          }),
+          status: "succeeded",
+          turns: 1,
+          messages: [],
+          toolCallsExecuted: 0,
+          tokensConsumed: 20,
+        };
+      },
+      now: () => "2026-08-16T00:00:00.000Z",
+    });
+    const boundedModel = model();
+    boundedModel.binding.contextWindow = 12_000;
+
+    await service.investigate({
+      planId: "plan-bounded-prompt",
+      sessionId: "session-bounded-prompt",
+      workspaceRoot: "/workspace",
+      sourceMessage: "保留这条完整用户目标",
+      profile: createPlanTaskProfile("保留这条完整用户目标"),
+      baseEvidence: [
+        {
+          id: "evidence_user_request",
+          kind: "user",
+          title: "用户需求",
+          summary: "u".repeat(40_000),
+        },
+        ...Array.from({ length: 24 }, (_, index) => ({
+          id: `evidence_large_${index}`,
+          kind: "workspace" as const,
+          title: `大型证据 ${index}`,
+          summary: "x".repeat(12_000),
+        })),
+      ],
+      model: boundedModel,
+    });
+
+    expect(prompt?.sourceMessage).toBe("保留这条完整用户目标");
+    expect(
+      (prompt?.baseEvidence as Array<{ id: string }>).map((item) => item.id),
+    ).toContain("evidence_user_request");
+    expect(
+      (
+        prompt?.baseEvidence as Array<{ id: string; summary: string }>
+      ).find((item) => item.id === "evidence_user_request")?.summary.length,
+    ).toBeLessThanOrEqual(512);
+    expect(
+      (
+        prompt?.investigationPolicy as {
+          omittedEvidenceCount: number;
+        }
+      ).omittedEvidenceCount,
+    ).toBeGreaterThan(0);
+    expect(JSON.stringify(prompt).length).toBeLessThan(30_000);
   });
 
   it("escalates evidence-poor investigation with distinct recoverable runs and redacts secrets", async () => {
@@ -718,6 +814,12 @@ function model(): BoundModelClient {
       connectionId: "connection",
       providerKind: "openai",
       modelId: "planner-model",
+      contextWindow: 128_000,
+      contextWindowSource: {
+        kind: "public_catalog",
+        label: "Zerox 公开模型目录",
+        checkedAt: "2026-08-16T00:00:00.000Z",
+      },
       revision: 1,
       connectionRevision: 1,
       profileRevision: 1,

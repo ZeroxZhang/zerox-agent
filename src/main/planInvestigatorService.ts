@@ -29,6 +29,8 @@ import {
   isPlanInvestigationEvidenceInsufficient,
   shouldEscalatePlanInvestigation,
 } from "./plannerKernel";
+import { estimateTextTokens } from "./contextManager";
+import { resolveAgentContextBudget } from "../shared/contextUsage";
 
 const MAX_EVIDENCE_SUMMARY_CHARS = 12_000;
 const MAX_EVIDENCE_PROMPT_CHARS = 48_000;
@@ -217,6 +219,22 @@ export function createPlanInvestigatorService(options: {
             runMode: "plan",
             allowedNames: allowedToolNames,
           });
+          const systemPrompt = buildInvestigatorSystemPrompt(
+            depth,
+            input.autonomyMode,
+          );
+          const contextBudget = resolveAgentContextBudget({
+            contextWindow: input.model.binding.contextWindow,
+            contextWindowSource: input.model.binding.contextWindowSource,
+            maxOutputTokens: input.model.binding.generation.maxTokens,
+          });
+          const userPromptBudget = Math.max(
+            512,
+            contextBudget.tokenBudget -
+              estimateTextTokens(systemPrompt) -
+              estimateTextTokens(JSON.stringify(tools)) -
+              256,
+          );
           const planningToolExecutor = createEvidenceInjectingToolExecutor(
             options.toolExecutor,
           );
@@ -232,10 +250,7 @@ export function createPlanInvestigatorService(options: {
             tools,
             maxTurns: checkpointCadence(depth),
             pauseOnFailureLoop: true,
-            systemPrompt: buildInvestigatorSystemPrompt(
-              depth,
-              input.autonomyMode,
-            ),
+            systemPrompt,
             ...(input.signal ? { signal: input.signal } : {}),
             onToolCall(toolName, args, event) {
               toolArgs.set(event.toolCallId, { toolName, ...args });
@@ -261,6 +276,7 @@ export function createPlanInvestigatorService(options: {
                   promptSkills,
                   depth,
                   evidence,
+                  userPromptBudget,
                 ),
               },
             ],
@@ -270,6 +286,15 @@ export function createPlanInvestigatorService(options: {
               model: input.model.binding.modelId,
               temperature: input.model.binding.generation.temperature,
               maxTokens: input.model.binding.generation.maxTokens,
+              ...(input.model.binding.contextWindow
+                ? { contextWindow: input.model.binding.contextWindow }
+                : {}),
+              ...(input.model.binding.contextWindowSource
+                ? {
+                    contextWindowSource:
+                      input.model.binding.contextWindowSource,
+                  }
+                : {}),
             },
             loopOptions,
           );
@@ -645,25 +670,99 @@ function buildInvestigatorUserPrompt(
   skills: SkillRecord[],
   depth: PlanInvestigationDepth,
   evidence: PlanEvidenceItem[],
+  tokenBudget: number,
 ): string {
-  return JSON.stringify({
-    sourceMessage: input.sourceMessage,
-    taskProfile: input.profile,
-    baseEvidence: boundEvidenceForPrompt(evidence),
-    explicitSkillName: input.explicitSkill?.manifest.name,
-    installedSkills: skills.map((skill) => ({
+  const allEvidence = boundEvidenceForPrompt(evidence);
+  const allSkills = prioritizeExplicitSkill(skills, input.explicitSkill).map(
+    (skill) => ({
       name: skill.manifest.name,
       description: skill.manifest.description,
       inputs: skill.manifest.inputs,
       permissions: skill.manifest.permissions,
-    })),
+    }),
+  );
+  const prompt = {
+    sourceMessage: input.sourceMessage,
+    taskProfile: input.profile,
+    baseEvidence: [] as PlanEvidenceItem[],
+    explicitSkillName: input.explicitSkill?.manifest.name,
+    installedSkills: [] as typeof allSkills,
     investigationPolicy: {
       depth,
       readOnly: true,
       autonomyMode: input.autonomyMode ?? "standard",
       evidenceRequiredForWorkspaceClaims: true,
+      omittedEvidenceCount: 0,
+      omittedSkillCount: 0,
     },
-  });
+  };
+  const effectiveBudget = Math.max(384, Math.floor(tokenBudget) - 128);
+  const userEvidence = allEvidence.find(
+    (item) => item.id === "evidence_user_request",
+  );
+  if (userEvidence) {
+    const fullUserEvidence = [...prompt.baseEvidence, userEvidence];
+    prompt.baseEvidence.push(
+      estimateTextTokens(
+        JSON.stringify({ ...prompt, baseEvidence: fullUserEvidence }),
+      ) <= effectiveBudget
+        ? userEvidence
+        : {
+            ...userEvidence,
+            summary:
+              userEvidence.summary.length > 512
+                ? `${userEvidence.summary.slice(0, 511)}…`
+                : userEvidence.summary,
+          },
+    );
+  }
+  const skillBudget = Math.min(
+    effectiveBudget,
+    Math.max(
+      estimateTextTokens(JSON.stringify(prompt)),
+      Math.floor(effectiveBudget * 0.45),
+    ),
+  );
+  for (const skill of allSkills) {
+    const next = [...prompt.installedSkills, skill];
+    if (
+      estimateTextTokens(
+        JSON.stringify({ ...prompt, installedSkills: next }),
+      ) > skillBudget
+    ) {
+      continue;
+    }
+    prompt.installedSkills = next;
+  }
+  for (const item of allEvidence) {
+    if (item.id === userEvidence?.id) continue;
+    const next = [...prompt.baseEvidence, item];
+    if (
+      estimateTextTokens(JSON.stringify({ ...prompt, baseEvidence: next })) >
+      effectiveBudget
+    ) {
+      continue;
+    }
+    prompt.baseEvidence = next;
+  }
+  prompt.investigationPolicy.omittedEvidenceCount =
+    evidence.length - prompt.baseEvidence.length;
+  prompt.investigationPolicy.omittedSkillCount =
+    allSkills.length - prompt.installedSkills.length;
+  return JSON.stringify(prompt);
+}
+
+function prioritizeExplicitSkill(
+  skills: SkillRecord[],
+  explicitSkill: SkillRecord | undefined,
+): SkillRecord[] {
+  if (!explicitSkill) return skills;
+  return [
+    explicitSkill,
+    ...skills.filter(
+      (skill) => skill.manifest.name !== explicitSkill.manifest.name,
+    ),
+  ];
 }
 
 function planningBriefTemplate(): Record<string, unknown> {

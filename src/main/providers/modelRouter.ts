@@ -137,6 +137,12 @@ function bindRequestProfile(
       : { type: "disabled" as const },
   });
   return {
+    countTokens(request: ChatCompletionRequest): Promise<number> {
+      if (!client.countTokens) {
+        return Promise.reject(new Error("Model token counting is unavailable"));
+      }
+      return client.countTokens(apply(request));
+    },
     complete(
       request: ChatCompletionRequest,
     ): Promise<ChatCompletionResponse> {

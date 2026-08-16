@@ -172,9 +172,13 @@ export function createRebuildFromCheckpoint(
 
       // 2. Retain the recent tail (by token budget), microcompacting
       //    regenerable tool results to placeholders.
+      const effectiveTailTokens = Math.max(
+        1,
+        Math.min(tailTokens, Math.floor(ctx.budget * 0.6)),
+      );
       const { tail, microcompactedRefs } = retainTail(
         ctx.messages,
-        tailTokens,
+        effectiveTailTokens,
         regenerable,
         ctx.protectedMarkers,
         ctx.surfaceNodeIds,

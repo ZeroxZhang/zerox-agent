@@ -4,7 +4,7 @@
   "title": "Zerox Runtime Convergence Program",
   "sourceReview": "docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md",
   "operatingGuide": ".zerox/runtime-convergence-program.md",
-  "updatedAt": "2026-08-14T22:37:59.000+08:00",
+  "updatedAt": "2026-08-16T22:42:00.000+08:00",
   "status": "completed",
   "activeFeatureId": null,
   "nextFeatureId": null,
@@ -283,6 +283,34 @@
         "npm run program:check",
         "npm run harness:check",
         "GitHub release workflow and six-asset verification"
+      ]
+    },
+    {
+      "id": "RC13",
+      "title": "Adaptive context orchestration and automatic window discovery",
+      "state": "completed",
+      "featureId": "P102-adaptive-context-orchestration",
+      "findings": [
+        "CONTEXT_WINDOW_PROVENANCE",
+        "CONTEXT_BUDGET_AUTHORITY",
+        "PLAN_INITIAL_PROMPT_OVERFLOW",
+        "COMPACTION_TARGET_VALIDATION",
+        "CONTEXT_RECOVERY_PRESENTATION"
+      ],
+      "dependsOn": ["RC09", "RC11"],
+      "architectureDecisionRequired": true,
+      "rollback": "Retain the existing public model matrix and replay-safe context surface, remove provider metadata enrichment and the new budget metadata, and restore the legacy compaction trigger without changing persisted Chat, Plan, Goal, checkpoint, or trajectory schemas.",
+      "verification": [
+        "automatic public context-window provenance and provider metadata tests",
+        "Plan initial-prompt and no-progress compaction regressions",
+        "focused model, context, runtime, and renderer tests",
+        "npm run typecheck:tests",
+        "npm run verify",
+        "npm run stress:runtime",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
       ]
     }
   ]

@@ -2,7 +2,11 @@ import type {
   AgentToolExecutionResult,
   AgentToolExecutor,
 } from "./agentToolExecutor";
-import { createContextManager, type ContextManager } from "./contextManager";
+import {
+  createContextManager,
+  estimateTextTokens,
+  type ContextManager,
+} from "./contextManager";
 import type { CompactionStrategy } from "./kernel/compactionStrategy";
 import { NEVER_COMPACT_MARKER } from "../shared/compactionMarkers";
 import type { AgentRunContext } from "../shared/agentWorkspace";
@@ -64,10 +68,11 @@ import {
 } from "./agentExplorationDedup";
 import {
   createAgentContextUsage,
-  resolveContextTokenBudget,
+  resolveAgentContextBudget,
   type AgentContextCompactionSummary,
   type AgentContextUsage,
 } from "../shared/contextUsage";
+import type { ModelContextWindowSource } from "../shared/modelSettings";
 import type { ContextSurfaceState } from "../shared/contextSurface";
 import { createContextSurface } from "./contextSurface";
 import {
@@ -254,6 +259,7 @@ export async function runAgentLoop(
     temperature: number;
     maxTokens: number;
     contextWindow?: number;
+    contextWindowSource?: ModelContextWindowSource;
   },
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
@@ -434,10 +440,15 @@ export async function runAgentLoop(
   // dozens of times in long goal runs).
   const explorationDedup = createExplorationDedupTracker();
   let emittedExplorationGuards = 0;
-  const contextTokenBudget = resolveContextTokenBudget({
+  const contextBudget = resolveAgentContextBudget({
     contextWindow: modelProfile.contextWindow,
+    contextWindowSource: modelProfile.contextWindowSource,
     maxOutputTokens: modelProfile.maxTokens,
   });
+  const contextTokenBudget = contextBudget.tokenBudget;
+  const toolDefinitionTokens = toolDefinitions.length
+    ? estimateTextTokens(JSON.stringify(toolDefinitions))
+    : 0;
   let contextCompactionCount = 0;
   let latestContextUsage: AgentContextUsage | undefined;
   let lastContextCompaction: AgentContextCompactionSummary | undefined;
@@ -504,8 +515,12 @@ export async function runAgentLoop(
       tokenBudget: contextTokenBudget,
       messageCount: contextSurface.stats().visibleMessageCount,
       compactionCount: contextCompactionCount,
+      budgetEnforcement: contextBudget.enforcement,
       ...(modelProfile.contextWindow
         ? { contextWindow: modelProfile.contextWindow }
+        : {}),
+      ...(modelProfile.contextWindowSource
+        ? { contextWindowSource: modelProfile.contextWindowSource }
         : {}),
       ...(lastContextCompaction
         ? { lastCompaction: lastContextCompaction }
@@ -517,34 +532,93 @@ export async function runAgentLoop(
     return usage;
   }
 
+  async function estimateRequestTokens(
+    requestMessages: ChatMessage[],
+    knownMessageTokens?: number,
+    forceExact = false,
+  ): Promise<number> {
+    const localEstimate =
+      (knownMessageTokens ?? contextManager.estimateTokens(requestMessages)) +
+      toolDefinitionTokens;
+    if (
+      !chatClient.countTokens ||
+      (!forceExact && localEstimate < contextTokenBudget * 0.7)
+    ) {
+      return localEstimate;
+    }
+    try {
+      const exact = await chatClient.countTokens({
+        ...modelProfile,
+        messages: requestMessages,
+        tools: toolDefinitions,
+        tool_choice: "auto",
+        ...(signal ? { signal } : {}),
+      });
+      return Number.isFinite(exact) && exact > 0
+        ? Math.floor(exact)
+        : localEstimate;
+    } catch {
+      return localEstimate;
+    }
+  }
+
   async function compactMessagesBeforeModelRequest() {
-    const estimatedTokens = contextSurface.estimatedTokens();
+    const surfaceMessages = contextSurface.messages();
+    const messageTokens = contextSurface.estimatedTokens();
+    const estimatedTokens = await estimateRequestTokens(
+      surfaceMessages,
+      messageTokens,
+    );
     if (estimatedTokens <= contextTokenBudget) {
       reportContextUsage(estimatedTokens);
       return;
     }
 
     const originalMessageCount = messages.length;
+    const fixedRequestTokens = Math.max(0, estimatedTokens - messageTokens);
+    const messageTokenBudget = Math.max(
+      1,
+      contextTokenBudget - fixedRequestTokens,
+    );
 
     // P2: route through the compaction strategy when provided. Default flag
     // `auto` degrades to summarize (= compressMessages) when no checkpoint
     // exists — byte-equivalent to the legacy path unless a rebuild happens.
     if (compactionStrategy) {
       const result = await compactionStrategy.compact({
-        messages: contextSurface.messages(),
-        budget: contextTokenBudget,
+        messages: surfaceMessages,
+        budget: messageTokenBudget,
         runId: runId ?? taskId ?? requestId ?? modelProfile.model,
-        estimatedTokens,
+        estimatedTokens: messageTokens,
         surfaceNodeIds: contextSurface.visibleNodeIds(),
         protectedMarkers: [NEVER_COMPACT_MARKER],
       });
       if (
         !result.compacted ||
         result.messages.length === 0 ||
-        result.afterTokens >= estimatedTokens
+        result.afterTokens >= messageTokens
       ) {
+        if (contextBudget.enforcement === "advisory") {
+          reportContextUsage(estimatedTokens);
+          return;
+        }
         throwContextCompactionNoProgress(
           estimatedTokens,
+          contextTokenBudget,
+        );
+      }
+      const compactedRequestTokens = await estimateRequestTokens(
+        result.messages,
+        result.afterTokens,
+        true,
+      );
+      if (
+        contextBudget.enforcement === "hard" &&
+        compactedRequestTokens > contextTokenBudget
+      ) {
+        throwContextCompactionInsufficient(
+          estimatedTokens,
+          compactedRequestTokens,
           contextTokenBudget,
         );
       }
@@ -555,7 +629,7 @@ export async function runAgentLoop(
           ? { checkpointRef: result.checkpointRef }
           : {}),
       });
-      const compactedTokens = contextSurface.estimatedTokens();
+      const compactedTokens = compactedRequestTokens;
       contextCompactionCount += 1;
       lastContextCompaction = {
         strategy: result.strategy,
@@ -580,19 +654,37 @@ export async function runAgentLoop(
       return;
     }
 
-    const surfaceMessages = contextSurface.messages();
     const compacted = contextManager.compressMessages(
       surfaceMessages,
-      contextTokenBudget,
-      estimatedTokens,
+      messageTokenBudget,
+      messageTokens,
     );
-    const nextTokens = contextManager.estimateTokens(compacted);
+    const nextMessageTokens = contextManager.estimateTokens(compacted);
     if (
       compacted.length === 0 ||
-      nextTokens >= estimatedTokens
+      nextMessageTokens >= messageTokens
     ) {
+      if (contextBudget.enforcement === "advisory") {
+        reportContextUsage(estimatedTokens);
+        return;
+      }
       throwContextCompactionNoProgress(
         estimatedTokens,
+        contextTokenBudget,
+      );
+    }
+    const nextTokens = await estimateRequestTokens(
+      compacted,
+      nextMessageTokens,
+      true,
+    );
+    if (
+      contextBudget.enforcement === "hard" &&
+      nextTokens > contextTokenBudget
+    ) {
+      throwContextCompactionInsufficient(
+        estimatedTokens,
+        nextTokens,
         contextTokenBudget,
       );
     }
@@ -601,7 +693,7 @@ export async function runAgentLoop(
       reason: "summarize",
       strategy: "summarize",
     });
-    const compactedTokens = contextSurface.estimatedTokens();
+    const compactedTokens = nextTokens;
     contextCompactionCount += 1;
     lastContextCompaction = {
       strategy: "summarize",
@@ -1782,7 +1874,17 @@ function throwContextCompactionNoProgress(
   tokenBudget: number,
 ): never {
   throw new Error(
-    `Context compaction made no progress: ${estimatedTokens} estimated tokens exceed the ${tokenBudget} token budget.`,
+    `上下文无法继续压缩：估算 ${estimatedTokens} tokens，超过 ${tokenBudget} tokens 的已验证输入预算。`,
+  );
+}
+
+function throwContextCompactionInsufficient(
+  estimatedTokens: number,
+  compactedTokens: number,
+  tokenBudget: number,
+): never {
+  throw new Error(
+    `上下文压缩后仍超出已验证输入预算：${estimatedTokens} → ${compactedTokens} tokens，预算 ${tokenBudget} tokens。`,
   );
 }
 

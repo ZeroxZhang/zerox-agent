@@ -10791,3 +10791,51 @@
   Electron ABI `137 -> 146 -> 137` restoration.
 - Program, harness, and whitespace checks passed. Closed
   `P101-readme-logo-and-root-artifact-organization`.
+
+## 2026-08-16 - P102 Adaptive Context Orchestration Completed
+
+- Accepted RC13 and reopened the Runtime Convergence Program with one bounded
+  Feature. The decision preserves the final hard context gate while making
+  public model metadata, not maximum output tokens, authoritative.
+- Added context-window provenance to catalog entries, provider connections,
+  frozen model bindings, and session context telemetry. Curated models use the
+  versioned public catalog; verified OpenAI-compatible connections use
+  provider `/models`; Ollama uses `/api/show`. Discovery is bounded to
+  configured models, cached, refreshed after seven days, and never exposes
+  credentials.
+- Persisted provider-published model metadata without changing connection or
+  profile revisions. Historical model settings, frozen Plans, checkpoints,
+  and context snapshots remain readable without a SQLite migration.
+- Replaced the unknown-window `maxOutputTokens * 0.7` hard limit with a visible
+  32k advisory planning envelope. Unknown limits may trigger best-effort
+  compaction but cannot block a provider request solely from a client
+  estimate.
+- Propagated the 128k DeepSeek V4 Flash catalog window through Plan
+  investigation. Plan now projects Skills and evidence against the resolved
+  first-request budget, preserves the complete source message and user
+  evidence id, and records how many durable evidence items stayed outside the
+  active working set.
+- Exposed Provider `countTokens` through settings-backed and frozen model
+  clients. Shared AgentLoop counts tool schemas, requests exact counts near
+  pressure, and revalidates exact post-compaction size. A verified hard window
+  accepts compaction only when the next request fits; no-progress and
+  insufficient compaction now fail before dispatch with Chinese diagnostics.
+- Applied the same hard/advisory contract to scheduled legacy planning and
+  runtime compatibility paths. Checkpoint rebuild tail size now derives from
+  the effective message budget while preserving tool-call/result groups.
+- Settings explicitly shows each model window and public/provider source.
+  The session context card shows the resolved model window, source, usable
+  budget, and advisory state. Browser validation at a stricter 376px viewport
+  found `scrollWidth == clientWidth` for document, body, and settings panel,
+  with no visible-overflow elements or application console errors.
+- Focused context, model, Provider, Plan, shared-loop, runtime, Goal, Kernel,
+  container, renderer, and Program suites passed 412/412 before full closure.
+- Strict test types covered 293/293 files. Full verify passed 2,984 tests with
+  six stress-only tests skipped by design; production build, Agent evals
+  26/26, and Memory evals 2/2 passed.
+- Runtime stress passed 6/6. Production smoke passed with real Electron ABI
+  146, SQLite WAL, seven migrations, eight authority markers, no JSON
+  fallback, no legacy shadows, and Node ABI restoration to 137.
+- Program, harness, and whitespace checks passed. Provider endpoints that do
+  not publish a context limit remain explicitly unverified and advisory;
+  users are never asked to configure the window manually.

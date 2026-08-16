@@ -732,6 +732,15 @@ export function ModelSettingsPanel() {
                             selectedConnection.providerKind &&
                           candidate.modelId === profile.modelId,
                       );
+                      const publishedModel =
+                        selectedConnection.publishedModels?.find(
+                          (candidate) => candidate.modelId === profile.modelId,
+                        );
+                      const contextWindow =
+                        entry?.contextWindow ?? publishedModel?.contextWindow;
+                      const contextWindowSource =
+                        entry?.contextWindowSource ??
+                        publishedModel?.contextWindowSource;
                       const isDefault =
                         profile.id === catalog.defaultChatProfileId ||
                         profile.id === catalog.defaultEmbeddingProfileId;
@@ -750,6 +759,21 @@ export function ModelSettingsPanel() {
                             </span>
                             <strong>{profile.name}</strong>
                             <p>{profile.modelId}</p>
+                            <p
+                              title={
+                                contextWindowSource?.checkedAt
+                                  ? `${contextWindowSource.label} · ${contextWindowSource.checkedAt}`
+                                  : undefined
+                              }
+                            >
+                              模型窗口：
+                              {contextWindow
+                                ? `${formatTokenCapacity(contextWindow)} · ${
+                                    contextWindowSource?.label ??
+                                    "公开模型目录"
+                                  }`
+                                : "公开元数据未提供"}
+                            </p>
                           </div>
                           <div className="model-profile-badges">
                             <span
@@ -855,7 +879,12 @@ export function ModelSettingsPanel() {
                             <span>
                               {entry.capabilities.tools ? "工具" : "无工具"} ·{" "}
                               {entry.contextWindow
-                                ? `${Math.round(entry.contextWindow / 1000)}k`
+                                ? `${formatTokenCapacity(
+                                    entry.contextWindow,
+                                  )} · ${
+                                    entry.contextWindowSource?.label ??
+                                    "公开模型目录"
+                                  }`
                                 : "上下文未知"}
                             </span>
                             <button
@@ -1245,4 +1274,11 @@ function formatTimestamp(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatTokenCapacity(value: number): string {
+  if (value >= 1_000_000) {
+    return `${Number((value / 1_000_000).toFixed(2))}m`;
+  }
+  return `${Number((value / 1_000).toFixed(1))}k`;
 }

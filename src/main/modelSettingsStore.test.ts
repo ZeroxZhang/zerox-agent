@@ -105,7 +105,75 @@ describe("model settings store", () => {
         providerKind: "openai",
         modelId: "gpt-5.6-sol",
         contextWindow: 400_000,
+        contextWindowSource: {
+          kind: "public_catalog",
+          label: "Zerox 公开模型目录",
+        },
       },
+    });
+  });
+
+  it("persists provider-published context metadata without changing connection revisions", async () => {
+    const store = createModelSettingsStore({
+      configDir: tempDir,
+      vault: new FakeSecretVault(),
+    });
+    const savedConnection = await store.saveConnection({
+      name: "OpenRouter",
+      providerKind: "openrouter",
+      credentialSource: "stored",
+      values: {
+        apiKey: "router-secret",
+        baseUrl: "https://openrouter.ai/api/v1",
+      },
+    });
+    expect(savedConnection.ok).toBe(true);
+    if (!savedConnection.ok) return;
+    const savedProfile = await store.saveProfile({
+      name: "Published custom model",
+      connectionId: savedConnection.connection.id,
+      modelId: "vendor/published-model",
+      purpose: "chat",
+    });
+    expect(savedProfile.ok).toBe(true);
+    if (!savedProfile.ok) return;
+
+    await store.recordPublishedModels(savedConnection.connection.id, [
+      {
+        modelId: "vendor/published-model",
+        contextWindow: 196_608,
+        contextWindowSource: {
+          kind: "provider_metadata",
+          label: "OpenRouter /models",
+          checkedAt: "2026-08-16T00:00:00.000Z",
+        },
+      },
+    ]);
+
+    await expect(
+      store.resolveProfile(savedProfile.profile.id),
+    ).resolves.toMatchObject({
+      binding: {
+        contextWindow: 196_608,
+        contextWindowSource: {
+          kind: "provider_metadata",
+          label: "OpenRouter /models",
+        },
+      },
+    });
+    await expect(store.loadCatalog()).resolves.toMatchObject({
+      connections: [
+        {
+          id: savedConnection.connection.id,
+          revision: savedConnection.connection.revision,
+          publishedModels: [
+            {
+              modelId: "vendor/published-model",
+              contextWindow: 196_608,
+            },
+          ],
+        },
+      ],
     });
   });
 

@@ -39,6 +39,19 @@ export function createProviderChatClient(
   const { provider, fallback } = options;
 
   return {
+    async countTokens(request: ChatCompletionRequest): Promise<number> {
+      if (!provider) {
+        if (fallback?.countTokens) {
+          return fallback.countTokens(request);
+        }
+        throw new Error("ProviderChatClient: token counting is unavailable");
+      }
+      const req = toCompleteRequest(request);
+      return provider.countTokens(req.messages, {
+        ...(req.tools ? { tools: req.tools } : {}),
+      });
+    },
+
     async complete(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
       if (!provider) {
         if (!fallback) throw new Error("ProviderChatClient: no provider or fallback configured");
@@ -256,6 +269,13 @@ export function createSettingsBackedChatClient(
   }
 
   return {
+    async countTokens(request: ChatCompletionRequest): Promise<number> {
+      const client = await resolveClient();
+      if (!client.countTokens) {
+        throw new Error("Token counting is unavailable for this provider");
+      }
+      return client.countTokens(request);
+    },
     async complete(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
       const client = await resolveClient();
       return client.complete(request);
@@ -290,6 +310,12 @@ function bindResolvedProfileRequest(
       : { type: "disabled" },
   });
   return {
+    countTokens(request) {
+      if (!client.countTokens) {
+        return Promise.reject(new Error("Token counting is unavailable"));
+      }
+      return client.countTokens(apply(request));
+    },
     complete(request) {
       return client.complete(apply(request));
     },

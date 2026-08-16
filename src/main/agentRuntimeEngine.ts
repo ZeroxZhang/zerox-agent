@@ -67,7 +67,10 @@ import {
   modelServiceNoticeFromError,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
-import type { ModelCapabilities } from "../shared/modelSettings";
+import type {
+  ModelCapabilities,
+  ModelContextWindowSource,
+} from "../shared/modelSettings";
 import type { SkillRecord } from "../shared/skills";
 import type {
   ProductionKernelDriver,
@@ -86,7 +89,7 @@ import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
 import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import { runAgentLoop as runSharedAgentLoop } from "./agentLoop";
-import { resolveContextTokenBudget } from "../shared/contextUsage";
+import { resolveAgentContextBudget } from "../shared/contextUsage";
 
 export type AgentRuntimeModelProfile = {
   baseUrl: string;
@@ -95,6 +98,7 @@ export type AgentRuntimeModelProfile = {
   temperature: number;
   maxTokens: number;
   contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
   modelCapabilities?: ModelCapabilities;
 };
 
@@ -848,10 +852,12 @@ export function createAgentRuntimeEngine(options: {
           getToolDefinitions(options.toolExecutor),
           task,
         );
-    const contextTokenBudget = resolveContextTokenBudget({
+    const contextBudget = resolveAgentContextBudget({
       contextWindow: profile.contextWindow,
+      contextWindowSource: profile.contextWindowSource,
       maxOutputTokens: profile.maxTokens,
     });
+    const contextTokenBudget = contextBudget.tokenBudget;
 
     function publishContextCompaction(
       estimatedTokens: number,
@@ -885,7 +891,20 @@ export function createAgentRuntimeEngine(options: {
           protectedMarkers: [NEVER_COMPACT_MARKER],
         });
         if (!result.compacted) {
+          if (contextBudget.enforcement === "hard") {
+            throw new Error(
+              `上下文无法继续压缩：估算 ${estimatedTokens} tokens，超过 ${contextTokenBudget} tokens 的已验证输入预算。`,
+            );
+          }
           return;
+        }
+        if (
+          contextBudget.enforcement === "hard" &&
+          result.afterTokens > contextTokenBudget
+        ) {
+          throw new Error(
+            `上下文压缩后仍超出已验证输入预算：${estimatedTokens} → ${result.afterTokens} tokens，预算 ${contextTokenBudget} tokens。`,
+          );
         }
         messages = result.messages;
         const compactedTokens = contextManager.estimateTokens(messages);
@@ -927,12 +946,28 @@ export function createAgentRuntimeEngine(options: {
         messages,
         contextTokenBudget,
       );
-      if (compacted.length === originalMessageCount && compacted === messages) {
+      const compactedTokens = contextManager.estimateTokens(compacted);
+      if (
+        compacted.length === 0 ||
+        compactedTokens >= estimatedTokens
+      ) {
+        if (contextBudget.enforcement === "hard") {
+          throw new Error(
+            `上下文无法继续压缩：估算 ${estimatedTokens} tokens，超过 ${contextTokenBudget} tokens 的已验证输入预算。`,
+          );
+        }
         return;
+      }
+      if (
+        contextBudget.enforcement === "hard" &&
+        compactedTokens > contextTokenBudget
+      ) {
+        throw new Error(
+          `上下文压缩后仍超出已验证输入预算：${estimatedTokens} → ${compactedTokens} tokens，预算 ${contextTokenBudget} tokens。`,
+        );
       }
 
       messages = compacted;
-      const compactedTokens = contextManager.estimateTokens(messages);
       publishContextCompaction(estimatedTokens, compactedTokens);
       await appendTrajectory(current.runId, "context_compacted", {
         originalMessageCount,

@@ -33,7 +33,10 @@ import { getAcceptanceCommandVariants } from "../shared/acceptanceCommand";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
 import { estimateMessageTokens } from "./contextManager";
 import type { GoalProgressEvent } from "../shared/chat";
-import type { ModelCapabilities } from "../shared/modelSettings";
+import type {
+  ModelCapabilities,
+  ModelContextWindowSource,
+} from "../shared/modelSettings";
 import { applyGoalOutputRootsToRunContext } from "./goalOutputRoots";
 import { buildAgentSystemPrompt, getSystemPromptAssembler } from "../shared/agentProtocol";
 import {
@@ -72,6 +75,7 @@ export type GoalRuntimeModelProfile = {
   temperature: number;
   maxTokens: number;
   contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
   modelCapabilities?: ModelCapabilities;
 };
 

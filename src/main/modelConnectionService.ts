@@ -1,7 +1,9 @@
 import type {
   ProviderConnectionInput,
   ProviderKind,
+  PublishedModelMetadata,
   PublicModelCatalog,
+  PublicProviderConnection,
   TestAndSaveProviderConnectionResult,
   TestModelConnectionResult,
   TestProviderConnectionInput,
@@ -53,6 +55,10 @@ export function createModelConnectionService(options: {
       models: string[];
       message: string;
     }
+  >();
+  const publishedModelCache = new Map<
+    string,
+    { expiresAt: number; models: PublishedModelMetadata[] }
   >();
 
   async function probeOllama(baseUrl: string) {
@@ -233,11 +239,76 @@ export function createModelConnectionService(options: {
 
   const service: ModelConnectionService = {
     async enrichCatalog(catalog) {
+      const publishedByConnection = new Map<string, PublishedModelMetadata[]>();
+      await Promise.all(
+        catalog.connections.map(async (connection) => {
+          const existing = connection.publishedModels ?? [];
+          if (
+            !shouldDiscoverPublishedModels(
+              catalog,
+              connection,
+              now().getTime(),
+            )
+          ) {
+            if (existing.length) {
+              publishedByConnection.set(connection.id, existing);
+            }
+            return;
+          }
+          const cached = publishedModelCache.get(connection.id);
+          const currentTime = now().getTime();
+          if (cached && cached.expiresAt > currentTime) {
+            publishedByConnection.set(connection.id, cached.models);
+            return;
+          }
+          try {
+            const resolved = await options.modelSettingsStore.resolveConnection(
+              connection.id,
+            );
+            const models = await discoverPublishedModels({
+              providerKind: connection.providerKind,
+              values: resolved.connectionValues,
+              secrets: resolved.secrets,
+              modelIds: catalog.profiles
+                .filter(
+                  (profile) =>
+                    profile.connectionId === connection.id &&
+                    profile.purpose === "chat",
+                )
+                .map((profile) => profile.modelId),
+              fetch: fetchImpl,
+              checkedAt: now().toISOString(),
+            });
+            const effective = models.length ? models : existing;
+            publishedModelCache.set(connection.id, {
+              expiresAt: currentTime + 6 * 60 * 60 * 1_000,
+              models: effective,
+            });
+            if (effective.length) {
+              publishedByConnection.set(connection.id, effective);
+            }
+            if (models.length) {
+              await options.modelSettingsStore.recordPublishedModels(
+                connection.id,
+                models,
+              );
+            }
+          } catch {
+            if (existing.length) {
+              publishedByConnection.set(connection.id, existing);
+            }
+          }
+        }),
+      );
       const connections = await Promise.all(
         catalog.connections.map(async (connection) => {
+          const publishedModels = publishedByConnection.get(connection.id);
           if (connection.providerKind !== "ollama") {
             return {
               ...connection,
+              ...(publishedModels?.length
+                ? { publishedModels: structuredClone(publishedModels) }
+                : {}),
               availability: !connection.hasCredential
                 ? ("unavailable" as const)
                 : connection.verification?.status === "passed"
@@ -250,6 +321,9 @@ export function createModelConnectionService(options: {
           const probe = await probeOllama(connection.values.baseUrl ?? "http://localhost:11434");
           return {
             ...connection,
+            ...(publishedModels?.length
+              ? { publishedModels: structuredClone(publishedModels) }
+              : {}),
             availability: probe.ok ? ("available" as const) : ("unavailable" as const),
             availableModelIds: [...probe.models],
           };
@@ -263,9 +337,31 @@ export function createModelConnectionService(options: {
           )
           .flatMap((connection) => connection.availableModelIds ?? []),
       );
-      const entries = [
+      const entryCandidates = [
         ...catalog.entries.filter(
           (entry) => entry.providerKind !== "ollama" || ollamaModelIds.has(entry.modelId),
+        ),
+        ...connections.flatMap((connection) =>
+          (connection.publishedModels ?? [])
+            .filter(
+              (model) =>
+                !catalog.entries.some(
+                  (entry) =>
+                    entry.providerKind === connection.providerKind &&
+                    entry.modelId === model.modelId,
+                ),
+            )
+            .map((model) => ({
+              routedModelId: `${connection.providerKind}:${model.modelId}`,
+              providerKind: connection.providerKind,
+              modelId: model.modelId,
+              label: model.modelId,
+              contextWindow: model.contextWindow,
+              contextWindowSource: { ...model.contextWindowSource },
+              capabilities: defaultModelCapabilities(),
+              verified: true,
+              verifiedAt: model.contextWindowSource.checkedAt,
+            })),
         ),
         ...[...ollamaModelIds]
           .filter(
@@ -283,6 +379,11 @@ export function createModelConnectionService(options: {
             verified: true,
             verifiedAt: now().toISOString(),
           })),
+      ];
+      const entries = [
+        ...new Map(
+          entryCandidates.map((entry) => [entry.routedModelId, entry]),
+        ).values(),
       ];
       return {
         ...catalog,
@@ -707,6 +808,225 @@ export function createModelConnectionService(options: {
     },
   };
   return service;
+}
+
+function shouldDiscoverPublishedModels(
+  catalog: PublicModelCatalog,
+  connection: PublicProviderConnection,
+  currentTime: number,
+): boolean {
+  if (
+    connection.verification?.status !== "passed" ||
+    !connection.hasCredential ||
+    !supportsPublishedModelDiscovery(connection)
+  ) {
+    return false;
+  }
+  return catalog.profiles.some((profile) => {
+    if (
+      profile.connectionId !== connection.id ||
+      profile.purpose !== "chat" ||
+      catalog.entries.some(
+        (entry) =>
+          entry.providerKind === connection.providerKind &&
+          entry.modelId === profile.modelId &&
+          Boolean(entry.contextWindow),
+      )
+    ) {
+      return false;
+    }
+    const published = connection.publishedModels?.find(
+      (model) => model.modelId === profile.modelId,
+    );
+    const checkedAt = Date.parse(
+      published?.contextWindowSource.checkedAt ?? "",
+    );
+    return (
+      !published ||
+      !Number.isFinite(checkedAt) ||
+      currentTime - checkedAt >= 7 * 24 * 60 * 60 * 1_000
+    );
+  });
+}
+
+function supportsPublishedModelDiscovery(
+  connection: PublicProviderConnection,
+): boolean {
+  if (
+    connection.providerKind === "anthropic" ||
+    connection.providerKind === "bedrock" ||
+    connection.providerKind === "vertex"
+  ) {
+    return false;
+  }
+  return !(
+    connection.providerKind === "custom" &&
+    (connection.values.protocol || "openai") !== "openai"
+  );
+}
+
+async function discoverPublishedModels(input: {
+  providerKind: ProviderKind;
+  values: Record<string, string>;
+  secrets: Record<string, string>;
+  modelIds: string[];
+  fetch: typeof fetch;
+  checkedAt: string;
+}): Promise<PublishedModelMetadata[]> {
+  if (input.providerKind === "ollama") {
+    return discoverOllamaPublishedModels(input);
+  }
+  const baseUrl = resolveProviderBaseUrl(input.providerKind, input.values);
+  if (!baseUrl) return [];
+  const endpoint = `${baseUrl.replace(/\/+$/, "")}/models`;
+  const apiKey =
+    input.secrets.apiKey ??
+    input.secrets.bedrockApiKey ??
+    input.secrets.vertexApiKey ??
+    "";
+  const response = await fetchWithTimeout(
+    input.fetch,
+    endpoint,
+    {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      },
+    },
+    5_000,
+    "模型目录",
+  );
+  if (!response.ok) return [];
+  const payload = await response.json();
+  const label = `${requireProviderDescriptor(input.providerKind).title} /models`;
+  const requested = new Set(input.modelIds);
+  return parsePublishedModelMetadata(payload, label, input.checkedAt).filter(
+    (model) => requested.has(model.modelId),
+  );
+}
+
+async function discoverOllamaPublishedModels(input: {
+  values: Record<string, string>;
+  modelIds: string[];
+  fetch: typeof fetch;
+  checkedAt: string;
+}): Promise<PublishedModelMetadata[]> {
+  const base = normalizeOllamaBaseUrl(
+    input.values.baseUrl ?? "http://localhost:11434",
+  ).replace(/\/v1$/, "");
+  const discovered = await Promise.all(
+    [...new Set(input.modelIds)].slice(0, 20).map(async (modelId) => {
+      const response = await fetchWithTimeout(
+        input.fetch,
+        `${base}/api/show`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: modelId }),
+        },
+        5_000,
+        "Ollama 模型信息",
+      );
+      if (!response.ok) return null;
+      const payload = (await response.json()) as {
+        model_info?: Record<string, unknown>;
+      };
+      const contextWindow = firstPositiveInteger(
+        ...Object.entries(payload.model_info ?? {})
+          .filter(([key]) => key.endsWith(".context_length"))
+          .map(([, value]) => value),
+      );
+      return contextWindow
+        ? {
+            modelId,
+            contextWindow,
+            contextWindowSource: {
+              kind: "provider_metadata" as const,
+              label: "Ollama /api/show",
+              checkedAt: input.checkedAt,
+            },
+          }
+        : null;
+    }),
+  );
+  const models: PublishedModelMetadata[] = [];
+  for (const model of discovered) {
+    if (model) models.push(model);
+  }
+  return models;
+}
+
+function parsePublishedModelMetadata(
+  payload: unknown,
+  label: string,
+  checkedAt: string,
+): PublishedModelMetadata[] {
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as Record<string, unknown>;
+  const candidates = Array.isArray(record.data)
+    ? record.data
+    : Array.isArray(record.models)
+      ? record.models
+      : [];
+  const byModelId = new Map<string, PublishedModelMetadata>();
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const item = candidate as Record<string, unknown>;
+    const modelId = firstString(item.id, item.name, item.model);
+    const contextWindow = firstPositiveInteger(
+      item.context_length,
+      item.context_window,
+      item.contextWindow,
+      item.max_context_length,
+      item.inputTokenLimit,
+      nestedNumber(item.top_provider, "context_length"),
+      nestedNumber(item.architecture, "context_length"),
+    );
+    if (!modelId || !contextWindow) continue;
+    byModelId.set(modelId.replace(/^models\//, ""), {
+      modelId: modelId.replace(/^models\//, ""),
+      contextWindow,
+      contextWindowSource: {
+        kind: "provider_metadata",
+        label,
+        checkedAt,
+      },
+    });
+  }
+  return [...byModelId.values()].sort((left, right) =>
+    left.modelId.localeCompare(right.modelId),
+  );
+}
+
+function firstString(...values: unknown[]): string {
+  return (
+    values.find(
+      (value): value is string =>
+        typeof value === "string" && value.trim().length > 0,
+    )?.trim() ?? ""
+  );
+}
+
+function firstPositiveInteger(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const number =
+      typeof value === "number"
+        ? value
+        : typeof value === "string"
+          ? Number(value)
+          : Number.NaN;
+    if (Number.isFinite(number) && number > 0) {
+      return Math.floor(number);
+    }
+  }
+  return undefined;
+}
+
+function nestedNumber(value: unknown, key: string): unknown {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
 }
 
 function validateTemporaryConditionalCredentials(

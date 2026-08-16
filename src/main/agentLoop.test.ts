@@ -266,11 +266,11 @@ describe("agent loop", () => {
         { role: "assistant", content: "old answer" },
         { role: "user", content: "current request" },
       ],
-      { ...modelProfile, maxTokens: 128, contextWindow: 300 },
+      { ...modelProfile, maxTokens: 128, contextWindow: 500 },
       {
         chatClient,
         toolExecutor: createToolExecutor(),
-        tools: testTools,
+        tools: [],
         contextManager: {
           estimateTokens(messages) {
             return messages.length * 100;
@@ -300,19 +300,19 @@ describe("agent loop", () => {
     ]);
     expect(compactionEvents).toEqual([
       expect.objectContaining({
-        tokenBudget: 154,
+        tokenBudget: 334,
         estimatedTokens: 400,
         compactedTokens: 300,
         strategy: "summarize",
       }),
     ]);
     expect(contextUsageEvents.at(-1)).toMatchObject({
-      tokenBudget: 154,
+      tokenBudget: 334,
       compactionCount: 1,
       messageCount: 3,
     });
     expect(result.contextUsage).toMatchObject({
-      tokenBudget: 154,
+      tokenBudget: 334,
       compactionCount: 1,
       lastCompaction: expect.objectContaining({
         beforeTokens: 400,
@@ -337,6 +337,50 @@ describe("agent loop", () => {
       expect(replacement.shadowedNodeIds).toHaveLength(4);
       expect(replacement.sourceNodeIds).toHaveLength(4);
     }
+  });
+
+  it("uses provider token counting near the limit and includes tool definitions", async () => {
+    const countedToolLengths: number[] = [];
+    let modelCalls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "count the complete request" }],
+      { ...modelProfile, maxTokens: 128, contextWindow: 500 },
+      {
+        chatClient: {
+          async countTokens(request) {
+            countedToolLengths.push(request.tools?.length ?? 0);
+            return request.messages.length > 1 ? 400 : 150;
+          },
+          async complete() {
+            modelCalls += 1;
+            return {
+              content: "done",
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        contextManager: {
+          estimateTokens(messages) {
+            return messages.length * 100;
+          },
+          compressMessages(messages) {
+            return [messages.at(-1)!];
+          },
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(countedToolLengths).toEqual([testTools.length, testTools.length]);
+    expect(result.contextUsage).toMatchObject({
+      estimatedTokens: 150,
+      tokenBudget: 334,
+      budgetEnforcement: "hard",
+    });
+    expect(modelCalls).toBe(1);
   });
 
   it("uses one-message token deltas instead of rescanning steady-state context", async () => {
@@ -407,13 +451,91 @@ describe("agent loop", () => {
       );
     expect(result).toMatchObject({
       status: "failed",
-      summary: expect.stringMatching(/compaction made no progress/i),
+      summary: expect.stringMatching(/上下文无法继续压缩/),
     });
     expect(
       result.contextSurface?.events.filter(
         (event) => event.kind === "replace",
       ),
     ).toHaveLength(0);
+    expect(modelCalls).toBe(0);
+  });
+
+  it("treats an unknown context window as advisory instead of blocking a valid provider request", async () => {
+    let modelCalls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "x".repeat(40_000) }],
+      { ...modelProfile, maxTokens: 128, contextWindow: undefined },
+      {
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            return {
+              content: "provider accepted the request",
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        contextManager: {
+          estimateTokens(messages) {
+            return messages.reduce(
+              (total, message) => total + message.content.length,
+              0,
+            );
+          },
+          compressMessages(messages) {
+            return [...messages];
+          },
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(result.contextUsage).toMatchObject({
+      budgetEnforcement: "advisory",
+    });
+    expect(modelCalls).toBe(1);
+  });
+
+  it("rejects a smaller compaction that still cannot fit a verified hard budget", async () => {
+    let modelCalls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "x".repeat(400) }],
+      { ...modelProfile, maxTokens: 128, contextWindow: 300 },
+      {
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            return {
+              content: "unreachable",
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        contextManager: {
+          estimateTokens(messages) {
+            return messages.reduce(
+              (total, message) => total + message.content.length,
+              0,
+            );
+          },
+          compressMessages() {
+            return [{ role: "user", content: "x".repeat(300) }];
+          },
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      summary: expect.stringMatching(/上下文|context/i),
+    });
     expect(modelCalls).toBe(0);
   });
 
@@ -453,7 +575,7 @@ describe("agent loop", () => {
         { role: "assistant", content: "old answer" },
         { role: "user", content: "current request" },
       ],
-      { ...modelProfile, maxTokens: 128 },
+      { ...modelProfile, maxTokens: 128, contextWindow: 600 },
       {
         chatClient,
         toolExecutor: createToolExecutor(),

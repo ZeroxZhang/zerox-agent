@@ -43,14 +43,17 @@ import type {
   RunScheduledTaskResult,
 } from "../shared/agentRuns";
 import type { SkillRecord } from "../shared/skills";
-import type { ModelCapabilities } from "../shared/modelSettings";
+import type {
+  ModelCapabilities,
+  ModelContextWindowSource,
+} from "../shared/modelSettings";
 import { filterToolDefinitionsForScheduledTask } from "./scheduledTaskToolVisibility";
 import {
   modelServiceNoticeFromError,
   throwForModelServiceNotice,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
-import { resolveContextTokenBudget } from "../shared/contextUsage";
+import { resolveAgentContextBudget } from "../shared/contextUsage";
 import type { ProductionKernelDriver } from "./kernel/productionKernelDriver";
 
 export type AgentModelProfile = {
@@ -62,6 +65,7 @@ export type AgentModelProfile = {
   temperature: number;
   maxTokens: number;
   contextWindow?: number;
+  contextWindowSource?: ModelContextWindowSource;
   thinking?: { type: "enabled" | "disabled"; budgetTokens?: number };
   modelCapabilities?: ModelCapabilities;
 };
@@ -406,10 +410,12 @@ export function createAgentRunnerService(options: {
     const needsPlanning = skill
       ? skill.manifest.planning?.required === true
       : true;
-    const contextTokenBudget = resolveContextTokenBudget({
+    const contextBudget = resolveAgentContextBudget({
       contextWindow: profile.contextWindow,
+      contextWindowSource: profile.contextWindowSource,
       maxOutputTokens: profile.maxTokens,
     });
+    const contextTokenBudget = contextBudget.tokenBudget;
 
     try {
       throwIfCanceled(signal);
@@ -422,14 +428,34 @@ export function createAgentRunnerService(options: {
             msgs,
             contextTokenBudget,
           );
+          const compactedTokens = contextManager.estimateTokens(compacted);
+          if (
+            compacted.length === 0 ||
+            compactedTokens >= tokens
+          ) {
+            if (contextBudget.enforcement === "hard") {
+              throw new Error(
+                `上下文无法继续压缩：估算 ${tokens} tokens，超过 ${contextTokenBudget} tokens 的已验证输入预算。`,
+              );
+            }
+            return msgs;
+          }
+          if (
+            contextBudget.enforcement === "hard" &&
+            compactedTokens > contextTokenBudget
+          ) {
+            throw new Error(
+              `上下文压缩后仍超出已验证输入预算：${tokens} → ${compactedTokens} tokens，预算 ${contextTokenBudget} tokens。`,
+            );
+          }
           emit(
             createEvent(
               "info",
-              `上下文已压缩：${tokens} → ${contextManager.estimateTokens(compacted)} tokens`,
+              `上下文已压缩：${tokens} → ${compactedTokens} tokens`,
               currentPhase,
               {
                 estimatedTokens: tokens,
-                compactedTokens: contextManager.estimateTokens(compacted),
+                compactedTokens,
                 tokenBudget: contextTokenBudget,
               },
             ),

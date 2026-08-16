@@ -51,6 +51,15 @@ const entry = (
   label,
   capabilities,
   ...(contextWindow ? { contextWindow } : {}),
+  ...(contextWindow
+    ? {
+        contextWindowSource: {
+          kind: "public_catalog" as const,
+          label: "Zerox 公开模型目录",
+          checkedAt: verifiedAt,
+        },
+      }
+    : {}),
   verified: true,
   verifiedAt,
 });
