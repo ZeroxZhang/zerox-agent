@@ -10719,3 +10719,19 @@
   closed.
 - Release evidence:
   `.zerox/reviews/P98-v3.9.0-release-review.md`.
+
+## 2026-08-16 - v3.9.0 README Upgrade Summary Completed
+
+- Added a Chinese `v3.9.0 核心特点与版本升级` section that explains the
+  release as a production-foundation convergence rather than another UI layer.
+- Added a v3.8.x-to-v3.9.0 comparison matrix for storage authority,
+  Goal/checkpoint truth, Memory/Multi-Agent concurrency, Learning/Eval
+  transactions, migration/rollback, security, Chat scale, and release evidence.
+- Added accurate first-launch migration, generation-conflict, fail-closed
+  native SQLite, explicit JSON rollback, and file-backed-boundary guidance.
+- Added a symmetric English `What changed in v3.9.0` section with the same
+  capability and compatibility claims.
+- README remains 744 lines, below the enforced 800-line ceiling.
+- Focused README/package/release-program tests passed 21/21. Strict test type
+  coverage remains 292/292; program, harness, and whitespace checks passed.
+- Closed `P99-v3.9.0-readme-upgrade-summary`.

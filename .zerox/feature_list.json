@@ -1,7 +1,32 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T20:11:00.000+08:00",
+  "updatedAt": "2026-08-16T20:45:00.000+08:00",
   "features": [
+    {
+      "id": "P99-v3.9.0-readme-upgrade-summary",
+      "priority": 129,
+      "status": "done",
+      "title": "Document v3.9.0 core characteristics and upgrade comparison",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "README.md",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "README explains the defining v3.9.0 characteristics in Chinese and English",
+        "README compares v3.9.0 with v3.8.x across storage, consistency, recovery, security, performance, and release quality",
+        "upgrade compatibility and explicit file-backed boundaries remain accurate",
+        "README stays concise, current, and below the enforced line-count ceiling"
+      ],
+      "verification": [
+        "npm test -- --run src/shared/readme.test.ts",
+        "npm run typecheck:tests",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P98-v3.9.0-release",
       "priority": 128,

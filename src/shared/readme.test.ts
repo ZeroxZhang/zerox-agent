@@ -37,6 +37,34 @@ describe("README", () => {
     expect(readme).not.toContain("A fixed local resource budget");
   });
 
+  it("explains the defining v3.9.0 upgrades over v3.8.x", () => {
+    const readme = readReadme();
+
+    for (const statement of [
+      "## v3.9.0 核心特点与版本升级",
+      "### 这个大版本的四个核心特点",
+      "### 相比 v3.8.x 的主要升级",
+      "SQLite 成为结构化运行时的默认权威",
+      "Goal status/Plan version CAS",
+      "trigram FTS",
+      "逐域原子 bootstrap",
+      "## What changed in v3.9.0",
+      "### Defining characteristics",
+      "### Upgrade from v3.8.x",
+      "SQLite is the default structured-runtime authority",
+      "generation conflict rejection",
+      "80-message cursor windows",
+      "Ed25519 manifest",
+    ]) {
+      expect(readme).toContain(statement);
+    }
+    expect(readme).toContain(
+      'node scripts/migrate-to-sqlite.mjs --configDir "<userData>/config" --verify',
+    );
+    expect(readme.match(/\| \*\*Storage\*\*/g)).toHaveLength(1);
+    expect(readme.match(/\| \*\*本地存储\*\*/g)).toHaveLength(1);
+  });
+
   it("documents the current Goal-Plan contract, Direct/Debate compatibility, and completion truth", () => {
     const readme = readReadme();
     const featureList = JSON.parse(

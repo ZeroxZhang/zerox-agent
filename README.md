@@ -77,6 +77,38 @@ Zerox Agent：
 
 旧版本中的独立 Goal 页面已经并入会话。目标的创建、规划、执行、验收、恢复和历史都发生在同一个 session-native Goal Mode 中。
 
+## v3.9.0 核心特点与版本升级
+
+v3.8.x 建立了多服务商模型、Direct/Debate 规划、Goal Contract、Chat SQLite event/projection 和统一 Runtime 的产品骨架。v3.9.0 的重点不是增加另一层界面，而是把这套能力收敛成更可靠的生产基础：本地状态只有一个明确真源，失败不会被伪装成成功，迁移和回滚可验证，原生工具也服从同一权限边界。
+
+### 这个大版本的四个核心特点
+
+1. **SQLite 成为结构化运行时的默认权威**：Goal、执行 checkpoint、Memory、Workspace、Multi-Agent Session、Learning、Eval Candidate 和 promoted fixture 不再各自以 JSON 为主存储。
+2. **状态变更可事务化、可恢复**：Goal 终态、Plan 版本、ledger publication、checkpoint、Eval promotion 和 Multi-Agent child run 都有明确的 CAS、幂等或事务边界。
+3. **安全边界覆盖原生执行路径**：代码搜索和 Git 读取也进入受管进程、最小环境、只读 Seatbelt、无网络、取消和进程树回收；MCP 私密配置不会进入 renderer 或业务快照。
+4. **性能与发布质量有可量化证据**：Chat 使用 FTS、projection、metadata 和 cursor 分页；大规模 stress、真实 Seatbelt、Electron ABI、签名和六资产 Release 都属于发布门禁。
+
+### 相比 v3.8.x 的主要升级
+
+| 领域 | v3.8.x 及更早版本 | v3.9.0 |
+| --- | --- | --- |
+| **本地存储** | Chat、Run、Task 等已使用 SQLite，但 Goal、Memory、Workspace、Multi-Agent、Learning/Eval 仍以 JSON 为权威，存在混合存储 | 结构化运行时默认统一到 `zerox.db`，八个新增收敛域使用持久化 authority marker |
+| **Goal 与 checkpoint** | 已有验收证书、恢复和终态保护，但跨进程条件写与 ledger 唯一性仍主要依赖应用层 | 增加 Goal status/Plan version CAS、不可逆终态保护、事务序号分配、publication key 唯一约束和 checkpoint 终态防复活 |
+| **Memory 与多 Agent** | JSON 全量快照容易产生写放大，并发更新需要进程内串行化 | Memory expected-snapshot transaction 防止并发覆盖；Workspace/Multi-Agent 使用 SQLite 事务、幂等 child run 和 Chat/Multi-Agent kind 隔离 |
+| **学习与评测** | Learning、Eval Candidate、promoted fixture 分散写入 JSON，promotion 跨记录更新 | 审核状态与复合 identity 进入 SQLite；accepted → promoted 与 fixture upsert 在同一事务完成 |
+| **迁移与回滚** | 迁移覆盖面和验证粒度有限，主要确认可导入和记录数量 | 八域 canonical record 校验、更新代冲突拒绝、逐域原子 bootstrap、严格 JSONL、rollback staging 与逆序补偿；显式 JSON 回滚后可安全重导 |
+| **安全与一致性** | Shell/MCP 主路径已有授权和 Seatbelt，但原生只读工具、凭据快照和部分失败终态仍有残余边界 | 封堵 `rg --pre` 注入；原生 `rg`/Git 统一受管；MCP `env/headers` 脱敏；Tool Result metadata 和 Kernel durable settlement fail closed |
+| **Chat 性能** | 已有 append-only event/projection，但搜索、列表和详情读取仍可能产生扫描、N+1 或大 transcript 传输 | trigram FTS、有界短词候选、批量 Goal/Plan 读取、metadata-only 列表和 80-message cursor 窗口 |
+| **发布可信度** | 已有生产 smoke 和兼容打包 | 2,970 项测试、6/6 runtime stress、10/10 Seatbelt、Electron ABI 137→146→137、Ed25519 manifest 和精确六资产 digest 复核 |
+
+### 升级与兼容性
+
+- 从旧版本首次启动时，应用会按数据域原子导入旧 JSON；只有 canonical 校验通过才写入 marker，失败域会完整回滚。
+- 如果旧 JSON 与现有 SQLite 都包含不同代际，应用拒绝用旧数据覆盖新权威；可使用迁移 CLI 查看具体冲突。
+- `sqlite`/`dual` 模式在 native SQLite 不可用时拒绝启动，避免静默回退后形成两个真源；`json` 仅保留给显式回滚和诊断。
+- 加密模型设置、大型 Tool Result、Workspace Run ledger、raw history 和 artifact payload 仍是明确的文件型边界，不会被误称为 SQLite 业务记录。
+- 离线迁移校验命令：`node scripts/migrate-to-sqlite.mjs --configDir "<userData>/config" --verify`。
+
 ## 选择正确的工作方式
 
 | 任务特征 | 推荐入口 | 为什么 |
@@ -513,6 +545,38 @@ External model calls still send the context required for a request to the provid
 | **Settings** | Model connections, tools, memory, Skills, learning, evals, and system health |
 
 The primary app flow is Chat, Runs, Tasks, and Settings. Diagnostics, skills, tools, memory, learning, and evals live under Settings instead of competing with the core workflow.
+
+## What changed in v3.9.0
+
+v3.8.x established multi-provider models, Direct/Debate planning, Goal Contracts, Chat event projections, and the unified Runtime. v3.9.0 turns that foundation into a stricter production system: one explicit authority for structured local state, transactional mutations, verifiable migration and rollback, complete native-process controls, and measurable release evidence.
+
+### Defining characteristics
+
+1. **SQLite is the default structured-runtime authority** for Goal, execution checkpoints, Memory, Workspace, Multi-Agent sessions, reviewed Learning, Eval candidates, and promoted fixtures.
+2. **State transitions are transactional and recoverable** through CAS, irreversible terminal protection, idempotent publication, and cross-record transactions.
+3. **Native paths share the trust boundary**: code search and Git reads use owned processes, minimal environments, read-only Seatbelt, no network, cancellation, and process-tree drain.
+4. **Performance and release quality are measured** through FTS/projections/cursor paging, large-scale stress, real Seatbelt effects, Electron ABI smoke, signed update metadata, and exact asset verification.
+
+### Upgrade from v3.8.x
+
+| Area | v3.8.x and earlier | v3.9.0 |
+| --- | --- | --- |
+| **Storage** | SQLite and JSON authorities coexisted across core domains | Structured runtime state converges on `zerox.db` with eight durable domain markers |
+| **Goal/checkpoint truth** | Recovery and certificates existed, while several conditional writes remained application-level | Goal status/Plan-version CAS, unique ledger publication, transactional sequences, and terminal checkpoint resurrection protection |
+| **Memory and multi-agent state** | Whole-file JSON snapshots amplified writes and relied on process-local serialization | Expected-snapshot Memory transactions, transactional sessions, idempotent child runs, and Chat/Multi-Agent kind isolation |
+| **Learning and evals** | Review candidates and promoted fixtures were separate JSON authorities | Composite identities and one-transaction accepted-to-promoted fixture publication |
+| **Migration/rollback** | Narrower migration coverage and count-oriented verification | Canonical record comparison, generation conflict rejection, atomic per-domain bootstrap, strict JSONL, staged rollback, and reverse compensation |
+| **Security** | Main Shell/MCP paths were sandboxed, with residual native-read and snapshot gaps | Managed `rg`/Git execution, `rg --pre` injection closure, MCP secret stripping, and fail-closed result/settlement metadata |
+| **Chat scale** | Event projections existed, but search/list/detail paths could still scan or hydrate too much | Trigram FTS, bounded short-query candidates, batched metadata reads, and 80-message cursor windows |
+| **Release evidence** | Production smoke and compatibility packaging | 2,970 tests, 6/6 stress, 10/10 Seatbelt, ABI 137→146→137, Ed25519 manifest, and six verified assets |
+
+### Upgrade behavior
+
+- First launch imports legacy JSON atomically per domain and writes a marker only after canonical verification succeeds.
+- Newer SQLite generations are never overwritten by stale JSON; conflicts fail closed with explicit migration evidence.
+- `sqlite` and `dual` refuse startup when native SQLite is unavailable. Explicit `json` remains a rollback and diagnostic mode.
+- Encrypted settings, large tool results, workspace-run ledgers, raw history, and artifact payloads remain intentional file-backed boundaries.
+- Offline verification: `node scripts/migrate-to-sqlite.mjs --configDir "<userData>/config" --verify`.
 
 ## Chat, Direct, and Debate
 
