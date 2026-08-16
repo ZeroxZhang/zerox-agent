@@ -16,8 +16,8 @@ const errors = [];
 if (manifest.schemaVersion !== 1) {
   errors.push("release program schemaVersion must be 1");
 }
-if (manifest.version !== "3.9.0" || manifest.tag !== "v3.9.0") {
-  errors.push("release program identity must be v3.9.0");
+if (manifest.version !== "3.9.1" || manifest.tag !== "v3.9.1") {
+  errors.push("release program identity must be v3.9.1");
 }
 if (!["active", "completed"].includes(manifest.status)) {
   errors.push("release program status must be active or completed");
@@ -81,10 +81,20 @@ const p97 = features.find(
 const p98 = features.find(
   (feature) => feature.id === "P98-v3.9.0-release",
 );
+const p102 = features.find(
+  (feature) => feature.id === "P102-adaptive-context-orchestration",
+);
+const p103 = features.find(
+  (feature) =>
+    feature.id === "P103-v3.9.1-context-orchestration-hotfix-release",
+);
 const openFeatures = features.filter((feature) => feature.status !== "done");
 
 if (p97?.status !== "done") {
   errors.push("P97 must be done before P98 release work");
+}
+if (p98?.status !== "done" || p102?.status !== "done") {
+  errors.push("P98 and P102 must be done before v3.9.1 release work");
 }
 if (openFeatures.length > manifest.maxActiveFeatures) {
   errors.push("release program allows at most one unfinished Feature");
@@ -98,12 +108,13 @@ if (manifest.status === "active") {
     errors.push("active release program requires one matching workstream");
   }
   if (
-    manifest.activeFeatureId !== "P98-v3.9.0-release" ||
-    p98?.status !== "in_progress" ||
+    manifest.activeFeatureId !==
+      "P103-v3.9.1-context-orchestration-hotfix-release" ||
+    p103?.status !== "in_progress" ||
     openFeatures.length !== 1 ||
-    openFeatures[0]?.id !== p98.id
+    openFeatures[0]?.id !== p103.id
   ) {
-    errors.push("P98 must be the only active release Feature");
+    errors.push("P103 must be the only active release Feature");
   }
 } else {
   if (
@@ -117,18 +128,18 @@ if (manifest.status === "active") {
   if (
     manifest.activeFeatureId !== null ||
     manifest.activeWorkstreamId !== null ||
-    p98?.status !== "done"
+    p103?.status !== "done"
   ) {
-    errors.push("completed release program must clear active ids and close P98");
+    errors.push("completed release program must clear active ids and close P103");
   }
 }
 
 if (workstreams.get("R01")?.state === "completed") {
   if (packageJson.version !== manifest.version) {
-    errors.push("completed R01 requires package version 3.9.0");
+    errors.push("completed R01 requires package version 3.9.1");
   }
   for (const relativePath of [
-    ".github/release-notes/v3.9.0.md",
+    ".github/release-notes/v3.9.1.md",
     "README.md",
   ]) {
     try {

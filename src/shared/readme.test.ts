@@ -19,8 +19,8 @@ describe("README", () => {
       '<img src="build/icon.svg" width="88" alt="Zerox Agent" />',
     );
     expect(existsSync(path.join(process.cwd(), "logo.png"))).toBe(true);
-    expect(readme).toContain("当前版本是 **v3.9.0**");
-    expect(readme).toContain("The current release: v3.9.0");
+    expect(readme).toContain("当前版本是 **v3.9.1**");
+    expect(readme).toContain("The current release: v3.9.1");
     expect(readme).toContain("local-first desktop control plane");
     expect(readme).toContain("recoverable agent runs");
     expect(readme).toContain("workspace");
@@ -42,6 +42,26 @@ describe("README", () => {
     expect(readme).not.toContain("v3.2.2 interface system");
     expect(readme).not.toContain("25 built-in tools");
     expect(readme).not.toContain("A fixed local resource budget");
+  });
+
+  it("documents the v3.9.1 automatic context-window hotfix", () => {
+    const readme = readReadme();
+
+    for (const statement of [
+      "## v3.9.1 上下文编排修复",
+      "不要求用户手动配置",
+      "Provider `/models`",
+      "Ollama `/api/show`",
+      "hard budget",
+      "advisory",
+      "工具 schema",
+      "## What changed in v3.9.1",
+      "there is no manual window setting",
+      "usable budget",
+      "provenance",
+    ]) {
+      expect(readme).toContain(statement);
+    }
   });
 
   it("explains the defining v3.9.0 upgrades over v3.8.x", () => {
@@ -187,7 +207,7 @@ describe("README", () => {
       expect(readme).toContain(command);
     }
 
-    expect(readme).toContain("Zerox-Agent-3.9.0-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-3.9.1-arm64.dmg");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
     expect(readme).toContain("legacy-adhoc");
     expect(readme).toContain("未经过 Apple Developer ID 签名与公证");
@@ -239,7 +259,7 @@ describe("README", () => {
     );
 
     expect(readme).toContain(
-      'alt="Zerox Agent v3.9.0 产品介绍"',
+      'alt="Zerox Agent 产品介绍"',
     );
     expect(readme).toContain("docs/product/zerox-agent-product-intro.jpg");
     expect(existsSync(imagePath)).toBe(true);

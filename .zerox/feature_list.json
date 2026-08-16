@@ -1,7 +1,48 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T22:42:00.000+08:00",
+  "updatedAt": "2026-08-16T22:50:00.000+08:00",
   "features": [
+    {
+      "id": "P103-v3.9.1-context-orchestration-hotfix-release",
+      "priority": 133,
+      "status": "in_progress",
+      "title": "Package, sign, smoke, and publish Zerox Agent v3.9.1 context orchestration hotfix",
+      "files": [
+        ".github/release-notes/v3.9.1.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/release-program.json",
+        ".zerox/reviews/P103-v3.9.1-release-review.md",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        "scripts/check-release-program.mjs",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "src/shared/releaseProgram.test.ts"
+      ],
+      "definitionOfDone": [
+        "v3.9.1 version identity is consistent across package metadata, README links, release notes, packaged application, update manifest, annotated tag, and GitHub Release",
+        "the accepted P102 adaptive context orchestration fix and user package acceptance are the frozen release source baseline",
+        "full verify, runtime stress, real Seatbelt, Electron SQLite authority smoke, program, harness, audit, and whitespace gates pass on the release tree",
+        "macOS arm64 ZIP and DMG use legacy-adhoc compatibility signing while latest-mac.yml uses the protected Ed25519 update key with sequence 3009001",
+        "the annotated v3.9.1 tag resolves to the exact remotely verified release commit",
+        "GitHub Release v3.9.1 is latest, non-draft, non-prerelease, and exposes exactly six digest-verified assets"
+      ],
+      "verification": [
+        "npm run typecheck:tests",
+        "npm run verify",
+        "npm run stress:runtime",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "npm audit --audit-level=high",
+        "npm audit --omit=dev --audit-level=high",
+        "git diff --check",
+        "remote verify workflow",
+        "v3.9.1 release workflow and six-asset digest/signature verification"
+      ]
+    },
     {
       "id": "P102-adaptive-context-orchestration",
       "priority": 132,

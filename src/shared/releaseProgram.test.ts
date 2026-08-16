@@ -9,7 +9,7 @@ function readJson(relativePath: string) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
 }
 
-describe("v3.9.0 release program", () => {
+describe("v3.9.1 release program", () => {
   it("passes the machine-readable release checker", () => {
     expect(
       execFileSync(
@@ -20,7 +20,7 @@ describe("v3.9.0 release program", () => {
     ).toContain("Release program check passed");
   });
 
-  it("starts only after the accepted P97 source baseline", () => {
+  it("starts only after the accepted P102 source baseline", () => {
     const program = readJson(".zerox/release-program.json");
     const features = readJson(".zerox/feature_list.json").features;
     const storageProgram = readJson(
@@ -28,11 +28,11 @@ describe("v3.9.0 release program", () => {
     );
 
     expect(program).toMatchObject({
-      version: "3.9.0",
-      tag: "v3.9.0",
+      version: "3.9.1",
+      tag: "v3.9.1",
       sourceBaseline: {
-        commit: "fb09f898a18e4346386ff1731b1703d0e0565631",
-        verifyRun: "31945392247",
+        commit: "546129c7681de81c2a200b915ccd0c32ba97930a",
+        verifyRun: "31953402750",
       },
     });
     expect(storageProgram).toMatchObject({
@@ -48,7 +48,13 @@ describe("v3.9.0 release program", () => {
     );
     expect(features).toContainEqual(
       expect.objectContaining({
-        id: "P98-v3.9.0-release",
+        id: "P102-adaptive-context-orchestration",
+        status: "done",
+      }),
+    );
+    expect(features).toContainEqual(
+      expect.objectContaining({
+        id: "P103-v3.9.1-context-orchestration-hotfix-release",
         status: program.status === "completed" ? "done" : "in_progress",
       }),
     );

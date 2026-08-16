@@ -109,7 +109,7 @@ describe("package scripts", () => {
     expect(mainSource).toContain("app.requestSingleInstanceLock()");
   });
 
-  it("sets release metadata to v3.9.0", () => {
+  it("sets release metadata to v3.9.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -118,7 +118,7 @@ describe("package scripts", () => {
     ) as { version?: string; packages?: Record<string, { version?: string }> };
     const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
 
-    expect(packageJson.version).toBe("3.9.0");
+    expect(packageJson.version).toBe("3.9.1");
     expect(packageJson.scripts?.["smoke:providers"]).toContain(
       "smoke-multi-provider.mjs",
     );
@@ -127,10 +127,10 @@ describe("package scripts", () => {
     );
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.9.0");
-    expect(packageLock.packages?.[""]?.version).toBe("3.9.0");
-    expect(readme).toContain("current release: v3.9.0");
-    expect(readme).toContain("当前版本是 **v3.9.0**");
+    expect(packageLock.version).toBe("3.9.1");
+    expect(packageLock.packages?.[""]?.version).toBe("3.9.1");
+    expect(readme).toContain("current release: v3.9.1");
+    expect(readme).toContain("当前版本是 **v3.9.1**");
   });
 
   it("publishes an exact-tag arm64 compatibility release from GitHub Actions", () => {
@@ -143,7 +143,7 @@ describe("package scripts", () => {
         process.cwd(),
         ".github",
         "release-notes",
-        "v3.9.0.md",
+        "v3.9.1.md",
       ),
       "utf8",
     );
@@ -159,12 +159,12 @@ describe("package scripts", () => {
     expect(workflow).toContain("npm run eval:memory:built");
     expect(workflow).toContain("npm run release:mac");
     expect(workflow).toContain("npm run release:publish");
-    expect(releaseNotes).toContain("# Zerox Agent v3.9.0");
-    expect(releaseNotes).toContain("Zerox-Agent-3.9.0-arm64.dmg");
+    expect(releaseNotes).toContain("# Zerox Agent v3.9.1");
+    expect(releaseNotes).toContain("Zerox-Agent-3.9.1-arm64.dmg");
     expect(releaseNotes).toContain("xattr -dr com.apple.quarantine");
   });
 
-  it("keeps release gates tracked through v3.9.0", () => {
+  it("keeps release gates tracked through v3.9.1", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -334,7 +334,7 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.9.0");
+    expect(packageJson.version).toBe("3.9.1");
     expect(openFeatureIds.length).toBeLessThanOrEqual(
       Math.min(
         runtimeProgram.maxActiveFeatures,

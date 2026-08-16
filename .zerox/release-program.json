@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "programId": "v3.9.0-release-2026-08",
-  "version": "3.9.0",
-  "tag": "v3.9.0",
-  "status": "completed",
-  "updatedAt": "2026-08-16T20:11:00.000+08:00",
-  "activeFeatureId": null,
-  "activeWorkstreamId": null,
+  "programId": "v3.9.1-context-hotfix-release-2026-08",
+  "version": "3.9.1",
+  "tag": "v3.9.1",
+  "status": "active",
+  "updatedAt": "2026-08-16T23:01:00.000+08:00",
+  "activeFeatureId": "P103-v3.9.1-context-orchestration-hotfix-release",
+  "activeWorkstreamId": "R03",
   "maxActiveFeatures": 1,
   "sourceBaseline": {
-    "commit": "fb09f898a18e4346386ff1731b1703d0e0565631",
-    "verifyRun": "31945392247"
+    "commit": "546129c7681de81c2a200b915ccd0c32ba97930a",
+    "verifyRun": "31953402750"
   },
   "invariants": [
     "The release tag is created only after the exact release commit passes local and remote verification.",
@@ -48,7 +48,7 @@
     {
       "id": "R03",
       "title": "Release commit push and remote verification",
-      "state": "completed",
+      "state": "in_progress",
       "dependsOn": [
         "R02"
       ],
@@ -61,7 +61,7 @@
     {
       "id": "R04",
       "title": "Clean-tree package, signing, preflight, tag, and Release workflow",
-      "state": "completed",
+      "state": "planned",
       "dependsOn": [
         "R03"
       ],
@@ -70,7 +70,7 @@
         "legacy-adhoc application signature",
         "Ed25519 update manifest signature",
         "release preflight",
-        "annotated v3.9.0 tag",
+        "annotated v3.9.1 tag",
         "remote tag exact commit",
         "release workflow success"
       ]
@@ -78,7 +78,7 @@
     {
       "id": "R05",
       "title": "Published asset, digest, and signature closure",
-      "state": "completed",
+      "state": "planned",
       "dependsOn": [
         "R04"
       ],

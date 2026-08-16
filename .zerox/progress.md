@@ -10839,3 +10839,32 @@
 - Program, harness, and whitespace checks passed. Provider endpoints that do
   not publish a context limit remain explicitly unverified and advisory;
   users are never asked to configure the window manually.
+
+## 2026-08-16 - P103 v3.9.1 Context Hotfix Release Started
+
+- Accepted user validation of the local macOS package built from P102.
+- Activated only `P103-v3.9.1-context-orchestration-hotfix-release` with
+  source baseline commit `546129c7681de81c2a200b915ccd0c32ba97930a` and
+  successful remote verify run `31953402750`.
+- Confirmed no local tag or GitHub Release named `v3.9.1` existed before
+  release preparation.
+- Updated package and lockfile identity, current README badges/download links,
+  bilingual v3.9.1 patch notes, release governance, and
+  `.github/release-notes/v3.9.1.md`.
+- R01 release, README, package, builder, and preflight contract tests passed
+  36/36. Program and whitespace checks passed.
+- R01 is complete. R02 is active for frozen-tree verification.
+
+## 2026-08-16 - P103 R02 Frozen Source Verification Completed
+
+- Strict test types covered 293/293 files.
+- Full verify passed 2,985 tests with six stress-only tests skipped by design;
+  production build, Agent evals 26/26, and Memory evals 2/2 passed.
+- Runtime stress passed 6/6. Real macOS Seatbelt effects passed 10/10.
+- Electron authority smoke accepted Node ABI 137 to Electron ABI 146 to Node
+  ABI 137, SQLite WAL, seven migrations, eight authority markers, all eight
+  P97 domain records, no JSON fallback, and no legacy shadows.
+- Full and production-only dependency audits reported zero vulnerabilities.
+- Program, harness, and whitespace checks passed.
+- R02 is complete. R03 is active for the release commit, push, and remote
+  verify.
