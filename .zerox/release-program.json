@@ -4,9 +4,9 @@
   "version": "3.9.1",
   "tag": "v3.9.1",
   "status": "active",
-  "updatedAt": "2026-08-16T23:01:00.000+08:00",
+  "updatedAt": "2026-08-16T23:05:00.000+08:00",
   "activeFeatureId": "P103-v3.9.1-context-orchestration-hotfix-release",
-  "activeWorkstreamId": "R03",
+  "activeWorkstreamId": "R04",
   "maxActiveFeatures": 1,
   "sourceBaseline": {
     "commit": "546129c7681de81c2a200b915ccd0c32ba97930a",
@@ -48,7 +48,7 @@
     {
       "id": "R03",
       "title": "Release commit push and remote verification",
-      "state": "in_progress",
+      "state": "completed",
       "dependsOn": [
         "R02"
       ],
@@ -61,7 +61,7 @@
     {
       "id": "R04",
       "title": "Clean-tree package, signing, preflight, tag, and Release workflow",
-      "state": "planned",
+      "state": "in_progress",
       "dependsOn": [
         "R03"
       ],

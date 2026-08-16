@@ -10868,3 +10868,12 @@
 - Program, harness, and whitespace checks passed.
 - R02 is complete. R03 is active for the release commit, push, and remote
   verify.
+
+## 2026-08-16 - P103 R03 Release Commit Verification Completed
+
+- Pushed v3.9.1 release-preparation commit `97d6722`.
+- GitHub verify run `31954312536` passed `npm run verify` and
+  `npm run harness:check` on the exact commit.
+- R03 is complete. R04 is active for the final frozen release commit,
+  clean-tree compatibility package, signed manifest, annotated tag, and
+  Release workflow.
