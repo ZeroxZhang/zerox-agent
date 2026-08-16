@@ -3,9 +3,12 @@ import path from "node:path";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 
-describe("Zerox project introduction page", () => {
+describe("Archived Zerox project introduction page", () => {
   const root = process.cwd();
-  const pagePath = path.join(root, "zerox-agent-onepage.html");
+  const pagePath = path.join(
+    root,
+    "docs/product/archive/zerox-agent-introduction.html",
+  );
   const page = readFileSync(pagePath, "utf8");
 
   it("presents the source-backed product boundary and trust model", () => {
@@ -67,6 +70,7 @@ describe("Zerox project introduction page", () => {
 
   it("contains accessible responsive interactions without external runtime dependencies", () => {
     expect(page).toContain('lang="zh-CN"');
+    expect(page).toContain('<base href="../../../">');
     expect(page).toContain('href="#main-content"');
     expect(page).toContain('aria-label="页面导航"');
     expect(page.match(/role="tab"/g)).toHaveLength(6);

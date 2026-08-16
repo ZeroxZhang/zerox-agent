@@ -480,4 +480,4 @@ Pre-existing working tree changes were observed and not touched:
 - Modified: `docs/design/zerox-agent-3-2-2-qa/capture-metrics.json`
 - Untracked: `.zerox/product-design-audit-2026-07-05/`
 
-This audit intentionally created only `UI_AUDIT.md`.
+This audit intentionally created only this review document.

@@ -6,13 +6,13 @@ Verdict: PASS
 
 ## Acceptance Summary
 
-The 3.3.0 UI polish is acceptable for macOS UI/interaction release. The four P0 safety and modal-contract issues from `UI_AUDIT.md` are closed in the current implementation, and the updated desktop screenshots show no blocking visual regressions, page-level horizontal overflow, or broken primary shell states across Chat, Runs, Tasks, Model Settings, and Tools Settings.
+The 3.3.0 UI polish is acceptable for macOS UI/interaction release. The four P0 safety and modal-contract issues from [`zerox-agent-3-3-0-ui-audit.md`](zerox-agent-3-3-0-ui-audit.md) are closed in the current implementation, and the updated desktop screenshots show no blocking visual regressions, page-level horizontal overflow, or broken primary shell states across Chat, Runs, Tasks, Model Settings, and Tools Settings.
 
 This is a UI/interaction acceptance pass, not a full product capability, security, or release packaging sign-off.
 
 ## Evidence Reviewed
 
-- `UI_AUDIT.md`, including first-round P0/P1/P2 findings and current status notes.
+- [`zerox-agent-3-3-0-ui-audit.md`](zerox-agent-3-3-0-ui-audit.md), including first-round P0/P1/P2 findings and current status notes.
 - Current working tree diff for Electron main/window/menu changes, React shell/components, dialog/focus helpers, and CSS.
 - Latest screenshots in `docs/design/zerox-agent-3-2-2-qa/*.png`.
 - Latest `docs/design/zerox-agent-3-2-2-qa/capture-metrics.json`, regenerated during this acceptance pass.

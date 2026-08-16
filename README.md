@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icon.svg" width="88" alt="Zerox Agent" />
+  <img src="logo.png" width="160" alt="Zerox Agent" />
 </p>
 
 <h1 align="center">Zerox Agent</h1>

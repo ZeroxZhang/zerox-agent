@@ -1,7 +1,44 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T21:12:56.000+08:00",
+  "updatedAt": "2026-08-16T21:32:26.000+08:00",
   "features": [
+    {
+      "id": "P101-readme-logo-and-root-artifact-organization",
+      "priority": 131,
+      "status": "done",
+      "title": "Use the canonical README logo and organize historical root artifacts",
+      "files": [
+        ".gitignore",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "README.md",
+        "docs/product/archive/**",
+        "docs/reviews/zerox-agent-3-3-0-ui-audit.md",
+        "docs/reviews/zerox-agent-3-3-0-ui-acceptance.md",
+        ".zerox/research/zerox-architecture-ui-brief.md",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/projectIntroductionPage.test.ts",
+        "src/shared/readme.test.ts",
+        "src/shared/repositoryLayout.test.ts"
+      ],
+      "definitionOfDone": [
+        "the README header uses the canonical tracked root logo.png asset",
+        "historical UI audit and acceptance documents live under docs/reviews with valid cross-references",
+        "legacy Onepager and project-introduction artifacts live under docs/product/archive instead of the repository root",
+        "required build, package, configuration, entrypoint, governance, and canonical brand files remain at the repository root",
+        "feature history, progress evidence, research references, and regression tests use the organized paths",
+        "focused tests, full verify, production smoke, program, harness, and whitespace checks pass"
+      ],
+      "verification": [
+        "npm test -- --run src/shared/readme.test.ts src/shared/projectIntroductionPage.test.ts src/shared/repositoryLayout.test.ts src/shared/packageScripts.test.ts",
+        "npm run typecheck:tests",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P100-v3.9.0-onepager-refresh",
       "priority": 130,
@@ -2342,7 +2379,7 @@
       "files": [
         ".zerox/feature_list.json",
         ".zerox/progress.md",
-        "zerox-agent-onepage.html",
+        "docs/product/archive/zerox-agent-introduction.html",
         "src/shared/projectIntroductionPage.test.ts",
         "src/shared/packageScripts.test.ts"
       ],
@@ -5139,8 +5176,8 @@
       "status": "done",
       "title": "v3.3.0 macOS UI release polish",
       "files": [
-        "UI_AUDIT.md",
-        "UI_ACCEPTANCE.md",
+        "docs/reviews/zerox-agent-3-3-0-ui-audit.md",
+        "docs/reviews/zerox-agent-3-3-0-ui-acceptance.md",
         "src/main/main.ts",
         "src/main/desktopLifecycle.ts",
         "src/renderer/App.tsx",
@@ -5171,10 +5208,10 @@
         ".zerox/progress.md"
       ],
       "definitionOfDone": [
-        "UI_AUDIT.md records the macOS HIG audit, interface inventory, severity-ranked findings, and implementation statuses",
+        "docs/reviews/zerox-agent-3-3-0-ui-audit.md records the macOS HIG audit, interface inventory, severity-ranked findings, and implementation statuses",
         "4 P0 safety and modal-contract findings are completed: tool approval, auto-approval/goal-mode risk copy, destructive confirmations, and goal detail drawer",
         "macOS application menu, Tray quick links, sidebar density, settings flattening, typography, icons, compact layouts, and technical-output scrolling are polished without business logic changes",
-        "independent adversarial UI acceptance PASS is recorded in UI_ACCEPTANCE.md",
+        "independent adversarial UI acceptance PASS is recorded in docs/reviews/zerox-agent-3-3-0-ui-acceptance.md",
         "visual QA screenshots and capture metrics are regenerated for Chat, Runs, Settings, Tasks, Tools, desktop, and narrow states",
         "package metadata reports version 3.3.0 in package.json and package-lock.json",
         "README current release and download example reflect v3.3.0",

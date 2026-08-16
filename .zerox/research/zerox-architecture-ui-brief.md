@@ -58,7 +58,7 @@
   - v2.0.1（6/15）**唯一一次回滚**——SQLite snapshot 覆盖 JSON-driven Goal/ledger 数据，回滚至 v1.9.5 并归档证据；
   - v2.3.0（6/16）Agent Runtime Kernel（KernelEventBus、checkpoint 压缩、权限引擎）；v2.3.1 preload 崩溃热修复；v2.3.6 Chrome 书签确定性目标经**六次黑盒 CDP 验收**才通过；
   - v2.4.0 八阶段大迭代收口；v2.4.5 分层系统提示重构；v2.4.6 `@skill` 显式调用；v2.5.0 workspace 一级边界；v2.6.0 15+ 项安全加固；v2.9.0 结构化输出渲染（Evidence-Linked Answer + Run Ledger，6 个 Task TDD 流水线）；
-  - v3.2.2 设计系统重建（独立审查子代理 Hooke 首次 BLOCKED）；v3.3.0 UI 审计 28 项（4 项 P0 全关闭，验收 PASS，`UI_ACCEPTANCE.md`）；v3.4.0（7/10）Goal Mode 运行时状态与 workspace 修复（5 个根因：GoalDraft 丢 workspaceId、含空格路径被截断、pause 非安全继续、resolveReview 等待整循环、running milestone 无 ready 态）；v3.6.0 token 预算、内层取消、`DENY_LISTED_COMMANDS` 安全加固；P42 v3.7.0 自主目标运行时已在 feature_list 标记 done（84/84）。
+  - v3.2.2 设计系统重建（独立审查子代理 Hooke 首次 BLOCKED）；v3.3.0 UI 审计 28 项（4 项 P0 全关闭，验收 PASS，`docs/reviews/zerox-agent-3-3-0-ui-acceptance.md`）；v3.4.0（7/10）Goal Mode 运行时状态与 workspace 修复（5 个根因：GoalDraft 丢 workspaceId、含空格路径被截断、pause 非安全继续、resolveReview 等待整循环、running milestone 无 ready 态）；v3.6.0 token 预算、内层取消、`DENY_LISTED_COMMANDS` 安全加固；P42 v3.7.0 自主目标运行时已在 feature_list 标记 done（84/84）。
 - **版本号口径注意**：README 正文仍写 "current release: v3.4.0"，package.json 为 3.6.0，feature_list 含 v3.7.0 功能——发稿前需作者统一（blueprint §六.4 已列为待确认项）。
 - **测试规模增长**：88 文件/393 测试（6/10）→ 188/1325（7/10）→ **199 文件/1835 测试**（7/12 `npm run verify` 复核，Agent evals 26/26、memory evals 2/2）。
 

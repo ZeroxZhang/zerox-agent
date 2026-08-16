@@ -7409,19 +7409,19 @@
 
 - Request:
   - Start the v3.3.0 major iteration as a pre-release frontend/macOS UI optimization pass.
-  - First dispatch an independent senior macOS UI/front-end subagent to audit the repository against Apple HIG and write `UI_AUDIT.md`.
+  - First dispatch an independent senior macOS UI/front-end subagent to audit the repository against Apple HIG and write `docs/reviews/zerox-agent-3-3-0-ui-audit.md`.
   - Implement the audit in P0 -> P1 -> P2 order without changing business logic.
   - Dispatch a second adversarial subagent for product acceptance, repeat if needed, then package, push, and publish the release.
 - Feature tracking:
   - Added `P36-v3.3.0-macos-ui-release-polish` and marked it `done` after independent audit, implementation, adversarial PASS, verification, packaging, and packaged-app smoke.
 - Audit and acceptance evidence:
-  - First independent audit subagent wrote `UI_AUDIT.md` with interface inventory, HIG baseline, P0/P1/P2 findings, and implementation statuses.
+  - First independent audit subagent wrote `docs/reviews/zerox-agent-3-3-0-ui-audit.md` with interface inventory, HIG baseline, P0/P1/P2 findings, and implementation statuses.
   - Completed all four P0 findings: tool approval modal contract, persistent auto-approval/goal-mode risk copy, shared destructive confirmation dialog, and Goal Detail drawer dialog/focus semantics.
   - Implemented the 3.3.0 UI polish set across macOS app menu, Tray quick links, window background/minimum size, sidebar density, settings flattening, typography, icon/glyph cleanup, compact settings navigation, technical output scrolling, and focus trap reuse.
-  - Second independent adversarial UI acceptance subagent wrote `UI_ACCEPTANCE.md` and returned PASS.
+  - Second independent adversarial UI acceptance subagent wrote `docs/reviews/zerox-agent-3-3-0-ui-acceptance.md` and returned PASS.
   - Visual QA screenshots and metrics were regenerated in `docs/design/zerox-agent-3-2-2-qa/`; `design-qa.md` now records the v3.3.0 surface check and the intentional 390px settings navigation scroll strip.
 - Changed areas:
-  - `UI_AUDIT.md`, `UI_ACCEPTANCE.md`, `.zerox/feature_list.json`, `.zerox/progress.md`, `README.md`, `package.json`, `package-lock.json`
+  - `docs/reviews/zerox-agent-3-3-0-ui-audit.md`, `docs/reviews/zerox-agent-3-3-0-ui-acceptance.md`, `.zerox/feature_list.json`, `.zerox/progress.md`, `README.md`, `package.json`, `package-lock.json`
   - `src/main/main.ts`, `src/main/desktopLifecycle.ts`, `src/main/desktopLifecycle.test.ts`
   - `src/renderer/App.tsx`, `src/renderer/components/AgentChatPanel.tsx`, `src/renderer/components/ConfirmDialog.tsx`, `src/renderer/components/GoalDetailDrawer.tsx`, `src/renderer/components/Icon.tsx`, `src/renderer/components/MemoryPanel.tsx`, `src/renderer/components/ModelSettingsPanel.tsx`, `src/renderer/components/ScheduledTasksPanel.tsx`, `src/renderer/components/useDialogFocusTrap.ts`
   - `src/renderer/styles/tokens.css`, `src/renderer/styles/app-shell.css`, `src/renderer/styles/sidebar.css`, `src/renderer/styles/chat.css`, `src/renderer/styles/composer.css`, `src/renderer/styles/cards.css`, `src/renderer/styles/responsive.css`, `src/renderer/styles/legacy.css`
@@ -8021,9 +8021,10 @@
 
 ## 2026-07-13 - P47 Responsive Project Introduction Site
 
-- Replaced the stale fixed-size `zerox-agent-onepage.html` poster with a
+- Replaced the stale fixed-size project poster with a
   responsive, standalone project introduction page grounded in current v3.7.0
-  source contracts.
+  source contracts. The historical page is now archived at
+  `docs/product/archive/zerox-agent-introduction.html`.
 - The page now explains:
   - the local-first desktop control-plane positioning and explicit non-goals;
   - the shared six-boundary Agent runtime flow from frozen context through Goal
@@ -8045,7 +8046,7 @@
 - Changed files:
   - `.zerox/feature_list.json`
   - `.zerox/progress.md`
-  - `zerox-agent-onepage.html`
+  - `docs/product/archive/zerox-agent-introduction.html`
   - `src/shared/projectIntroductionPage.test.ts`
   - `src/shared/packageScripts.test.ts`
 - Verification evidence:
@@ -10762,3 +10763,31 @@
   design; production build, Agent evals 26/26, and Memory evals 2/2 passed.
 - Program, harness, Onepager project validation, and whitespace checks
   passed. Closed `P100-v3.9.0-onepager-refresh`.
+
+## 2026-08-16 - P101 README Logo And Root Artifact Organization Completed
+
+- Replaced the README header reference to `build/icon.svg` with the canonical
+  tracked root `logo.png` and increased its display width to 160px so the
+  complete Zerox mark remains legible.
+- Moved the v3.3.0 macOS UI audit and acceptance records from the repository
+  root to `docs/reviews/zerox-agent-3-3-0-ui-audit.md` and
+  `docs/reviews/zerox-agent-3-3-0-ui-acceptance.md`; repaired their internal,
+  Feature, progress, and research references.
+- Moved the early Building Agent Onepager plus the v3.7-era responsive
+  introduction HTML/PNG into `docs/product/archive/`. Added an archive index
+  that distinguishes historical assets from the current v3.9.0 Onepager.
+- Added a repository-relative base URL to the archived responsive page so its
+  root README, source, architecture, and brand links remain resolvable from
+  the new location.
+- Added `src/shared/repositoryLayout.test.ts` to enforce the root boundary:
+  historical audit/Onepager files stay under `docs`, while governance,
+  package/build configuration, entrypoints, and `logo.png` remain at root.
+- Focused README, archived-page, repository-layout, and package tests passed
+  26/26. Strict test types covered 293/293 files.
+- Full verify passed 2,974 tests with six stress-only tests skipped by
+  design; production build, Agent evals 26/26, and Memory evals 2/2 passed.
+- Production smoke passed with native SQLite authority, WAL, seven
+  migrations, eight authority markers, no legacy JSON shadows, and Node /
+  Electron ABI `137 -> 146 -> 137` restoration.
+- Program, harness, and whitespace checks passed. Closed
+  `P101-readme-logo-and-root-artifact-organization`.

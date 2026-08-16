@@ -573,7 +573,9 @@ describe("package scripts", () => {
         id: "P36-v3.3.0-macos-ui-release-polish",
         status: "done",
         definitionOfDone: expect.arrayContaining([
-          expect.stringContaining("UI_AUDIT.md records the macOS HIG audit"),
+          expect.stringContaining(
+            "docs/reviews/zerox-agent-3-3-0-ui-audit.md records the macOS HIG audit",
+          ),
           expect.stringContaining("4 P0 safety and modal-contract findings are completed"),
           expect.stringContaining("independent adversarial UI acceptance PASS"),
           expect.stringContaining("package metadata reports version 3.3.0"),

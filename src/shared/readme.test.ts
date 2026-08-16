@@ -12,6 +12,13 @@ describe("README", () => {
   it("describes the current product instead of a historical release log", () => {
     const readme = readReadme();
 
+    expect(readme).toContain(
+      '<img src="logo.png" width="160" alt="Zerox Agent" />',
+    );
+    expect(readme).not.toContain(
+      '<img src="build/icon.svg" width="88" alt="Zerox Agent" />',
+    );
+    expect(existsSync(path.join(process.cwd(), "logo.png"))).toBe(true);
     expect(readme).toContain("当前版本是 **v3.9.0**");
     expect(readme).toContain("The current release: v3.9.0");
     expect(readme).toContain("local-first desktop control plane");
