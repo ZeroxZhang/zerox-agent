@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
@@ -310,9 +311,9 @@ describe("agent tool executor", () => {
           agentRole: "primary",
           depth: 0,
           sandbox: {
-            mode: "read_write",
-            network: "enabled",
-            shell: "enabled",
+            mode: "workspace_write",
+            network: "task_policy",
+            shell: "approved_commands",
             allowWorkspaceEscape: false,
             extraReadRoots: [],
             extraWriteRoots: [],
@@ -351,9 +352,9 @@ describe("agent tool executor", () => {
           agentRole: "primary",
           depth: 0,
           sandbox: {
-            mode: "read_write",
-            network: "enabled",
-            shell: "enabled",
+            mode: "workspace_write",
+            network: "task_policy",
+            shell: "approved_commands",
             allowWorkspaceEscape: false,
             extraReadRoots: [],
             extraWriteRoots: [],
@@ -1396,7 +1397,7 @@ describe("agent tool executor", () => {
       result: {
         stdout: "sandboxed",
         sandboxBackend: "seatbelt",
-        sandboxEnforcement: "write-and-network-none",
+        sandboxEnforcement: "read-write-and-network-policy",
       },
     });
     expect(policies).toEqual([
@@ -1405,6 +1406,146 @@ describe("agent tool executor", () => {
         mode: "workspace_write",
       }),
     ]);
+  });
+
+  it("preserves the shell failure when private-temp cleanup also fails", async () => {
+    const executor = createAgentToolExecutor({
+      processSandbox: passthroughSandbox([], async () => {
+        throw new Error("cleanup fixture failed");
+      }),
+    });
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+    const command = "exit 7";
+
+    await expect(
+      executor.execute(
+        { toolName: "shell_exec", args: { command } },
+        { runContext, authorizedShellCommand: command },
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorDetails: {
+        command,
+        exitCode: 7,
+        processSandboxCleanupFailure: "cleanup fixture failed",
+      },
+    });
+  });
+
+  it("kills resistant shell descendants before cleaning the lease", async () => {
+    if (process.platform === "win32") return;
+    const descendantPath = path.join(tempDir, "resistant-descendant.mjs");
+    const parentPath = path.join(tempDir, "spawn-resistant-child.mjs");
+    const pidPath = path.join(tempDir, "resistant.pid");
+    await writeFile(
+      descendantPath,
+      [
+        'process.on("SIGTERM", () => {});',
+        "setInterval(() => {}, 1_000);",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      parentPath,
+      [
+        'import { spawn } from "node:child_process";',
+        'import { writeFileSync } from "node:fs";',
+        `const child = spawn(process.execPath, [${JSON.stringify(descendantPath)}], { stdio: "ignore" });`,
+        `writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));`,
+        "setInterval(() => {}, 1_000);",
+      ].join("\n"),
+      "utf8",
+    );
+    let cleanupCount = 0;
+    let cleanupObservedLiveDescendant = false;
+    const executor = createAgentToolExecutor({
+      processSandbox: passthroughSandbox([], async () => {
+        cleanupCount += 1;
+        const pid = Number(await readFile(pidPath, "utf8"));
+        cleanupObservedLiveDescendant = isProcessAlive(pid);
+      }),
+    });
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+    const command =
+      `${JSON.stringify(process.execPath)} ${JSON.stringify(parentPath)}`;
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "shell_exec",
+          args: { command, timeoutMs: 100 },
+        },
+        { runContext, authorizedShellCommand: command },
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorDetails: { kind: "timeout" },
+    });
+
+    const descendantPid = Number(await readFile(pidPath, "utf8"));
+    expect(cleanupCount).toBe(1);
+    expect(cleanupObservedLiveDescendant).toBe(false);
+    expect(isProcessAlive(descendantPid)).toBe(false);
+  });
+
+  it("cleans private temps after real Seatbelt shell timeout and abort", async () => {
+    if (process.platform !== "darwin") return;
+    const privateTempRoot = await mkdtemp(
+      path.join(os.tmpdir(), "zerox-shell-private-root-"),
+    );
+    const executor = createAgentToolExecutor({
+      processSandbox: createProcessSandboxProvider({
+        tempRoot: privateTempRoot,
+      }),
+    });
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+    const command = "sleep 5";
+
+    try {
+      await expect(
+        executor.execute(
+          {
+            toolName: "shell_exec",
+            args: { command, timeoutMs: 25 },
+          },
+          { runContext, authorizedShellCommand: command },
+        ),
+      ).resolves.toMatchObject({
+        ok: false,
+        errorDetails: { kind: "timeout" },
+      });
+      expect(await readdir(privateTempRoot)).toEqual([]);
+
+      const controller = new AbortController();
+      const execution = executor.execute(
+        {
+          toolName: "shell_exec",
+          args: { command, timeoutMs: 5_000 },
+        },
+        {
+          runContext,
+          authorizedShellCommand: command,
+          signal: controller.signal,
+        },
+      );
+      setTimeout(() => controller.abort(new Error("abort fixture")), 25);
+      await expect(execution).resolves.toMatchObject({
+        ok: false,
+        errorDetails: { kind: "canceled" },
+      });
+      expect(await readdir(privateTempRoot)).toEqual([]);
+    } finally {
+      await rm(privateTempRoot, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when process sandbox mode is deny", async () => {
@@ -1462,7 +1603,7 @@ describe("agent tool executor", () => {
       result: {
         stdout: "test-sandboxed",
         sandboxBackend: "seatbelt",
-        sandboxEnforcement: "write-and-network-none",
+        sandboxEnforcement: "read-write-and-network-policy",
       },
     });
     expect(policies).toHaveLength(1);
@@ -1608,7 +1749,33 @@ describe("agent tool executor", () => {
       ),
     ).resolves.toMatchObject({
       ok: false,
-      error: expect.stringContaining("network-disabled"),
+      error: expect.stringContaining("process network capability is not granted"),
+    });
+  });
+
+  it("does not grant shell networking from the default web-tool policy", async () => {
+    const executor = createAgentToolExecutor({
+      processSandbox: passthroughSandbox([]),
+    });
+    const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
+      workspaceRoot: tempDir,
+    });
+
+    await expect(
+      executor.execute(
+        {
+          toolName: "shell_exec",
+          args: { command: "curl https://example.com" },
+        },
+        {
+          runContext,
+          authorizedShellCommand: "curl https://example.com",
+        },
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("use an authorized web tool"),
     });
   });
 
@@ -1935,13 +2102,14 @@ describe("agent tool executor", () => {
 
 function passthroughSandbox(
   policies: ProcessSandboxPolicy[],
+  cleanup: () => Promise<void> = async () => {},
 ): ProcessSandboxProvider {
   return {
     status() {
       return {
         available: true,
         backend: "seatbelt",
-        enforcement: "write-and-network-none",
+        enforcement: "read-write-and-network-policy",
       };
     },
     confine(argv, policy) {
@@ -1949,13 +2117,34 @@ function passthroughSandbox(
       return {
         argv,
         backend: "seatbelt",
-        enforcement: "write-and-network-none",
+        enforcement: "read-write-and-network-policy",
         denialSignatures: ["operation not permitted"],
+        readableRoots: [policy.workspaceRoot],
         writableRoots: [policy.workspaceRoot],
         network: policy.network,
+        privateTempDir: policy.workspaceRoot,
+        buildChildEnv(parentEnv, configuredEnv = {}) {
+          return {
+            ...parentEnv,
+            ...configuredEnv,
+            TMPDIR: policy.workspaceRoot,
+            TMP: policy.workspaceRoot,
+            TEMP: policy.workspaceRoot,
+          };
+        },
+        cleanup,
       };
     },
   };
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function createMemoryRecord(

@@ -95,15 +95,17 @@ export function createGoalChatService(options: {
     | {
         kind: "background";
         controller: AbortController;
+        drain: Promise<void>;
         completion: Promise<void>;
       }
     | {
         kind: "operation";
         controller: AbortController;
+        drain: Promise<void>;
         completion: Promise<Goal>;
       }
   >();
-  const pendingGoalCancellations = new Map<string, Promise<void>>();
+  const pendingGoalSettlements = new Map<string, Promise<void>>();
   const pendingRestarts = new Set<string>();
   let shuttingDown = false;
 
@@ -163,8 +165,8 @@ export function createGoalChatService(options: {
       if (existing.controller.signal.aborted && !pendingRestarts.has(goalId)) {
         pendingRestarts.add(goalId);
         void existing.completion.finally(() => {
-          pendingRestarts.delete(goalId);
-          if (!shuttingDown) {
+          const shouldRestart = pendingRestarts.delete(goalId);
+          if (shouldRestart && !shuttingDown) {
             startBackgroundGoalRun(goalId, runOptions, runner);
           }
         });
@@ -179,7 +181,10 @@ export function createGoalChatService(options: {
       abortFromParent();
     }
 
-    const completion = runner(goalId, { signal: controller.signal })
+    const runnerCompletion = Promise.resolve().then(() =>
+      runner(goalId, { signal: controller.signal }),
+    );
+    const completion = runnerCompletion
       .then(
         () => undefined,
         () => {
@@ -195,27 +200,35 @@ export function createGoalChatService(options: {
     activeGoalRuns.set(goalId, {
       kind: "background",
       controller,
+      drain: completion,
       completion,
     });
   }
 
-  function abortBackgroundGoalRun(goalId: string) {
+  async function abortAndDrainOwnedGoalRun(
+    goalId: string,
+    reason: "user_pause" | "user_canceled",
+  ): Promise<void> {
+    pendingRestarts.delete(goalId);
     const active = activeGoalRuns.get(goalId);
     if (active && !active.controller.signal.aborted) {
-      active.controller.abort();
+      active.controller.abort(reason);
+    }
+    if (active) {
+      await active.drain;
     }
   }
 
-  function beginGoalCancellation(goalId: string): () => void {
+  function beginGoalSettlement(goalId: string): () => void {
     let settle: (() => void) | undefined;
     const completion = new Promise<void>((resolve) => {
       settle = resolve;
     });
-    pendingGoalCancellations.set(goalId, completion);
+    pendingGoalSettlements.set(goalId, completion);
     return () => {
       settle?.();
-      if (pendingGoalCancellations.get(goalId) === completion) {
-        pendingGoalCancellations.delete(goalId);
+      if (pendingGoalSettlements.get(goalId) === completion) {
+        pendingGoalSettlements.delete(goalId);
       }
     };
   }
@@ -238,7 +251,7 @@ export function createGoalChatService(options: {
         }
       }
       if (existing.controller.signal.aborted) {
-        await pendingGoalCancellations.get(goalId);
+        await pendingGoalSettlements.get(goalId);
       }
       const canonical = await options.goalStore.get(goalId);
       if (!canonical) {
@@ -260,16 +273,23 @@ export function createGoalChatService(options: {
       abortFromParent();
     }
 
+    const runnerCompletion = Promise.resolve().then(() =>
+      runner(goalId, { signal: controller.signal }),
+    );
+    const drain = runnerCompletion.then(
+      () => undefined,
+      () => undefined,
+    );
     const completion = (async (): Promise<Goal> => {
       try {
         let result: Goal;
         try {
-          result = await runner(goalId, { signal: controller.signal });
+          result = await runnerCompletion;
         } catch (error) {
           if (!controller.signal.aborted) {
             throw error;
           }
-          await pendingGoalCancellations.get(goalId);
+          await pendingGoalSettlements.get(goalId);
           const canonical = await options.goalStore.get(goalId);
           if (canonical) {
             return canonical;
@@ -277,11 +297,11 @@ export function createGoalChatService(options: {
           throw error;
         }
         if (controller.signal.aborted) {
-          await pendingGoalCancellations.get(goalId);
+          await pendingGoalSettlements.get(goalId);
         }
         let canonical = await options.goalStore.get(goalId);
         if (controller.signal.aborted) {
-          await pendingGoalCancellations.get(goalId);
+          await pendingGoalSettlements.get(goalId);
           canonical = (await options.goalStore.get(goalId)) ?? canonical;
         }
         return canonical ?? result;
@@ -292,7 +312,12 @@ export function createGoalChatService(options: {
         }
       }
     })();
-    activeGoalRuns.set(goalId, { kind: "operation", controller, completion });
+    activeGoalRuns.set(goalId, {
+      kind: "operation",
+      controller,
+      drain,
+      completion,
+    });
     return completion;
   }
 
@@ -539,49 +564,74 @@ export function createGoalChatService(options: {
     },
 
     async pause(goalId) {
-      const goal = await options.goalStore.get(goalId);
-      if (!goal) {
+      const existing = await options.goalStore.get(goalId);
+      if (!existing) {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
 
-      if (goal.status !== "waiting_for_review") {
-        abortBackgroundGoalRun(goalId);
-        assertGoalTransition(goal.status, "waiting_for_review");
-        goal.status = "waiting_for_review";
-        goal.milestones = goal.milestones.map((milestone) =>
-          milestone.state === "running"
-            ? { ...milestone, state: "ready" }
-            : milestone,
-        );
-        goal.updatedAt = now();
-        const persisted = await options.goalStore.save(goal);
-        if (persisted.status !== goal.status) {
+      if (existing.status !== "waiting_for_review") {
+        const finishSettlement = beginGoalSettlement(goalId);
+        try {
+          await abortAndDrainOwnedGoalRun(goalId, "user_pause");
+          const goal = await options.goalStore.get(goalId);
+          if (!goal) {
+            throw new Error(`Goal "${goalId}" was not found.`);
+          }
+          if (
+            goal.status === "waiting_for_review" ||
+            goal.status === "achieved" ||
+            goal.status === "canceled"
+          ) {
+            return toGoalSummary(goal);
+          }
+          assertGoalTransition(goal.status, "waiting_for_review");
+          goal.status = "waiting_for_review";
+          goal.milestones = goal.milestones.map((milestone) =>
+            milestone.state === "running"
+              ? { ...milestone, state: "ready" }
+              : milestone,
+          );
+          goal.updatedAt = now();
+          const persisted = await options.goalStore.save(goal);
+          if (persisted.status !== goal.status) {
+            return toGoalSummary(persisted);
+          }
+          await options.goalStore.appendLedger(goal.id, {
+            at: goal.updatedAt,
+            kind: "review_requested",
+            summary: "Goal paused from chat and is waiting for review.",
+          });
+          notifyProgress(
+            "review_requested",
+            persisted,
+            "目标已暂停，等待审核。",
+          );
           return toGoalSummary(persisted);
+        } finally {
+          finishSettlement();
         }
-        await options.goalStore.appendLedger(goal.id, {
-          at: goal.updatedAt,
-          kind: "review_requested",
-          summary: "Goal paused from chat and is waiting for review.",
-        });
-        notifyProgress("review_requested", persisted, "目标已暂停，等待审核。");
-        return toGoalSummary(persisted);
       }
 
-      return toGoalSummary(goal);
+      return toGoalSummary(existing);
     },
 
     async cancel(goalId) {
-      const goal = await options.goalStore.get(goalId);
-      if (!goal) {
+      const existing = await options.goalStore.get(goalId);
+      if (!existing) {
         throw new Error(`Goal "${goalId}" was not found.`);
       }
 
-      if (goal.status !== "canceled") {
-        assertGoalTransition(goal.status, "canceled");
-      }
-      const finishCancellation = beginGoalCancellation(goalId);
+      const finishSettlement = beginGoalSettlement(goalId);
       try {
-        abortBackgroundGoalRun(goalId);
+        await abortAndDrainOwnedGoalRun(goalId, "user_canceled");
+        const goal = await options.goalStore.get(goalId);
+        if (!goal) {
+          throw new Error(`Goal "${goalId}" was not found.`);
+        }
+        if (goal.status === "achieved" || goal.status === "canceled") {
+          return toGoalSummary(goal);
+        }
+        assertGoalTransition(goal.status, "canceled");
         goal.status = "canceled";
         goal.stopReason = "user_canceled";
         goal.updatedAt = now();
@@ -597,7 +647,7 @@ export function createGoalChatService(options: {
         notifyProgress("stopped", persisted, "目标已取消。");
         return toGoalSummary(persisted);
       } finally {
-        finishCancellation();
+        finishSettlement();
       }
     },
 

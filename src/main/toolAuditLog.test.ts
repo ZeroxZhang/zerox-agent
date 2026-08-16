@@ -75,6 +75,40 @@ describe("tool audit log", () => {
     await expect(auditLog.list({ limit: 1 })).resolves.toEqual([second]);
   });
 
+  it("recursively redacts credential keys and values before disk persistence", async () => {
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_secret",
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
+    });
+
+    const event = await auditLog.append({
+      taskId: "task_secret",
+      request: {
+        toolName: "shell_exec",
+        args: {
+          command:
+            "curl https://user:password@example.test/run?api_key=query-secret",
+          nested: {
+            authorization: "Bearer nested-secret",
+            output: "Set-Cookie: session=cookie-secret; Path=/",
+          },
+        },
+      },
+      decision: {
+        allowed: false,
+        reason: "Authorization: Bearer decision-secret",
+      },
+    });
+
+    const serialized = JSON.stringify(event);
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /password@example|query-secret|nested-secret|cookie-secret|decision-secret/,
+    );
+    await expect(auditLog.list({ limit: 1 })).resolves.toEqual([event]);
+  });
+
   describe.each(["sqlite", "dual"] as StorageBackend[])("backend=%s", (backend) => {
     it("returns the same audit event that it persists", async () => {
       const storage = createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });

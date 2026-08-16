@@ -107,13 +107,22 @@ type OpenProjectAgentWorkspaceInput = {
   mode?: "open" | "create";
 };
 
+type IpcInvokeHandler = Parameters<typeof ipcMain.handle>[1];
+
 const maximumGoalOperationIdChars = 128;
 const safeGoalOperationIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+let trustedRendererSenderGuard:
+  | ((event: IpcMainInvokeEvent) => boolean)
+  | undefined;
 
 export function registerAllIpcHandlers(
   container: AppContainer,
-  options: { appUpdateService?: AppUpdateService } = {},
+  options: {
+    isTrustedSender: (event: IpcMainInvokeEvent) => boolean;
+    appUpdateService?: AppUpdateService;
+  },
 ): void {
+  trustedRendererSenderGuard = options.isTrustedSender;
   registerAppIpcHandlers(container, options.appUpdateService);
   registerTasksIpcHandlers(container);
   registerToolsIpcHandlers(container);
@@ -129,6 +138,18 @@ export function registerAllIpcHandlers(
   registerChatIpcHandlers(container);
   registerGoalProgressBroadcaster(container);
   registerAgentRunsChangedBroadcaster(container);
+}
+
+function handleTrustedIpc(
+  channel: string,
+  listener: IpcInvokeHandler,
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!trustedRendererSenderGuard?.(event)) {
+      throw new Error(`Rejected untrusted renderer IPC sender for ${channel}.`);
+    }
+    return listener(event, ...args);
+  });
 }
 
 function registerGoalProgressBroadcaster(container: AppContainer): void {
@@ -155,23 +176,23 @@ function registerAppIpcHandlers(
   container: AppContainer,
   appUpdateService?: AppUpdateService,
 ): void {
-  ipcMain.handle("app:getMeta", () => container.appMeta);
-  ipcMain.handle("app:getRuntimeInfo", () => container.buildDesktopRuntimeInfo());
-  ipcMain.handle("app:getUpdateState", (): AppUpdateState =>
+  handleTrustedIpc("app:getMeta", () => container.appMeta);
+  handleTrustedIpc("app:getRuntimeInfo", () => container.buildDesktopRuntimeInfo());
+  handleTrustedIpc("app:getUpdateState", (): AppUpdateState =>
     appUpdateService?.getState() ?? {
       phase: "disabled",
       currentVersion: container.buildDesktopRuntimeInfo().version,
       message: "当前运行环境未启用自动更新。",
     },
   );
-  ipcMain.handle("app:checkForUpdates", async (): Promise<AppUpdateState> =>
+  handleTrustedIpc("app:checkForUpdates", async (): Promise<AppUpdateState> =>
     appUpdateService?.checkForUpdates() ?? {
       phase: "disabled",
       currentVersion: container.buildDesktopRuntimeInfo().version,
       message: "当前运行环境未启用自动更新。",
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "app:installUpdate",
     async (): Promise<AppUpdateActionResult> => {
       if (appUpdateService) {
@@ -185,8 +206,8 @@ function registerAppIpcHandlers(
       return { ok: false, state, message: state.message ?? "无法更新。" };
     },
   );
-  ipcMain.handle("navigation:list", () => container.getNavigationSections());
-  ipcMain.handle(
+  handleTrustedIpc("navigation:list", () => container.getNavigationSections());
+  handleTrustedIpc(
     "agentBootstrap:prepare",
     async (): Promise<PrepareAgentResult> => {
       try {
@@ -203,7 +224,7 @@ function registerAppIpcHandlers(
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentBootstrap:validate",
     async (): Promise<ValidateAgentResult> => {
       try {
@@ -227,7 +248,7 @@ function registerAppIpcHandlers(
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentBootstrap:loadValidation",
     async (): Promise<LoadAgentValidationResult> => {
       try {
@@ -244,12 +265,12 @@ function registerAppIpcHandlers(
       }
     },
   );
-  ipcMain.handle("skills:list", () => container.discoverSkills());
+  handleTrustedIpc("skills:list", () => container.discoverSkills());
 }
 
 function registerTasksIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("scheduledTasks:list", () => container.scheduledTaskStore().list());
-  ipcMain.handle(
+  handleTrustedIpc("scheduledTasks:list", () => container.scheduledTaskStore().list());
+  handleTrustedIpc(
     "scheduledTasks:create",
     async (
       _event,
@@ -277,7 +298,7 @@ function registerTasksIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "scheduledTasks:setEnabled",
     async (
       _event,
@@ -298,7 +319,7 @@ function registerTasksIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "scheduledTasks:update",
     async (
       _event,
@@ -327,7 +348,7 @@ function registerTasksIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "scheduledTasks:delete",
     async (_event, taskId: string): Promise<DeleteScheduledTaskResult> => {
       try {
@@ -346,13 +367,13 @@ function registerTasksIpcHandlers(container: AppContainer): void {
 }
 
 function registerToolsIpcHandlers(container: AppContainer): void {
-  ipcMain.handle(
+  handleTrustedIpc(
     "toolPermissions:authorize",
     (_event, taskId: string, request: ToolCallRequest) =>
       container.toolAuthorizationService().authorize(taskId, request),
   );
-  ipcMain.handle("toolAudit:list", () => container.toolAuditLog().list({ limit: 50 }));
-  ipcMain.handle(
+  handleTrustedIpc("toolAudit:list", () => container.toolAuditLog().list({ limit: 50 }));
+  handleTrustedIpc(
     "toolResults:readRef",
     async (_event, ref: string, options?: unknown) =>
       container.readToolResultRef(ref, sanitizeReadToolResultRefOptions(options)),
@@ -383,25 +404,25 @@ function sanitizeReadToolResultRefOptions(
 }
 
 function registerRunsIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("agentRuns:list", () => container.agentRunStore().list({ limit: 50 }));
-  ipcMain.handle("agentRuns:listActiveExecutions", () =>
+  handleTrustedIpc("agentRuns:list", () => container.agentRunStore().list({ limit: 50 }));
+  handleTrustedIpc("agentRuns:listActiveExecutions", () =>
     container.agentExecutionStore().listActive(),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:listTrajectory",
     (_event, runId: string) => container.agentTrajectoryStore().list(runId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:openSession",
     async (_event, runId: string): Promise<OpenAgentRunSessionResult> =>
       container.openAgentRunSession(runId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:runTask",
     async (_event, taskId: string): Promise<RunScheduledTaskResult> =>
       container.runAgentTask(taskId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:runTaskStreaming",
     async (event: IpcMainInvokeEvent, taskId: string) => {
       const sender = event.sender;
@@ -422,7 +443,7 @@ function registerRunsIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:cancelTask",
     (_event, taskId: string): CancelScheduledTaskRunResult => {
       const controller = container.getActiveTaskRunControllers().get(taskId);
@@ -441,7 +462,7 @@ function registerRunsIpcHandlers(container: AppContainer): void {
       };
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:retry",
     async (_event, runId: string): Promise<RunScheduledTaskResult> => {
       const run = await container.agentRunStore().get(runId);
@@ -456,12 +477,12 @@ function registerRunsIpcHandlers(container: AppContainer): void {
       return container.runAgentTask(run.taskId);
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:resume",
     async (_event, runId: string): Promise<RunScheduledTaskResult> =>
       container.resumeAgentRun(runId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentRuns:pause",
     async (_event, runId: string): Promise<PauseAgentRunResult> =>
       container.pauseAgentRun(runId),
@@ -469,13 +490,13 @@ function registerRunsIpcHandlers(container: AppContainer): void {
 }
 
 function registerWorkspacesIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("agentWorkspaces:list", () =>
+  handleTrustedIpc("agentWorkspaces:list", () =>
     container.agentWorkspaceService().listWorkspaces(),
   );
-  ipcMain.handle("agentWorkspaces:createTemporary", (_event, input) =>
+  handleTrustedIpc("agentWorkspaces:createTemporary", (_event, input) =>
     container.agentWorkspaceService().createTemporaryWorkspace(input),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentWorkspaces:openProject",
     async (_event, input?: OpenProjectAgentWorkspaceInput) => {
       const isCreateMode = input?.mode === "create";
@@ -498,21 +519,21 @@ function registerWorkspacesIpcHandlers(container: AppContainer): void {
       });
     },
   );
-  ipcMain.handle("agentWorkspaces:requestGitWorktree", (_event, input) =>
+  handleTrustedIpc("agentWorkspaces:requestGitWorktree", (_event, input) =>
     container.requestGitWorktreeAgentWorkspace(input),
   );
 }
 
 function registerMultiAgentIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("multiAgentSessions:list", () => container.multiAgentSessionStore().list());
+  handleTrustedIpc("multiAgentSessions:list", () => container.multiAgentSessionStore().list());
 }
 
 function registerGoalsIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("goal:listActive", () => container.agentGoalStore().listActive());
-  ipcMain.handle("goal:get", (_event, goalId: string) =>
+  handleTrustedIpc("goal:listActive", () => container.agentGoalStore().listActive());
+  handleTrustedIpc("goal:get", (_event, goalId: string) =>
     container.agentGoalStore().get(goalId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:create",
     async (
       _event,
@@ -541,10 +562,10 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle("goal:start", async (_event, goalId: string) =>
+  handleTrustedIpc("goal:start", async (_event, goalId: string) =>
     container.runGoalOperation(goalId, () => container.goalChatService().start(goalId)),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goalDraft:confirm",
     async (
       _event,
@@ -553,25 +574,25 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
     ): Promise<GoalDraftConfirmResult> =>
       container.confirmGoalDraft(draftId, edit),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goalDraft:discard",
     async (_event, draftId: string): Promise<GoalDraftDiscardResult> =>
       container.discardGoalDraft(draftId),
   );
-  ipcMain.handle("goal:pause", async (_event, goalId: string) =>
+  handleTrustedIpc("goal:pause", async (_event, goalId: string) =>
     container.runGoalOperation(goalId, () => container.goalChatService().pause(goalId)),
   );
-  ipcMain.handle("goal:resume", async (_event, goalId: string) =>
+  handleTrustedIpc("goal:resume", async (_event, goalId: string) =>
     container.runGoalOperation(goalId, () => container.goalChatService().resume(goalId)),
   );
-  ipcMain.handle("goal:cancel", async (_event, goalId: string) =>
+  handleTrustedIpc("goal:cancel", async (_event, goalId: string) =>
     container.runGoalOperation(
       goalId,
       () => container.goalChatService().cancel(goalId),
       { preempt: true },
     ),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:resolveReview",
     async (
       _event,
@@ -583,14 +604,14 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       );
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:increaseBudget",
     async (): Promise<{ ok: false; message: string }> => ({
       ok: false,
       message: "budget_control_removed",
     }),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:replan",
     async (
       _event,
@@ -600,13 +621,13 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       return container.replanGoal(goalId, instructions);
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:retry",
     async (_event, goalId: string): Promise<{ ok: boolean; goal?: Goal; message?: string }> => {
       return container.retryGoal(goalId);
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:proposeAmendment",
     (
       _event,
@@ -614,7 +635,7 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
     ): Promise<GoalAmendmentOperationResult> =>
       container.proposeGoalAmendment(input),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:resolveAmendment",
     (
       _event,
@@ -624,7 +645,7 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
     ): Promise<GoalAmendmentOperationResult> =>
       container.resolveGoalAmendment(goalId, proposalId, decision),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:continueAcceptance",
     async (
       _event,
@@ -636,7 +657,7 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
       return container.continueGoalAcceptance(goalId);
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "goal:markCompletedUnverified",
     async (
       _event,
@@ -651,10 +672,10 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
 }
 
 function registerPlansIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("plans:get", (_event, planId: string) =>
+  handleTrustedIpc("plans:get", (_event, planId: string) =>
     container.planStore().get(planId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "plans:getLatestBySession",
     async (_event, sessionId: string) => {
       const plan = await container.planStore().getLatestBySession(sessionId);
@@ -668,7 +689,7 @@ function registerPlansIpcHandlers(container: AppContainer): void {
       return plan;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "plans:retryFailedRound",
     async (
       _event,
@@ -692,19 +713,19 @@ function registerPlansIpcHandlers(container: AppContainer): void {
       return result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "plans:discard",
     (_event, planId: string, expectedRevision: number) =>
       container.discardPlan(planId, expectedRevision),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "plans:confirm",
     (
       _event,
       input: ConfirmPlanInput,
     ): Promise<ConfirmPlanResult> => container.confirmPlan(input),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "plans:adoptGoalPlan",
     (
       _event,
@@ -785,59 +806,59 @@ function invalidGoalOperationIdResult(): { ok: false; message: string } {
 }
 
 function registerEvalsIpcHandlers(container: AppContainer): void {
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentEvalCandidates:list",
     (_event, options?: AgentEvalCandidateListOptions): Promise<AgentEvalCandidate[]> =>
       container.agentEvalCandidateStore().list(options),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentEvalCandidates:generateForRun",
     (_event, runId: string): Promise<GenerateEvalCandidateForRunResult> =>
       container.agentEvalCandidateService().generateForRun(runId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentEvalCandidates:accept",
     (_event, candidateId: string) =>
       container.agentEvalCandidateService().acceptCandidate(candidateId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentEvalCandidates:reject",
     (_event, candidateId: string) =>
       container.agentEvalCandidateService().rejectCandidate(candidateId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "agentEvalCandidates:promote",
     (_event, candidateId: string): Promise<PromoteEvalCandidateResult> =>
       container.agentEvalCandidateService().promoteAccepted(candidateId),
   );
-  ipcMain.handle("agentQuality:getEvalReport", async () =>
+  handleTrustedIpc("agentQuality:getEvalReport", async () =>
     container.runAgentQualityEvals(),
   );
 }
 
 function registerMemoryIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("memory:list", (_event, options?: MemoryListOptions) =>
+  handleTrustedIpc("memory:list", (_event, options?: MemoryListOptions) =>
     container.memoryStore().list(options),
   );
-  ipcMain.handle("memory:search", (_event, options: MemorySearchOptions) =>
+  handleTrustedIpc("memory:search", (_event, options: MemorySearchOptions) =>
     container.memoryStore().search(options),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:ingestRecent",
     (_event, scope?: MemoryIngestionScope): Promise<IngestRecentMemoryResult> =>
       container.memoryIngestionService().ingestRecent(scope),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:getIngestionStatus",
     (): Promise<GetMemoryIngestionStatusResult> =>
       container.memoryIngestionService().getStatus(),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:listIngestionCandidates",
     (): Promise<ListMemoryIngestionCandidatesResult> =>
       container.memoryIngestionService().listCandidates(),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:acceptIngestionCandidate",
     (
       _event,
@@ -845,7 +866,7 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
     ): Promise<AcceptMemoryIngestionCandidateResult> =>
       container.memoryIngestionService().acceptCandidate(candidateId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:rejectIngestionCandidate",
     (
       _event,
@@ -853,17 +874,17 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
     ): Promise<RejectMemoryIngestionCandidateResult> =>
       container.memoryIngestionService().rejectCandidate(candidateId),
   );
-  ipcMain.handle("history:search", (_event, options: RawHistorySearchOptions) =>
+  handleTrustedIpc("history:search", (_event, options: RawHistorySearchOptions) =>
     hasRawHistoryScope(options)
       ? container.historyIndexStore().search(options)
       : [],
   );
-  ipcMain.handle("history:around", (_event, options: RawHistoryAroundOptions) =>
+  handleTrustedIpc("history:around", (_event, options: RawHistoryAroundOptions) =>
     hasRawHistoryScope(options)
       ? container.historyIndexStore().around(options)
       : null,
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:create",
     async (_event, input: MemoryInput): Promise<CreateMemoryResult> => {
       try {
@@ -888,7 +909,7 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:delete",
     async (_event, memoryId: string): Promise<DeleteMemoryResult> => {
       try {
@@ -904,8 +925,8 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle("memory:export", () => container.memoryStore().export());
-  ipcMain.handle("memory:evaluate", async (): Promise<RunMemoryEvalResult> => {
+  handleTrustedIpc("memory:export", () => container.memoryStore().export());
+  handleTrustedIpc("memory:evaluate", async (): Promise<RunMemoryEvalResult> => {
     const result = await container.runMemoryEvals();
     if (result.ok) {
       return result;
@@ -915,7 +936,7 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
       message: result.message,
     };
   });
-  ipcMain.handle("memory:governance", async (): Promise<RunMemoryGovernanceResult> => {
+  handleTrustedIpc("memory:governance", async (): Promise<RunMemoryGovernanceResult> => {
     try {
       return {
         ok: true,
@@ -929,7 +950,7 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
       };
     }
   });
-  ipcMain.handle(
+  handleTrustedIpc(
     "memoryProfile:read",
     async (): Promise<ReadMemoryProfileResult> => {
       try {
@@ -946,7 +967,7 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memoryProfile:save",
     async (_event, content: string): Promise<SaveMemoryProfileResult> => {
       try {
@@ -963,7 +984,7 @@ function registerMemoryIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "memory:maintain",
     async (): Promise<RunMemoryMaintenanceResult> => {
       try {
@@ -989,30 +1010,30 @@ function hasRawHistoryScope(
 }
 
 function registerLearningIpcHandlers(container: AppContainer): void {
-  ipcMain.handle(
+  handleTrustedIpc(
     "learning:listCandidates",
     (_event, options?: AgentLearningListOptions) =>
       container.agentLearningStore().list(options),
   );
-  ipcMain.handle("learning:acceptCandidate", (_event, candidateId: string) =>
+  handleTrustedIpc("learning:acceptCandidate", (_event, candidateId: string) =>
     container.agentLearningStore().setStatus(candidateId, "accepted"),
   );
-  ipcMain.handle("learning:rejectCandidate", (_event, candidateId: string) =>
+  handleTrustedIpc("learning:rejectCandidate", (_event, candidateId: string) =>
     container.agentLearningStore().setStatus(candidateId, "rejected"),
   );
-  ipcMain.handle("learning:applyAccepted", () =>
+  handleTrustedIpc("learning:applyAccepted", () =>
     container.agentLearningService().applyAcceptedLearning(),
   );
 }
 
 function registerModelSettingsIpcHandlers(container: AppContainer): void {
-  ipcMain.handle("modelSettings:load", () => container.modelSettingsStore.load());
-  ipcMain.handle("modelCatalog:load", async () =>
+  handleTrustedIpc("modelSettings:load", () => container.modelSettingsStore.load());
+  handleTrustedIpc("modelCatalog:load", async () =>
     container
       .modelConnectionService()
       .enrichCatalog(await container.modelSettingsStore.loadCatalog()),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:saveConnection",
     async (_event, input: ProviderConnectionInput) => {
       const result = await container.modelSettingsStore.saveConnection(input);
@@ -1028,7 +1049,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
       return result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:testAndSaveConnection",
     async (
       _event,
@@ -1043,7 +1064,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
       return result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:clearConnectionCredential",
     async (_event, input: RevisionedModelResourceInput) => {
       const result =
@@ -1062,7 +1083,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
       return result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:deleteConnection",
     async (_event, input: RevisionedModelResourceInput) => {
       const result =
@@ -1080,7 +1101,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
         : result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:saveProfile",
     async (_event, input: ModelProfileInput) => {
       const result = await container.modelSettingsStore.saveProfile(input);
@@ -1100,7 +1121,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
       return result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:deleteProfile",
     async (_event, input: RevisionedModelResourceInput) => {
       const result = await container.modelSettingsStore.deleteProfile(input);
@@ -1114,7 +1135,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
         : result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:setDefaultProfile",
     async (
       _event,
@@ -1135,7 +1156,7 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
         : result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:setModelHidden",
     async (_event, routedModelId: string, hidden: boolean) => {
       const result = await container.modelSettingsStore.setModelHidden(
@@ -1152,16 +1173,16 @@ function registerModelSettingsIpcHandlers(container: AppContainer): void {
         : result;
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelCatalog:testProvider",
     (_event, input: TestProviderConnectionInput) =>
       container.modelConnectionService().testProvider(input),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelSettings:testConnection",
     () => container.modelConnectionService().testConnection(),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "modelSettings:save",
     async (_event, input: ModelSettingsInput): Promise<SaveModelSettingsResult> => {
       try {
@@ -1212,7 +1233,7 @@ export async function shutdownActiveChatMessages(): Promise<number> {
 function registerChatIpcHandlers(container: AppContainer): void {
   acceptingChatMessages = true;
 
-  ipcMain.handle(
+  handleTrustedIpc(
     IPC_CHANNELS.chatSendMessage,
     async (
       event: IpcMainInvokeEvent,
@@ -1268,7 +1289,7 @@ function registerChatIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     IPC_CHANNELS.chatCancelMessage,
     (event, requestId?: string): CancelChatMessageResult => {
       if (typeof requestId === "string" && requestId.trim()) {
@@ -1293,7 +1314,7 @@ function registerChatIpcHandlers(container: AppContainer): void {
       };
     },
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     IPC_CHANNELS.chatRespondSkillInput,
     async (
       event: IpcMainInvokeEvent,
@@ -1345,26 +1366,26 @@ function registerChatIpcHandlers(container: AppContainer): void {
       }
     },
   );
-  ipcMain.handle("chatSessions:list", () => container.listChatSessions());
-  ipcMain.handle("chatSessions:get", (_event, sessionId: string) =>
+  handleTrustedIpc("chatSessions:list", () => container.listChatSessions());
+  handleTrustedIpc("chatSessions:get", (_event, sessionId: string) =>
     container.getChatSession(sessionId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "chatSessions:archive",
     (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
       container.archiveChatSession(sessionId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "chatSessions:restore",
     (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
       container.restoreChatSession(sessionId),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "chatSessions:rename",
     (_event, sessionId: string, title: string): Promise<ChatSessionOperationResult> =>
       container.renameChatSession(sessionId, title),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "chatSessions:delete",
     (_event, sessionId: string): Promise<ChatSessionOperationResult> =>
       container.deleteChatSession(sessionId),

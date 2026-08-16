@@ -11,10 +11,7 @@ import {
   type Milestone,
   type SuccessCriterion,
 } from "../shared/agentGoal";
-import type {
-  AgentTaskContract,
-  ChromeBookmarksTaskContract,
-} from "../shared/agentTaskContract";
+import type { ChromeBookmarksTaskContract } from "../shared/agentTaskContract";
 import {
   createChromeBookmarkArtifactCriterion,
   hasTaskContractAcceptanceCriteria,
@@ -35,7 +32,7 @@ type AgentGoalPlanOptions = {
   successCriteria: SuccessCriterion[];
   availableTools: string[];
   availableSkills: string[];
-  taskContract?: AgentTaskContract;
+  taskContract?: unknown;
   selectedSkill?: GoalSelectedSkill;
 };
 

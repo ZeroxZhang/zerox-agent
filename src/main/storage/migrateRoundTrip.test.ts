@@ -24,6 +24,7 @@ import { execFileSync } from "node:child_process";
 import Database from "better-sqlite3";
 
 const root = path.resolve(__dirname, "..", "..", "..");
+let scriptRoot: string;
 
 function createFreshMigrationScriptRoot(): string {
   const scriptRoot = mkdtempSync(path.join(tmpdir(), "zerox-mig-scripts-"));
@@ -44,8 +45,6 @@ function createFreshMigrationScriptRoot(): string {
 }
 
 describe("P1 migration scripts round-trip", () => {
-  let scriptRoot: string;
-
   beforeAll(() => {
     scriptRoot = createFreshMigrationScriptRoot();
   }, 20_000);
@@ -165,7 +164,7 @@ describe("P1 migration scripts round-trip", () => {
       );
 
       // 1. Migrate JSON → SQLite (--verify asserts counts).
-      const migrateOut = execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"), "--configDir", dir, "--verify"], { encoding: "utf8", cwd: root });
+      const migrateOut = runMigrationVerify(dir);
       expect(migrateOut).toContain('"runs": 1');
       expect(migrateOut).toContain('"memory_records": 1');
       expect(migrateOut).toContain('"learning_candidates": 2');
@@ -309,6 +308,105 @@ describe("P1 migration scripts round-trip", () => {
       expect(
         readFileSync(path.join(dir, "migration-errors.jsonl"), "utf8"),
       ).toMatch(/sessions.*parse failed/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails --verify when a JSONL source row cannot be parsed", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-parse-loss-"));
+    try {
+      writeFileSync(
+        path.join(dir, "agent-runs.jsonl"),
+        [
+          JSON.stringify({
+            id: "run_valid",
+            taskId: "task_1",
+            taskName: "Task",
+            skillName: "skill",
+            status: "succeeded",
+            summary: "done",
+            events: [],
+            startedAt: "2026-08-16T00:00:00.000Z",
+            finishedAt: "2026-08-16T00:00:01.000Z",
+          }),
+          '{"id":"run_truncated"',
+          "",
+        ].join("\n"),
+      );
+
+      const failure = captureMigrationFailure(dir);
+      expect(failure.status).not.toBe(0);
+      expect(failure.stdout).toContain('"sourceCounts"');
+      expect(failure.stdout).toContain('"parse": 1');
+      expect(failure.stdout).toContain('"table": "runs"');
+      expect(
+        readFileSync(path.join(dir, "migration-errors.jsonl"), "utf8"),
+      ).toContain('"kind":"parse"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails --verify when a parsed source row cannot be written", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-write-loss-"));
+    try {
+      writeFileSync(
+        path.join(dir, "agent-runs.jsonl"),
+        `${JSON.stringify({
+          id: "run_invalid",
+          taskId: null,
+          taskName: "Invalid",
+          skillName: "skill",
+          status: "succeeded",
+          summary: "must fail",
+          events: [],
+          startedAt: "2026-08-16T00:00:00.000Z",
+          finishedAt: "2026-08-16T00:00:01.000Z",
+        })}\n`,
+      );
+
+      const failure = captureMigrationFailure(dir);
+      expect(failure.status).not.toBe(0);
+      expect(failure.stdout).toContain('"write": 1');
+      expect(failure.stdout).toContain('"source": 1');
+      expect(failure.stdout).toContain('"target": 0');
+      expect(
+        readFileSync(path.join(dir, "migration-errors.jsonl"), "utf8"),
+      ).toContain('"kind":"write"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count a pre-existing target row as a write from this invocation", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-preexisting-"));
+    try {
+      writeFileSync(
+        path.join(dir, "agent-runs.jsonl"),
+        `${JSON.stringify({
+          id: "run_preexisting",
+          taskId: "task_1",
+          taskName: "Task",
+          skillName: "skill",
+          status: "succeeded",
+          summary: "done",
+          events: [],
+          startedAt: "2026-08-16T00:00:00.000Z",
+          finishedAt: "2026-08-16T00:00:01.000Z",
+        })}\n`,
+      );
+
+      expect(runMigrationVerify(dir)).toMatch(
+        /"targetCounts":\s*{\s*"runs": 1/,
+      );
+      const failure = captureMigrationFailure(dir);
+      expect(failure.status).not.toBe(0);
+      expect(failure.stdout).toContain('"table": "runs"');
+      expect(failure.stdout).toContain('"source": 1');
+      expect(failure.stdout).toContain('"target": 0');
+      expect(failure.stdout).toContain('"baseline": 1');
+      expect(failure.stdout).toContain('"total": 1');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -496,3 +594,51 @@ describe("P1 migration scripts round-trip", () => {
     }
   });
 });
+
+function captureMigrationFailure(configDir: string): {
+  status: number | null;
+  stdout: string;
+} {
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"),
+        "--configDir",
+        configDir,
+        "--verify",
+      ],
+      { encoding: "utf8", cwd: root, stdio: "pipe" },
+    );
+  } catch (error) {
+    const failure = error as Error & {
+      status: number | null;
+      stdout: string;
+    };
+    return {
+      status: failure.status,
+      stdout: failure.stdout,
+    };
+  }
+  throw new Error("Expected migration verification to fail.");
+}
+
+function runMigrationVerify(configDir: string): string {
+  try {
+    return execFileSync(
+      process.execPath,
+      [
+        path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"),
+        "--configDir",
+        configDir,
+        "--verify",
+      ],
+      { encoding: "utf8", cwd: root, stdio: "pipe" },
+    );
+  } catch (error) {
+    const failure = error as Error & { stdout?: string; stderr?: string };
+    throw new Error(
+      `Migration verification failed.\nstdout:\n${failure.stdout ?? ""}\nstderr:\n${failure.stderr ?? ""}`,
+    );
+  }
+}

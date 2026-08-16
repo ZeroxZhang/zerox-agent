@@ -15,7 +15,6 @@ describe("agent goal translator degradation", () => {
               successCriteria: [],
               milestones: [],
             }),
-            reasoningContent: null,
             toolCalls: [],
             finishReason: "stop",
           };

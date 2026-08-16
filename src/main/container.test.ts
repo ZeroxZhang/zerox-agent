@@ -331,6 +331,7 @@ describe("app container goal drafts", () => {
     toolWorkerMock.createToolWorker.mockReturnValueOnce({
       close,
       execute: vi.fn(),
+      options: undefined,
     });
     const container = createAppContainer({
       async requestToolApproval() {
@@ -356,6 +357,7 @@ describe("app container goal drafts", () => {
         throw new Error("worker close failed");
       }),
       execute: vi.fn(),
+      options: undefined,
     });
     const container = createAppContainer({
       async requestToolApproval() {
@@ -364,10 +366,65 @@ describe("app container goal drafts", () => {
     });
     container.toolWorker();
     const runStore = container.agentRunStore();
-    const flush = vi.spyOn(runStore, "flushShadowWrites");
+    const trajectoryStore = container.agentTrajectoryStore();
+    const taskStore = container.scheduledTaskStore();
+    const validationStore = container.agentValidationStore();
+    const profileStore = container.memoryProfileStore();
+    const auditLog = container.toolAuditLog();
+    const flushes = [
+      vi.spyOn(runStore, "flushShadowWrites"),
+      vi.spyOn(trajectoryStore, "flushShadowWrites"),
+      vi.spyOn(taskStore, "flushShadowWrites"),
+      vi.spyOn(validationStore, "flushShadowWrites"),
+      vi.spyOn(profileStore, "flushShadowWrites"),
+      vi.spyOn(auditLog, "flushShadowWrites"),
+    ];
 
     await expect(container.shutdownRuntime()).rejects.toThrow("worker close failed");
-    expect(flush).toHaveBeenCalledTimes(1);
+    for (const flush of flushes) {
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(flush).toHaveBeenCalledWith({ close: true });
+    }
+  });
+
+  it("awaits active MCP disconnect cleanup before shutdown settles", async () => {
+    let releaseDisconnect!: () => void;
+    const disconnectBlocked = new Promise<void>((resolve) => {
+      releaseDisconnect = resolve;
+    });
+    const disconnect = vi.fn(async () => {
+      await disconnectBlocked;
+    });
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    container.getActiveMcpClients().push({
+      async connect() {},
+      disconnect,
+      async listTools() {
+        return [];
+      },
+      async callTool() {
+        return { ok: true, result: {} };
+      },
+      isConnected() {
+        return true;
+      },
+    });
+
+    let shutdownSettled = false;
+    const shutdown = container.shutdownRuntime().then(() => {
+      shutdownSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(shutdownSettled).toBe(false);
+
+    releaseDisconnect();
+    await shutdown;
+    expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("closes task admission before shutdown can be escaped by a late lookup", async () => {
@@ -800,7 +857,7 @@ describe("app container goal drafts", () => {
       content: expect.stringContaining("scoped UI content"),
     });
 
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
     const ipcReadRef = electronState.ipcHandlers.get("toolResults:readRef");
     expect(ipcReadRef).toBeTypeOf("function");
     await expect(
@@ -2951,18 +3008,8 @@ async function createSeedGitRepository(repositoryRoot: string): Promise<void> {
   await execFileAsync("git", ["commit", "-m", "seed"], { cwd: repositoryRoot });
 }
 
-async function listGitBranches(repositoryRoot: string): Promise<string[]> {
-  const { stdout } = await execFileAsync("git", ["branch", "--format=%(refname:short)"], {
-    cwd: repositoryRoot,
-  });
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
 function expectedPlanStatusForGoal(
-  status: Goal["status"],
+  status: string,
 ): PlanRecord["status"] {
   if (status === "achieved") {
     return "completed";
@@ -3043,12 +3090,6 @@ function createStoredGoal(
       },
     ],
     status: overrides.status,
-    budget: overrides.budget ?? {
-      maxIterations: 2,
-      maxToolCalls: 4,
-      maxWallClockMs: 60_000,
-      maxReplans: 1,
-    },
     executionUsage: overrides.executionUsage ?? {
       iterations: 0,
       toolCalls: 0,

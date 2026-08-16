@@ -1,5 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  parseJsonConfigFileContent,
+  readConfigFile,
+  sys,
+} from "typescript";
 import { describe, expect, it } from "vitest";
 
 type PackageJson = {
@@ -852,14 +858,68 @@ describe("package scripts", () => {
     ) as PackageJson;
 
     expect(packageJson.scripts).toMatchObject({
+      "typecheck:tests":
+        "tsc -p tsconfig.tests.json && node scripts/check-test-type-coverage.mjs",
       verify:
-        "npm test && npm run build && node scripts/run-agent-evals.mjs && node scripts/run-memory-evals.mjs",
+        "npm run typecheck:tests && npm test && npm run build && node scripts/run-agent-evals.mjs && node scripts/run-memory-evals.mjs",
       doctor: "npm run verify",
       "smoke:llm": "npm run build && node scripts/check-api-info.mjs",
-      "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",
+      "smoke:prod": "node scripts/run-production-smoke.mjs",
       "validate:agent":
         "npm run build && BUILDING_AGENT_VALIDATE=1 electron .",
     });
+  });
+
+  it("keeps every repository test in the strict TypeScript test project", () => {
+    const rootDir = process.cwd();
+    const configPath = path.join(rootDir, "tsconfig.tests.json");
+    const configFile = readConfigFile(configPath, sys.readFile);
+
+    expect(configFile.error).toBeUndefined();
+    if (configFile.error) return;
+
+    expect(configFile.config.include).toEqual([
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
+    ]);
+    const parsedConfig = parseJsonConfigFileContent(
+      configFile.config,
+      sys,
+      rootDir,
+      undefined,
+      configPath,
+    );
+    expect(parsedConfig.errors).toEqual([]);
+    expect(
+      execFileSync(
+        process.execPath,
+        [path.join(rootDir, "scripts", "check-test-type-coverage.mjs")],
+        { cwd: rootDir, encoding: "utf8" },
+      ),
+    ).toMatch(
+      /^\[test-types\] repo test file count = \d+; project covered count = \d+\n$/,
+    );
+    for (const productionConfig of [
+      "tsconfig.electron.json",
+      "tsconfig.renderer.json",
+    ]) {
+      const productionPath = path.join(rootDir, productionConfig);
+      const productionFile = readConfigFile(productionPath, sys.readFile);
+      expect(productionFile.error).toBeUndefined();
+      const parsedProduction = parseJsonConfigFileContent(
+        productionFile.config,
+        sys,
+        rootDir,
+        undefined,
+        productionPath,
+      );
+      expect(parsedProduction.errors).toEqual([]);
+      expect(
+        parsedProduction.fileNames.filter((filePath) =>
+          /\.test\.tsx?$/.test(filePath),
+        ),
+      ).toEqual([]);
+    }
   });
 
   it("exposes deterministic memory evals", () => {
@@ -887,8 +947,9 @@ describe("package scripts", () => {
       "episode:export":
         "npm run build && node scripts/export-agent-episode.mjs",
       "episode:export:built": "node scripts/export-agent-episode.mjs",
-      "smoke:prod": "npm run build && BUILDING_AGENT_SMOKE=1 electron .",
-      "smoke:prod:built": "BUILDING_AGENT_SMOKE=1 electron .",
+      "smoke:prod": "node scripts/run-production-smoke.mjs",
+      "smoke:prod:built":
+        "node scripts/run-production-smoke.mjs --skip-build",
     });
   });
 

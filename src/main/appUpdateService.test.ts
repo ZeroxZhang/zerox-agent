@@ -56,7 +56,7 @@ class FakeUpdater extends EventEmitter {
     isUpdateAvailable: false,
     updateInfo: verifiedManifest(),
   }));
-  downloadUpdate = vi.fn(async () => []);
+  downloadUpdate = vi.fn(async (): Promise<string[]> => []);
   quitAndInstall = vi.fn();
 }
 
@@ -138,14 +138,14 @@ describe("app update service", () => {
     const updater = new FakeUpdater();
     const onBeforeInstall = vi.fn();
     const manifest = verifiedManifest();
-    let finishDownload: (() => void) | null = null;
+    let finishDownload!: () => void;
     updater.checkForUpdates.mockResolvedValue({
       isUpdateAvailable: true,
       updateInfo: manifest,
     });
     updater.downloadUpdate.mockImplementation(
-      () => new Promise<void>((resolve) => {
-        finishDownload = resolve;
+      () => new Promise<string[]>((resolve) => {
+        finishDownload = () => resolve([]);
       }),
     );
     const service = createAppUpdateService({
@@ -170,7 +170,7 @@ describe("app update service", () => {
       ...manifest,
       downloadedFile: `/tmp/${manifest.path}`,
     });
-    finishDownload?.();
+    finishDownload();
     await startPromise;
     await expect(service.installDownloadedUpdate()).resolves.toMatchObject({
       ok: true,

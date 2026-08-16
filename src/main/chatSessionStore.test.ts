@@ -51,8 +51,10 @@ describe("chat session store", () => {
         kind: "image",
       },
     ]);
+    const attachment = appended.message.attachments?.[0];
+    if (!attachment) throw new Error("Expected persisted attachment.");
     const unsafePendingAttachment = {
-      ...appended.message.attachments?.[0],
+      ...attachment,
       dataBase64: "must-not-be-persisted",
     };
     await store.appendActivityEvent(appended.session.id, {

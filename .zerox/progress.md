@@ -10239,3 +10239,90 @@
 - Pre-commit review fixed nested modal cleanup so underlying dialogs neither
   steal focus from the active modal nor lose the original restore target.
 - P93 is complete with no unfinished Feature.
+
+## 2026-08-16 - Src Main Test Type Health Started
+
+- Activated `P94-src-main-test-type-health` after TRAE diagnostics exposed that
+  `tsconfig.electron.json` excluded all test files from project typechecking.
+- A strict Bundler-mode baseline found 392 diagnostics across 41 `src/main`
+  test files despite the runtime tests passing.
+- The first repair updated `compactionStrategy.test.ts` from legacy Goal
+  budget, usage, and review-policy fixtures to the current contracts.
+- The work will remove shared-helper cascades first, then close remaining
+  fixture diagnostics and add a permanent test typecheck gate.
+
+## 2026-08-16 - Src Main Test Type Health Completed
+
+- Added `tsconfig.tests.json` as an explicit strict Bundler-mode project for
+  main, preload, and shared tests, referenced it from `tsconfig.json`, and
+  added `npm run typecheck:tests` to the standard `verify` gate.
+- Reduced the baseline from 392 diagnostics across 41 `src/main` test files to
+  zero by updating legacy Goal, run, sandbox, Skill, model, stream, store, and
+  tool-executor fixtures to current production contracts.
+- Kept production changes narrow: malformed planner contracts remain runtime
+  validated, Chat memory-profile dependencies expose only the method they
+  consume, and outbound DNS injection now uses Node's connector lookup type.
+- `npm run typecheck:tests`: zero diagnostics.
+- `npm test -- --run src/main`: 158 files / 1,988 tests passed; 6 stress tests
+  remained intentionally skipped.
+- `npm run verify`: 273 files / 2,793 tests passed; build, Agent evaluations
+  26/26, and Memory evaluations 2/2 passed.
+- `npm run program:check`, `npm run harness:check`,
+  `npm audit --audit-level=high`, and `git diff --check` passed; the audit
+  reported zero vulnerabilities.
+- P94 is complete with no unfinished Feature.
+
+## 2026-08-16 - Architecture Stability And Trust Review Started
+
+- Activated P95 as the only unfinished Feature after a fresh architecture-level
+  review of Electron trust boundaries, Kernel runtime settlement, ToolRuntime
+  process confinement, Skill MCP activation, persistence, migration, and
+  release governance.
+- Four independent domain reviewers produced candidate findings; two fresh
+  validators then checked all candidates independently against production
+  call paths and tests.
+- Confirmed 12 serious findings with 2/2 existence consensus: two Critical
+  trust-boundary defects and ten Major runtime, persistence, confidentiality,
+  transport, recovery, or release-gate defects.
+- Excluded the replay-driver app.exit concern from P95 after both validators
+  independently classified the env-only debug path as Minor.
+- Review evidence and remediation order are recorded in
+  .zerox/reviews/P95-architecture-stability-review.md before implementation.
+
+## 2026-08-16 - Architecture Stability And Trust Hardening Completed
+
+- Remediated all 12 independently confirmed P95 findings across Electron
+  renderer trust, process and MCP confinement, Kernel terminal persistence,
+  Goal quiescence, SQLite authority, dual shadow drain, credential redaction,
+  migration verification, typed MCP transports, crash recovery, and release
+  governance.
+- Added deny-by-default macOS Seatbelt profiles with minimal child
+  environments, per-process private temp leases, detached process-group drain,
+  exact Skill/server MCP trust, and fail-closed provider checks. A separate
+  security review found no exploitable issue in the final private-temp change.
+- Added failure-visible close-and-drain queues for every dual shadow store and
+  prevented successful Kernel terminals after required trajectory or
+  observation persistence failures.
+- Made production smoke prove the real Electron dual-storage path: Node ABI
+  137 is rebuilt to Electron ABI 146, native SQLite WAL/migrations/row and JSON
+  shadow are verified without fallback, and the Node ABI is restored and
+  probed before exit. Concurrency, timeout, signal, stale-lock, hash, and
+  offline recovery paths are covered.
+- Expanded the strict test TypeScript project and its machine-readable
+  coverage guard to all 282 `src/**/*.test.ts` and `src/**/*.test.tsx` files,
+  including renderer JSX tests. Tagged release runs this gate and the built
+  production smoke before packaging.
+- Independent QA rejected three intermediate states: JSON fallback hidden by a
+  successful renderer smoke, global temp-directory read access, and an
+  initial-bad ABI recovery path plus 23 uncovered renderer tests. Each blocker
+  was fixed, independently re-reviewed, and submitted to a fresh full QA run.
+- Final independent acceptance: 29 focused files / 509 tests with zero skips;
+  full verify 281 files / 2,880 tests; Agent evaluations 26/26; Memory
+  evaluations 2/2; runtime stress 6/6; real Seatbelt effects 10/10; and native
+  Electron/SQLite production smoke passed with no JSON fallback.
+- `npm run program:check`, `npm run harness:check`, `./init.sh`,
+  `npm audit --audit-level=high`, and `git diff --check` passed with zero
+  vulnerabilities. The test engineer's final decision was `ACCEPT`.
+- Review and closure evidence:
+  `.zerox/reviews/P95-architecture-stability-review.md`. P95 is complete with
+  no unfinished Feature.

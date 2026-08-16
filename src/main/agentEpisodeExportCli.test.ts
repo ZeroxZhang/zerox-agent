@@ -103,13 +103,14 @@ function createRun(id: string): AgentRunRecord {
 
 function createCheckpoint(): AgentExecutionCheckpoint {
   return {
+    id: "checkpoint_1",
     runId: "run_1",
     taskId: "task_1",
     status: "failed",
-    plan: { estimatedTurns: 1, reasoning: "test", steps: [] },
-    currentStepId: null,
+    steps: [],
     messages: [],
-    artifacts: [],
+    toolCallCount: 0,
+    createdAt: timestamp,
     updatedAt: timestamp,
   };
 }

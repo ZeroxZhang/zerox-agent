@@ -74,15 +74,10 @@ describe("goal runtime engine", () => {
       }],
     });
     const runContext = buildPrimaryRunContext({
+      workspaceId: "workspace_1",
       runId: "run_python_fallback",
-      taskId: "goal_1",
+      goalId: "goal_1",
       workspaceRoot: "/Users/demo/project",
-      permissionPolicy: {
-        files: { read: ["/Users/demo/project"], write: ["/Users/demo/project"] },
-        web: { search: false, fetchDomains: [] },
-        shell: { commands: [] },
-        memory: { read: true, write: false },
-      },
     });
 
     expect(
@@ -91,6 +86,9 @@ describe("goal runtime engine", () => {
       command,
       "python3 /Users/demo/project/check.py --help",
     ]));
+    expect(
+      buildGoalMilestoneRuntimeTask(goal, runContext).permissions.shell.commands,
+    ).not.toContain("node *");
   });
 
   it("persists the milestone run and trajectory before Goal Kernel run_end", async () => {
@@ -161,6 +159,69 @@ describe("goal runtime engine", () => {
       runId: "goal_kernel_run",
       status: "succeeded",
     });
+  });
+
+  it("drains later trajectory writes but never publishes success after an earlier gap", async () => {
+    const bus = new KernelEventBus();
+    const persistedTypes: string[] = [];
+    let appendCount = 0;
+    const trajectoryStore = {
+      async append(_runId: string, event: AgentTrajectoryEvent) {
+        appendCount += 1;
+        if (appendCount === 1) {
+          throw new Error("first goal trajectory failed");
+        }
+        persistedTypes.push(event.type);
+        return event;
+      },
+    };
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          return { content: "done", toolCalls: [], finishReason: "stop" };
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "goal-model",
+        temperature: 0,
+        maxTokens: 4096,
+      }),
+      toolExecutor: createAgentToolExecutor(),
+      runStore: {
+        async append(run) {
+          return run;
+        },
+      },
+      trajectoryStore,
+      goalContext: createAgentGoalContext({ trajectoryStore }),
+      createId: () => "goal_trajectory_failure",
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runAgentLoop(messages) {
+        return {
+          status: "succeeded",
+          summary: "must not publish success",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 0,
+        };
+      },
+    });
+    const goal = createGoal();
+
+    await expect(
+      engine.runMilestone(goal, goal.milestones[0]!),
+    ).rejects.toThrow("first goal trajectory failed");
+    expect(persistedTypes).toEqual(
+      expect.arrayContaining(["final_summary", "checkpoint_written"]),
+    );
+    expect(
+      bus.history().filter(
+        (event) => event.type === "run_end" && event.status === "succeeded",
+      ),
+    ).toEqual([]);
   });
 
   it("does not replay a milestone when cancellation arrives after run persistence", async () => {
@@ -296,6 +357,16 @@ describe("goal runtime engine", () => {
             decision: {
               allowed: true,
               reason: "authorized deterministic tool",
+            },
+            auditEvent: {
+              id: `audit_${request.toolName}`,
+              taskId: _taskId,
+              request,
+              decision: {
+                allowed: true,
+                reason: "authorized deterministic tool",
+              },
+              createdAt: "2026-06-13T10:00:00.000Z",
             },
           };
         },
@@ -1432,7 +1503,7 @@ describe("goal runtime engine", () => {
   it("ignores a legacy wall-clock budget for deterministic pipeline tools", async () => {
     const runs: AgentRunRecord[] = [];
     const goal = createGoal({ taskContract: chromeBookmarkTaskContract });
-    goal.budget.maxWallClockMs = 10;
+    goal.budget!.maxWallClockMs = 10;
     const engine = createGoalRuntimeEngine({
       workspaceRoot: "/Users/demo/project",
       chatClient: { async complete() { throw new Error("unused"); } },
@@ -1588,7 +1659,12 @@ describe("goal runtime engine", () => {
             },
             { runContext: options.runContext },
           );
-          options.onToolResult?.("chrome_bookmarks_read", toolResult.ok, toolResult);
+          options.onToolResult?.(
+            "chrome_bookmarks_read",
+            toolResult.ok,
+            toolResult,
+            { toolCallId: "chrome_bookmarks_read_1" },
+          );
           return {
             summary: "已读取 Chrome 书签。",
             status: "succeeded",
@@ -2170,25 +2246,45 @@ describe("goal runtime engine", () => {
       now: () => "2026-06-13T10:00:00.000Z",
       runAgentLoop: async (messages, _profile, options): Promise<AgentLoopResult> => {
         instruction = messages.at(-1)?.content ?? "";
-        options.onToolCall?.("web_fetch", {
-          options: { z: 1, a: 2 },
-          apiKey: "raw-secret-one",
-        });
-        options.onToolCall?.("web_fetch", {
-          apiKey: "raw-secret-two",
-          options: { a: 2, z: 1 },
-        });
-        options.onToolCall?.("file_write", {
-          path: "report.md",
-          content: "PRIVATE_FILE_CONTENT".repeat(2_000),
-        });
-        options.onToolCall?.("shell_exec", {
-          command: "curl https://secret.invalid/run?api_key=query-secret -H 'Authorization: Bearer shell-secret'",
-        });
-        options.onToolCall?.("web_fetch", {
-          url: "https://user:password@secret.invalid/report?access_token=url-secret",
-          headers: { custom: "Bearer header-secret" },
-        });
+        options.onToolCall?.(
+          "web_fetch",
+          {
+            options: { z: 1, a: 2 },
+            apiKey: "raw-secret-one",
+          },
+          { toolCallId: "web_fetch_1" },
+        );
+        options.onToolCall?.(
+          "web_fetch",
+          {
+            apiKey: "raw-secret-two",
+            options: { a: 2, z: 1 },
+          },
+          { toolCallId: "web_fetch_2" },
+        );
+        options.onToolCall?.(
+          "file_write",
+          {
+            path: "report.md",
+            content: "PRIVATE_FILE_CONTENT".repeat(2_000),
+          },
+          { toolCallId: "file_write_1" },
+        );
+        options.onToolCall?.(
+          "shell_exec",
+          {
+            command: "curl https://secret.invalid/run?api_key=query-secret -H 'Authorization: Bearer shell-secret'",
+          },
+          { toolCallId: "shell_exec_1" },
+        );
+        options.onToolCall?.(
+          "web_fetch",
+          {
+            url: "https://user:password@secret.invalid/report?access_token=url-secret",
+            headers: { custom: "Bearer header-secret" },
+          },
+          { toolCallId: "web_fetch_3" },
+        );
         return {
           summary: "Repair attempted.",
           status: "succeeded",

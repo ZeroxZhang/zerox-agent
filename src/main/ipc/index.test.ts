@@ -44,6 +44,23 @@ describe("chat IPC handlers", () => {
     );
   });
 
+  it("rejects every privileged handler when the renderer sender is untrusted", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const container = {
+      appMeta: { productName: "Zerox Agent" },
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container, { isTrustedSender: () => false });
+
+    expect(() =>
+      electronState.ipcHandlers.get("app:getMeta")?.({
+        sender: { getURL: () => "https://attacker.invalid" },
+      }),
+    ).toThrow("Rejected untrusted renderer IPC sender for app:getMeta");
+  });
+
   it("opens project workspaces through the native directory picker", () => {
     const openProjectSource = getHandlerSource(
       ipcSource,
@@ -73,6 +90,8 @@ describe("chat IPC handlers", () => {
       type: "answer_delta",
       sessionId: "session_1",
       requestId: "request_1",
+      turnId: "turn_1",
+      sequence: 1,
       text: "done",
       createdAt: "2026-06-24T08:00:01.000Z",
     };
@@ -91,7 +110,7 @@ describe("chat IPC handlers", () => {
         respondSkillInput,
       }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
 
     const handler = electronState.ipcHandlers.get("chat:respondSkillInput");
     expect(handler).toBeTypeOf("function");
@@ -132,7 +151,7 @@ describe("chat IPC handlers", () => {
       onAgentRunsChanged: vi.fn(),
       chatService: () => ({ sendMessage }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
     const handler = electronState.ipcHandlers.get("chat:sendMessage");
     const invocation = handler?.(
       { sender: { isDestroyed: () => false, send: vi.fn() } },
@@ -169,7 +188,7 @@ describe("chat IPC handlers", () => {
       onAgentRunsChanged: vi.fn(),
       chatService: () => ({ sendMessage }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
     const handler = electronState.ipcHandlers.get("chat:sendMessage");
     const sender = { isDestroyed: () => false, send: vi.fn() };
     const input = {
@@ -207,7 +226,7 @@ describe("chat IPC handlers", () => {
       onAgentRunsChanged: vi.fn(),
       chatService: () => ({ sendMessage }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
     const sender = { isDestroyed: () => false, send: vi.fn() };
     const active = electronState.ipcHandlers.get("chat:sendMessage")?.(
       { sender },
@@ -227,13 +246,16 @@ describe("chat IPC handlers", () => {
   it("passes a generated request id into the chat service", async () => {
     electronState.ipcHandlers.clear();
     const { registerAllIpcHandlers } = await import("./index");
-    const sendMessage = vi.fn(async () => ({ ok: false as const, message: "done" }));
+    const sendMessage = vi.fn(async (_input: unknown) => ({
+      ok: false as const,
+      message: "done",
+    }));
     const container = {
       onGoalProgressEvent: vi.fn(),
       onAgentRunsChanged: vi.fn(),
       chatService: () => ({ sendMessage }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
 
     await electronState.ipcHandlers.get("chat:sendMessage")?.(
       { sender: { isDestroyed: () => false, send: vi.fn() } },
@@ -262,7 +284,7 @@ describe("chat IPC handlers", () => {
       onAgentRunsChanged: vi.fn(),
       chatService: () => ({ respondSkillInput }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
     const completion = electronState.ipcHandlers.get("chat:respondSkillInput")?.(
       { sender: { id: 42, isDestroyed: () => false, send: vi.fn() } },
       {
@@ -293,7 +315,7 @@ describe("chat IPC handlers", () => {
       onAgentRunsChanged: vi.fn(),
       chatService: () => ({ respondSkillInput }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
     const completion = electronState.ipcHandlers.get("chat:respondSkillInput")?.(
       { sender: { id: 42, isDestroyed: () => false, send: vi.fn() } },
       {
@@ -348,7 +370,7 @@ describe("chat IPC handlers", () => {
       continueGoalAcceptance,
       markGoalCompletedUnverified,
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
 
     await expect(
       electronState.ipcHandlers.get("goal:continueAcceptance")?.({}, "goal_1"),
@@ -394,7 +416,7 @@ describe("chat IPC handlers", () => {
         appendMessage,
       }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
 
     await expect(
       electronState.ipcHandlers.get("plans:retryFailedRound")?.(
@@ -456,7 +478,7 @@ describe("chat IPC handlers", () => {
         appendMessage,
       }),
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
 
     await expect(
       electronState.ipcHandlers.get("plans:getLatestBySession")?.(
@@ -487,7 +509,7 @@ describe("chat IPC handlers", () => {
       continueGoalAcceptance,
       markGoalCompletedUnverified,
     } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
-    registerAllIpcHandlers(container);
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
     const handler = electronState.ipcHandlers.get(channel);
 
     for (const unsafeGoalId of [

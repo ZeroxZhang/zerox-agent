@@ -1,6 +1,7 @@
 import { lookup as dnsLookupCallback } from "node:dns";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import type { LookupFunction } from "node:net";
 import ipaddr from "ipaddr.js";
 import { Agent, fetch as undiciFetch } from "undici";
 
@@ -46,7 +47,7 @@ export async function assertSafeOutboundUrl(
 }
 
 export function createSafeOutboundDispatcher(
-  resolveDns: typeof dnsLookupCallback = dnsLookupCallback,
+  resolveDns: LookupFunction = dnsLookupCallback,
 ): Agent {
   return new Agent({
     connect: {
@@ -54,12 +55,14 @@ export function createSafeOutboundDispatcher(
         resolveDns(
           hostname,
           { ...lookupOptions, all: true, verbatim: true },
-          (error, records) => {
+          (error, records, family) => {
             if (error) {
               callback(error, [], undefined);
               return;
             }
-            const addresses = Array.isArray(records) ? records : [records];
+            const addresses = Array.isArray(records)
+              ? records
+              : [{ address: records, family: family ?? 0 }];
             const requestedFamily = Number(lookupOptions.family ?? 0);
             const eligible = addresses.filter(
               (record) =>

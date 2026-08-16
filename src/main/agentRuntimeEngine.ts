@@ -32,6 +32,7 @@ import { toCompleteRequest } from "./providers/normalize";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import { createToolRuntime } from "./toolRuntime";
+import { createFailureVisibleSerialQueue } from "./failureVisibleSerialQueue";
 import {
   buildAgentSystemPrompt,
   buildTaskPrompt,
@@ -385,9 +386,9 @@ export function createAgentRuntimeEngine(options: {
           getToolDefinitions(options.toolExecutor),
           task,
         );
-    let observationTail = Promise.resolve();
+    const observationQueue = createFailureVisibleSerialQueue();
     const observe = (operation: () => Promise<void>) => {
-      observationTail = observationTail.then(operation, operation);
+      void observationQueue.enqueue(operation);
     };
     const appendObserved = (
       type: AgentTrajectoryEventType,
@@ -606,7 +607,7 @@ export function createAgentRuntimeEngine(options: {
           });
         },
         async onCheckpoint(loopCheckpoint) {
-          await observationTail;
+          await observationQueue.drain();
           current = await saveCheckpoint(current, "running", {
             messages: loopCheckpoint.messages.map(toExecutionMessage),
             contextSurface: loopCheckpoint.contextSurface,
@@ -630,7 +631,7 @@ export function createAgentRuntimeEngine(options: {
     const persistLoopResult = async (
       loopResult: Awaited<ReturnType<typeof executeLoopSegment>>,
     ): Promise<RunScheduledTaskResult> => {
-      await observationTail;
+      await observationQueue.drain();
       current = await saveCheckpoint(
         current,
         loopResult.status === "paused" ? "paused" : "running",

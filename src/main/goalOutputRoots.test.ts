@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Goal } from "../shared/agentGoal";
+import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import {
   applyGoalOutputRootsToRunContext,
   extractGoalOutputRoots,
@@ -72,6 +73,7 @@ describe("goal output roots", () => {
               kind: "file_exists",
               description: "absolute path",
               params: { path: "/Users/demo/Desktop/bookmark_list.md" },
+              requiresEvidence: false,
             },
           ],
         },
@@ -105,6 +107,7 @@ describe("goal output roots", () => {
             kind: "file_exists",
             description: "directory output",
             params: { path: alias },
+            requiresEvidence: false,
           },
         ],
       },
@@ -133,6 +136,7 @@ describe("goal output roots", () => {
               path: "bookmark_list.md",
               destination: { kind: "desktop", filename: "bookmark_list.md" },
             },
+            requiresEvidence: false,
           },
         ],
       },
@@ -212,20 +216,23 @@ describe("goal output roots", () => {
     ]);
 
     const context = applyGoalOutputRootsToRunContext(
-      {
+      buildPrimaryRunContext({
         workspaceId: "workspace_1",
         workspaceRoot: "/Users/demo/project",
         sandbox: {
-          mode: "workspace-write",
+          mode: "workspace_write",
+          network: "task_policy",
+          shell: "approved_commands",
           allowWorkspaceEscape: false,
           extraReadRoots: [],
           extraWriteRoots: [],
         },
         locationEnv: {
           homeDir: "/Users/demo",
+          workspaceRoot: "/Users/demo/project",
           platform: "darwin",
         },
-      },
+      }),
       goal,
     );
 

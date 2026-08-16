@@ -4,7 +4,7 @@
 // paths produce equivalent results via the repositories.
 
 import { describe, expect, it } from "vitest";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -21,7 +21,7 @@ function makeRun(id: string): AgentRunRecord {
     taskId: "task-1",
     taskName: "T",
     skillName: "s",
-    status: "executing",
+    status: "running",
     summary: "",
     events: [],
     startedAt: `2026-06-19T00:00:0${id.length}.000Z`,
@@ -67,6 +67,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         expect((await store.get("a"))?.id).toBe("a");
         expect((await store.list()).map((r) => r.id)).toEqual(["b", "a"]);
         expect((await store.list({ limit: 1 })).map((r) => r.id)).toEqual(["b"]);
+        if (backend === "dual") await store.flushShadowWrites();
       });
     });
   },
@@ -109,6 +110,267 @@ describe("dual-write shadows to JSON", () => {
       expect((await jsonOnly.list("run-1")).map((event) => event.sequence)).toEqual([1]);
     });
   });
+
+  it("keeps SQLite task mutations authoritative when every JSON shadow fails", async () => {
+    await withStorage("dual", async (dir, storage) => {
+      await mkdir(join(dir, "scheduled-tasks.json"));
+      const { createScheduledTaskStore } = await import("../taskStore");
+      const store = createScheduledTaskStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+        createId: () => "task_authoritative",
+        now: () => new Date("2026-08-16T00:00:00.000Z"),
+      });
+
+      const created = await store.create({
+        name: "Authoritative",
+        skillName: "",
+        enabled: true,
+        schedule: { kind: "manual" },
+        input: {},
+      });
+      const updated = await store.update(created.id, {
+        name: "SQLite wins",
+        skillName: "",
+        enabled: true,
+        schedule: { kind: "daily", time: "09:00" },
+        input: { request: "run" },
+      });
+      await store.recordRun(
+        created.id,
+        new Date("2026-08-16T01:00:00.000Z"),
+      );
+      await store.setEnabled(created.id, false);
+
+      expect(updated?.name).toBe("SQLite wins");
+      await expect(store.get(created.id)).resolves.toMatchObject({
+        name: "SQLite wins",
+        enabled: false,
+        lastRunAt: "2026-08-16T01:00:00.000Z",
+      });
+      await expect(store.delete(created.id)).resolves.toBe(true);
+      await expect(store.get(created.id)).resolves.toBeNull();
+      await expect(store.flushShadowWrites()).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+    });
+  });
+
+  it("reports run shadow failure only at the explicit drain", async () => {
+    await withStorage("dual", async (dir, storage) => {
+      await mkdir(join(dir, "agent-runs.jsonl"));
+      const store = createAgentRunStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+
+      await expect(store.append(makeRun("authority"))).resolves.toMatchObject({
+        id: "authority",
+      });
+      await expect(store.get("authority")).resolves.toMatchObject({
+        id: "authority",
+      });
+      await expect(store.flushShadowWrites()).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+    });
+  });
+
+  it("tracks validation, persona, and audit shadows for shutdown drain", async () => {
+    await withStorage("dual", async (dir, storage) => {
+      await Promise.all([
+        mkdir(join(dir, "agent-validation.json")),
+        mkdir(join(dir, "memory-persona.md")),
+        mkdir(join(dir, "tool-audit.jsonl")),
+      ]);
+      const [
+        { createAgentValidationStore },
+        { createMemoryProfileStore },
+        { createToolAuditLog },
+      ] = await Promise.all([
+        import("../agentValidationStore"),
+        import("../memoryProfileStore"),
+        import("../toolAuditLog"),
+      ]);
+      const validation = createAgentValidationStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const profile = createMemoryProfileStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const audit = createToolAuditLog({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+
+      await validation.save({
+        validatedAt: "2026-08-16T00:00:00.000Z",
+        report: {
+          ready: true,
+          model: { ready: true, message: "ready" },
+          skill: { ready: true, message: "ready" },
+          task: { ready: true, created: false, task: null, message: "ready" },
+          connection: {
+            ready: true,
+            checked: true,
+            latencyMs: 1,
+            message: "ready",
+          },
+          run: { ready: true, ran: false, run: null, message: "ready" },
+        },
+      });
+      await profile.save("# SQLite persona");
+      await audit.append({
+        taskId: "task_1",
+        request: { toolName: "file_read", args: { path: "/tmp/a" } },
+        decision: { allowed: true, reason: "allowed" },
+      });
+
+      await expect(validation.flushShadowWrites()).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+      await expect(profile.flushShadowWrites()).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+      await expect(audit.flushShadowWrites()).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+    });
+  });
+
+  it("rejects every authoritative mutation after the shutdown drain closes admission", async () => {
+    await withStorage("dual", async (dir, storage) => {
+      const [
+        { createScheduledTaskStore },
+        { createAgentValidationStore },
+        { createMemoryProfileStore },
+        { createToolAuditLog },
+      ] = await Promise.all([
+        import("../taskStore"),
+        import("../agentValidationStore"),
+        import("../memoryProfileStore"),
+        import("../toolAuditLog"),
+      ]);
+      const runs = createAgentRunStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const trajectories = createAgentTrajectoryStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const tasks = createScheduledTaskStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+        createId: () => "task_before_close",
+      });
+      const validation = createAgentValidationStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const profile = createMemoryProfileStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const audit = createToolAuditLog({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const validationSnapshot = {
+        validatedAt: "2026-08-16T00:00:00.000Z",
+        report: {
+          ready: true,
+          model: { ready: true, message: "ready" },
+          skill: { ready: true, message: "ready" },
+          task: { ready: true, created: false, task: null, message: "ready" },
+          connection: {
+            ready: true,
+            checked: true,
+            latencyMs: 1,
+            message: "ready",
+          },
+          run: { ready: true, ran: false, run: null, message: "ready" },
+        },
+      };
+
+      await runs.append(makeRun("before-close"));
+      await trajectories.append("run-1", makeEvent(1));
+      await tasks.create({
+        name: "Before close",
+        skillName: "",
+        enabled: true,
+        schedule: { kind: "manual" },
+        input: {},
+      });
+      await validation.save(validationSnapshot);
+      await profile.save("# Before close");
+      await audit.append({
+        taskId: "before-close",
+        request: { toolName: "file_read", args: { path: "/tmp/a" } },
+        decision: { allowed: true, reason: "allowed" },
+      });
+
+      await Promise.all([
+        runs.flushShadowWrites({ close: true }),
+        trajectories.flushShadowWrites({ close: true }),
+        tasks.flushShadowWrites({ close: true }),
+        validation.flushShadowWrites({ close: true }),
+        profile.flushShadowWrites({ close: true }),
+        audit.flushShadowWrites({ close: true }),
+      ]);
+
+      const closed = "Persistence queue is closed.";
+      await expect(runs.append(makeRun("after-close"))).rejects.toThrow(closed);
+      await expect(
+        trajectories.append("run-1", makeEvent(2)),
+      ).rejects.toThrow(closed);
+      await expect(
+        tasks.create({
+          name: "After close",
+          skillName: "",
+          enabled: true,
+          schedule: { kind: "manual" },
+          input: {},
+        }),
+      ).rejects.toThrow(closed);
+      await expect(
+        validation.save({
+          ...validationSnapshot,
+          validatedAt: "2026-08-16T01:00:00.000Z",
+        }),
+      ).rejects.toThrow(closed);
+      await expect(profile.save("# After close")).rejects.toThrow(closed);
+      await expect(
+        audit.append({
+          taskId: "after-close",
+          request: { toolName: "file_read", args: { path: "/tmp/b" } },
+          decision: { allowed: true, reason: "allowed" },
+        }),
+      ).rejects.toThrow(closed);
+
+      await expect(runs.get("after-close")).resolves.toBeNull();
+      await expect(trajectories.list("run-1")).resolves.toHaveLength(1);
+      await expect(tasks.list()).resolves.toHaveLength(1);
+      await expect(validation.load()).resolves.toEqual(validationSnapshot);
+      await expect(profile.read()).resolves.toMatchObject({
+        content: "# Before close",
+      });
+      await expect(audit.list()).resolves.toHaveLength(1);
+    });
+  });
 });
 
 describe.each(["sqlite", "dual"] as StorageBackend[])(
@@ -123,6 +385,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         const events = await log.list();
         expect(events.length).toBe(2);
         expect(events[0]!.request.toolName).toBe("file_write"); // newest first
+        if (backend === "dual") await log.flushShadowWrites();
       });
     });
 
@@ -143,6 +406,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         });
 
         await expect(log.list({ limit: 1 })).resolves.toEqual([event]);
+        if (backend === "dual") await log.flushShadowWrites();
       });
     });
   },
@@ -173,6 +437,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         expect((await store.list()).length).toBe(1);
         expect(await store.delete(task.id)).toBe(true);
         expect(await store.get(task.id)).toBeNull();
+        if (backend === "dual") await store.flushShadowWrites();
       });
     });
 
@@ -204,6 +469,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         });
         await expect(store.get(created.id)).resolves.toEqual(created);
         await expect(store.list()).resolves.toEqual([created]);
+        if (backend === "dual") await store.flushShadowWrites();
       });
     });
   },
@@ -220,6 +486,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         await store.save({ report: { ready: true, model: { ok: true, detail: "" }, skill: { ok: true, detail: "" }, task: { ok: true, detail: "", tasks: [] }, connection: { ok: true, detail: "" }, run: { ok: true, detail: "", run: undefined } } as never, validatedAt: "2026-06-19T00:00:00.000Z" });
         const loaded = await store.load();
         expect(loaded?.validatedAt).toBe("2026-06-19T00:00:00.000Z");
+        if (backend === "dual") await store.flushShadowWrites();
       });
     });
   },
@@ -241,6 +508,7 @@ describe.each(["sqlite", "dual"] as StorageBackend[])(
         ]);
         const updated = await store.read();
         expect(updated.content).toContain("Vim");
+        if (backend === "dual") await store.flushShadowWrites();
       });
     });
   },

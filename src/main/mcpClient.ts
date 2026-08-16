@@ -3,9 +3,12 @@ import { createInterface } from "node:readline";
 import { env as nodeEnv } from "node:process";
 import type { ToolDefinition } from "./openAiCompatibleClient";
 import type {
+  ConfinedProcess,
   ProcessSandboxPolicy,
   ProcessSandboxProvider,
 } from "./processSandbox";
+import { buildMinimalProcessEnv } from "./processSandbox";
+import { terminateOwnedProcessTree } from "./ownedProcess";
 
 export type McpServerConfig = {
   name: string;
@@ -47,28 +50,11 @@ export type McpClient = {
   isConnected(): boolean;
 };
 
-const MCP_CHILD_ENV_ALLOWLIST = [
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "PATH",
-  "SHELL",
-  "TMPDIR",
-  "USER",
-] as const;
-
 export function buildMcpChildEnv(
   parentEnv: NodeJS.ProcessEnv,
   configuredEnv: Record<string, string> = {},
 ): NodeJS.ProcessEnv {
-  const childEnv: NodeJS.ProcessEnv = {};
-  for (const key of MCP_CHILD_ENV_ALLOWLIST) {
-    const value = parentEnv[key];
-    if (value !== undefined) {
-      childEnv[key] = value;
-    }
-  }
-  return { ...childEnv, ...configuredEnv };
+  return buildMinimalProcessEnv(parentEnv, configuredEnv);
 }
 
 export function createMcpClient(config: McpServerConfig): McpClient {
@@ -78,6 +64,13 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     );
   }
   let childProcess: ReturnType<typeof spawn> | null = null;
+  const ownedProcesses = new WeakMap<
+    ReturnType<typeof spawn>,
+    {
+      confined?: ConfinedProcess;
+      release?: Promise<void>;
+    }
+  >();
   let nextId = 1;
   const pendingRequests = new Map<
     number,
@@ -87,6 +80,7 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     }
   >();
   let connected = false;
+  let lifecycleFailure: Error | null = null;
   // v3.6.0: Auto-restart state (NET-21).
   let restartAttempts = 0;
   const MAX_RESTART_ATTEMPTS = 3;
@@ -120,9 +114,10 @@ export function createMcpClient(config: McpServerConfig): McpClient {
         sendNotification("notifications/cancelled", {
           requestId: id,
           reason: reason instanceof Error ? reason.message : String(reason ?? "aborted"),
-        });
+        }, proc);
         void terminateActiveProcess(
           reason instanceof Error ? reason : new Error("MCP request aborted."),
+          { preserveError: true, expectedProcess: proc },
         );
       };
 
@@ -131,8 +126,11 @@ export function createMcpClient(config: McpServerConfig): McpClient {
         sendNotification("notifications/cancelled", {
           requestId: id,
           reason: error.message,
+        }, proc);
+        void terminateActiveProcess(error, {
+          preserveError: true,
+          expectedProcess: proc,
         });
-        void terminateActiveProcess(error);
       }, 30000);
 
       const originalResolve = resolve;
@@ -154,15 +152,27 @@ export function createMcpClient(config: McpServerConfig): McpClient {
         return;
       }
       signal?.addEventListener("abort", abortHandler, { once: true });
-      proc.stdin!.write(JSON.stringify(request) + "\n");
+      try {
+        proc.stdin!.write(JSON.stringify(request) + "\n");
+      } catch (error) {
+        pendingRequests.delete(id);
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", abortHandler);
+        reject(error instanceof Error ? error : new Error(String(error)));
+        void terminateActiveProcess(
+          error instanceof Error ? error : new Error(String(error)),
+          { preserveError: true, expectedProcess: proc },
+        );
+      }
     });
   }
 
   function sendNotification(
     method: string,
     params?: Record<string, unknown>,
+    proc = childProcess,
   ) {
-    if (!childProcess || !childProcess.stdin) return;
+    if (!proc?.stdin) return;
 
     const notification = {
       jsonrpc: "2.0" as const,
@@ -170,7 +180,11 @@ export function createMcpClient(config: McpServerConfig): McpClient {
       ...(params ? { params } : {}),
     };
 
-    childProcess.stdin.write(JSON.stringify(notification) + "\n");
+    try {
+      proc.stdin.write(JSON.stringify(notification) + "\n");
+    } catch {
+      // The owning request will observe and settle the process failure.
+    }
   }
 
   // v3.6.0: Auto-restart with exponential backoff (NET-21).
@@ -182,40 +196,27 @@ export function createMcpClient(config: McpServerConfig): McpClient {
   let reconnectGeneration = 0;
   // Guard against concurrent connect() calls (manual + auto-restart race).
   let connectingPromise: Promise<void> | null = null;
+  let lifecycleReleasePromise: Promise<void> | null = null;
 
-  async function terminateProcess(
-    proc: ReturnType<typeof spawn>,
+  async function terminateActiveProcess(
+    reason: Error,
+    options?: {
+      preserveError?: boolean;
+      expectedProcess?: ReturnType<typeof spawn>;
+    },
   ): Promise<void> {
-    if (proc.exitCode !== null || proc.signalCode !== null) return;
-
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      let forceKill: ReturnType<typeof setTimeout> | undefined;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        if (forceKill) clearTimeout(forceKill);
-        resolve();
-      };
-      proc.once("exit", finish);
-      const kill = (signal: NodeJS.Signals) => {
-        try {
-          if (process.platform !== "win32" && proc.pid) {
-            process.kill(-proc.pid, signal);
-          } else {
-            proc.kill(signal);
-          }
-        } catch {
-          finish();
-        }
-      };
-      forceKill = setTimeout(() => kill("SIGKILL"), 1_000);
-      forceKill.unref?.();
-      kill("SIGTERM");
-    });
-  }
-
-  async function terminateActiveProcess(reason: Error): Promise<void> {
+    if (
+      options?.expectedProcess &&
+      childProcess !== options.expectedProcess
+    ) {
+      try {
+        await releaseOwnedProcess(options.expectedProcess);
+      } catch (error) {
+        rememberLifecycleFailure(error);
+        logCleanupFailure("stale request", error);
+      }
+      return;
+    }
     manuallyDisconnected = true;
     reconnectGeneration += 1;
     connected = false;
@@ -227,11 +228,43 @@ export function createMcpClient(config: McpServerConfig): McpClient {
     pendingRequests.clear();
 
     const proc = childProcess;
-    if (proc) await terminateProcess(proc);
+    let cleanupError: unknown;
+    if (proc) {
+      try {
+        await releaseOwnedProcess(proc);
+      } catch (error) {
+        cleanupError = error;
+        rememberLifecycleFailure(error);
+      }
+    }
     if (childProcess === proc) childProcess = null;
     for (const pending of pendingToReject) {
       pending.reject(reason);
     }
+    const visibleCleanupError = normalizeError(
+      cleanupError ?? lifecycleFailure,
+    );
+    if (visibleCleanupError && !options?.preserveError) {
+      throw visibleCleanupError;
+    }
+    if (cleanupError) {
+      logCleanupFailure("request termination", cleanupError);
+    }
+  }
+
+  async function releaseOwnedProcess(
+    proc: ReturnType<typeof spawn>,
+  ): Promise<void> {
+    const state = ownedProcesses.get(proc);
+    if (!state) {
+      await terminateOwnedProcessTree(proc);
+      return;
+    }
+    state.release ??= (async () => {
+      await terminateOwnedProcessTree(proc);
+      await state.confined?.cleanup();
+    })();
+    await state.release;
   }
 
   function scheduleReconnect(generation = reconnectGeneration) {
@@ -276,27 +309,66 @@ export function createMcpClient(config: McpServerConfig): McpClient {
   async function connectInternal(): Promise<void> {
     let command = config.command;
     let commandArgs = config.args ?? [];
+    let confined: ConfinedProcess | undefined;
     if (config.processSandbox && config.sandboxPolicy) {
-      const confined = config.processSandbox.confine(
+      confined = config.processSandbox.confine(
         [command, ...commandArgs],
         config.sandboxPolicy,
       );
       command = confined.argv[0]!;
       commandArgs = [...confined.argv.slice(1)];
     }
-    const proc = spawn(command, commandArgs, {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: buildMcpChildEnv(nodeEnv, config.env),
-      shell: false,
-      detached: process.platform !== "win32",
-    });
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn(command, commandArgs, {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: confined
+          ? confined.buildChildEnv(nodeEnv, config.env)
+          : buildMcpChildEnv(nodeEnv, config.env),
+        shell: false,
+        detached: process.platform !== "win32",
+      });
+    } catch (error) {
+      if (confined) {
+        try {
+          await confined.cleanup();
+        } catch (cleanupError) {
+          rememberLifecycleFailure(cleanupError);
+          logCleanupFailure("spawn failure", cleanupError);
+        }
+      }
+      throw error;
+    }
 
+    ownedProcesses.set(proc, {
+      ...(confined ? { confined } : {}),
+    });
     childProcess = proc;
+    const processGeneration = reconnectGeneration;
     let reconnectScheduledForProcess = false;
     const reconnectAfterUnexpectedFailure = () => {
       if (reconnectScheduledForProcess || manuallyDisconnected) return;
       reconnectScheduledForProcess = true;
-      scheduleReconnect();
+      const release = (async () => {
+        let released = true;
+        try {
+          await releaseOwnedProcess(proc);
+        } catch (error) {
+          released = false;
+          rememberLifecycleFailure(error);
+          logCleanupFailure("unexpected process exit", error);
+        }
+        if (childProcess === proc) childProcess = null;
+        if (released) {
+          scheduleReconnect(processGeneration);
+        }
+      })();
+      lifecycleReleasePromise = release;
+      void release.finally(() => {
+        if (lifecycleReleasePromise === release) {
+          lifecycleReleasePromise = null;
+        }
+      });
     };
 
     const rl = createInterface({
@@ -326,17 +398,21 @@ export function createMcpClient(config: McpServerConfig): McpClient {
       // Stderr is for logging, not protocol messages
     });
 
-    proc.on("error", (error) => {
+    const handleProcessError = (error: Error) => {
       if (childProcess !== proc) return;
       const wasConnected = connected;
       connected = false;
       for (const [, pending] of pendingRequests) {
-        pending.reject(
-          new Error(`MCP process error: ${error.message}`),
-        );
+        pending.reject(error);
       }
       pendingRequests.clear();
       if (wasConnected) reconnectAfterUnexpectedFailure();
+    };
+    proc.on("error", (error) => {
+      handleProcessError(new Error(`MCP process error: ${error.message}`));
+    });
+    proc.stdin?.on("error", (error) => {
+      handleProcessError(new Error(`MCP stdin error: ${error.message}`));
     });
 
     proc.on("exit", (code) => {
@@ -374,7 +450,12 @@ export function createMcpClient(config: McpServerConfig): McpClient {
       sendNotification("notifications/initialized");
       connected = true;
     } catch (error) {
-      await terminateProcess(proc);
+      try {
+        await releaseOwnedProcess(proc);
+      } catch (cleanupError) {
+        rememberLifecycleFailure(cleanupError);
+        logCleanupFailure("failed initialization", cleanupError);
+      }
       if (childProcess === proc) childProcess = null;
       throw error;
     }
@@ -382,6 +463,12 @@ export function createMcpClient(config: McpServerConfig): McpClient {
 
   async function connectClient(): Promise<void> {
     if (connected) return;
+    if (lifecycleReleasePromise) {
+      await lifecycleReleasePromise;
+    }
+    if (lifecycleFailure) {
+      throw lifecycleFailure;
+    }
     if (connectingPromise) {
       await connectingPromise;
       return;
@@ -493,4 +580,22 @@ export function createMcpClient(config: McpServerConfig): McpClient {
       return connected;
     },
   };
+
+  function logCleanupFailure(context: string, error: unknown): void {
+    console.error(
+      `[mcp] MCP server "${config.name}" cleanup failed after ${context}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  function rememberLifecycleFailure(error: unknown): void {
+    lifecycleFailure ??= normalizeError(error) ??
+      new Error("Unknown MCP lifecycle cleanup failure.");
+  }
+
+  function normalizeError(error: unknown): Error | null {
+    if (error === undefined || error === null) return null;
+    return error instanceof Error ? error : new Error(String(error));
+  }
 }

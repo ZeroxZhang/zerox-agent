@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  collectSkillMcpConfigs,
   discoverSkills,
+  readTrustedSkillMcpAllowlist,
   shouldAutoInitializeSkillMcp,
 } from "./skillRegistry";
 
@@ -24,8 +26,74 @@ describe("skill registry", () => {
       false,
     );
     expect(shouldAutoInitializeSkillMcp({ ZEROX_ENABLE_SKILL_MCP: "1" })).toBe(
+      false,
+    );
+    expect(
+      shouldAutoInitializeSkillMcp({
+        ZEROX_ENABLE_SKILL_MCP: "1",
+        ZEROX_SKILL_MCP_ALLOWLIST: "research/local-index",
+      }),
+    ).toBe(
       true,
     );
+  });
+
+  it("requires exact Skill/server trust and preserves the transport union", async () => {
+    await writeSkill(
+      "research",
+      `---
+name: research
+description: Trusted MCP transport fixture.
+execution:
+  mode: agent
+mcpServers:
+  - name: local-index
+    command: node
+    args: ["server.js"]
+    readRoots: ["./data"]
+    network: false
+  - name: remote-http
+    transport: http
+    url: https://mcp.example.test/rpc
+  - name: untrusted
+    transport: sse
+    url: https://mcp.example.test/sse
+---
+
+# Research
+`,
+    );
+    const trustedServers = readTrustedSkillMcpAllowlist({
+      ZEROX_SKILL_MCP_ALLOWLIST:
+        "research/local-index,research/remote-http,*/untrusted,bad",
+    });
+
+    await expect(
+      collectSkillMcpConfigs({
+        skillsDir: tempDir,
+        skipSystemDirs: true,
+        trustedServers,
+      }),
+    ).resolves.toEqual([
+      {
+        name: "local-index",
+        transport: "stdio",
+        command: "node",
+        args: ["server.js"],
+        readRoots: [
+          path.join(tempDir, "research"),
+          path.join(tempDir, "research", "data"),
+        ],
+        network: false,
+        sourceSkill: "research",
+      },
+      {
+        name: "remote-http",
+        transport: "http",
+        url: "https://mcp.example.test/rpc",
+        sourceSkill: "research",
+      },
+    ]);
   });
 
   it("discovers valid skill folders and reports invalid ones", async () => {
@@ -60,7 +128,11 @@ execution:
 `,
     );
 
-    const result = await discoverSkills({ skillsDir: tempDir, skipSystemDirs: true });
+    const result = await discoverSkills({
+      skillsDir: tempDir,
+      skipSystemDirs: true,
+      forceRefresh: true,
+    });
 
     expect(result.skills).toHaveLength(1);
     expect(result.skills[0]).toMatchObject({

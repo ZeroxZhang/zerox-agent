@@ -1093,7 +1093,7 @@ describe("goal acceptance failure fingerprints", () => {
 
   it("sorts shallow array tail keys numeric-then-lexical", () => {
     const makeArray = (namedOrder: string[]) => {
-      const value: unknown[] & Record<string, unknown> = [];
+      const value = createNamedArray();
       value.length = 100;
       value[97] = "late";
       value[33] = "early";
@@ -1117,7 +1117,7 @@ describe("goal acceptance failure fingerprints", () => {
 
   it("includes nonenumerable numeric own array indices in deep digests only", () => {
     const makeArray = (numericValue: unknown, hiddenValue: string, symbolValue: string) => {
-      const value: unknown[] & Record<string | symbol, unknown> = [];
+      const value = createPropertyArray();
       value.length = 128;
       Object.defineProperty(value, "97", {
         configurable: true,
@@ -1210,7 +1210,7 @@ describe("goal acceptance failure fingerprints", () => {
   it("includes nonenumerable numeric shallow array tails without scanning declared holes", () => {
     let getterReads = 0;
     const makeArray = (lateValue: string, hiddenMetadata: string) => {
-      const value: unknown[] & Record<string, unknown> = [];
+      const value = createNamedArray();
       value.length = 1_000_000;
       Object.defineProperty(value, "97", {
         configurable: true,
@@ -1377,7 +1377,7 @@ describe("goal acceptance failure fingerprints", () => {
 
   it("excludes exactly 32768 hidden array names without starving real entries", () => {
     const makeArray = (lateValue: string, includeHidden: boolean) => {
-      const value: unknown[] & Record<string, unknown> = [];
+      const value = createNamedArray();
       value.length = 128;
       Object.defineProperty(value, "97", {
         enumerable: false,
@@ -1660,4 +1660,19 @@ function wrapMixedGraph(value: unknown, depth: number): unknown {
     graph = level % 2 === 0 ? [graph] : { next: graph };
   }
   return graph;
+}
+
+function createNamedArray(): unknown[] & Record<string, unknown> {
+  return Object.assign(
+    [] as unknown[],
+    {} as Record<string, unknown>,
+  );
+}
+
+function createPropertyArray(): unknown[] &
+  Record<string | symbol, unknown> {
+  return Object.assign(
+    [] as unknown[],
+    {} as Record<string | symbol, unknown>,
+  );
 }

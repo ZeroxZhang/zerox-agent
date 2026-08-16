@@ -5,6 +5,10 @@ import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { StorageBackend, RunRepository, Storage } from "../shared/storageContract";
 import { createRunRepository } from "./storage/repositories/runRepository";
 import { readRecoverableJsonl } from "./jsonlRecovery";
+import {
+  createFailureVisibleSerialQueue,
+  type PersistenceQueueDrainOptions,
+} from "./failureVisibleSerialQueue";
 
 export type AgentTrajectoryStore = {
   append(
@@ -19,7 +23,7 @@ export type AgentTrajectoryStore = {
     options?: { signal?: AbortSignal },
   ): Promise<{ appended: boolean; event: AgentTrajectoryEvent }>;
   list(runId: string): Promise<AgentTrajectoryEvent[]>;
-  flushShadowWrites(): Promise<void>;
+  flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
 const trajectoryMutationQueues = new Map<string, Promise<void>>();
@@ -134,40 +138,28 @@ export function createAgentTrajectoryStore(
   }
 
   // --- sqlite / dual (hot path stays sync) ---
-  const shadowWrites = new Set<Promise<void>>();
-  let shadowTail: Promise<void> = Promise.resolve();
-  function enqueueShadowWrite(operation: () => Promise<unknown>): Promise<void> {
-    const write = shadowTail.then(operation, operation).then(() => undefined);
-    shadowWrites.add(write);
-    shadowTail = write.then(
-      () => undefined,
-      () => undefined,
-    );
-    void write.then(
-      () => shadowWrites.delete(write),
-      () => shadowWrites.delete(write),
-    );
-    return write;
-  }
+  const shadowQueue = createFailureVisibleSerialQueue();
 
   return {
     async append(runId, event, appendOptions) {
       throwIfAborted(appendOptions?.signal);
+      shadowQueue.assertOpen();
       repo.appendTrajectory(runId, event); // sync hot path
       if (backend === "dual") {
-        await enqueueShadowWrite(() => appendJsonEventExact(runId, event));
+        void shadowQueue.enqueue(() => appendJsonEventExact(runId, event));
       }
       return event;
     },
     async appendIfAbsent(runId, publicationKey, event, appendOptions) {
       throwIfAborted(appendOptions?.signal);
+      shadowQueue.assertOpen();
       const result = repo.appendTrajectoryPublication(
         runId,
         publicationKey,
         createPublicationEvent(runId, publicationKey, event),
       );
       if (backend === "dual") {
-        await enqueueShadowWrite(() =>
+        void shadowQueue.enqueue(() =>
           appendJsonPublicationExact(
             runId,
             publicationKey,
@@ -180,8 +172,8 @@ export function createAgentTrajectoryStore(
     async list(runId) {
       return repo.getTrajectory(runId);
     },
-    async flushShadowWrites() {
-      await Promise.all([...shadowWrites]);
+    async flushShadowWrites(flushOptions) {
+      await shadowQueue.drain(flushOptions);
     },
   };
 }

@@ -38,7 +38,7 @@ function baseGoal(overrides: Partial<Goal> = {}): Goal {
       tokens: 0,
       replans: 0,
     },
-    reviewPolicy: { mode: "human" } as Goal["reviewPolicy"],
+    reviewPolicy: "review_final_only",
     planVersion: 1,
     createdAt: "2026-06-19T00:00:00.000Z",
     updatedAt: "2026-06-19T00:00:00.000Z",
@@ -396,7 +396,16 @@ describe("SessionRepository + ActorRepository", () => {
     const hits = sessions.searchMessages({ query: "sqlite" });
     expect(hits.length).toBe(1);
     expect(hits[0].sessionTitle).toBe("Research swarm");
-    actors.create({ id: "a1", runId: "run-9", contextMode: "state", status: "spawning", task: "research" });
+    actors.create({
+      id: "a1",
+      runId: "run-9",
+      contextMode: "state",
+      status: "spawning",
+      task: "research",
+      payload: {},
+      createdAt: "2026-06-19T00:00:00.000Z",
+      updatedAt: "2026-06-19T00:00:00.000Z",
+    });
     actors.updateStatus("a1", "done");
     expect(actors.get("a1")?.status).toBe("done");
     expect(actors.listByRun("run-9").length).toBe(1);

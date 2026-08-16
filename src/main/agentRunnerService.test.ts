@@ -3,6 +3,7 @@ import { createAgentRunnerService } from "./agentRunnerService";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
+import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
@@ -385,13 +386,14 @@ describe("agent runner service", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor(),
         async execute() {
           return {
             ok: true,
             result: { content: largeContent },
           };
         },
-      } as AgentToolExecutor,
+      },
       toolResultOffloadStore: store,
       toolResultOffloadThreshold: 120,
       createId: () => "run_offload_fallback",
@@ -771,7 +773,6 @@ function createSkillRecord(
       },
     },
     body: "Summarize files in the target directory.",
-    rawFrontmatter: "",
     rootDir: "/tmp/skills/local-file-organizer",
     skillFile: "/tmp/skills/local-file-organizer/SKILL.md",
   };
@@ -791,9 +792,21 @@ function createTaskStore(
     async create() {
       throw new Error("Not needed in this test.");
     },
+    async update() {
+      throw new Error("Not needed in this test.");
+    },
     async recordRun(taskId, completedAt) {
       recordedRuns.push({ taskId, completedAt: completedAt.toISOString() });
       return task;
+    },
+    async setEnabled() {
+      return task;
+    },
+    async delete() {
+      return false;
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
 }
@@ -806,8 +819,14 @@ function createMemoryRunStore(): AgentRunStore & { runs: AgentRunRecord[] } {
       runs.push(run);
       return run;
     },
+    async get(runId) {
+      return runs.find((run) => run.id === runId) ?? null;
+    },
     async list() {
       return runs;
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
 }
@@ -950,6 +969,7 @@ function createAuthorizationService(
 }
 
 function createToolExecutor(sequence: string[] = []): AgentToolExecutor {
+  const registry = createDynamicToolRegistry();
   return {
     async execute() {
       sequence.push("execute");
@@ -957,6 +977,12 @@ function createToolExecutor(sequence: string[] = []): AgentToolExecutor {
         ok: true,
         result: { content: "notes" },
       };
+    },
+    getRegistry() {
+      return registry;
+    },
+    hasTool() {
+      return true;
     },
   };
 }

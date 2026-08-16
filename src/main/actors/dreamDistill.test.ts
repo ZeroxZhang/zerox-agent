@@ -18,9 +18,31 @@ import { projectRunGraph } from "../../shared/runGraph";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import type { MemoryRecord } from "../../shared/memory";
+import type { Goal } from "../../shared/agentGoal";
 
 function makeRun(id: string): AgentRunRecord {
-  return { id, taskId: `task-${id}`, taskName: "T", skillName: "s", status: "executing", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" };
+  return { id, taskId: `task-${id}`, taskName: "T", skillName: "s", status: "running", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" };
+}
+
+function baseGoal(): Goal {
+  return {
+    id: "goal-dream",
+    description: "Distill run observations.",
+    successCriteria: [],
+    milestones: [],
+    status: "executing",
+    executionUsage: {
+      iterations: 0,
+      toolCalls: 0,
+      wallClockMs: 0,
+      tokens: 0,
+      replans: 0,
+    },
+    reviewPolicy: "review_final_only",
+    planVersion: 1,
+    createdAt: "2026-06-19T00:00:00.000Z",
+    updatedAt: "2026-06-19T00:00:00.000Z",
+  };
 }
 function evt(runId: string, seq: number, type: AgentTrajectoryEvent["type"], payload: Record<string, unknown>): AgentTrajectoryEvent {
   return { id: `e-${runId}-${seq}`, runId, type, sequence: seq, payload, redaction: { containsApiKey: false, containsFileContent: false, containsUserText: false }, createdAt: `2026-06-19T00:00:0${seq}.000Z` };

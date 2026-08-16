@@ -101,10 +101,13 @@ import {
 } from "../shared/agentIntent";
 import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import {
-  maskPreviewSecrets,
   stringifyMaskedPreview,
   type ChatOutputPart,
 } from "../shared/chatOutput";
+import {
+  redactCredentialText,
+  stringifyRedactedCredentials,
+} from "../shared/credentialRedaction";
 import {
   summarizeAgentRuntimeContextSnapshot,
 } from "../shared/agentRuntimeContext";
@@ -292,7 +295,10 @@ export function createChatService(options: {
   chatClient: ChatClient;
   getModelProfile: () => Promise<AgentModelProfile>;
   memoryStore: Pick<MemoryStore, "create" | "search">;
-  memoryProfileStore?: MemoryProfileStore;
+  memoryProfileStore?: Pick<
+    MemoryProfileStore,
+    "updateFromMemories"
+  >;
   chatSessionStore?: Pick<
     ChatSessionStore,
     "appendMessage" | "attachGoal" | "clearActiveGoal" | "addTokenUsage"
@@ -1705,7 +1711,11 @@ export function createChatService(options: {
                   requestId,
                   role: "tool",
                   toolName,
-                  content: `Tool call ${toolName}: ${truncateHistoryContent(JSON.stringify(args))}`,
+                  content:
+                    `Tool call ${toolName}: ` +
+                    truncateHistoryContent(
+                      stringifyRedactedCredentials(args),
+                    ),
                   workspaceId: agentRunContext?.workspaceId,
                   createdAt: new Date(getNowMs(options.now)).toISOString(),
                 });
@@ -1806,7 +1816,11 @@ export function createChatService(options: {
                   requestId,
                   role: "tool",
                   toolName,
-                  content: `Tool result ${toolName}: ${ok ? "ok" : "error"} ${truncateHistoryContent(JSON.stringify(result))}`,
+                  content:
+                    `Tool result ${toolName}: ${ok ? "ok" : "error"} ` +
+                    truncateHistoryContent(
+                      stringifyRedactedCredentials(result),
+                    ),
                   workspaceId: agentRunContext?.workspaceId,
                   createdAt: new Date(getNowMs(options.now)).toISOString(),
                 });
@@ -5409,15 +5423,9 @@ function appendRawHistoryEntry(options: {
     return;
   }
 
-  // v3.6.0: Mask secrets in raw history content before persisting (SEC-17).
-  let safeContent: string;
-  try {
-    const parsed = JSON.parse(options.content);
-    const masked = maskPreviewSecrets(parsed);
-    safeContent = truncateHistoryContent(typeof masked === "string" ? masked : JSON.stringify(masked));
-  } catch {
-    safeContent = truncateHistoryContent(options.content);
-  }
+  const safeContent = truncateHistoryContent(
+    redactCredentialText(options.content),
+  );
   void options.historyIndexStore
     .append({
       id: options.createId(),
@@ -5435,7 +5443,9 @@ function appendRawHistoryEntry(options: {
 
 async function writeAtomicMemories(options: {
   memoryStore: Pick<MemoryStore, "create">;
-  memoryProfileStore: MemoryProfileStore | undefined;
+  memoryProfileStore:
+    | Pick<MemoryProfileStore, "updateFromMemories">
+    | undefined;
   sessionId: string;
   userMessageId: string | null;
   assistantMessageId: string | null;

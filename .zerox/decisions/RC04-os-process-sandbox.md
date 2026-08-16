@@ -4,6 +4,8 @@ Status: Accepted
 
 Date: 2026-08-14
 
+P95 hardening amendment: 2026-08-16
+
 ## Context
 
 Zerox currently analyzes and authorizes Shell/test commands but starts the
@@ -58,11 +60,13 @@ The Seatbelt file profile is:
 
 ```text
 (version 1)
-(allow default)
-(deny file-write*)
-(allow file-write* (literal "/dev/null"))
+(deny default)
+(import "system.sb")
+(allow process*)
+<literal ancestor metadata grants>
+<declared and required-system read grants>
 <canonical writable-root grants>
-<optional deny network*>
+<optional allow network*>
 ```
 
 ## Enforcement Claims
@@ -70,9 +74,9 @@ The Seatbelt file profile is:
 RC04 claims only what it enforces:
 
 - **file writes:** kernel restricted to canonical writable roots;
+- **file reads:** kernel restricted to declared roots, the process-private temp
+  directory, and reviewed system/runtime roots;
 - **network none:** kernel denies network operations;
-- **reads:** allow-default, still governed by typed tools and authorization but
-  not claimed as kernel-isolated;
 - **approved domains/task policy:** authorization remains authoritative;
   Seatbelt cannot enforce DNS-domain allowlists;
 - **process/CPU/memory:** not constrained by this profile.
@@ -83,12 +87,20 @@ This is a material trust improvement without overstating it as a container.
 
 For `shell_exec` and `test_run`:
 
-- `read_only` grants no writable root except `/dev/null`;
+- `read_only` grants no workspace or user-data writable root;
 - `workspace_write` grants canonical `workspaceRoot`,
-  `extraWriteRoots`, `/tmp`, and `os.tmpdir()`;
-- `network: none` adds `(deny network*)`;
+  `extraWriteRoots`, and one process-private temp directory;
+- both modes grant only that process-private temp directory for temporary
+  writes and force `TMPDIR`, `TMP`, and `TEMP` to it;
+- each lease name uses a CSPRNG UUID, is created by one atomic `mkdir` with
+  `0700` permissions, and is canonicalized beneath the canonical temp root;
+- child environment construction is a method on the issued lease, so callers
+  and Skill manifest `env` values cannot supply a path that impersonates a
+  private temp;
+- `network: none` remains denied by the default-deny profile;
 - other network modes rely on existing shell-plan authorization;
-- `extraReadRoots` do not create write grants;
+- `workspaceRoot`, `extraReadRoots`, and required system/runtime roots receive
+  read grants; root ancestors receive metadata-only traversal grants;
 - `allowWorkspaceEscape` never means unrestricted writes; only declared
   `extraWriteRoots` are granted.
 
@@ -96,9 +108,15 @@ For stdio MCP:
 
 - the server is opt-in and globally persistent, so it cannot safely inherit a
   per-run workspace;
-- it receives a dedicated MCP state root plus temp write grants;
+- it receives a dedicated MCP state root plus one private temp per process
+  launch;
 - it may use network because external integration is its purpose;
 - it receives no user-workspace write grant.
+- the client owns each temp lease through initialize, reconnect, abort, and
+  disconnect, then removes it after the child exits.
+- every child process owns one cached release promise that terminates and
+  drains its detached process group before removing the lease; shutdown awaits
+  that promise, and a failed server initialization is disconnected immediately.
 
 ## Availability And Rollback
 
@@ -122,6 +140,9 @@ process entries. Linux/Windows backends require their own reviewed substrates.
   enforcement facts, and denial classification.
 - Timeout/cancellation continues to terminate and drain the confined process
   tree.
+- Success, command failure, spawn failure, timeout, and cancellation all drain
+  the owned process group before private-temp cleanup. Cleanup failure becomes
+  the primary failure only when no command/process failure already exists.
 - A runner failure never retries the raw command.
 - MCP reconnects reuse the same confined launch policy.
 
@@ -147,8 +168,6 @@ migration is involved.
 ## Deferred Work
 
 - Linux bubblewrap/Landlock and Windows restricted-token backends.
-- read-path kernel isolation.
 - per-workspace MCP process pools.
-- private per-run temp mounts/directories.
 - CPU, memory, PID, and syscall limits.
 - script-backed model tools.

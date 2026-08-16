@@ -44,12 +44,26 @@ export type SkillToolDefinition = {
   entrypoint: string;
 };
 
-export type SkillMcpServerConfig = {
+export type SkillMcpStdioServerConfig = {
   name: string;
+  transport: "stdio";
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  readRoots?: string[];
+  network?: boolean;
 };
+
+export type SkillMcpRemoteServerConfig = {
+  name: string;
+  transport: "http" | "sse";
+  url: string;
+  headers?: Record<string, string>;
+};
+
+export type SkillMcpServerConfig =
+  | SkillMcpStdioServerConfig
+  | SkillMcpRemoteServerConfig;
 
 export type SkillExecutionConfig = {
   mode: SkillExecutionMode;
@@ -172,7 +186,7 @@ function normalizeManifest(data: Record<string, unknown>): SkillManifest {
     ...(Array.isArray(data.tools) && data.tools.length > 0
       ? { tools: readSkillToolDefinitions(data.tools) }
       : {}),
-    ...(Array.isArray(data.mcpServers) && data.mcpServers.length > 0
+    ...(data.mcpServers !== undefined
       ? { mcpServers: readMcpServerConfigs(data.mcpServers) }
       : {}),
     ...(Array.isArray(data.dependencies) && data.dependencies.length > 0
@@ -284,19 +298,116 @@ function readSkillToolDefinitions(value: unknown): SkillToolDefinition[] {
 }
 
 function readMcpServerConfigs(value: unknown): SkillMcpServerConfig[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => {
-      const server = readRecord(entry);
-      if (!readString(server.name) || !readString(server.command)) return null;
+  if (!Array.isArray(value)) {
+    throw new SkillManifestError("Skill mcpServers must be an array.");
+  }
+  return value.map((entry, index) => {
+    const server = readRecord(entry);
+    const name = readString(server.name);
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) {
+      throw new SkillManifestError(
+        `Skill mcpServers[${index}] requires a valid name.`,
+      );
+    }
+    const transport = readString(server.transport) || "stdio";
+    if (transport === "stdio") {
+      const command = readString(server.command);
+      if (!command) {
+        throw new SkillManifestError(
+          `Skill MCP stdio server "${name}" requires command.`,
+        );
+      }
+      if (server.url !== undefined || server.headers !== undefined) {
+        throw new SkillManifestError(
+          `Skill MCP stdio server "${name}" cannot declare url or headers.`,
+        );
+      }
       return {
-        name: readString(server.name),
-        command: readString(server.command),
+        name,
+        transport: "stdio" as const,
+        command,
         ...(Array.isArray(server.args) ? { args: readStringArray(server.args) } : {}),
-        ...(isRecord(server.env) ? { env: Object.fromEntries(Object.entries(server.env).map(([k, v]) => [k, String(v)])) } : {}),
+        ...(server.env !== undefined
+          ? { env: readStringRecord(server.env, `MCP stdio server "${name}" env`) }
+          : {}),
+        ...(server.readRoots !== undefined
+          ? { readRoots: readStringArrayStrict(server.readRoots, `MCP stdio server "${name}" readRoots`) }
+          : {}),
+        ...(server.network !== undefined
+          ? { network: readStrictBoolean(server.network, `MCP stdio server "${name}" network`) }
+          : {}),
       };
-    })
-    .filter((s): s is SkillMcpServerConfig => s !== null);
+    }
+    if (transport === "http" || transport === "sse") {
+      if (
+        server.command !== undefined ||
+        server.args !== undefined ||
+        server.env !== undefined ||
+        server.readRoots !== undefined ||
+        server.network !== undefined
+      ) {
+        throw new SkillManifestError(
+          `Skill MCP ${transport} server "${name}" cannot declare stdio fields.`,
+        );
+      }
+      const url = readString(server.url);
+      if (!isHttpsUrl(url)) {
+        throw new SkillManifestError(
+          `Skill MCP ${transport} server "${name}" requires an https URL.`,
+        );
+      }
+      return {
+        name,
+        transport,
+        url,
+        ...(server.headers !== undefined
+          ? { headers: readStringRecord(server.headers, `MCP ${transport} server "${name}" headers`) }
+          : {}),
+      };
+    }
+    throw new SkillManifestError(
+      `Skill MCP server "${name}" has unsupported transport "${transport}".`,
+    );
+  });
+}
+
+function readStringRecord(
+  value: unknown,
+  label: string,
+): Record<string, string> {
+  if (!isRecord(value)) {
+    throw new SkillManifestError(`${label} must be an object.`);
+  }
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!key.trim() || typeof item !== "string") {
+      throw new SkillManifestError(`${label} values must be strings.`);
+    }
+    result[key] = item;
+  }
+  return result;
+}
+
+function readStringArrayStrict(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new SkillManifestError(`${label} must be an array of strings.`);
+  }
+  return readStringArray(value);
+}
+
+function readStrictBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new SkillManifestError(`${label} must be a boolean.`);
+  }
+  return value;
+}
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function readDependencies(value: unknown): string[] {

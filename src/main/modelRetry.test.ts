@@ -193,7 +193,7 @@ describe("completeWithModelRetry", () => {
       },
       {
         timeoutMs: 5,
-        fetch: ((_, init?: RequestInit) => {
+        fetch: ((_input: RequestInfo | URL, init?: RequestInit) => {
           fetchCalls += 1;
           return new Promise<Response>((_, reject) => {
             const signal = init?.signal;

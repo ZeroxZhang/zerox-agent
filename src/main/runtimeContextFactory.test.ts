@@ -12,19 +12,20 @@ describe("runtime context factory", () => {
       runId: "run_1",
       sessionId: "session_1",
     });
+    const modelProfile = {
+      baseUrl: "https://models.local/v1",
+      apiKey: "sk-secret-value",
+      model: "gpt-local",
+      temperature: 0.2,
+      maxTokens: 4096,
+      thinking: { type: "enabled" as const, budgetTokens: 512 },
+    };
 
     const snapshot = createRuntimeContextSnapshotForRun({
       surface: "chat",
       runId: "run_1",
       runContext,
-      modelProfile: {
-        baseUrl: "https://models.local/v1",
-        apiKey: "sk-secret-value",
-        model: "gpt-local",
-        temperature: 0.2,
-        maxTokens: 4096,
-        thinking: { type: "enabled", budgetTokens: 512 },
-      },
+      modelProfile,
       tools: [
         toolDefinition("shell_exec"),
         toolDefinition("file_read"),
@@ -100,10 +101,6 @@ describe("runtime context factory", () => {
       runId: "run_1",
       modelProfile: {
         model: "gpt-local",
-        apiKey: "sk-secret-value",
-        baseUrl: "https://models.local/v1",
-        temperature: 0,
-        maxTokens: 2048,
       },
       tools: [toolDefinition("web_search"), toolDefinition("file_read")],
       permission: {
@@ -120,10 +117,6 @@ describe("runtime context factory", () => {
       runId: "run_1",
       modelProfile: {
         model: "gpt-local",
-        apiKey: "sk-secret-value",
-        baseUrl: "https://models.local/v1",
-        temperature: 0,
-        maxTokens: 2048,
       },
       tools: [toolDefinition("file_read"), toolDefinition("web_search")],
       permission: {
@@ -211,37 +204,44 @@ function toolDefinition(name: string): ToolDefinition {
   };
 }
 
-function createSkillRecord(): SkillRecord {
+function createSkillRecord(): SkillRecord & {
+  resources: Array<{
+    kind: "skill";
+    path: string;
+    sha256: string;
+  }>;
+} {
   return {
-    id: "onepager",
     rootDir: "/skills/onepager",
+    skillFile: "/skills/onepager/SKILL.md",
     body: "# Onepager",
     manifest: {
       name: "onepager",
       displayName: "Onepager",
       description: "Create one-page reports.",
       version: "1.0.0",
-      category: "writing",
       inputs: [],
       permissions: {
         files: {
           read: ["{{skillRoot}}/references"],
           write: [],
         },
-        tools: {
-          builtin: ["file_read"],
-          mcp: [],
+        shell: {
+          commands: [],
         },
-        network: {
-          allowedDomains: [],
+        web: {
+          search: false,
+          fetchDomains: [],
+        },
+        memory: {
+          read: true,
+          write: false,
         },
       },
       execution: {
         mode: "agent",
+        entrypoint: null,
         maxTurns: 4,
-      },
-      verification: {
-        required: false,
       },
     },
     resources: [

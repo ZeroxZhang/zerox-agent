@@ -9,11 +9,22 @@ import { runAgentLoop as runProductionAgentLoop } from "./agentLoop";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { AppendChatMessageInput } from "./chatSessionStore";
-import type { ChatClient, ChatMessage, ChatCompletionResponse, StreamingChatClient } from "./openAiCompatibleClient";
+import type {
+  ChatClient,
+  ChatCompletionRequest,
+  ChatMessage,
+  ChatCompletionResponse,
+  StreamingChatClient,
+} from "./openAiCompatibleClient";
+import type { AgentModelProfile } from "./agentRunnerService";
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
-import type { SkillRecord } from "../shared/skills";
+import type {
+  SkillManifest,
+  SkillPermissions,
+  SkillRecord,
+} from "../shared/skills";
 import {
   authorizeToolCallWithinRunContext,
   getDefaultTaskPermissionPolicy,
@@ -38,6 +49,7 @@ import type {
 } from "../shared/workspaceRunLedger";
 import type { GoalDraft } from "../shared/goalTranslation";
 import type { PlanRecord } from "../shared/planMode";
+import { deriveChatSessionWork } from "../shared/chatSessionWork";
 import { KernelEventBus } from "./kernel/eventBus";
 import { createProductionKernelDriver } from "./kernel/productionKernelDriver";
 
@@ -378,7 +390,8 @@ describe("chat service", () => {
           tools: false,
           streaming: true,
           vision: false,
-          thinking: false,
+          pdf: false,
+          parallelToolCalls: false,
         },
       }),
       memoryStore: createMemoryStore(),
@@ -1015,7 +1028,7 @@ describe("chat service", () => {
       },
       async discoverSkills() {
         skillDiscoveryCalls += 1;
-        return { skills: [], warnings: [] };
+        return { skills: [], errors: [] };
       },
       toolExecutor: createToolExecutor(),
       createId: () => "chat_plan_input",
@@ -1201,7 +1214,7 @@ describe("chat service", () => {
       },
       async discoverSkills() {
         skillDiscoveryCalls += 1;
-        return { skills: [], warnings: [] };
+        return { skills: [], errors: [] };
       },
       toolExecutor: createToolExecutor(),
       createId: () => "chat_ready_plan_feedback",
@@ -1296,7 +1309,7 @@ describe("chat service", () => {
       },
       async discoverSkills() {
         skillDiscoveryCalls += 1;
-        return { skills: [], warnings: [] };
+        return { skills: [], errors: [] };
       },
       toolExecutor: createToolExecutor(),
       createId: () => "chat_failed_plan_locked",
@@ -1358,7 +1371,7 @@ describe("chat service", () => {
       },
       async discoverSkills() {
         skillDiscoveryCalls += 1;
-        return { skills: [], warnings: [] };
+        return { skills: [], errors: [] };
       },
       toolExecutor: createToolExecutor(),
       createId: () => "chat_canceled_plan_locked",
@@ -4586,6 +4599,68 @@ describe("chat service", () => {
     ]);
   });
 
+  it("redacts structured and prefixed tool credentials before raw-history writes", async () => {
+    const rawHistoryEntries: Array<Record<string, unknown>> = [];
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          return chatReply("unused");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      historyIndexStore: {
+        async append(entry) {
+          rawHistoryEntries.push(entry);
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      async runAgentLoop(messages, _profile, options) {
+        options.onToolCall?.(
+          "shell_exec",
+          {
+            command:
+              "curl https://user:password@example.test/run?api_key=query-secret",
+            nested: { authorization: "Bearer nested-secret" },
+          },
+          { toolCallId: "secret_call" },
+        );
+        options.onToolResult?.(
+          "shell_exec",
+          false,
+          {
+            ok: false,
+            error:
+              "Set-Cookie: session=cookie-secret; Path=/ Authorization: Bearer result-secret",
+          },
+          { toolCallId: "secret_call" },
+        );
+        return {
+          status: "succeeded",
+          summary: "done",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 1,
+        };
+      },
+      createId: createSequentialId("history_secret"),
+      now: createSteppedClock("2026-08-16T00:00:00.000Z"),
+    });
+
+    await service.sendMessage({
+      sessionId: "session_history_secret",
+      requestId: "request_history_secret",
+      message: "run",
+    });
+    await flushAsyncTasks();
+
+    const serialized = JSON.stringify(rawHistoryEntries);
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /password@example|query-secret|nested-secret|cookie-secret|result-secret/,
+    );
+  });
+
   it("loads and enforces an explicitly selected agent skill in chat", async () => {
     const capturedMessages: ChatMessage[][] = [];
     const statusEvents: ChatTaskStatusEvent[] = [];
@@ -5224,7 +5299,7 @@ describe("chat service", () => {
                 },
               ],
               permissions: {
-                ...getDefaultTaskPermissionPolicy(),
+                ...createSkillPermissions(),
                 files: { read: ["{{targetDir}}"], write: ["{{targetDir}}"] },
               },
             },
@@ -5781,7 +5856,7 @@ describe("chat service", () => {
                 },
               ],
               permissions: {
-                ...getDefaultTaskPermissionPolicy(),
+                ...createSkillPermissions(),
                 files: { read: ["{{targetDir}}"], write: ["{{targetDir}}"] },
               },
             },
@@ -6211,7 +6286,7 @@ describe("chat service", () => {
                 },
               ],
               permissions: {
-                ...getDefaultTaskPermissionPolicy(),
+                ...createSkillPermissions(),
                 files: { read: ["{{targetDir}}"], write: ["{{targetDir}}"] },
               },
             },
@@ -8110,6 +8185,7 @@ function createChatSessionStore(
         ...(session.workspaceSummary
           ? { workspaceSummary: session.workspaceSummary }
           : {}),
+        work: deriveChatSessionWork(session),
         updatedAt: session.updatedAt,
       }));
     },
@@ -8148,7 +8224,11 @@ function createChatSessionStore(
       options.tokenUsageWrites?.push({ sessionId, usage });
       return null;
     },
-    async appendActivityEvent(sessionId: string, event: ChatTaskStatusEvent) {
+    async appendActivityEvent(
+      sessionId: string,
+      event: ChatTaskStatusEvent,
+      _eventOptions?: { selectedSkillName?: string },
+    ) {
       options.activityEvents?.push(event);
       const session = buildSession(sessionId, sessions.get(sessionId)?.summary ?? "会话", {
         activity: {
@@ -8309,13 +8389,20 @@ function createPlanFixture(
   partial: Partial<PlanRecord> &
     Pick<PlanRecord, "id" | "sessionId" | "status" | "actionGate">,
 ): PlanRecord {
+  const {
+    actionGate,
+    id,
+    sessionId,
+    status,
+    ...overrides
+  } = partial;
   return {
-    id: partial.id,
-    sessionId: partial.sessionId,
+    id,
+    sessionId,
     sourceMessage: "生成一个调用 DBS skill 的本地计划。",
     mode: "debate",
-    status: partial.status,
-    actionGate: partial.actionGate,
+    status,
+    actionGate,
     revision: 5,
     taskContract: {
       objective: "生成一个调用 DBS skill 的本地计划。",
@@ -8349,7 +8436,7 @@ function createPlanFixture(
     },
     createdAt: "2026-07-30T11:00:00.000Z",
     updatedAt: "2026-07-30T11:01:00.000Z",
-    ...partial,
+    ...overrides,
   };
 }
 
@@ -8360,7 +8447,7 @@ async function createCompleteProfile() {
     model: "agent-model",
     temperature: 0.2,
     maxTokens: 8192,
-  };
+  } satisfies AgentModelProfile;
 }
 
 function createTaskStore(
@@ -8403,7 +8490,11 @@ function createTask(partial: Partial<ScheduledTask> = {}): ScheduledTask {
 }
 
 function createSkillRecord(
-  partial: Partial<SkillRecord> & Pick<SkillRecord["manifest"], "name"> & { body?: string },
+  partial: {
+    name: string;
+    body?: string;
+    manifest?: Partial<SkillManifest>;
+  },
 ): SkillRecord {
   const name = partial.name;
   return {
@@ -8420,7 +8511,7 @@ function createSkillRecord(
         entrypoint: null,
       },
       inputs: partial.manifest?.inputs ?? [],
-      permissions: partial.manifest?.permissions ?? getDefaultTaskPermissionPolicy(),
+      permissions: partial.manifest?.permissions ?? createSkillPermissions(),
       ...(partial.manifest?.planning ? { planning: partial.manifest.planning } : {}),
       ...(partial.manifest?.tools ? { tools: partial.manifest.tools } : {}),
       ...(partial.manifest?.mcpServers ? { mcpServers: partial.manifest.mcpServers } : {}),
@@ -8432,6 +8523,26 @@ function createSkillRecord(
 function createToolExecutor(
   forcedResult?: Awaited<ReturnType<AgentToolExecutor["execute"]>>,
 ): AgentToolExecutor {
+  const registry = createDynamicToolRegistry();
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_list",
+        description: "List files",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+      },
+    },
+    async () => ({
+      ok: true,
+      result: { files: ["a.txt", "b.txt"] },
+    }),
+    "test",
+  );
   return {
     async execute() {
       if (forcedResult) {
@@ -8443,29 +8554,12 @@ function createToolExecutor(
       };
     },
     getRegistry() {
-      return {
-        getDefinitions() {
-          return [
-            {
-              type: "function" as const,
-              function: {
-                name: "file_list",
-                description: "List files",
-                parameters: {
-                  type: "object",
-                  properties: { path: { type: "string" } },
-                  required: ["path"],
-                },
-              },
-            },
-          ];
-        },
-      };
+      return registry;
     },
     hasTool() {
       return true;
     },
-  } as AgentToolExecutor;
+  };
 }
 
 function createMemoryWorkspaceRunStore(options: {
@@ -8554,6 +8648,28 @@ function createMemoryTrajectoryStore(
     async list() {
       return events;
     },
+    async appendIfAbsent(_runId, _publicationKey, event) {
+      const existing = events.find(
+        (candidate) => candidate.id === event.id,
+      );
+      if (existing) {
+        return { appended: false, event: existing };
+      }
+      events.push(structuredClone(event));
+      return { appended: true, event };
+    },
+    async flushShadowWrites() {
+      return;
+    },
+  };
+}
+
+function createSkillPermissions(): SkillPermissions {
+  return {
+    files: { read: [], write: [] },
+    shell: { commands: [] },
+    web: { search: false, fetchDomains: [] },
+    memory: { read: false, write: false },
   };
 }
 

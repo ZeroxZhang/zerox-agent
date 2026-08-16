@@ -9,6 +9,7 @@ import type {
   AgentToolExecutionResult,
   AgentToolExecutor,
 } from "./agentToolExecutor";
+import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import {
   createToolRuntime,
   type ToolRuntimeGuard,
@@ -347,9 +348,9 @@ describe("ToolRuntime", () => {
 
   it("normalizes invalid output and deep-freezes detached outcomes", async () => {
     const mutableResult = {
-      ok: true,
+      ok: true as const,
       result: { nested: { value: 1 } },
-    } as AgentToolExecutionResult;
+    } satisfies AgentToolExecutionResult;
     const runtime = createToolRuntime({
       authorizationService: allowAuthorization(),
       toolExecutor: executor(async () => mutableResult),
@@ -363,8 +364,7 @@ describe("ToolRuntime", () => {
       taskId: "task_1",
       request,
     });
-    (mutableResult as { result: { nested: { value: number } } }).result.nested.value =
-      2;
+    mutableResult.result.nested.value = 2;
     (request.args.nested as { input: number }).input = 2;
 
     expect(outcome.result).toEqual({
@@ -374,11 +374,12 @@ describe("ToolRuntime", () => {
     expect(outcome.request.args).toEqual({ nested: { input: 1 } });
     expect(Object.isFrozen(outcome)).toBe(true);
     expect(Object.isFrozen(outcome.result)).toBe(true);
-    expect(
-      Object.isFrozen(
-        (outcome.result as { result: { nested: object } }).result.nested,
-      ),
-    ).toBe(true);
+    if (!outcome.result.ok) throw new Error(outcome.result.error);
+    const nestedResult = outcome.result.result.nested;
+    if (typeof nestedResult !== "object" || nestedResult === null) {
+      throw new Error("Expected nested object result.");
+    }
+    expect(Object.isFrozen(nestedResult)).toBe(true);
   });
 
   it("turns an invalid success payload into a canonical failure", async () => {
@@ -527,8 +528,9 @@ function executor(
     execute,
     getRegistry() {
       return {
+        ...createDynamicToolRegistry(),
         getSource: () => source,
-      } as ReturnType<AgentToolExecutor["getRegistry"]>;
+      };
     },
   };
 }

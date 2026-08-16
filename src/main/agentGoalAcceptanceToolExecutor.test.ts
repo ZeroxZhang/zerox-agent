@@ -29,7 +29,13 @@ describe("authorized goal acceptance tool executor", () => {
         toolExecutor: {
           async execute() {
             rawCalls += 1;
-            return { ok: true, output: "exit code 0", metadata: { exitCode: 0 } };
+            return {
+              ok: true,
+              result: {
+                output: "exit code 0",
+                metadata: { exitCode: 0 },
+              },
+            };
           },
         },
       }),
@@ -74,7 +80,7 @@ describe("authorized goal acceptance tool executor", () => {
       toolExecutor: {
         async execute() {
           rawCalls += 1;
-          return { ok: true };
+          return { ok: true, result: {} };
         },
       },
     });
@@ -150,7 +156,7 @@ describe("authorized goal acceptance tool executor", () => {
         toolExecutor: {
           async execute() {
             rawCalls += 1;
-            return { ok: true };
+            return { ok: true, result: {} };
           },
         },
       }),
@@ -183,7 +189,7 @@ describe("authorized goal acceptance tool executor", () => {
       toolExecutor: {
         async execute(_request, options) {
           receivedContext = options?.runContext;
-          return { ok: true };
+          return { ok: true, result: {} };
         },
       },
     });

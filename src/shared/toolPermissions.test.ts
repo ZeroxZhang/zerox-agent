@@ -97,6 +97,7 @@ describe("task permission policy", () => {
       mcpServers: [
         {
           name: "filesystem-index",
+          transport: "stdio",
           command: "node",
           args: ["./mcp/filesystem-index.js"],
         },

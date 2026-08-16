@@ -7,6 +7,7 @@ const root = process.cwd();
 describe("production process sandbox boundary", () => {
   it("injects one provider into command tools and stdio MCP", () => {
     const container = read("src/main/container.ts");
+    const skillMcpClient = read("src/main/skillMcpClient.ts");
 
     expect(container).toContain("createProcessSandboxProvider");
     expect(container).toContain(
@@ -15,23 +16,43 @@ describe("production process sandbox boundary", () => {
     expect(container).toContain(
       "processSandbox: processSandboxProvider(),",
     );
-    expect(container).toContain('"mcp-process-sandbox"');
-    expect(container).toContain("sandboxPolicy:");
+    expect(container).toContain(
+      "processSandbox: processSandboxProvider()",
+    );
+    expect(skillMcpClient).toContain('"mcp-process-sandbox"');
+    expect(skillMcpClient).toContain(
+      "processSandbox: options.processSandbox",
+    );
+    expect(skillMcpClient).toContain("sandboxPolicy:");
+    expect(skillMcpClient).toContain("extraReadRoots: config.readRoots");
   });
 
   it("confines every arbitrary model-reachable process before spawn", () => {
     const executor = read("src/main/agentToolExecutor.ts");
     const testRunner = read("src/main/nativeTestRunTool.ts");
     const mcp = read("src/main/mcpClient.ts");
+    const sandbox = read("src/main/processSandbox.ts");
+    const ownedProcess = read("src/main/ownedProcess.ts");
 
     expect(executor).toContain("processSandbox.confine(");
-    expect(executor).toContain("execFileAsync(confined.argv[0]!");
-    expect(executor).toContain("shell: false");
+    expect(executor).toContain("runOwnedProcess({");
+    expect(executor).toContain("confined.buildChildEnv(process.env)");
     expect(testRunner).toContain("args.processSandbox.confine(");
-    expect(testRunner).toContain("spawn(confined.argv[0]!");
-    expect(testRunner).toContain("shell: false");
+    expect(testRunner).toContain("runOwnedProcess({");
+    expect(testRunner).toContain("confined.buildChildEnv(process.env)");
     expect(mcp).toContain("config.processSandbox.confine(");
-    expect(mcp).toContain("const proc = spawn(command, commandArgs");
+    expect(mcp).toContain("proc = spawn(command, commandArgs");
+    expect(mcp).toContain("ownedProcesses.set(proc");
+    expect(mcp).toContain("await releaseOwnedProcess(proc)");
+    expect(executor).toContain("await confined.cleanup()");
+    expect(testRunner).toContain("await confined.cleanup()");
+    expect(ownedProcess).toContain("terminateOwnedProcessTree");
+    expect(ownedProcess).toContain('signalProcessGroup(pid, "SIGKILL")');
+    expect(sandbox).toContain("createPrivateTempDirectory(tempRoot)");
+    expect(sandbox).toContain("privateTempDir");
+    expect(sandbox).toContain("buildChildEnv");
+    expect(sandbox).not.toContain("privateTempDir?: string");
+    expect(sandbox).not.toContain('    "/tmp",');
   });
 
   it("has no production unconfined feature mode", () => {

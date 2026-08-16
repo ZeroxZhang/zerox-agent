@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createTaskSchedulerService } from "./taskSchedulerService";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { RunScheduledTaskResult } from "../shared/agentRuns";
-import type { ScheduledTask, ScheduledTaskInput } from "../shared/scheduledTasks";
+import type { ScheduledTask } from "../shared/scheduledTasks";
 import { getDefaultTaskPermissionPolicy } from "../shared/toolPermissions";
 
 describe("task scheduler service", () => {
@@ -125,16 +125,10 @@ describe("task scheduler service", () => {
 function createTaskStore(
   tasks: ScheduledTask[],
   completedRuns: Array<{ taskId: string; completedAt: string }>,
-): ScheduledTaskStore {
+): Pick<ScheduledTaskStore, "list" | "recordRun"> {
   return {
     async list() {
       return tasks;
-    },
-    async get(taskId) {
-      return tasks.find((task) => task.id === taskId) ?? null;
-    },
-    async create(_input: ScheduledTaskInput) {
-      throw new Error("Not needed in this test.");
     },
     async recordRun(taskId, completedAt) {
       completedRuns.push({ taskId, completedAt: completedAt.toISOString() });

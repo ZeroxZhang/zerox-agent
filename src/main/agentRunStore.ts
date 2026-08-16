@@ -4,12 +4,16 @@ import type { AgentRunRecord } from "../shared/agentRuns";
 import type { StorageBackend, RunRepository, Storage } from "../shared/storageContract";
 import { createRunRepository } from "./storage/repositories/runRepository";
 import { readRecoverableJsonl } from "./jsonlRecovery";
+import {
+  createFailureVisibleSerialQueue,
+  type PersistenceQueueDrainOptions,
+} from "./failureVisibleSerialQueue";
 
 export type AgentRunStore = {
   append(run: AgentRunRecord): Promise<AgentRunRecord>;
   get(runId: string): Promise<AgentRunRecord | null>;
   list(options?: { limit?: number; taskId?: string }): Promise<AgentRunRecord[]>;
-  flushShadowWrites(): Promise<void>;
+  flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
 export interface AgentRunStoreOptions {
@@ -18,12 +22,6 @@ export interface AgentRunStoreOptions {
   backend?: StorageBackend;
   /** Storage instance required when backend is sqlite/dual. */
   storage?: Storage;
-}
-
-function shadowWriteError(error: unknown): void {
-  // Fire-and-forget JSON side-write failures must never break the hot path.
-  // eslint-disable-next-line no-console
-  console.warn("[storage] dual-write JSON shadow write failed:", String(error));
 }
 
 export function createAgentRunStore(options: AgentRunStoreOptions): AgentRunStore {
@@ -64,22 +62,15 @@ export function createAgentRunStore(options: AgentRunStoreOptions): AgentRunStor
   }
 
   // --- sqlite / dual ---
-  const shadowWrites = new Set<Promise<void>>();
-  function enqueueShadowWrite(promise: Promise<unknown>): void {
-    let tracked: Promise<void>;
-    tracked = promise
-      .catch(shadowWriteError)
-      .then(() => undefined)
-      .finally(() => {
-        shadowWrites.delete(tracked);
-      });
-    shadowWrites.add(tracked);
-  }
+  const shadowQueue = createFailureVisibleSerialQueue();
 
   return {
     async append(run) {
+      shadowQueue.assertOpen();
       repo.create(run); // sync, hot path
-      if (backend === "dual") enqueueShadowWrite(jsonImpl.append(run));
+      if (backend === "dual") {
+        void shadowQueue.enqueue(() => jsonImpl.append(run));
+      }
       return run;
     },
     async get(runId) {
@@ -89,8 +80,8 @@ export function createAgentRunStore(options: AgentRunStoreOptions): AgentRunStor
       const limit = listOptions?.limit ?? 50;
       return repo.list({ limit, taskId: listOptions?.taskId });
     },
-    async flushShadowWrites() {
-      await Promise.all([...shadowWrites]);
+    async flushShadowWrites(flushOptions) {
+      await shadowQueue.drain(flushOptions);
     },
   };
 }

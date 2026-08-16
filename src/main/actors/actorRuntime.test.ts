@@ -23,9 +23,14 @@ function baseGoal(): Goal {
   return {
     id: "goal-1", description: "Ship the feature", successCriteria: [], milestones: [],
     status: "executing",
-    budget: { maxTurns: 10, maxMinutes: 60, maxCostUsd: 1 } as Goal["budget"],
-    executionUsage: { turns: 0, minutes: 0, costUsd: 0 } as Goal["executionUsage"],
-    reviewPolicy: { mode: "human" } as Goal["reviewPolicy"],
+    executionUsage: {
+      iterations: 0,
+      toolCalls: 0,
+      wallClockMs: 0,
+      tokens: 0,
+      replans: 0,
+    },
+    reviewPolicy: "review_final_only",
     planVersion: 1, createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z",
   };
 }
@@ -379,7 +384,7 @@ describe("checkpointWriterActor (rule-based fallback)", () => {
     const storage = await createInMemoryStorage();
     const runs = createRunRepository(storage);
     const ck = createCheckpointRepository(storage);
-    runs.create({ id: "run-1", taskId: "task-1", taskName: "T", skillName: "s", status: "executing", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" });
+    runs.create({ id: "run-1", taskId: "task-1", taskName: "T", skillName: "s", status: "running", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" });
     const ev = (seq: number, type: AgentTrajectoryEvent["type"]): AgentTrajectoryEvent => ({
       id: `e-${seq}`, runId: "run-1", type, sequence: seq, payload: {},
       redaction: { containsApiKey: false, containsFileContent: false, containsUserText: false },
@@ -449,7 +454,7 @@ describe("checkpointWriterOrchestrator", () => {
     const storage = await createInMemoryStorage();
     const runs = createRunRepository(storage);
     const ck = createCheckpointRepository(storage);
-    runs.create({ id: "run-1", taskId: "t", taskName: "T", skillName: "s", status: "executing", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" });
+    runs.create({ id: "run-1", taskId: "t", taskName: "T", skillName: "s", status: "running", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" });
     const orchestrator = createCheckpointWriterOrchestrator({
       runRepository: runs, checkpointRepository: ck,
       resolveGoal: () => ({ goal: baseGoal(), ledgerEvents: [] }),

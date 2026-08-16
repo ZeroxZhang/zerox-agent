@@ -4,8 +4,10 @@ import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
 type WorkflowStep = {
+  name?: string;
   uses?: string;
   run?: string;
+  env?: Record<string, string>;
   with?: Record<string, unknown>;
 };
 
@@ -19,6 +21,25 @@ type VerifyWorkflow = {
   };
   jobs?: {
     verify?: {
+      "runs-on"?: string;
+      steps?: WorkflowStep[];
+    };
+  };
+};
+
+type ReleaseWorkflow = {
+  name?: string;
+  on?: {
+    push?: {
+      tags?: string[];
+    };
+  };
+  permissions?: {
+    contents?: string;
+  };
+  jobs?: {
+    "macos-arm64"?: {
+      if?: string;
       "runs-on"?: string;
       steps?: WorkflowStep[];
     };
@@ -74,20 +95,57 @@ describe("GitHub verify workflow", () => {
     expect(packageJson.scripts.verify).not.toContain("electron");
   });
 
-  it("runs the opt-in stress gate before tagged release packaging", () => {
-    const workflowSource = readFileSync(
+  it("runs strict test types, stress, and real smoke before tagged release packaging", () => {
+    const workflow = parse(readFileSync(
       path.join(process.cwd(), ".github", "workflows", "release.yml"),
       "utf8",
+    )) as ReleaseWorkflow;
+    const job = workflow.jobs?.["macos-arm64"];
+    const steps = job?.steps ?? [];
+    const verifyStepIndex = steps.findIndex(
+      (step) => step.name === "Verify source tree",
+    );
+    const releaseStepIndex = steps.findIndex(
+      (step) => step.run === "npm run release:mac",
+    );
+    const publishStep = steps.find(
+      (step) =>
+        step.run ===
+        'npm run release:publish -- "${GITHUB_WORKSPACE}/.github/release-notes/${GITHUB_REF_NAME}.md"',
+    );
+    const signingStep = steps.find(
+      (step) => step.name === "Materialize update signing key",
     );
 
-    expect(workflowSource).toContain('tags:\n      - "v*.*.*"');
-    expect(workflowSource).toContain(
-      "secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY",
+    expect(workflow.name).toBe("release");
+    expect(workflow.on?.push?.tags).toEqual(["v*.*.*"]);
+    expect(workflow.permissions).toEqual({ contents: "write" });
+    expect(job).toMatchObject({
+      if: "github.repository == 'ZeroxZhang/zerox-agent'",
+      "runs-on": "macos-14",
+    });
+    expect(verifyStepIndex).toBeGreaterThanOrEqual(0);
+    expect(releaseStepIndex).toBeGreaterThan(verifyStepIndex);
+    expect(
+      steps[verifyStepIndex]?.run
+        ?.trim()
+        .split(/\r?\n/)
+        .map((command) => command.trim()),
+    ).toEqual([
+      "npm run typecheck:tests",
+      "npm test -- --maxWorkers=1",
+      "npm run stress:runtime",
+      "npm run build",
+      "npm run eval:agent:built",
+      "npm run eval:memory:built",
+      "npm run smoke:prod:built",
+      "npm run harness:check",
+    ]);
+    expect(signingStep?.env?.UPDATE_SIGNING_PRIVATE_KEY).toBe(
+      "${{ secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY }}",
     );
-    expect(workflowSource).toContain("npm run stress:runtime");
-    expect(workflowSource.indexOf("npm run stress:runtime")).toBeLessThan(
-      workflowSource.indexOf("npm run release:mac"),
-    );
-    expect(workflowSource).toContain("npm run release:publish");
+    expect(publishStep?.env).toMatchObject({
+      GH_TOKEN: "${{ github.token }}",
+    });
   });
 });

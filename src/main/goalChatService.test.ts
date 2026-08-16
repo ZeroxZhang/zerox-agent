@@ -1030,7 +1030,13 @@ describe("goal chat service", () => {
       controller: createController({
         async start(_goalId, options) {
           startedSignal = options?.signal;
-          return new Promise<Goal>(() => undefined);
+          return new Promise<Goal>((resolve) => {
+            options?.signal?.addEventListener(
+              "abort",
+              () => resolve(createGoal({ status: "canceled" })),
+              { once: true },
+            );
+          });
         },
       }),
       goalStore: createGoalStore({
@@ -1110,13 +1116,50 @@ describe("goal chat service", () => {
     expect(starts).toBe(1);
   });
 
+  it("does not let a queued restart escape a quiescent cancel", async () => {
+    let starts = 0;
+    let settleRun!: () => void;
+    const service = createGoalChatService({
+      controller: createController({
+        async start(goalId) {
+          starts += 1;
+          return new Promise<Goal>((resolve) => {
+            settleRun = () =>
+              resolve(createGoal({ id: goalId, status: "executing" }));
+          });
+        },
+      }),
+      goalStore: createGoalStore({
+        existingGoal: createGoal({ status: "planning" }),
+      }),
+      planner: createFakePlanner(),
+    });
+
+    const parent = new AbortController();
+    await service.start("goal_release", { signal: parent.signal });
+    parent.abort();
+    await service.start("goal_release");
+    const canceled = service.cancel("goal_release");
+    settleRun();
+
+    await expect(canceled).resolves.toMatchObject({ status: "canceled" });
+    await Promise.resolve();
+    expect(starts).toBe(1);
+  });
+
   it("aborts a background controller run when pausing the goal", async () => {
     let startedSignal: AbortSignal | undefined;
     const service = createGoalChatService({
       controller: createController({
         async start(_goalId, options) {
           startedSignal = options?.signal;
-          return new Promise<Goal>(() => undefined);
+          return new Promise<Goal>((resolve) => {
+            options?.signal?.addEventListener(
+              "abort",
+              () => resolve(createGoal({ status: "waiting_for_review" })),
+              { once: true },
+            );
+          });
         },
       }),
       goalStore: createGoalStore({
@@ -1133,6 +1176,70 @@ describe("goal chat service", () => {
     await service.pause("goal_release");
     expect(startedSignal?.aborted).toBe(true);
   });
+
+  it.each([
+    ["pause", "waiting_for_review"],
+    ["cancel", "canceled"],
+  ] as const)(
+    "awaits the owned runtime drain before %s becomes visible",
+    async (operation, expectedStatus) => {
+      let releaseRuntime!: () => void;
+      const runtimeReleased = new Promise<void>((resolve) => {
+        releaseRuntime = resolve;
+      });
+      const order: string[] = [];
+      let persistedGoal = createGoal({ status: "planning" });
+      const service = createGoalChatService({
+        controller: createController({
+          async start(goalId, options) {
+            return new Promise<Goal>((resolve) => {
+              options?.signal?.addEventListener(
+                "abort",
+                () => {
+                  void runtimeReleased.then(() => {
+                    order.push("runtime_drained");
+                    resolve(createGoal({ id: goalId, status: "executing" }));
+                  });
+                },
+                { once: true },
+              );
+            });
+          },
+        }),
+        goalStore: {
+          async get(goalId) {
+            return goalId === persistedGoal.id ? persistedGoal : null;
+          },
+          async save(goal) {
+            persistedGoal = structuredClone(goal);
+            order.push(`persisted:${goal.status}`);
+            return persistedGoal;
+          },
+          async appendLedger() {
+            order.push("ledger");
+          },
+        },
+        planner: createFakePlanner(),
+      });
+
+      await service.start(persistedGoal.id);
+      order.length = 0;
+      const settlement = service[operation](persistedGoal.id);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(order).toEqual([]);
+      expect(persistedGoal.status).toBe("executing");
+
+      releaseRuntime();
+      await expect(settlement).resolves.toMatchObject({
+        status: expectedStatus,
+      });
+      expect(order[0]).toBe("runtime_drained");
+      expect(order[1]).toBe(`persisted:${expectedStatus}`);
+      expect(order[2]).toBe("ledger");
+    },
+  );
 
   it("keeps historical budget-stopped chat goals read-only", async () => {
     const savedGoals: Goal[] = [];
@@ -1352,7 +1459,7 @@ describe("goal chat service", () => {
           targetId: "milestone_1",
           fingerprint: "c".repeat(64),
           occurrence: 5,
-          verdict: "rejected",
+          verdict: "rejected_repairable",
           failureClass: "command_failed",
           failedCheckIds: ["check_python"],
           evidenceRefs: [],
@@ -1890,7 +1997,7 @@ describe("goal chat service", () => {
 
 function createFakePlanner(): Pick<
   import("./agentGoalPlanner").AgentGoalPlanner,
-  "plan"
+  "plan" | "replan"
 > {
   return {
     async plan(description, planOptions) {
@@ -1905,6 +2012,9 @@ function createFakePlanner(): Pick<
           attempts: 0,
         },
       ];
+    },
+    async replan(goal) {
+      return goal.milestones;
     },
   };
 }

@@ -1,6 +1,5 @@
 import { app, BrowserWindow, safeStorage } from "electron";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { createAgentExecutionStore } from "./agentExecutionStore";
 import {
@@ -87,11 +86,11 @@ import {
 import {
   discoverSkills,
   collectSkillMcpConfigs,
+  readTrustedSkillMcpAllowlist,
   shouldAutoInitializeSkillMcp,
 } from "./skillRegistry";
-import { createMcpClient } from "./mcpClient";
-import { resolveTransportKind } from "./mcpTransport";
-import { createMcpTransportClient } from "./mcpTransportClient";
+import type { McpClient } from "./mcpClient";
+import { createSkillMcpClient } from "./skillMcpClient";
 import { createMaxMode } from "./providers/maxMode";
 import { createScheduledTaskStore } from "./taskStore";
 import { createTaskSchedulerService } from "./taskSchedulerService";
@@ -169,6 +168,7 @@ import { createMemoryRepository } from "./storage/repositories/memoryRepository"
 import { createSessionRepository } from "./storage/repositories/sessionRepository";
 import { createSelfImprovementService } from "./actors/selfImprovementService";
 import { createProcessSandboxProvider } from "./processSandbox";
+import { runProductionStorageSmokeProbe } from "./productionSmokeStorage";
 import type { Storage } from "../shared/storageContract";
 import {
   createToolAuthorizationService,
@@ -464,6 +464,19 @@ export function createAppContainer(options: {
 
   function activeSqliteStorage(): Storage | null {
     return storageBackend() === "json" ? null : storage();
+  }
+
+  async function runProductionStorageSmoke() {
+    const requestedBackend = resolveStorageBackend();
+    const resolvedBackend = storageBackend();
+    return runProductionStorageSmokeProbe({
+      configDir,
+      requestedBackend,
+      resolvedBackend,
+      runtimeVersions: process.versions,
+      storage: resolvedBackend === "json" ? null : storage(),
+      taskStore: scheduledTaskStore(),
+    });
   }
 
   const modelSettingsStore = createModelSettingsStore({
@@ -2033,7 +2046,7 @@ export function createAppContainer(options: {
   let mcpInitialized = false;
   let runtimeShuttingDown = false;
   let mcpInitializationPromise: Promise<void> | null = null;
-  const activeMcpClients: Awaited<ReturnType<typeof createMcpClient>>[] = [];
+  const activeMcpClients: McpClient[] = [];
   const activeTaskRunControllers = new Map<string, AbortController>();
   const activeTaskRunCompletions = new Map<string, Promise<void>>();
   const activeRuntimeInvocationCompletions = new Set<Promise<unknown>>();
@@ -2061,74 +2074,36 @@ export function createAppContainer(options: {
     mcpInitialized = true;
 
     try {
-      const mcpConfigs = await collectSkillMcpConfigs({ skillsDir });
+      const mcpConfigs = await collectSkillMcpConfigs({
+        skillsDir,
+        trustedServers: readTrustedSkillMcpAllowlist(process.env),
+      });
 
       for (const config of mcpConfigs) {
         if (runtimeShuttingDown) break;
+        let client: McpClient | undefined;
         try {
-          // P8: resolve the MCP transport kind (default stdio for backward
-          // compat). http/sse configs route through the transport-backed
-          // McpClient; stdio keeps the existing process-based mcpClient.
-          const transportKind = resolveTransportKind(
-            (config as { transport?: string }).transport,
-          );
-          const stdioSandboxRoot =
-            transportKind === "stdio"
-              ? path.join(
-                  configDir,
-                  "mcp-process-sandbox",
-                  createHash("sha256")
-                    .update(
-                      JSON.stringify([
-                        config.sourceSkill,
-                        config.name,
-                        config.command,
-                        config.args ?? [],
-                      ]),
-                    )
-                    .digest("hex")
-                    .slice(0, 24),
-                )
-              : null;
-          if (stdioSandboxRoot) {
-            await mkdir(stdioSandboxRoot, { recursive: true });
-          }
-          const client =
-            transportKind === "stdio"
-              ? createMcpClient({
-                  name: config.name,
-                  transport: "stdio",
-                  command: config.command,
-                  args: config.args,
-                  env: config.env,
-                  processSandbox: processSandboxProvider(),
-                  sandboxPolicy: {
-                    mode: "workspace_write",
-                    workspaceRoot: stdioSandboxRoot!,
-                    network: "allow",
-                  },
-                })
-              : createMcpTransportClient({
-                  name: config.name,
-                  transport: transportKind,
-                  url: (config as { url?: string }).url,
-                  headers: (config as { headers?: Record<string, string> }).headers,
-                });
+          client = await createSkillMcpClient(config, {
+            configDir,
+            processSandbox: processSandboxProvider(),
+          });
+          const activeClient = client;
 
-          activeMcpClients.push(client);
-          await client.connect();
+          activeMcpClients.push(activeClient);
+          await activeClient.connect();
           if (runtimeShuttingDown) {
-            await client.disconnect();
+            await activeClient.disconnect();
+            removeActiveMcpClient(activeClient);
             continue;
           }
 
-          const mcpTools = await client.listTools();
+          const mcpTools = await activeClient.listTools();
           for (const tool of mcpTools) {
             try {
               toolExecutor.getRegistry().register(
                 tool,
                 async (args, executionOptions) => {
-                  const result = await client.callTool(
+                  const result = await activeClient.callTool(
                     tool.function.name,
                     args,
                     executionOptions?.signal
@@ -2149,11 +2124,29 @@ export function createAppContainer(options: {
             `MCP server "${config.name}" initialized with ${mcpTools.length} tools (from skill: ${config.sourceSkill})`,
           );
         } catch (error) {
+          let cleanupError: unknown;
+          if (client) {
+            removeActiveMcpClient(client);
+            try {
+              await client.disconnect();
+            } catch (disconnectError) {
+              cleanupError = disconnectError;
+            }
+          }
           console.error(
             `Failed to initialize MCP server "${config.name}": ${
               error instanceof Error ? error.message : "Unknown error"
             }`,
           );
+          if (cleanupError) {
+            console.error(
+              `Failed to clean up MCP server "${config.name}" after initialization error: ${
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError)
+              }`,
+            );
+          }
         }
       }
 
@@ -2167,6 +2160,13 @@ export function createAppContainer(options: {
           error instanceof Error ? error.message : "Unknown error"
         }`,
       );
+    }
+  }
+
+  function removeActiveMcpClient(client: McpClient): void {
+    const index = activeMcpClients.indexOf(client);
+    if (index >= 0) {
+      activeMcpClients.splice(index, 1);
     }
   }
 
@@ -4395,9 +4395,21 @@ export function createAppContainer(options: {
     const flushResults = await Promise.allSettled([
       goalProgressDeliveryQueue,
       (lazyStore.get("agentRunStore") as AgentRunStore | undefined)
-        ?.flushShadowWrites() ?? Promise.resolve(),
+        ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
       (lazyStore.get("agentTrajectoryStore") as AgentTrajectoryStore | undefined)
-        ?.flushShadowWrites() ?? Promise.resolve(),
+        ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("scheduledTaskStore") as
+        | ReturnType<typeof createScheduledTaskStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("agentValidationStore") as
+        | ReturnType<typeof createAgentValidationStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("memoryProfileStore") as
+        | ReturnType<typeof createMemoryProfileStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("toolAuditLog") as
+        | ReturnType<typeof createToolAuditLog>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
       (lazyStore.get("chatSessionStore") as ChatSessionStore | undefined)
         ?.flush() ?? Promise.resolve(),
     ]);
@@ -4423,7 +4435,10 @@ export function createAppContainer(options: {
         appPath: app.getAppPath(),
         isPackaged: app.isPackaged,
         productName: appMeta.productName,
-        rendererMode: process.env.ELECTRON_RENDERER_URL ? "development" : "production",
+        rendererMode:
+          !app.isPackaged && process.env.ELECTRON_RENDERER_URL
+            ? "development"
+            : "production",
         userDataPath: app.getPath("userData"),
         version: app.getVersion(),
       }),
@@ -4434,6 +4449,7 @@ export function createAppContainer(options: {
     agentBootstrapService,
     agentValidationStore,
     scheduledTaskStore,
+    runProductionStorageSmoke,
     kernelEventBus,
     setKernelPermissionRules,
     toolAuditLog,

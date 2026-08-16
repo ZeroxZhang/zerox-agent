@@ -40,11 +40,13 @@ jobs:
 
       - name: Verify source tree
         run: |
+          npm run typecheck:tests
           npm test -- --maxWorkers=1
           npm run stress:runtime
           npm run build
           npm run eval:agent:built
           npm run eval:memory:built
+          npm run smoke:prod:built
           npm run harness:check
 
       - name: Materialize update signing key

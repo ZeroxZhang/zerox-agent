@@ -1043,7 +1043,7 @@ describe("model connection service", () => {
 function createModelSettingsStore(
   settings: Partial<PublicModelSettings>,
   apiKey: string | null,
-): Pick<ModelSettingsStore, "load" | "getApiKey"> {
+): ModelSettingsStore {
   return {
     async load() {
       return {
@@ -1052,13 +1052,60 @@ function createModelSettingsStore(
         embeddingModel: "",
         temperature: 0.2,
         maxTokens: 8192,
+        thinkingEnabled: false,
+        thinkingBudgetTokens: 0,
         hasApiKey: false,
         updatedAt: null,
         ...settings,
       };
     },
+    async save() {
+      throw new Error("Unexpected model settings save.");
+    },
     async getApiKey() {
       return apiKey;
+    },
+    async loadCatalog() {
+      throw new Error("Unexpected model catalog load.");
+    },
+    async saveConnection() {
+      throw new Error("Unexpected model connection save.");
+    },
+    async clearConnectionCredential() {
+      throw new Error("Unexpected model credential clear.");
+    },
+    async recordConnectionVerification() {
+      throw new Error("Unexpected connection verification update.");
+    },
+    async recordProfileVerification() {
+      throw new Error("Unexpected profile verification update.");
+    },
+    async deleteConnection() {
+      throw new Error("Unexpected model connection delete.");
+    },
+    async saveProfile() {
+      throw new Error("Unexpected model profile save.");
+    },
+    async deleteProfile() {
+      throw new Error("Unexpected model profile delete.");
+    },
+    async setDefaultProfile() {
+      throw new Error("Unexpected default model update.");
+    },
+    async setModelHidden() {
+      throw new Error("Unexpected model visibility update.");
+    },
+    async resolveProfile() {
+      throw new Error("Unexpected model profile resolution.");
+    },
+    async resolveBinding() {
+      throw new Error("Unexpected model binding resolution.");
+    },
+    async resolveConnection() {
+      throw new Error("Unexpected model connection resolution.");
+    },
+    async markConnectionUsed() {
+      throw new Error("Unexpected model connection usage update.");
     },
   };
 }

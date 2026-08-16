@@ -8,20 +8,28 @@ import {
   nativeImage,
   Tray,
 } from "electron";
-import type { MenuItemConstructorOptions } from "electron";
+import type {
+  IpcMainInvokeEvent,
+  MenuItemConstructorOptions,
+  RenderProcessGoneDetails,
+} from "electron";
 import { autoUpdater } from "electron-updater";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
 import { createAppContainer } from "./container";
 import { registerAllIpcHandlers, shutdownActiveChatMessages } from "./ipc";
 import {
+  createRendererCrashRecoveryTracker,
   getDefaultLoginItemSettings,
   getDisabledLoginItemSettings,
   getMainWindowOptions,
   getTrayTooltip,
+  isTrustedRendererLocation,
+  resolveTrustedRendererSource,
   shouldApplyLoginStartup,
   shouldCreateMainWindowAtStartup,
+  shouldRecoverRendererProcess,
   shouldRestoreMainWindowOnActivate,
 } from "./desktopLifecycle";
 import { runDesktopAgentValidation } from "./desktopAgentValidator";
@@ -48,6 +56,11 @@ import {
   verifyDownloadedUpdateFiles,
 } from "./appUpdateManifest";
 import { createUpdateHighWaterStore } from "./appUpdateHighWater";
+import {
+  createProductionSmokeSettler,
+  evaluateProductionSmokeAcceptance,
+  type ProductionStorageSmokeEvidence,
+} from "../shared/productionSmoke";
 
 app.setName("Zerox Agent");
 applyUserDataDirOverride({
@@ -59,10 +72,15 @@ applyUserDataDirOverride({
 setPromptBaseDir(path.join(app.getAppPath(), "prompts"));
 setProfileContentLoader(loadModelPromptFile);
 
-const rendererUrl = process.env.ELECTRON_RENDERER_URL;
+const rendererSource = resolveTrustedRendererSource({
+  isPackaged: app.isPackaged,
+  rendererUrl: process.env.ELECTRON_RENDERER_URL,
+  rendererFile: path.join(__dirname, "../../dist/index.html"),
+});
 const appMeta = getAppMeta();
 const smokeMode = getSmokeModeOptions(process.env);
 const validationMode = getAgentValidationModeOptions(process.env);
+const rendererCrashRecovery = createRendererCrashRecoveryTracker();
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -140,9 +158,11 @@ function createMainWindow(): BrowserWindow {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
   mainWindow = windowInstance;
+  installRendererTrustPolicy(windowInstance);
 
   if (smokeMode.viewport) {
     windowInstance.setSize(
@@ -153,7 +173,7 @@ function createMainWindow(): BrowserWindow {
   }
 
   windowInstance.on("close", (event) => {
-    if (!isQuitting) {
+    if (!isQuitting && mainWindow === windowInstance) {
       event.preventDefault();
       windowInstance.hide();
     }
@@ -169,19 +189,73 @@ function createMainWindow(): BrowserWindow {
     attachSmokeModeLifecycle(windowInstance);
   }
 
-  if (rendererUrl) {
-    const url = new URL(rendererUrl);
+  if (rendererSource.kind === "development_url") {
+    const url = new URL(rendererSource.url);
     if (smokeMode.targetHash) {
       url.hash = smokeMode.targetHash;
     }
     void windowInstance.loadURL(url.toString());
   } else {
-    void windowInstance.loadFile(path.join(__dirname, "../../dist/index.html"), {
+    void windowInstance.loadFile(rendererSource.filePath, {
       hash: smokeMode.targetHash?.replace(/^#/, ""),
     });
   }
 
   return windowInstance;
+}
+
+function installRendererTrustPolicy(windowInstance: BrowserWindow): void {
+  windowInstance.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  windowInstance.webContents.on("will-navigate", (event) => {
+    event.preventDefault();
+  });
+  windowInstance.webContents.on("will-redirect", (event) => {
+    event.preventDefault();
+  });
+  windowInstance.webContents.on(
+    "render-process-gone",
+    (_event, details: RenderProcessGoneDetails) => {
+      handleRendererProcessGone(windowInstance, details);
+    },
+  );
+}
+
+function handleRendererProcessGone(
+  windowInstance: BrowserWindow,
+  details: RenderProcessGoneDetails,
+): void {
+  console.error("[renderer] render process gone", {
+    reason: details.reason,
+    exitCode: details.exitCode,
+  });
+  if (isQuitting || !shouldRecoverRendererProcess(details.reason)) {
+    return;
+  }
+
+  const decision = rendererCrashRecovery.recordCrash();
+  if (mainWindow === windowInstance) {
+    mainWindow = null;
+  }
+  if (!windowInstance.isDestroyed()) {
+    windowInstance.destroy();
+  }
+
+  if (!decision.recover) {
+    dialog.showErrorBox(
+      `${appMeta.productName} renderer repeatedly crashed`,
+      `The renderer crashed ${decision.crashCount} times within one minute. ` +
+        "The application will shut down so runtime work can drain safely.",
+    );
+    app.quit();
+    return;
+  }
+
+  const retry = setTimeout(() => {
+    if (!isQuitting && !mainWindow) {
+      createMainWindow();
+    }
+  }, 250);
+  retry.unref?.();
 }
 
 function createTray(): Tray {
@@ -403,7 +477,7 @@ function createTrayIconDataUrl(): string {
 function attachSmokeModeLifecycle(windowInstance: BrowserWindow) {
   let timeout: NodeJS.Timeout | null = null;
 
-  const exit = (code: number, message: string) => {
+  const settle = createProductionSmokeSettler(({ code, message }) => {
     isQuitting = true;
     if (timeout) {
       clearTimeout(timeout);
@@ -415,6 +489,9 @@ function attachSmokeModeLifecycle(windowInstance: BrowserWindow) {
       console.error(message);
     }
     app.exit(code);
+  });
+  const exit = (code: number, message: string) => {
+    settle({ code, message });
   };
 
   timeout = setTimeout(() => {
@@ -426,15 +503,35 @@ function attachSmokeModeLifecycle(windowInstance: BrowserWindow) {
     const script = smokeMode.performanceEnabled
       ? getSmokeRendererPerformanceScript(smokeMode)
       : getSmokeRendererCheckScript(smokeMode);
-    void windowInstance.webContents
-      .executeJavaScript(script, true)
-      .then((result: unknown) => {
+    void Promise.all([
+      windowInstance.webContents.executeJavaScript(script, true),
+      runProductionStorageSmokeCheck(),
+    ])
+      .then(([result, storageCheck]: [unknown, ProductionStorageSmokeCheck]) => {
+        const rendererPassed =
+          (isSmokeRendererPerformanceResult(result) && result.ok) ||
+          (isSmokeRendererCheckResult(result) && result.ok);
+        const acceptance = evaluateProductionSmokeAcceptance({
+          rendererPassed,
+          storageRequired: storageCheck.required,
+          storagePassed: storageCheck.passed,
+        });
+        if (!acceptance.ok && acceptance.failedChecks.includes("storage")) {
+          exit(1, `Production storage smoke failed: ${storageCheck.message}`);
+          return;
+        }
         if (isSmokeRendererPerformanceResult(result)) {
-          exit(result.ok ? 0 : 1, getSmokeRendererPerformanceMessage(result));
+          exit(
+            result.ok ? 0 : 1,
+            `${getSmokeRendererPerformanceMessage(result)}${storageCheck.message}`,
+          );
           return;
         }
         if (isSmokeRendererCheckResult(result) && result.ok) {
-          exit(0, "Smoke startup passed: renderer rendered agent chat UI.");
+          exit(
+            0,
+            `Smoke startup passed: renderer rendered agent chat UI.${storageCheck.message}`,
+          );
           return;
         }
 
@@ -459,6 +556,48 @@ function attachSmokeModeLifecycle(windowInstance: BrowserWindow) {
       );
     },
   );
+}
+
+type ProductionStorageSmokeCheck = {
+  required: boolean;
+  passed: boolean;
+  message: string;
+  evidence?: ProductionStorageSmokeEvidence;
+};
+
+async function runProductionStorageSmokeCheck(): Promise<ProductionStorageSmokeCheck> {
+  if (process.env.ZEROX_PRODUCTION_SMOKE_REQUIRE_SQLITE !== "1") {
+    return { required: false, passed: true, message: "" };
+  }
+
+  try {
+    const evidencePath =
+      process.env.ZEROX_PRODUCTION_SMOKE_EVIDENCE_FILE?.trim();
+    if (!evidencePath) {
+      throw new Error("ZEROX_PRODUCTION_SMOKE_EVIDENCE_FILE is required.");
+    }
+    const evidence = await container.runProductionStorageSmoke();
+    await mkdir(path.dirname(evidencePath), { recursive: true });
+    await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+    });
+    console.log(`[smoke:storage] ${JSON.stringify(evidence)}`);
+    return {
+      required: true,
+      passed: true,
+      message:
+        ` Native SQLite dual-path passed (Electron ABI ${evidence.nativeRuntime.modulesAbi}, ` +
+        `migrations=${evidence.sqlite.migrationCount}, task=${evidence.dual.taskId}).`,
+      evidence,
+    };
+  } catch (error) {
+    return {
+      required: true,
+      passed: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function startTaskScheduler() {
@@ -747,7 +886,10 @@ function stopAppUpdateScheduler() {
 }
 
 app.whenReady().then(() => {
-  registerAllIpcHandlers(container, { appUpdateService });
+  registerAllIpcHandlers(container, {
+    appUpdateService,
+    isTrustedSender: isTrustedRendererIpcEvent,
+  });
   registerToolApprovalIpcHandlers();
   registerKernelIpcHandlers();
   installApplicationMenu();
@@ -804,23 +946,30 @@ app.whenReady().then(() => {
 });
 
 function registerToolApprovalIpcHandlers() {
-  ipcMain.handle("toolApproval:getMode", () =>
-    toolApprovalCoordinator.getAutoApprovalState(),
-  );
+  ipcMain.handle("toolApproval:getMode", (event) => {
+    assertTrustedRendererIpcEvent(event);
+    return toolApprovalCoordinator.getAutoApprovalState();
+  });
   ipcMain.handle(
     "toolApproval:setAutoApprovalEnabled",
-    (_event, enabled: boolean) =>
-      toolApprovalCoordinator.setAutoApprovalEnabled(Boolean(enabled)),
+    (event, enabled: boolean) => {
+      assertTrustedRendererIpcEvent(event);
+      return toolApprovalCoordinator.setAutoApprovalEnabled(Boolean(enabled));
+    },
   );
   ipcMain.handle(
     "toolApproval:setGoalModeEnabled",
-    (_event, enabled: boolean) =>
-      toolApprovalCoordinator.setGoalModeEnabled(Boolean(enabled)),
+    (event, enabled: boolean) => {
+      assertTrustedRendererIpcEvent(event);
+      return toolApprovalCoordinator.setGoalModeEnabled(Boolean(enabled));
+    },
   );
   ipcMain.handle(
     "toolApproval:resolve",
-    (_event, input: ResolveToolApprovalInput) =>
-    toolApprovalCoordinator.resolveApproval(input),
+    (event, input: ResolveToolApprovalInput) => {
+      assertTrustedRendererIpcEvent(event);
+      return toolApprovalCoordinator.resolveApproval(input);
+    },
   );
 }
 
@@ -830,16 +979,22 @@ function registerKernelIpcHandlers() {
     sendToRendererWindows(KERNEL_IPC.event, event);
   });
 
-  ipcMain.handle(KERNEL_IPC.subscribe, () => kernelEventBus.history());
-  ipcMain.handle(KERNEL_IPC.resumeRun, (_event, checkpointRef: string) =>
-    container.resumeAgentRun(extractRunIdFromCheckpointRef(checkpointRef)),
-  );
-  ipcMain.handle(KERNEL_IPC.updatePermissionRules, (_event, rules: unknown) =>
-    container.setKernelPermissionRules(normalizePermissionRules(rules)),
-  );
-  ipcMain.handle(KERNEL_IPC.respondPermission, (_event, input: unknown) =>
-    resolveKernelPermission(input),
-  );
+  ipcMain.handle(KERNEL_IPC.subscribe, (event) => {
+    assertTrustedRendererIpcEvent(event);
+    return kernelEventBus.history();
+  });
+  ipcMain.handle(KERNEL_IPC.resumeRun, (event, checkpointRef: string) => {
+    assertTrustedRendererIpcEvent(event);
+    return container.resumeAgentRun(extractRunIdFromCheckpointRef(checkpointRef));
+  });
+  ipcMain.handle(KERNEL_IPC.updatePermissionRules, (event, rules: unknown) => {
+    assertTrustedRendererIpcEvent(event);
+    return container.setKernelPermissionRules(normalizePermissionRules(rules));
+  });
+  ipcMain.handle(KERNEL_IPC.respondPermission, (event, input: unknown) => {
+    assertTrustedRendererIpcEvent(event);
+    return resolveKernelPermission(input);
+  });
 }
 
 function sendToRendererWindows(channel: string, payload: unknown) {
@@ -847,6 +1002,25 @@ function sendToRendererWindows(channel: string, payload: unknown) {
     if (!windowInstance.isDestroyed()) {
       windowInstance.webContents.send(channel, payload);
     }
+  }
+}
+
+function isTrustedRendererIpcEvent(event: IpcMainInvokeEvent): boolean {
+  const windowInstance = mainWindow;
+  if (
+    !windowInstance ||
+    windowInstance.isDestroyed() ||
+    event.sender !== windowInstance.webContents
+  ) {
+    return false;
+  }
+  const location = event.senderFrame?.url || event.sender.getURL();
+  return isTrustedRendererLocation(location, rendererSource);
+}
+
+function assertTrustedRendererIpcEvent(event: IpcMainInvokeEvent): void {
+  if (!isTrustedRendererIpcEvent(event)) {
+    throw new Error("Rejected untrusted renderer IPC sender.");
   }
 }
 

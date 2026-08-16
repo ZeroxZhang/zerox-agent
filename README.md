@@ -260,7 +260,16 @@ Skill 是 Zerox Agent 的主要扩展机制。每个 Skill 以 `SKILL.md` 描述
 
 应用启动时扫描内置和用户 Skill 目录。会话中可通过 `@skill` 搜索并选择技能；执行记录会固定 Skill 的来源和哈希，避免运行途中被静默替换。
 
-Skill 声明的 MCP 进程默认不会自动启动。只有显式设置 `ZEROX_ENABLE_SKILL_MCP=1` 时才启用自动初始化，并且子进程只继承白名单环境变量与 manifest 明确声明的值。
+Skill 声明的 MCP Server 默认拒绝启动。自动初始化必须同时设置
+`ZEROX_ENABLE_SKILL_MCP=1` 和精确的
+`ZEROX_SKILL_MCP_ALLOWLIST=skill-name/server-name,...`；allowlist 不支持通配符，
+未列出的 Skill/Server 即使出现在 manifest 中也不会启动。该 allowlist 是启动配置，
+需由 shell、launch agent 或应用启动器持久设置，修改后重启应用生效。
+
+stdio MCP 默认只能读取 Skill 根目录、写入独立进程沙箱且不能联网；manifest
+可通过 `readRoots` 和 `network: true` 显式扩展已信任 Server 的能力。子进程只继承
+最小环境白名单与 manifest 明确声明的 `env`。远程 MCP 使用 `transport: http`
+或 `transport: sse`，必须声明 HTTPS `url`，可选 `headers` 会原样传给该受信 Server。
 
 复杂任务可创建 parent/child multi-agent sessions。子任务继承工作区和权限边界，并带有 parent run、session、role 和 depth 元数据；父任务在接收结果前可以设置审查门禁。
 
@@ -570,7 +579,7 @@ Stored secrets are encrypted with Electron `safeStorage` and are never exposed t
 
 ## Skills, memory, and multi-agent work
 
-`SKILL.md` files define inputs, execution mode, permissions, planning requirements, custom tools, and optional MCP servers. Skills are discoverable through `@skill` and are provenance-pinned for execution. Skill MCP startup is opt-in through `ZEROX_ENABLE_SKILL_MCP=1`.
+`SKILL.md` files define inputs, execution mode, permissions, planning requirements, custom tools, and optional MCP servers. Skills are discoverable through `@skill` and are provenance-pinned for execution. Skill MCP servers are denied by default: startup requires both `ZEROX_ENABLE_SKILL_MCP=1` and an exact, wildcard-free `ZEROX_SKILL_MCP_ALLOWLIST=skill-name/server-name,...` launch configuration. stdio servers default to the Skill root, an isolated writable sandbox, no network, and a minimal child environment; trusted manifests may explicitly add `readRoots`, `network`, or `env`. Remote `http` and `sse` transports require HTTPS URLs.
 
 Memory supports core, session, semantic, episodic, and procedural records with lexical retrieval and optional embedding-backed search. Parent/child multi-agent sessions inherit workspace and authorization context and preserve parent run, session, role, and depth metadata.
 

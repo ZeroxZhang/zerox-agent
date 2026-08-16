@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { buildMcpChildEnv, createMcpClient } from "./mcpClient";
@@ -30,6 +38,21 @@ describe("MCP child environment", () => {
       LANG: "en_US.UTF-8",
       PATH: "/opt/mcp/bin:/usr/bin:/bin",
       MCP_EXPLICIT_TOKEN: "configured-secret",
+    });
+  });
+
+  it("does not accept a caller-supplied private lease path", () => {
+    expect(
+      buildMcpChildEnv(
+        { HOME: "/Users/demo", TMPDIR: "/parent/tmp" },
+        {
+          TMPDIR: "/configured/tmpdir",
+          TMP: "/configured/tmp",
+          TEMP: "/configured/temp",
+        },
+      ),
+    ).toEqual({
+      HOME: "/Users/demo",
     });
   });
 });
@@ -143,12 +166,18 @@ lines.on("line", (line) => {
       "utf8",
     );
     const sandboxPolicies: ProcessSandboxPolicy[] = [];
+    let cleanupCount = 0;
     const client = createMcpClient({
       name: "fixture",
       transport: "stdio",
       command: process.execPath,
       args: [script],
-      processSandbox: passthroughSandbox(sandboxPolicies),
+      processSandbox: passthroughSandbox(
+        sandboxPolicies,
+        () => {
+          cleanupCount += 1;
+        },
+      ),
       sandboxPolicy: {
         mode: "workspace_write",
         workspaceRoot: dir,
@@ -163,6 +192,7 @@ lines.on("line", (line) => {
       });
       setTimeout(() => controller.abort(new Error("cancel fixture")), 25);
       await expect(hanging).rejects.toThrow("cancel fixture");
+      expect(cleanupCount).toBe(1);
 
       await expect(client.callTool("fixture", {})).resolves.toMatchObject({
         ok: true,
@@ -171,6 +201,232 @@ lines.on("line", (line) => {
       expect(sandboxPolicies).toHaveLength(2);
     } finally {
       await client.disconnect();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves abort error and fails closed after lease cleanup failure", async () => {
+    const dir = await mkdtemp(
+      path.join(os.tmpdir(), "zerox-mcp-abort-cleanup-"),
+    );
+    const script = path.join(dir, "server.mjs");
+    await writeFile(
+      script,
+      `import { createInterface } from "node:readline";
+createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.method === "initialize") {
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} }) + "\\n");
+  }
+});\n`,
+      "utf8",
+    );
+    let cleanupCount = 0;
+    const client = createMcpClient({
+      name: "abort-cleanup-fixture",
+      transport: "stdio",
+      command: process.execPath,
+      args: [script],
+      processSandbox: passthroughSandbox([], () => {
+        cleanupCount += 1;
+        throw new Error("abort lease cleanup failed");
+      }),
+      sandboxPolicy: {
+        mode: "workspace_write",
+        workspaceRoot: dir,
+        network: "none",
+      },
+    });
+
+    try {
+      await client.connect();
+      const controller = new AbortController();
+      const call = client.callTool("hang", {}, {
+        signal: controller.signal,
+      });
+      controller.abort(new Error("primary abort"));
+
+      await expect(call).rejects.toThrow("primary abort");
+      expect(cleanupCount).toBe(1);
+      await expect(client.callTool("retry", {})).rejects.toThrow(
+        "abort lease cleanup failed",
+      );
+      await expect(client.disconnect()).rejects.toThrow(
+        "abort lease cleanup failed",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("holds a real private temp until stdio MCP disconnect then removes it", async () => {
+    if (process.platform !== "darwin") return;
+    const dir = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "zerox-mcp-close-")),
+    );
+    const privateTempRoot = await mkdtemp(
+      path.join(os.tmpdir(), "zerox-mcp-private-root-"),
+    );
+    const script = path.join(dir, "server.mjs");
+    const environmentPath = path.join(dir, "environment.json");
+    await writeFile(
+      script,
+      `import { writeFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
+await writeFile(${JSON.stringify(environmentPath)}, JSON.stringify({
+  TMPDIR: process.env.TMPDIR,
+  TMP: process.env.TMP,
+  TEMP: process.env.TEMP,
+}), "utf8");
+createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.method === "initialize") {
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} }) + "\\n");
+  } else if (request.method === "tools/list") {
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { tools: [] } }) + "\\n");
+  }
+});\n`,
+      "utf8",
+    );
+    const client = createMcpClient({
+      name: "close-fixture",
+      transport: "stdio",
+      command: process.execPath,
+      args: [script],
+      env: {
+        TMPDIR: "/private/tmp/forged-dir",
+        TMP: "/private/tmp/forged-tmp",
+        TEMP: "/private/tmp/forged-temp",
+      },
+      processSandbox: createProcessSandboxProvider({
+        tempRoot: privateTempRoot,
+      }),
+      sandboxPolicy: {
+        mode: "workspace_write",
+        workspaceRoot: dir,
+        network: "none",
+      },
+    });
+
+    try {
+      await client.connect();
+      const leases = await readdir(privateTempRoot);
+      expect(leases).toHaveLength(1);
+      const privateTempDir = await realpath(
+        path.join(privateTempRoot, leases[0]!),
+      );
+      expect(JSON.parse(await readFile(environmentPath, "utf8"))).toEqual({
+        TMPDIR: privateTempDir,
+        TMP: privateTempDir,
+        TEMP: privateTempDir,
+      });
+      await expect(client.listTools()).resolves.toEqual([]);
+      await client.disconnect();
+      expect(await readdir(privateTempRoot)).toEqual([]);
+    } finally {
+      await client.disconnect();
+      await Promise.all([
+        rm(dir, { recursive: true, force: true }),
+        rm(privateTempRoot, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  it("awaits the in-flight process lease cleanup during disconnect", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "zerox-mcp-drain-"));
+    const script = path.join(dir, "server.mjs");
+    await writeFile(
+      script,
+      `import { createInterface } from "node:readline";
+createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.method === "initialize") {
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} }) + "\\n");
+  } else if (request.method === "tools/call") {
+    process.exit(1);
+  }
+});\n`,
+      "utf8",
+    );
+    let releaseCleanup!: () => void;
+    const cleanupBlocked = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    let cleanupStarted = false;
+    let cleanupCount = 0;
+    const client = createMcpClient({
+      name: "drain-fixture",
+      transport: "stdio",
+      command: process.execPath,
+      args: [script],
+      processSandbox: passthroughSandbox([], async () => {
+        cleanupStarted = true;
+        cleanupCount += 1;
+        await cleanupBlocked;
+      }),
+      sandboxPolicy: {
+        mode: "workspace_write",
+        workspaceRoot: dir,
+        network: "none",
+      },
+    });
+
+    try {
+      await client.connect();
+      await expect(client.callTool("crash", {})).rejects.toThrow(/exited/);
+      await waitUntil(() => cleanupStarted);
+      let disconnected = false;
+      const disconnect = client.disconnect().then(() => {
+        disconnected = true;
+      });
+      await Promise.resolve();
+      expect(disconnected).toBe(false);
+
+      releaseCleanup();
+      await disconnect;
+      expect(cleanupCount).toBe(1);
+    } finally {
+      releaseCleanup();
+      await client.disconnect();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports cleanup failure when disconnect has no earlier error", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "zerox-mcp-cleanup-"));
+    const script = path.join(dir, "server.mjs");
+    await writeFile(
+      script,
+      `import { createInterface } from "node:readline";
+createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.method === "initialize") {
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} }) + "\\n");
+  }
+});\n`,
+      "utf8",
+    );
+    const client = createMcpClient({
+      name: "cleanup-failure-fixture",
+      transport: "stdio",
+      command: process.execPath,
+      args: [script],
+      processSandbox: passthroughSandbox([], () => {
+        throw new Error("lease cleanup failed");
+      }),
+      sandboxPolicy: {
+        mode: "workspace_write",
+        workspaceRoot: dir,
+        network: "none",
+      },
+    });
+
+    try {
+      await client.connect();
+      await expect(client.disconnect()).rejects.toThrow(
+        "lease cleanup failed",
+      );
+    } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -238,18 +494,34 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
 });\n`,
       "utf8",
     );
+    const sandboxPolicies: ProcessSandboxPolicy[] = [];
+    let cleanupCount = 0;
     const client = createMcpClient({
       name: "retry-budget-fixture",
       transport: "stdio",
       command: process.execPath,
       args: [script],
+      processSandbox: passthroughSandbox(
+        sandboxPolicies,
+        () => {
+          cleanupCount += 1;
+        },
+      ),
+      sandboxPolicy: {
+        mode: "workspace_write",
+        workspaceRoot: dir,
+        network: "none",
+      },
     });
     try {
       await client.connect();
       await waitForLineCount(countFile, 4, 9_000);
       expect((await readFile(countFile, "utf8")).trim().split("\n")).toHaveLength(4);
+      await waitUntil(() => cleanupCount === 4);
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect((await readFile(countFile, "utf8")).trim().split("\n")).toHaveLength(4);
+      expect(sandboxPolicies).toHaveLength(4);
+      expect(cleanupCount).toBe(4);
     } finally {
       await client.disconnect();
       await rm(dir, { recursive: true, force: true });
@@ -259,13 +531,14 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
 
 function passthroughSandbox(
   policies: ProcessSandboxPolicy[],
+  onCleanup: () => void | Promise<void> = () => {},
 ): ProcessSandboxProvider {
   return {
     status() {
       return {
         available: true,
         backend: "seatbelt",
-        enforcement: "write-and-network-none",
+        enforcement: "read-write-and-network-policy",
       };
     },
     confine(argv, policy) {
@@ -273,10 +546,26 @@ function passthroughSandbox(
       return {
         argv,
         backend: "seatbelt",
-        enforcement: "write-and-network-none",
+        enforcement: "read-write-and-network-policy",
         denialSignatures: ["operation not permitted"],
+        readableRoots: [
+          policy.workspaceRoot,
+          ...(policy.extraReadRoots ?? []),
+        ],
         writableRoots: [policy.workspaceRoot],
         network: policy.network,
+        privateTempDir: policy.workspaceRoot,
+        buildChildEnv(parentEnv, configuredEnv = {}) {
+          return {
+            ...buildMcpChildEnv(parentEnv, configuredEnv),
+            TMPDIR: policy.workspaceRoot,
+            TMP: policy.workspaceRoot,
+            TEMP: policy.workspaceRoot,
+          };
+        },
+        async cleanup() {
+          await onCleanup();
+        },
       };
     },
   };
@@ -307,4 +596,14 @@ async function waitForLineCount(
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for ${expected} MCP process starts.`);
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!predicate() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  if (!predicate()) {
+    throw new Error("Timed out waiting for MCP lifecycle condition.");
+  }
 }

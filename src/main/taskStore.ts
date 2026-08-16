@@ -11,6 +11,10 @@ import {
 } from "../shared/scheduledTasks";
 import type { StorageBackend, Storage, TaskRepository } from "../shared/storageContract";
 import { createTaskRepository } from "./storage/repositories/index";
+import {
+  createFailureVisibleSerialQueue,
+  type PersistenceQueueDrainOptions,
+} from "./failureVisibleSerialQueue";
 
 type StoredScheduledTasks = {
   schemaVersion: 1;
@@ -33,6 +37,7 @@ export type ScheduledTaskStore = {
     changedAt?: Date,
   ): Promise<ScheduledTask | null>;
   delete(taskId: string): Promise<boolean>;
+  flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
 export class ScheduledTaskValidationError extends Error {
@@ -49,11 +54,6 @@ export interface ScheduledTaskStoreOptions {
   backend?: StorageBackend;
   /** Storage instance required when backend is sqlite/dual. */
   storage?: Storage;
-}
-
-function shadowWriteError(error: unknown): void {
-  // eslint-disable-next-line no-console
-  console.warn("[storage] dual-write JSON shadow write failed:", String(error));
 }
 
 export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): ScheduledTaskStore {
@@ -248,6 +248,9 @@ export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): Sc
 
       return true;
     },
+    async flushShadowWrites() {
+      return;
+    },
   };
 
   if (backend === "json" || !options.storage) {
@@ -255,14 +258,27 @@ export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): Sc
   }
 
   // --- sqlite / dual ---
-  // Validation + normalization stay on the JSON impl's create path (it throws
-  // ScheduledTaskValidationError); the repository persists + reads. For
-  // recordRun/setEnabled/delete we re-use jsonImpl to compute the updated task
-  // then mirror to the repo.
   const repo: TaskRepository = createTaskRepository(options.storage);
+  const shadowQueue = createFailureVisibleSerialQueue();
 
-  async function jsonCreate(input: ScheduledTaskInput): Promise<ScheduledTask> {
-    return jsonImpl.create(input);
+  function validatedInput(input: ScheduledTaskInput): ScheduledTaskInput {
+    const normalized = normalizeScheduledTaskInput(input);
+    const validation = validateScheduledTaskInput(normalized);
+    if (!validation.valid) {
+      throw new ScheduledTaskValidationError(validation.errors);
+    }
+    return normalized;
+  }
+
+  function enqueueJsonShadow(): void {
+    if (backend !== "dual") {
+      return;
+    }
+    const snapshot: StoredScheduledTasks = {
+      schemaVersion: 1,
+      tasks: repo.list(),
+    };
+    void shadowQueue.enqueue(() => writeStoredTasks(snapshot));
   }
 
   return {
@@ -273,30 +289,53 @@ export function createScheduledTaskStore(options: ScheduledTaskStoreOptions): Sc
       return repo.get(taskId);
     },
     async create(input) {
-      const task = await jsonCreate(input); // validates + normalizes + writes JSON
-      repo.create(task);
+      shadowQueue.assertOpen();
+      const normalized = validatedInput(input);
+      const timestamp = now().toISOString();
+      const task = repo.create({
+        ...normalized,
+        id: createId(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastRunAt: null,
+        nextRunAt: normalized.enabled
+          ? computeNextRunAt(normalized.schedule, new Date(timestamp))
+          : null,
+      });
+      enqueueJsonShadow();
       return task;
     },
     async update(taskId, input, changedAt) {
+      shadowQueue.assertOpen();
       const effectiveChangedAt = changedAt ?? now();
-      const updated = await jsonImpl.update(taskId, input, effectiveChangedAt);
-      if (updated) repo.update(taskId, input, effectiveChangedAt);
+      const updated = repo.update(
+        taskId,
+        validatedInput(input),
+        effectiveChangedAt,
+      );
+      if (updated) enqueueJsonShadow();
       return updated;
     },
     async recordRun(taskId, completedAt) {
-      const updated = await jsonImpl.recordRun(taskId, completedAt);
-      if (updated) repo.recordRun(taskId, completedAt);
+      shadowQueue.assertOpen();
+      const updated = repo.recordRun(taskId, completedAt);
+      if (updated) enqueueJsonShadow();
       return updated;
     },
     async setEnabled(taskId, enabled, changedAt) {
-      const updated = await jsonImpl.setEnabled(taskId, enabled, changedAt);
-      if (updated) repo.setEnabled(taskId, enabled, changedAt);
+      shadowQueue.assertOpen();
+      const updated = repo.setEnabled(taskId, enabled, changedAt);
+      if (updated) enqueueJsonShadow();
       return updated;
     },
     async delete(taskId) {
-      const removed = await jsonImpl.delete(taskId);
-      if (removed) repo.delete(taskId);
+      shadowQueue.assertOpen();
+      const removed = repo.delete(taskId);
+      if (removed) enqueueJsonShadow();
       return removed;
+    },
+    async flushShadowWrites(flushOptions) {
+      await shadowQueue.drain(flushOptions);
     },
   };
 }
@@ -307,5 +346,3 @@ function normalizeStoredTask(task: ScheduledTask): ScheduledTask {
     ...normalizeScheduledTaskInput(task),
   };
 }
-
-export { shadowWriteError };

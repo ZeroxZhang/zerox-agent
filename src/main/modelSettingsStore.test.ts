@@ -448,7 +448,7 @@ describe("model settings store", () => {
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.errors.credentialSource).toContain("不支持环境变量");
+    expect(result.errors?.credentialSource).toContain("不支持环境变量");
   });
 
   it("honors an explicit switch from stored to environment credentials", async () => {

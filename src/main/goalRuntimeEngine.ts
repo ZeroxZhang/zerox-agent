@@ -63,6 +63,7 @@ import {
 import type { AgentContextUsage } from "../shared/contextUsage";
 import type { ProductionKernelDriver } from "./kernel/productionKernelDriver";
 import { runGoalKernelSegment } from "./kernel/goalKernelSegment";
+import { createFailureVisibleSerialQueue } from "./failureVisibleSerialQueue";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -269,13 +270,13 @@ export function createGoalRuntimeEngine(options: {
       const startedAt = now();
       const runId = runOptions?.runId ?? createId();
       const runSignal = runOptions?.signal;
-      let trajectoryQueue: Promise<void> = Promise.resolve();
+      const trajectoryQueue = createFailureVisibleSerialQueue();
       const appendRunTrajectory = (
         type: Parameters<AgentTrajectoryStore["append"]>[1]["type"],
         payload: Record<string, unknown>,
         containsUserText = true,
-      ) => {
-        const write = trajectoryQueue.then(() =>
+      ) =>
+        trajectoryQueue.enqueue(() =>
           appendTrajectory(
             runId,
             type,
@@ -284,12 +285,7 @@ export function createGoalRuntimeEngine(options: {
             runSignal,
           ),
         );
-        trajectoryQueue = write.catch(() => undefined);
-        return write;
-      };
-      const flushTrajectoryWrites = async () => {
-        await trajectoryQueue;
-      };
+      const flushTrajectoryWrites = () => trajectoryQueue.drain();
       const taskId = `goal:${goal.id}`;
       const runContext = extendRunContextForSelectedSkill(
         withGoalRunIdentity(
@@ -1257,7 +1253,6 @@ function buildGoalMilestonePermissionPolicy(
         "npm run harness:check",
         "npm run harness:score",
         "npm run smoke:prod",
-        "node *",
         "git status",
         "git diff",
         "git diff -- *",

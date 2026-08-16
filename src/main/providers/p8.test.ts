@@ -180,7 +180,7 @@ describe("MCP transports", () => {
 
 describe("runGraph model_response + totalUsage (P8 cost model)", () => {
   it("projects model_response nodes and aggregates totalUsage", () => {
-    const run: AgentRunRecord = { id: "run-c", taskId: "t", taskName: "T", skillName: "s", status: "executing", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" };
+    const run: AgentRunRecord = { id: "run-c", taskId: "t", taskName: "T", skillName: "s", status: "running", summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "" };
     const ev = (id: string, seq: number, payload: Record<string, unknown>): AgentTrajectoryEvent => ({
       id, runId: "run-c", type: "model_response", sequence: seq, payload,
       redaction: { containsApiKey: false, containsFileContent: false, containsUserText: false },

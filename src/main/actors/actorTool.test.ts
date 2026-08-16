@@ -8,6 +8,7 @@ import type { SpawnInput } from "./actorRuntime";
 import type { AgentRunContext } from "../../shared/agentWorkspace";
 import { createWorkflowRuntime } from "../workflow/workflowRuntime";
 import { registerDeepResearchWorkflow } from "../workflow/deepResearchWorkflow";
+import type { AgentToolExecutionResult } from "../dynamicToolRegistry";
 
 describe("actor tool registration + execution (P6 activation)", () => {
   it("registers the actor tool and runs spawn+wait via op:run", async () => {
@@ -26,7 +27,7 @@ describe("actor tool registration + execution (P6 activation)", () => {
       { runContext: createRunContext("run_owner") },
     );
     expect(res.ok).toBe(true);
-    expect((res as { result: { summary: string } }).result.summary).toContain("did: research the spec");
+    expect(toolResult<{ summary: string }>(res).summary).toContain("did: research the spec");
   });
 
   it("op:spawn returns an actorId without waiting", async () => {
@@ -39,16 +40,16 @@ describe("actor tool registration + execution (P6 activation)", () => {
       { runContext: createRunContext("run_owner") },
     );
     expect(res.ok).toBe(true);
-    expect((res as { result: { actorId: string } }).result.actorId).toBeTruthy();
+    expect(toolResult<{ actorId: string }>(res).actorId).toBeTruthy();
   });
 
   it("passes run context parentRunId into spawned actors", async () => {
     const registry = createDynamicToolRegistry();
-    let receivedInput: SpawnInput | null = null;
+    const receivedInputs: SpawnInput[] = [];
     const runtime = createActorRuntime({
       deps: {
         runActor: async (input) => {
-          receivedInput = input;
+          receivedInputs.push(input);
           return { status: "done", summary: "ok", filesTouched: [] };
         },
       },
@@ -62,7 +63,7 @@ describe("actor tool registration + execution (P6 activation)", () => {
     );
 
     expect(res.ok).toBe(true);
-    expect(receivedInput?.parentRunId).toBe("run_parent");
+    expect(receivedInputs[0]?.parentRunId).toBe("run_parent");
   });
 
   it("emits a runtime event as soon as an actor is spawned", async () => {
@@ -152,10 +153,9 @@ describe("actor tool registration + execution (P6 activation)", () => {
     );
 
     expect(res.ok).toBe(false);
-    expect((res as { error: string }).error).toContain("user canceled");
-    expect((res as { errorDetails: { status: string } }).errorDetails.status).toBe(
-      "canceled",
-    );
+    if (res.ok) throw new Error("Expected actor cancellation to fail.");
+    expect(res.error).toContain("user canceled");
+    expect(res.errorDetails?.status).toBe("canceled");
   });
 
   it("rejects unknown op", async () => {
@@ -183,7 +183,7 @@ describe("actor tool registration + execution (P6 activation)", () => {
       { op: "spawn", task: "owned work", background: true },
       { runContext: createRunContext("run_a") },
     );
-    const actorId = (spawned as { result: { actorId: string } }).result.actorId;
+    const actorId = toolResult<{ actorId: string }>(spawned).actorId;
 
     const result = await registry.execute(
       ACTOR_TOOL_NAME,
@@ -231,7 +231,7 @@ describe("actor tool registration + execution (P6 activation)", () => {
         signal: controller.signal,
       },
     );
-    const actorId = (spawned as { result: { actorId: string } }).result.actorId;
+    const actorId = toolResult<{ actorId: string }>(spawned).actorId;
 
     controller.abort();
     await expect(runtime.wait(actorId)).resolves.toMatchObject({ status: "canceled" });
@@ -348,7 +348,7 @@ describe("actor tool registration + execution (P6 activation)", () => {
         signal: parent.signal,
       },
     );
-    const actorId = (spawned as { result: { actorId: string } }).result.actorId;
+    const actorId = toolResult<{ actorId: string }>(spawned).actorId;
 
     await expect(executor.execute(
       {
@@ -395,6 +395,15 @@ describe("workflow tool registration + execution (P6 activation)", () => {
     expect(registry.has(WORKFLOW_TOOL_NAME)).toBe(true);
     const res = await registry.execute(WORKFLOW_TOOL_NAME, { op: "list" });
     expect(res.ok).toBe(true);
-    expect((res as { result: { workflows: string[] } }).result.workflows).toContain("deep-research");
+    expect(toolResult<{ workflows: string[] }>(res).workflows).toContain("deep-research");
   });
 });
+
+function toolResult<T extends Record<string, unknown>>(
+  result: AgentToolExecutionResult,
+): T {
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+  return result.result as T;
+}

@@ -25,6 +25,8 @@ model = "ok-model"`,
             embeddingModel: input.embeddingModel,
             temperature: input.temperature,
             maxTokens: input.maxTokens,
+            thinkingEnabled: false,
+            thinkingBudgetTokens: 0,
             hasApiKey: true,
             updatedAt: "2026-06-07T08:00:00.000Z",
           };

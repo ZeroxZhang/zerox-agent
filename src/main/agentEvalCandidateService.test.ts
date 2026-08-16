@@ -165,6 +165,9 @@ function createMemoryRunStore(runs: AgentRunRecord[]): AgentRunStore {
     async list() {
       return runs;
     },
+    async flushShadowWrites() {
+      return;
+    },
   };
 }
 
@@ -178,6 +181,17 @@ function createMemoryTrajectoryStore(
     },
     async list(runId) {
       return trajectories[runId] ?? [];
+    },
+    async appendIfAbsent(runId, _publicationKey, event) {
+      const existing = (trajectories[runId] ?? []).find(
+        (candidate) => candidate.id === event.id,
+      );
+      if (existing) return { appended: false, event: existing };
+      trajectories[runId] = [...(trajectories[runId] ?? []), event];
+      return { appended: true, event };
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
 }

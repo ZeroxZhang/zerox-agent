@@ -31,13 +31,23 @@ planning:
 # 取消注释并修改为你的 MCP 服务器路径以启用
 # mcpServers:
 #   - name: filesystem
+#     transport: stdio
 #     command: npx
 #     args: ["-y", "@anthropic/mcp-server-filesystem", "/path/to/allowed/dir"]
+#     readRoots: ["/path/to/allowed/dir"]
+#     network: false
 #   - name: web-search
+#     transport: stdio
 #     command: npx
 #     args: ["-y", "@anthropic/mcp-server-brave-search"]
+#     network: true
 #     env:
 #       BRAVE_API_KEY: "your-api-key"
+#   - name: remote-search
+#     transport: http
+#     url: https://mcp.example.com/rpc
+#     headers:
+#       authorization: "Bearer configured-token"
 
 # 自定义工具定义
 # 取消注释以启用
@@ -67,11 +77,15 @@ planning:
 
 ## MCP 服务器集成
 
-在 `mcpServers` 配置项中定义 MCP 服务器。应用启动时会自动连接 MCP 服务器，
-发现其中的工具并注册到智能体的工具执行器中。
+在 `mcpServers` 配置项中定义 MCP 服务器并不会自动授予信任。应用只会连接同时满足
+`ZEROX_ENABLE_SKILL_MCP=1` 且精确列入
+`ZEROX_SKILL_MCP_ALLOWLIST=example-mcp-skill/server-name` 的服务器，发现其中的工具并
+注册到智能体的工具执行器中。allowlist 不支持通配符。
 
 支持的 MCP 传输协议：
-- `stdio`：通过标准输入/输出与子进程通信
+- `stdio`：通过标准输入/输出与子进程通信，默认只读 Skill 根目录且禁止网络；
+  `readRoots`、`network` 和 `env` 必须显式声明。
+- `http` / `sse`：远程 HTTPS MCP，可选 `headers`。
 
 ## 自定义工具
 

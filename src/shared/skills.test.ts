@@ -183,6 +183,87 @@ permissions:
     ]);
   });
 
+  it("parses strict stdio, HTTP, and SSE MCP server variants", () => {
+    const parsed = parseSkillMarkdown(`---
+name: mcp-skill
+description: Exercise every supported MCP transport.
+execution:
+  mode: agent
+mcpServers:
+  - name: local-index
+    command: node
+    args: ["server.js"]
+    readRoots: ["./data"]
+    network: false
+  - name: remote-http
+    transport: http
+    url: https://mcp.example.test/rpc
+    headers:
+      x-client: zerox
+  - name: remote-sse
+    transport: sse
+    url: https://mcp.example.test/sse
+---
+
+# MCP
+`);
+
+    expect(parsed.manifest.mcpServers).toEqual([
+      {
+        name: "local-index",
+        transport: "stdio",
+        command: "node",
+        args: ["server.js"],
+        readRoots: ["./data"],
+        network: false,
+      },
+      {
+        name: "remote-http",
+        transport: "http",
+        url: "https://mcp.example.test/rpc",
+        headers: { "x-client": "zerox" },
+      },
+      {
+        name: "remote-sse",
+        transport: "sse",
+        url: "https://mcp.example.test/sse",
+      },
+    ]);
+  });
+
+  it.each([
+    [
+      "mixed stdio and remote fields",
+      `name: bad\ntransport: http\ncommand: node\nurl: https://mcp.example.test`,
+    ],
+    [
+      "insecure remote URL",
+      `name: bad\ntransport: sse\nurl: http://mcp.example.test`,
+    ],
+    [
+      "missing stdio command",
+      `name: bad\ntransport: stdio`,
+    ],
+    [
+      "unknown transport",
+      `name: bad\ntransport: websocket\nurl: https://mcp.example.test`,
+    ],
+  ])("rejects %s MCP configuration", (_label, serverYaml) => {
+    expect(() =>
+      parseSkillMarkdown(`---
+name: invalid-mcp
+description: Invalid MCP manifest.
+execution:
+  mode: agent
+mcpServers:
+  - ${serverYaml.replaceAll("\n", "\n    ")}
+---
+
+# Invalid
+`),
+    ).toThrow(SkillManifestError);
+  });
+
   it("ships the built-in file organizer skill with Chinese product copy", () => {
     const markdown = readFileSync(
       path.join(process.cwd(), "skills/local-file-organizer/SKILL.md"),

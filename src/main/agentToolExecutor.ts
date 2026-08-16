@@ -1,8 +1,6 @@
-import { exec, execFile } from "node:child_process";
 import { access, lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { analyzeShell } from "./tools/shell/shellAnalyzer";
 import type { ChatSessionStore } from "./chatSessionStore";
 import { createWebTools, type WebTools } from "./webTools";
@@ -52,14 +50,16 @@ import {
 import type { SkillDiscoveryResult } from "../shared/skills";
 import { authorizePlanModeTool } from "./planModePolicy";
 import {
+  buildMinimalProcessEnv,
   isProcessSandboxUnavailableError,
   processSandboxPolicyFromRunContext,
   type ConfinedProcess,
   type ProcessSandboxProvider,
 } from "./processSandbox";
-
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
+import {
+  runOwnedProcess,
+  type OwnedProcessResult,
+} from "./ownedProcess";
 
 export type AgentToolExecutionResult =
   | { ok: true; result: Record<string, unknown> }
@@ -269,10 +269,10 @@ function validateToolExecutionRequest(
         errorDetails: { kind: "sandbox_denied", toolName },
       };
     }
-    if (runContext.sandbox.network === "none" && shellPlan.networkAccess) {
+    if (shellPlan.networkAccess) {
       return {
         ok: false,
-        error: `${toolName} refused by network-disabled run sandbox.`,
+        error: `${toolName} refused because process network capability is not granted; use an authorized web tool instead.`,
         errorDetails: { kind: "sandbox_denied", toolName },
       };
     }
@@ -2239,30 +2239,30 @@ async function executeShellCommand(
     }
   }
 
-  try {
-    const result = confined
-      ? await execFileAsync(confined.argv[0]!, [...confined.argv.slice(1)], {
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024,
-          shell: false,
-          ...(signal ? { signal } : {}),
-          ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
-        })
-      : await execAsync(command, {
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024,
-          shell: getShellExecShell(),
-          ...(signal ? { signal } : {}),
-          ...(runContext ? { cwd: runContext.workspaceRoot } : {}),
-        });
-    const durationMs = Date.now() - startedAt;
-
-    return {
+  const processResult = await runOwnedProcess({
+    command: confined?.argv[0] ?? command,
+    args: confined ? confined.argv.slice(1) : [],
+    cwd: runContext?.workspaceRoot,
+    env: confined
+      ? confined.buildChildEnv(process.env)
+      : buildMinimalProcessEnv(process.env),
+    shell: confined ? false : getShellExecShell(),
+    timeoutMs,
+    signal,
+    maxOutputBytes: 1024 * 1024,
+  });
+  const durationMs = Date.now() - startedAt;
+  let executionResult: AgentToolExecutionResult;
+  if (
+    processResult.terminal === "exit" &&
+    processResult.exitCode === 0
+  ) {
+    executionResult = {
       ok: true,
       result: {
         command,
-        stdout: result.stdout,
-        stderr: result.stderr,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
         exitCode: 0,
         durationMs,
         timeoutMs,
@@ -2274,30 +2274,32 @@ async function executeShellCommand(
           : {}),
       },
     };
-  } catch (error) {
-    const durationMs = Date.now() - startedAt;
-    const execError = error as Error & {
-      stdout?: string;
-      stderr?: string;
-      code?: number;
-      signal?: NodeJS.Signals;
-      killed?: boolean;
-    };
+  } else {
     const details = buildShellErrorDetails({
       command,
       timeoutMs,
       durationMs,
-      signal,
-      error: execError,
+      processResult,
       confined,
     });
-
-    return {
+    executionResult = {
       ok: false,
       error: summarizeShellError(details),
       errorDetails: details,
     };
   }
+
+  if (confined) {
+    try {
+      await confined.cleanup();
+    } catch (error) {
+      if (executionResult.ok) {
+        return processSandboxCleanupResult(error);
+      }
+      executionResult = appendShellCleanupFailure(executionResult, error);
+    }
+  }
+  return executionResult;
 }
 
 function processSandboxUnavailableResult(
@@ -2311,6 +2313,32 @@ function processSandboxUnavailableResult(
       kind: "process_sandbox_unavailable",
       backend,
       reason,
+    },
+  };
+}
+
+function processSandboxCleanupResult(error: unknown): AgentToolExecutionResult {
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    ok: false,
+    error: `Process sandbox cleanup failed: ${reason}`,
+    errorDetails: {
+      kind: "process_sandbox_cleanup_failed",
+      reason,
+    },
+  };
+}
+
+function appendShellCleanupFailure(
+  result: Extract<AgentToolExecutionResult, { ok: false }>,
+  error: unknown,
+): AgentToolExecutionResult {
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    ...result,
+    errorDetails: {
+      ...result.errorDetails,
+      processSandboxCleanupFailure: reason,
     },
   };
 }
@@ -2419,34 +2447,30 @@ function buildShellErrorDetails(options: {
   command: string;
   timeoutMs: number;
   durationMs: number;
-  signal?: AbortSignal;
-  error: Error & {
-    stdout?: string;
-    stderr?: string;
-    code?: number;
-    signal?: NodeJS.Signals;
-    killed?: boolean;
-  };
+  processResult: OwnedProcessResult;
   confined?: ConfinedProcess;
 }): Record<string, unknown> {
-  const stdout = options.error.stdout ?? "";
-  const stderr = options.error.stderr ?? "";
-  const exitCode = typeof options.error.code === "number" ? options.error.code : 1;
+  const stdout = options.processResult.stdout;
+  const stderr = options.processResult.stderr;
+  const exitCode = options.processResult.exitCode ?? 1;
   const sandboxDenied = Boolean(
     options.confined &&
       options.confined.denialSignatures.some((signature) =>
         stderr.toLowerCase().includes(signature),
       ),
   );
-  const kind = options.signal?.aborted
-    ? "canceled"
-    : options.durationMs >= options.timeoutMs - 5
-      ? "timeout"
-      : sandboxDenied
-        ? "sandbox_denied"
-      : !stdout.trim() && !stderr.trim()
-        ? "empty_exit"
-        : "exit";
+  const kind =
+    options.processResult.terminal === "canceled"
+      ? "canceled"
+      : options.processResult.terminal === "timeout"
+        ? "timeout"
+        : options.processResult.terminal === "spawn_error"
+          ? "spawn_error"
+          : sandboxDenied
+            ? "sandbox_denied"
+            : !stdout.trim() && !stderr.trim()
+              ? "empty_exit"
+              : "exit";
 
   return {
     kind,
@@ -2456,8 +2480,11 @@ function buildShellErrorDetails(options: {
     stdoutTail: tailText(stdout),
     stderrTail: tailText(stderr),
     exitCode,
-    signal: options.error.signal ?? null,
-    killed: Boolean(options.error.killed),
+    signal: options.processResult.signal,
+    killed: options.processResult.killed,
+    ...(options.processResult.error
+      ? { cause: options.processResult.error.message }
+      : {}),
     durationMs: options.durationMs,
     timeoutMs: options.timeoutMs,
     ...(options.confined
@@ -2479,7 +2506,10 @@ function summarizeShellError(details: Record<string, unknown>): string {
     return `shell_exec 超时：命令超过 ${details.timeoutMs} ms 仍未结束。`;
   }
   if (kind === "sandbox_denied") {
-    return "shell_exec 被 OS 进程沙箱拒绝：命令尝试了未授权的文件写入或网络访问。";
+    return "shell_exec 被 OS 进程沙箱拒绝：命令尝试了未授权的文件读写或网络访问。";
+  }
+  if (kind === "spawn_error") {
+    return `shell_exec 启动失败：${String(details.cause ?? "未知错误")}。`;
   }
 
   const exitCode = Number(details.exitCode ?? 1);

@@ -272,9 +272,13 @@ describe("agent bootstrap service", () => {
       validationStore: {
         async save(snapshot) {
           snapshots.push(snapshot);
+          return snapshot;
         },
         async load() {
           return snapshots.at(-1) ?? null;
+        },
+        async flushShadowWrites() {
+          return;
         },
       },
       now: () => new Date("2026-06-06T09:00:00.000Z"),
@@ -307,6 +311,8 @@ function createModelSettingsStore(
         embeddingModel: "",
         temperature: 0.2,
         maxTokens: 8192,
+        thinkingEnabled: false,
+        thinkingBudgetTokens: 0,
         hasApiKey: false,
         updatedAt: null,
         ...partial,
@@ -405,7 +411,6 @@ function createSkillResult(): SkillDiscoveryResult {
           },
         },
         body: "默认用中文输出。",
-        rawFrontmatter: "",
         rootDir: "/tmp/skills/local-file-organizer",
         skillFile: "/tmp/skills/local-file-organizer/SKILL.md",
       },

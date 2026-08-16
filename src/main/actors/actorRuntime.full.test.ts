@@ -47,7 +47,7 @@ describe("ActorRuntime full (P6)", () => {
       },
     });
     const handle = runtime.spawn({ contextMode: "state", lifecycle: "ephemeral", task: "long", background: true });
-    runtime.send(handle.actorId, { hint: "focus on errors" }, "parent");
+    await runtime.send!(handle.actorId, { hint: "focus on errors" }, "parent");
     // inbox pending is internal; just resolve the actor.
     resolveActor({ status: "done", summary: "ok", filesTouched: [] });
     const outcome = await runtime.wait(handle.actorId);
@@ -231,7 +231,7 @@ describe("registerWorkflowAsSkill", () => {
 describe("runGraph actor/workflow projection (additive)", () => {
   it("projects actor_spawned/actor_done/workflow nodes without dropping existing kinds", () => {
     const run: AgentRunRecord = {
-      id: "run-g", taskId: "task-g", taskName: "T", skillName: "s", status: "executing",
+      id: "run-g", taskId: "task-g", taskName: "T", skillName: "s", status: "running",
       summary: "", events: [], startedAt: "2026-06-19T00:00:00.000Z", finishedAt: "",
     };
     const ev = (id: string, seq: number, type: AgentTrajectoryEvent["type"], payload: Record<string, unknown>): AgentTrajectoryEvent => ({

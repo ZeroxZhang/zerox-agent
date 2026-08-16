@@ -31,6 +31,7 @@ describe("chat session token usage projection", () => {
           totalTokens: 100,
           promptTokens: 70,
           completionTokens: 30,
+          estimated: false,
         },
         plans: [plan],
         goals: [goal],

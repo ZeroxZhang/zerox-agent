@@ -1,7 +1,96 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-15T12:38:00.000+08:00",
+  "updatedAt": "2026-08-16T11:41:45.000+08:00",
   "features": [
+    {
+      "id": "P95-architecture-stability-and-trust-hardening",
+      "priority": 125,
+      "status": "done",
+      "title": "Repair architecture trust boundaries, persistence truth, and runtime stability",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/reviews/P95-architecture-stability-review.md",
+        ".github/workflows/release.yml",
+        "scripts/migrate-to-sqlite.mjs",
+        "src/main/main.ts",
+        "src/main/desktopLifecycle.ts",
+        "src/main/goalChatService.ts",
+        "src/main/goalRuntimeEngine.ts",
+        "src/main/agentRuntimeEngine.ts",
+        "src/main/processSandbox.ts",
+        "src/main/agentToolExecutor.ts",
+        "src/main/toolAuditLog.ts",
+        "src/main/chatService.ts",
+        "src/main/skillRegistry.ts",
+        "src/main/container.ts",
+        "src/main/taskStore.ts",
+        "src/main/agentRunStore.ts",
+        "src/main/agentValidationStore.ts",
+        "src/main/memoryProfileStore.ts",
+        "src/shared/skills.ts",
+        "src/shared/chatOutput.ts",
+        "src/shared/ciWorkflow.test.ts",
+        "src/main/**/*.test.ts"
+      ],
+      "definitionOfDone": [
+        "packaged Electron never loads an untrusted renderer origin and renderer crashes recover within a bounded policy",
+        "model-authored shell and opt-in MCP processes cannot read undeclared user files, inherit secrets, or use undeclared network access",
+        "Goal pause and cancel return only after owned runtime work drains",
+        "trajectory persistence failures remain visible and prevent a false successful Kernel terminal",
+        "SQLite task mutations are SQLite-authoritative and dual JSON shadows are fully tracked, drained, and failure-visible",
+        "migration verification fails closed on parse, write, or count loss",
+        "audit and raw-history persistence recursively redact credentials before disk writes",
+        "Skill MCP transport configuration is a typed end-to-end discriminated contract",
+        "tag release runs the same strict test type gate as local verify",
+        "focused tests, full verify, runtime stress, production smoke, program, harness, audit, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run typecheck:tests",
+        "focused architecture regression tests",
+        "npm run verify",
+        "npm run stress:runtime",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "npm audit --audit-level=high",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P94-src-main-test-type-health",
+      "priority": 124,
+      "status": "done",
+      "title": "Restore strict TypeScript health for src/main tests",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "package.json",
+        "tsconfig.json",
+        "tsconfig.tests.json",
+        "src/main/**/*.test.ts",
+        "src/main/agentGoalPlanner.ts",
+        "src/main/chatService.ts",
+        "src/main/outboundUrlPolicy.ts",
+        "src/shared/packageScripts.test.ts"
+      ],
+      "definitionOfDone": [
+        "all src/main tests belong to an explicit TypeScript project understood by the IDE",
+        "strict test typecheck reports zero diagnostics across src/main and its shared dependencies",
+        "stale fixtures and mocks use current production contracts without unsafe assertion workarounds",
+        "test typecheck is enforced by the standard verification gate",
+        "focused tests, full verify, program, harness, audit, and whitespace gates pass"
+      ],
+      "verification": [
+        "npm run typecheck:tests",
+        "npm test -- --run src/main",
+        "npm run verify",
+        "npm run program:check",
+        "npm run harness:check",
+        "npm audit --audit-level=high",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P93-frontend-kernel-compatibility-and-interaction-review",
       "priority": 123,

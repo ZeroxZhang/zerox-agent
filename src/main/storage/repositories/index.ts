@@ -50,7 +50,9 @@ import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../reposit
 
 export function createTaskRepository(storage: Storage): TaskRepository {
   const db = storage.db;
-  const buildTask = (input: ScheduledTaskInput & { id?: string }): ScheduledTask => {
+  const buildTask = (
+    input: Parameters<TaskRepository["create"]>[0],
+  ): ScheduledTask => {
     const existing = input as ScheduledTaskInput & Partial<ScheduledTask>;
     const now = existing.createdAt ?? new Date().toISOString();
     const normalized = normalizeScheduledTaskInput(input);
@@ -81,7 +83,7 @@ export function createTaskRepository(storage: Storage): TaskRepository {
     get(taskId: string): ScheduledTask | null {
       return getPayloadRow<ScheduledTask>(db, "SELECT payload FROM tasks WHERE id = ?", [taskId]);
     },
-    create(input: ScheduledTaskInput & { id?: string }): ScheduledTask {
+    create(input: Parameters<TaskRepository["create"]>[0]): ScheduledTask {
       const task = buildTask(input);
       persist(task);
       return task;

@@ -5,6 +5,8 @@ import {
   parseSkillMarkdown,
   type SkillDiscoveryError,
   type SkillDiscoveryResult,
+  type SkillMcpRemoteServerConfig,
+  type SkillMcpStdioServerConfig,
   type SkillRecord,
 } from "../shared/skills";
 
@@ -14,13 +16,14 @@ export type SkillGraph = {
   errors: SkillDiscoveryError[];
 };
 
-export type McpServerInitConfig = {
-  name: string;
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
-  sourceSkill: string;
-};
+export type McpServerInitConfig =
+  | (Omit<SkillMcpStdioServerConfig, "readRoots"> & {
+      sourceSkill: string;
+      readRoots: string[];
+    })
+  | (SkillMcpRemoteServerConfig & {
+      sourceSkill: string;
+    });
 
 export type SkillRegistryResult = SkillDiscoveryResult & {
   mcpServers: McpServerInitConfig[];
@@ -30,7 +33,24 @@ export type SkillRegistryResult = SkillDiscoveryResult & {
 export function shouldAutoInitializeSkillMcp(
   env: Record<string, string | undefined>,
 ): boolean {
-  return env.ZEROX_ENABLE_SKILL_MCP === "1";
+  return (
+    env.ZEROX_ENABLE_SKILL_MCP === "1" &&
+    readTrustedSkillMcpAllowlist(env).size > 0
+  );
+}
+
+export function readTrustedSkillMcpAllowlist(
+  env: Record<string, string | undefined>,
+): ReadonlySet<string> {
+  const entries = (env.ZEROX_SKILL_MCP_ALLOWLIST ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return new Set(
+    entries.filter((entry) =>
+      /^[a-z0-9][a-z0-9-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(entry),
+    ),
+  );
 }
 
 function getDefaultSkillDirs(): string[] {
@@ -87,28 +107,80 @@ export async function buildSkillGraph(options: {
 export async function collectSkillMcpConfigs(options: {
   skillsDir: string;
   extraDirs?: string[];
+  skipSystemDirs?: boolean;
+  trustedServers: ReadonlySet<string>;
 }): Promise<McpServerInitConfig[]> {
-  const { skills } = await discoverSkills(options);
+  const { skills } = await discoverSkills({
+    skillsDir: options.skillsDir,
+    extraDirs: options.extraDirs,
+    skipSystemDirs: options.skipSystemDirs,
+    forceRefresh: true,
+  });
   const seen = new Set<string>();
   const configs: McpServerInitConfig[] = [];
 
   for (const skill of skills) {
     if (skill.manifest.mcpServers) {
       for (const server of skill.manifest.mcpServers) {
+        if (
+          !options.trustedServers.has(
+            trustedSkillMcpServerKey(skill.manifest.name, server.name),
+          )
+        ) {
+          continue;
+        }
         if (seen.has(server.name)) continue;
         seen.add(server.name);
-        configs.push({
-          name: server.name,
-          command: server.command,
-          args: server.args,
-          env: server.env,
-          sourceSkill: skill.manifest.name,
-        });
+        configs.push(
+          server.transport === "stdio"
+            ? {
+                ...server,
+                sourceSkill: skill.manifest.name,
+                readRoots: resolveMcpReadRoots(
+                  skill.rootDir,
+                  server.readRoots ?? [],
+                ),
+              }
+            : {
+                ...server,
+                sourceSkill: skill.manifest.name,
+              },
+        );
       }
     }
   }
 
   return configs;
+}
+
+export function trustedSkillMcpServerKey(
+  skillName: string,
+  serverName: string,
+): string {
+  return `${skillName}/${serverName}`;
+}
+
+function resolveMcpReadRoots(
+  skillRoot: string,
+  configuredRoots: readonly string[],
+): string[] {
+  const canonicalSkillRoot = path.resolve(skillRoot);
+  const roots = configuredRoots.map((root) => {
+    const resolved = path.isAbsolute(root)
+      ? path.resolve(root)
+      : path.resolve(canonicalSkillRoot, root);
+    if (
+      !path.isAbsolute(root) &&
+      resolved !== canonicalSkillRoot &&
+      !resolved.startsWith(`${canonicalSkillRoot}${path.sep}`)
+    ) {
+      throw new Error(
+        `MCP read root escapes Skill directory: ${root}`,
+      );
+    }
+    return resolved;
+  });
+  return [...new Set([canonicalSkillRoot, ...roots])];
 }
 
 function resolveDependencyOrder(

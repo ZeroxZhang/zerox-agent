@@ -10,7 +10,7 @@ function makeRun(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
     taskId: "task-1",
     taskName: "Test task",
     skillName: "test",
-    status: "executing",
+    status: "running",
     summary: "",
     events: [],
     startedAt: "2026-06-19T00:00:00.000Z",
@@ -36,7 +36,16 @@ describe("RunRepository", () => {
   it("create + get round-trips the full record", async () => {
     const storage = await createInMemoryStorage();
     const runs = createRunRepository(storage);
-    const run = makeRun({ artifacts: [{ path: "/tmp/x", sha256: "abc" }], childRunIds: ["c1"] });
+    const run = makeRun({
+      artifacts: [{
+        id: "artifact-x",
+        kind: "file",
+        label: "x",
+        path: "/tmp/x",
+        createdAt: "2026-06-19T00:00:00.000Z",
+      }],
+      childRunIds: ["c1"],
+    });
     runs.create(run);
     expect(runs.get("run-1")).toEqual(run);
     expect(runs.get("missing")).toBeNull();
@@ -47,10 +56,10 @@ describe("RunRepository", () => {
     const storage = await createInMemoryStorage();
     const runs = createRunRepository(storage);
     runs.create(makeRun({ summary: "v1" }));
-    runs.create(makeRun({ summary: "v2", status: "done" }));
+    runs.create(makeRun({ summary: "v2", status: "succeeded" }));
     const got = runs.get("run-1");
     expect(got?.summary).toBe("v2");
-    expect(got?.status).toBe("done");
+    expect(got?.status).toBe("succeeded");
     storage.close();
   });
 
@@ -70,10 +79,10 @@ describe("RunRepository", () => {
     const storage = await createInMemoryStorage();
     const runs = createRunRepository(storage);
     runs.create(makeRun());
-    runs.updateStatus("run-1", "done");
-    expect(runs.get("run-1")?.status).toBe("done");
+    runs.updateStatus("run-1", "succeeded");
+    expect(runs.get("run-1")?.status).toBe("succeeded");
     const row = storage.db.prepare("SELECT status FROM runs WHERE id = ?").get<{ status: string }>("run-1");
-    expect(row.status).toBe("done");
+    expect(row?.status).toBe("succeeded");
     storage.close();
   });
 

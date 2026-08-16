@@ -40,7 +40,8 @@ describe("createMcpTransportClient (P8 http/sse MCP activation)", () => {
 
     const result = await client.callTool("search", { q: "quantum" });
     expect(result.ok).toBe(true);
-    expect((result as { result: { results: string[] } }).result.results).toEqual(["hit1", "hit2"]);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.result.results).toEqual(["hit1", "hit2"]);
 
     await client.disconnect();
     expect(client.isConnected()).toBe(false);
@@ -112,10 +113,12 @@ describe("createMcpTransportClient (P8 http/sse MCP activation)", () => {
       {
         resolveHostname: resolvePublicHostname,
         fetch: (async (_url, init) => {
-          observedSignal = init?.signal as AbortSignal;
+          const signal = init?.signal;
+          if (!signal) throw new Error("Expected MCP request cancellation signal.");
+          observedSignal = signal;
           return new Promise<Response>((_resolve, reject) => {
-            observedSignal.addEventListener("abort", () => {
-              reject(observedSignal?.reason);
+            signal.addEventListener("abort", () => {
+              reject(signal.reason);
             }, { once: true });
           });
         }) as typeof fetch,

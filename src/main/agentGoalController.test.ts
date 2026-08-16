@@ -393,7 +393,7 @@ describe("agent goal controller", () => {
     const base = createGoal([milestone("milestone_1")], { status: "executing" });
     await store.save({
       ...base,
-      budget: { ...base.budget, ...budget },
+      budget: { ...base.budget!, ...budget },
       executionUsage: { ...base.executionUsage, ...executionUsage },
     });
     const runtime = createRuntime();
@@ -914,19 +914,11 @@ describe("agent goal controller", () => {
       runtime,
       acceptance: {
         async evaluate() {
-          return {
-            accepted: true,
-            inferentialUsed: true,
-            checkResults: [
-              {
-                checkId: "check_goal_review",
-                kind: "model_review",
-                passed: true,
-                evidenceRefs: ["artifact:goalEvidence"],
-                detail: "Chrome bookmark evidence was accepted.",
-              },
-            ],
-          };
+          return acceptedResult("check_goal_review", {
+            kind: "model_review",
+            detail: "Chrome bookmark evidence was accepted.",
+            evidenceRefs: ["artifact:goalEvidence"],
+          });
         },
         async evaluateGoal() {
           finalGoalReviewCalls += 1;
@@ -963,19 +955,14 @@ describe("agent goal controller", () => {
       runtime,
       acceptance: {
         async evaluate() {
-          return {
-            accepted: true,
-            inferentialUsed: false,
-            checkResults: [
-              {
-                checkId: "check_bookmark_artifact",
-                kind: "file_exists",
-                passed: true,
-                evidenceRefs: ["artifact:bookmark_list", "provenance:bookmark_list"],
-                detail: "File exists with valid provenance: bookmark_list.md",
-              },
+          return acceptedResult("check_bookmark_artifact", {
+            kind: "file_exists",
+            detail: "File exists with valid provenance: bookmark_list.md",
+            evidenceRefs: [
+              "artifact:bookmark_list",
+              "provenance:bookmark_list",
             ],
-          };
+          });
         },
         async evaluateGoal() {
           finalGoalAcceptanceCalls += 1;
@@ -1324,7 +1311,7 @@ describe("agent goal controller", () => {
     const judgePrompts: string[] = [];
     const acceptance = createRealAcceptance({
       workspacePath,
-      complete(request) {
+      async complete(request) {
         judgePrompts.push(
           request.messages.map((message) => message.content).join("\n"),
         );
@@ -1390,7 +1377,7 @@ describe("agent goal controller", () => {
     const judgePrompts: string[] = [];
     const acceptance = createRealAcceptance({
       workspacePath,
-      complete(request) {
+      async complete(request) {
         judgePrompts.push(
           request.messages.map((message) => message.content).join("\n"),
         );
@@ -1729,7 +1716,7 @@ describe("agent goal controller", () => {
       );
       await store.save({
         ...base,
-        budget: { ...base.budget, ...budgetOverride },
+        budget: { ...base.budget!, ...budgetOverride },
         executionUsage: { ...base.executionUsage, ...usageOverride },
       });
       let goalAcceptanceCalls = 0;
@@ -1972,7 +1959,7 @@ describe("agent goal controller", () => {
               fingerprint: "f".repeat(64),
               occurrence: 1,
               verdict: "acceptance_unavailable",
-              failureClass: "infrastructure",
+              failureClass: "judge_unavailable",
               failedCheckIds: ["check_done", "check_done"],
               evidenceRefs: ["artifact:report", "artifact:report"],
               actionSignatures: [],
@@ -2116,7 +2103,7 @@ describe("agent goal controller", () => {
               fingerprint: "f".repeat(64),
               occurrence: 1,
               verdict: "acceptance_unavailable",
-              failureClass: "infrastructure",
+              failureClass: "judge_unavailable",
               failedCheckIds,
               evidenceRefs,
               actionSignatures: [],
@@ -3651,7 +3638,7 @@ describe("agent goal controller", () => {
     const blockedLedger = await store.readLedger("goal_1");
     const certifiedLedger = await store.readLedger("goal_2");
     const ledgerKinds = [...blockedLedger, ...certifiedLedger].map((event) => event.kind);
-    expect(ledgerKinds).toEqual(expect.arrayContaining(expectedKinds));
+    expect(ledgerKinds).toEqual(expect.arrayContaining([...expectedKinds]));
   });
 
   it.each([
@@ -4388,7 +4375,9 @@ describe("agent goal controller", () => {
 
   function createController(options: {
     runtime: GoalRuntimeEngine;
-    acceptance: ReturnType<typeof createAcceptance>;
+    acceptance: Parameters<
+      typeof createAgentGoalController
+    >[0]["acceptance"];
     goalStore?: AgentGoalStore;
     trajectoryStore?: Pick<
       AgentTrajectoryStore,
@@ -4720,7 +4709,7 @@ function evidenceFingerprint(manifest: GoalEvidenceManifest): string {
 function acceptedResult(
   checkId: string,
   overrides: {
-    kind?: "assertion" | "model_review";
+    kind?: "assertion" | "file_exists" | "model_review";
     detail?: string;
     evidenceRefs?: string[];
     evidenceManifest?: GoalEvidenceManifest;
@@ -5027,41 +5016,21 @@ function createDeferredRuntime(): GoalRuntimeEngine & {
 function createAcceptance(options: {
   milestoneAccepted: boolean[];
   goalAccepted?: boolean[];
-}) {
+}): Parameters<typeof createAgentGoalController>[0]["acceptance"] {
   const milestoneAccepted = [...options.milestoneAccepted];
   const goalAccepted = [...(options.goalAccepted ?? [true])];
   return {
     async evaluate() {
       const accepted = milestoneAccepted.shift() ?? false;
-      return {
-        accepted,
-        inferentialUsed: false,
-        checkResults: [
-          {
-            checkId: "check_done",
-            kind: "assertion" as const,
-            passed: accepted,
-            evidenceRefs: [],
-            detail: accepted ? "Accepted." : "Rejected.",
-          },
-        ],
-      };
+      return accepted
+        ? acceptedResult("check_done")
+        : rejectedResult("check_done");
     },
     async evaluateGoal() {
       const accepted = goalAccepted.shift() ?? false;
-      return {
-        accepted,
-        inferentialUsed: false,
-        checkResults: [
-          {
-            checkId: "check_goal",
-            kind: "assertion" as const,
-            passed: accepted,
-            evidenceRefs: [],
-            detail: accepted ? "Goal accepted." : "Goal rejected.",
-          },
-        ],
-      };
+      return accepted
+        ? acceptedResult("check_goal")
+        : rejectedResult("check_goal");
     },
   };
 }

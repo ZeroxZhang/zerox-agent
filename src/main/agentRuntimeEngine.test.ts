@@ -3,7 +3,10 @@ import { createAgentRuntimeEngine } from "./agentRuntimeEngine";
 import type { AgentExecutionStore } from "./agentExecutionStore";
 import type { AgentLearningStore } from "./agentLearningStore";
 import type { AgentRunStore } from "./agentRunStore";
-import type { AgentToolExecutor } from "./agentToolExecutor";
+import {
+  createAgentToolExecutor as createProductionToolExecutor,
+  type AgentToolExecutor,
+} from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type {
@@ -207,6 +210,62 @@ describe("agent runtime engine", () => {
         /^agent-executions\/kernel_scheduled_1\/kernel_scheduled_/,
       ),
     });
+  });
+
+  it("keeps the first observation failure visible after later writes drain", async () => {
+    const bus = new KernelEventBus();
+    const persistedTypes: string[] = [];
+    const trajectoryStore = createMemoryTrajectoryStore([]);
+    trajectoryStore.append = async (_runId, event) => {
+      persistedTypes.push(event.type);
+      if (event.type === "model_request") {
+        throw new Error("model request trajectory failed");
+      }
+      return event;
+    };
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore,
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runLoop(_messages, _profile, loopOptions) {
+        loopOptions.onTurn?.(0, "executing");
+        loopOptions.onModelResponse?.(finalResponse("later success"), 0);
+        return {
+          status: "succeeded",
+          summary: "must not publish success",
+          turns: 1,
+          messages: [],
+          contextSurface: createTestContextSurface(loopOptions.runId!, []),
+          toolCallsExecuted: 0,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("observation_failure"),
+      now: createSteppedClock("2026-08-16T00:00:00.000Z"),
+    });
+
+    await expect(engine.startTask("task_123")).resolves.toMatchObject({
+      ok: true,
+      run: {
+        status: "failed",
+        summary: expect.stringContaining("model request trajectory failed"),
+      },
+    });
+    expect(persistedTypes).toEqual(
+      expect.arrayContaining(["model_request", "model_response"]),
+    );
+    expect(
+      bus.history().filter(
+        (event) => event.type === "run_end" && event.status === "succeeded",
+      ),
+    ).toEqual([]);
   });
 
   it("persists a shared-loop failure before publishing the Kernel terminal event", async () => {
@@ -573,6 +632,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute() {
           return {
             ok: true,
@@ -1014,6 +1074,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute(request) {
           return {
             ok: true,
@@ -1205,6 +1266,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute(request) {
           return registry.execute(request.toolName, request.args);
         },
@@ -1385,6 +1447,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute(request) {
           executedPaths.push(String(request.args.path ?? ""));
           if (request.args.path === "~/Downloads/missing.md") {
@@ -1448,6 +1511,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute() {
           return {
             ok: false,
@@ -1512,6 +1576,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute() {
           return {
             ok: false,
@@ -1581,6 +1646,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute(request) {
           executedPaths.push(String(request.args.path ?? ""));
           return {
@@ -1790,6 +1856,7 @@ describe("agent runtime engine", () => {
         },
       },
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute(request, options) {
           toolContexts.push(options?.runContext);
           return createToolExecutor([]).execute(request);
@@ -1860,6 +1927,7 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: {
+        ...createToolExecutor([]),
         async execute(_request, options) {
           receivedSignal = options?.signal;
           return {
@@ -2135,6 +2203,9 @@ function createTaskStore(task: ScheduledTask | null): ScheduledTaskStore {
     async delete() {
       return false;
     },
+    async flushShadowWrites() {
+      return;
+    },
   };
 }
 
@@ -2146,8 +2217,14 @@ function createMemoryRunStore(): AgentRunStore & { runs: AgentRunRecord[] } {
       runs.push(run);
       return run;
     },
+    async get(runId) {
+      return runs.find((run) => run.id === runId) ?? null;
+    },
     async list() {
       return runs;
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
 }
@@ -2209,6 +2286,19 @@ function createMemoryTrajectoryStore(
     },
     async list() {
       return events;
+    },
+    async appendIfAbsent(_runId, _publicationKey, event) {
+      const existing = events.find(
+        (candidate) => candidate.id === event.id,
+      );
+      if (existing) {
+        return { appended: false, event: existing };
+      }
+      events.push(structuredClone(event));
+      return { appended: true, event };
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
 }
@@ -2325,7 +2415,10 @@ function createWorkspaceService(runContext: AgentRunContext) {
   };
 }
 
-function createToolExecutor(executedTools: string[]): AgentToolExecutor {
+function createToolExecutor(
+  executedTools: string[] = [],
+): AgentToolExecutor {
+  const registry = createProductionToolExecutor().getRegistry();
   return {
     async execute(request) {
       executedTools.push(request.toolName);
@@ -2333,6 +2426,12 @@ function createToolExecutor(executedTools: string[]): AgentToolExecutor {
         ok: true,
         result: { content: "notes" },
       };
+    },
+    getRegistry() {
+      return registry;
+    },
+    hasTool() {
+      return true;
     },
   };
 }

@@ -327,7 +327,15 @@ export interface ActorRepository {
 export interface TaskRepository {
   list(): ScheduledTask[];
   get(taskId: string): ScheduledTask | null;
-  create(input: ScheduledTaskInput & { id?: string }): ScheduledTask;
+  create(
+    input: ScheduledTaskInput &
+      Partial<
+        Pick<
+          ScheduledTask,
+          "id" | "createdAt" | "updatedAt" | "lastRunAt" | "nextRunAt"
+        >
+      >,
+  ): ScheduledTask;
   update(
     taskId: string,
     input: ScheduledTaskInput,

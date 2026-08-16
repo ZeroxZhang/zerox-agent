@@ -320,7 +320,7 @@ function neverSettlingFetch(): typeof fetch {
 }
 
 function abortAwareNeverSettlingFetch(): typeof fetch {
-  return ((_, init?: RequestInit) => new Promise<Response>((_, reject) => {
+  return ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_, reject) => {
     const signal = init?.signal;
     const abort = () => {
       reject(new DOMException("The operation was aborted.", "AbortError"));

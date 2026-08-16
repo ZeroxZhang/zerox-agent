@@ -21,6 +21,14 @@ describe("chat agent evidence recorder", () => {
         async list() {
           return events;
         },
+        async appendIfAbsent(_runId, _publicationKey, event) {
+          const existing = events.find(
+            (candidate) => candidate.id === event.id,
+          );
+          if (existing) return { appended: false, event: existing };
+          events.push(event);
+          return { appended: true, event };
+        },
         async flushShadowWrites() {
           return;
         },

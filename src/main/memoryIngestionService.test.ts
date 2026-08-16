@@ -380,6 +380,11 @@ function chatSession(
     summary: "",
     messageCount: 1,
     ...(archivedAt ? { archivedAt } : {}),
+    work: {
+      source: "idle",
+      status: "idle",
+      updatedAt: "2026-07-05T01:00:00.000Z",
+    },
     updatedAt: "2026-07-05T01:00:00.000Z",
   };
 }

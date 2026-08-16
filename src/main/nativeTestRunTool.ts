@@ -1,12 +1,13 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import type { AgentToolExecutionResult } from "./dynamicToolRegistry";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import {
+  buildMinimalProcessEnv,
   isProcessSandboxUnavailableError,
   processSandboxPolicyFromRunContext,
   type ConfinedProcess,
   type ProcessSandboxProvider,
 } from "./processSandbox";
+import { runOwnedProcess } from "./ownedProcess";
 
 const maxOutputBytes = 1024 * 1024 * 8;
 
@@ -54,139 +55,135 @@ export async function runNativeTestCommand(args: {
     }
   }
 
-  return new Promise((resolve) => {
-    let settled = false;
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    let stdout = "";
-    let stderr = "";
-    let abortHandler: (() => void) | null = null;
-    const settle = (result: AgentToolExecutionResult) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-      if (abortHandler) {
-        args.signal?.removeEventListener("abort", abortHandler);
-      }
-      resolve(result);
-    };
-    const child = confined
-      ? spawn(confined.argv[0]!, [...confined.argv.slice(1)], {
-          cwd: workspaceRoot,
-          shell: false,
-          detached: process.platform !== "win32",
-          stdio: ["ignore", "pipe", "pipe"],
-        })
-      : spawn(command, {
-          cwd: workspaceRoot,
-          shell: true,
-          detached: process.platform !== "win32",
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-
-    child.stdout?.on("data", (chunk: Buffer | string) => {
-      stdout = appendCappedOutput(stdout, chunk);
-    });
-    child.stderr?.on("data", (chunk: Buffer | string) => {
-      stderr = appendCappedOutput(stderr, chunk);
-    });
-    child.once("error", (error) => {
-      settle({
-        ok: false,
-        error: `test_run failed to start: ${error.message}`,
-        errorDetails: {
-          kind: "spawn_error",
-          command,
-          cwd: workspaceRoot,
-          exitCode: null,
-          stdout,
-          stderr,
-          timeoutMs,
-          ...(confined
-            ? {
-                sandboxBackend: confined.backend,
-                sandboxEnforcement: confined.enforcement,
-              }
-            : {}),
-        },
-      });
-    });
-    child.once("close", (exitCode) => {
-      if (exitCode !== 0) {
-        settle({
-          ok: false,
-          error: `test_run failed with exit code ${exitCode ?? 0}.`,
-          errorDetails: {
-            kind: isSandboxDenied(confined, stderr)
-              ? "sandbox_denied"
-              : "exit",
-            command,
-            cwd: workspaceRoot,
-            exitCode: exitCode ?? 0,
-            stdout,
-            stderr,
-            timeoutMs,
-            ...sandboxDetails(confined, stderr),
-          },
-        });
-        return;
-      }
-      settle({
-        ok: true,
-        result: {
-          command,
-          cwd: workspaceRoot,
-          exitCode: 0,
-          stdout,
-          stderr,
-          timeoutMs,
-          ...sandboxDetails(confined, stderr),
-        },
-      });
-    });
-
-    timeoutHandle = setTimeout(() => {
-      terminateProcessTree(child);
-      settle({
-        ok: false,
-        error: `test_run timed out after ${timeoutMs} ms.`,
-        errorDetails: {
-          kind: "timeout",
-          command,
-          cwd: workspaceRoot,
-          exitCode: 0,
-          stdout,
-          stderr,
-          timeoutMs,
-          ...sandboxDetails(confined, stderr),
-        },
-      });
-    }, timeoutMs);
-
-    abortHandler = () => {
-      terminateProcessTree(child);
-      settle({
-        ok: false,
-        error: "test_run was canceled.",
-        errorDetails: {
-          kind: "canceled",
-          command,
-          cwd: workspaceRoot,
-          stdout,
-          stderr,
-          ...sandboxDetails(confined, stderr),
-        },
-      });
-    };
-    args.signal?.addEventListener("abort", abortHandler, { once: true });
-    if (args.signal?.aborted) {
-      abortHandler();
-    }
+  const processResult = await runOwnedProcess({
+    command: confined?.argv[0] ?? command,
+    args: confined ? confined.argv.slice(1) : [],
+    cwd: workspaceRoot,
+    env: confined
+      ? confined.buildChildEnv(process.env)
+      : buildMinimalProcessEnv(process.env),
+    shell: confined ? false : true,
+    timeoutMs,
+    signal: args.signal,
+    maxOutputBytes,
   });
+
+  let result: AgentToolExecutionResult;
+  if (processResult.terminal === "spawn_error") {
+    result = {
+      ok: false,
+      error: `test_run failed to start: ${
+        processResult.error?.message ?? "unknown spawn error"
+      }`,
+      errorDetails: {
+        kind: "spawn_error",
+        command,
+        cwd: workspaceRoot,
+        exitCode: null,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
+        timeoutMs,
+        ...sandboxDetails(confined, processResult.stderr),
+      },
+    };
+  } else if (processResult.terminal === "timeout") {
+    result = {
+      ok: false,
+      error: `test_run timed out after ${timeoutMs} ms.`,
+      errorDetails: {
+        kind: "timeout",
+        command,
+        cwd: workspaceRoot,
+        exitCode: 0,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
+        timeoutMs,
+        ...sandboxDetails(confined, processResult.stderr),
+      },
+    };
+  } else if (processResult.terminal === "canceled") {
+    result = {
+      ok: false,
+      error: "test_run was canceled.",
+      errorDetails: {
+        kind: "canceled",
+        command,
+        cwd: workspaceRoot,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
+        ...sandboxDetails(confined, processResult.stderr),
+      },
+    };
+  } else if (processResult.exitCode !== 0) {
+    result = {
+      ok: false,
+      error: `test_run failed with exit code ${processResult.exitCode ?? 0}.`,
+      errorDetails: {
+        kind: isSandboxDenied(confined, processResult.stderr)
+          ? "sandbox_denied"
+          : "exit",
+        command,
+        cwd: workspaceRoot,
+        exitCode: processResult.exitCode ?? 0,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
+        timeoutMs,
+        ...sandboxDetails(confined, processResult.stderr),
+      },
+    };
+  } else {
+    result = {
+      ok: true,
+      result: {
+        command,
+        cwd: workspaceRoot,
+        exitCode: 0,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
+        timeoutMs,
+        ...sandboxDetails(confined, processResult.stderr),
+      },
+    };
+  }
+
+  if (confined) {
+    try {
+      await confined.cleanup();
+    } catch (error) {
+      return result.ok
+        ? processSandboxCleanupFailure(error)
+        : appendCleanupFailure(result, error);
+    }
+  }
+  return result;
+}
+
+function processSandboxCleanupFailure(
+  error: unknown,
+): AgentToolExecutionResult {
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    ok: false,
+    error: `Process sandbox cleanup failed: ${reason}`,
+    errorDetails: {
+      kind: "process_sandbox_cleanup_failed",
+      reason,
+    },
+  };
+}
+
+function appendCleanupFailure(
+  result: Extract<AgentToolExecutionResult, { ok: false }>,
+  error: unknown,
+): AgentToolExecutionResult {
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    ...result,
+    errorDetails: {
+      ...result.errorDetails,
+      processSandboxCleanupFailure: reason,
+    },
+  };
 }
 
 function processSandboxUnavailable(
@@ -225,53 +222,4 @@ function isSandboxDenied(
       stderr.toLowerCase().includes(signature),
     ),
   );
-}
-
-function appendCappedOutput(
-  current: string,
-  chunk: Buffer | string,
-): string {
-  if (Buffer.byteLength(current) >= maxOutputBytes) {
-    return current;
-  }
-  const next = current + chunk.toString();
-  if (Buffer.byteLength(next) <= maxOutputBytes) {
-    return next;
-  }
-  return Buffer.from(next).subarray(0, maxOutputBytes).toString();
-}
-
-function terminateProcessTree(
-  child: ChildProcess,
-): void {
-  const pid = child.pid;
-  if (!pid) {
-    child.kill("SIGKILL");
-    return;
-  }
-  if (process.platform === "win32") {
-    child.kill("SIGKILL");
-    const treeKiller = spawn(
-      "taskkill",
-      ["/pid", String(pid), "/T", "/F"],
-      { stdio: "ignore", windowsHide: true },
-    );
-    treeKiller.unref();
-    return;
-  }
-
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-
-  const forceKillHandle = setTimeout(() => {
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {
-      // The process group already exited.
-    }
-  }, 250);
-  forceKillHandle.unref();
 }

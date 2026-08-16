@@ -5,8 +5,8 @@ import { createMemoryRepository } from "../storage/repositories/memoryRepository
 import { createSessionRepository } from "../storage/repositories/sessionRepository";
 import { createWorkflowRuntime } from "../workflow/workflowRuntime";
 import { createSelfImprovementService, resolveSelfImprovementMode } from "./selfImprovementService";
-import { rm, mkdirSync } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";

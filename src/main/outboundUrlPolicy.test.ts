@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lookup as dnsLookup } from "node:dns";
+import type { LookupFunction } from "node:net";
 import {
   assertSafeOutboundUrl,
   createSafeOutboundDispatcher,
@@ -50,9 +50,9 @@ describe("outbound URL policy", () => {
     ]],
     [[{ address: "::ffff:7f00:1", family: 6 }]],
   ])("rejects non-public addresses in the connector's actual DNS lookup", async (records) => {
-    const resolver = ((_hostname, _options, callback) => {
+    const resolver: LookupFunction = (_hostname, _options, callback) => {
       callback(null, records, undefined);
-    }) as typeof dnsLookup;
+    };
     const dispatcher = createSafeOutboundDispatcher(resolver);
     try {
       await expect(

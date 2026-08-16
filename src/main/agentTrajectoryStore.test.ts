@@ -209,6 +209,7 @@ describe("agent trajectory store", () => {
     controller.abort(new DOMException("Run canceled.", "AbortError"));
 
     await expect(append).resolves.toEqual(event);
+    await expect(store.flushShadowWrites()).resolves.toBeUndefined();
     const jsonStore = createAgentTrajectoryStore({
       configDir,
       backend: "json",
@@ -230,13 +231,15 @@ describe("agent trajectory store", () => {
     const trajectoriesDir = path.join(configDir, "agent-trajectories");
     await writeFile(trajectoriesDir, "blocks directory creation", "utf8");
 
-    await expect(store.append("run_1", event)).rejects.toMatchObject({
+    await expect(store.append("run_1", event)).resolves.toEqual(event);
+    await expect(store.flushShadowWrites()).rejects.toMatchObject({
       code: "ENOTDIR",
     });
     await expect(store.list("run_1")).resolves.toEqual([event]);
 
     await rm(trajectoriesDir, { force: true });
     await expect(store.append("run_1", event)).resolves.toEqual(event);
+    await expect(store.flushShadowWrites()).resolves.toBeUndefined();
 
     const jsonStore = createAgentTrajectoryStore({
       configDir,
