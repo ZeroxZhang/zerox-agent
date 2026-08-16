@@ -1,8 +1,18 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isProductionStorageSmokeEvidence } from "../shared/productionSmoke";
+import { createAgentEvalCandidateStore } from "./agentEvalCandidateStore";
+import { createAgentExecutionStore } from "./agentExecutionStore";
+import { createAgentGoalStore } from "./agentGoalStore";
+import { createAgentLearningStore } from "./agentLearningStore";
+import { createAgentWorkspaceStore } from "./agentWorkspaceStore";
+import { createPromotedAgentEvalFixtureStore } from "./eval/agentPromotedEvalFixtures";
+import { createMemoryStore } from "./memoryStore";
+import { createMultiAgentSessionStore } from "./multiAgentSessionStore";
+import type { Storage } from "../shared/storageContract";
+import { bootstrapSqliteDomainAuthority } from "./storage/domainAuthorityBootstrap";
 import { createStorageImpl } from "./storage/storageDb";
 import { createScheduledTaskStore } from "./taskStore";
 import { runProductionStorageSmokeProbe } from "./productionSmokeStorage";
@@ -20,37 +30,33 @@ describe("production storage smoke probe", () => {
     await rm(configDir, { recursive: true, force: true });
   });
 
-  it("executes a native SQLite write and observes the matching dual JSON shadow", async () => {
+  it("proves all P97 domains are SQLite-authoritative inside Electron", async () => {
     const storage = createStorageImpl({
       dbPath: path.join(configDir, "zerox.db"),
     });
     const taskId = "production_smoke_task";
-    const taskStore = createScheduledTaskStore({
-      configDir,
-      backend: "dual",
-      storage,
-      createId: () => taskId,
-    });
+    const stores = createSmokeStores(configDir, storage, taskId);
 
     try {
+      await bootstrapSqliteDomainAuthority({ configDir, storage });
       const evidence = await runProductionStorageSmokeProbe({
         configDir,
-        requestedBackend: "dual",
-        resolvedBackend: "dual",
+        requestedBackend: "sqlite",
+        resolvedBackend: "sqlite",
         runtimeVersions: {
           electron: "42.9.0",
           modules: "146",
           node: "24.14.0",
         },
         storage,
-        taskStore,
+        ...stores,
         createId: () => taskId,
       });
 
       expect(isProductionStorageSmokeEvidence(evidence)).toBe(true);
       expect(evidence).toMatchObject({
-        requestedBackend: "dual",
-        resolvedBackend: "dual",
+        requestedBackend: "sqlite",
+        resolvedBackend: "sqlite",
         nativeRuntime: {
           runtime: "electron",
           modulesAbi: "146",
@@ -58,10 +64,12 @@ describe("production storage smoke probe", () => {
         sqlite: {
           foreignKeys: 1,
           taskRowPersisted: true,
-        },
-        dual: {
-          jsonShadowPersisted: true,
           taskId,
+        },
+        authority: {
+          markerCount: 8,
+          domainRowsPersisted: true,
+          legacyJsonShadowsAbsent: true,
         },
       });
       expect(
@@ -69,10 +77,17 @@ describe("production storage smoke probe", () => {
           .prepare("SELECT COUNT(*) AS count FROM tasks WHERE id = ?")
           .get<{ count: number }>(taskId),
       ).toEqual({ count: 1 });
-      const shadow = JSON.parse(
-        await readFile(path.join(configDir, "scheduled-tasks.json"), "utf8"),
-      ) as { tasks: Array<{ id: string }> };
-      expect(shadow.tasks.map((task) => task.id)).toEqual([taskId]);
+      expect(
+        storage.db
+          .prepare("SELECT COUNT(*) AS count FROM domain_authority_state")
+          .get<{ count: number }>(),
+      ).toEqual({ count: 8 });
+      await expect(
+        access(path.join(configDir, "scheduled-tasks.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        access(path.join(configDir, "memory-records.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       storage.close();
     }
@@ -82,18 +97,13 @@ describe("production storage smoke probe", () => {
     const storage = createStorageImpl({
       dbPath: path.join(configDir, "zerox.db"),
     });
-    const taskStore = createScheduledTaskStore({
-      configDir,
-      backend: "dual",
-      storage,
-      createId: () => "must_not_write",
-    });
+    const stores = createSmokeStores(configDir, storage, "must_not_write");
 
     try {
       await expect(
         runProductionStorageSmokeProbe({
           configDir,
-          requestedBackend: "dual",
+          requestedBackend: "sqlite",
           resolvedBackend: "json",
           runtimeVersions: {
             electron: "42.9.0",
@@ -101,7 +111,7 @@ describe("production storage smoke probe", () => {
             node: "24.14.0",
           },
           storage: null,
-          taskStore,
+          ...stores,
         }),
       ).rejects.toThrow(/rejected storage fallback/);
       expect(
@@ -112,3 +122,41 @@ describe("production storage smoke probe", () => {
     }
   });
 });
+
+function createSmokeStores(
+  configDir: string,
+  storage: Storage,
+  taskId: string,
+) {
+  const options = {
+    configDir,
+    backend: "sqlite" as const,
+    storage,
+  };
+  return {
+    taskStore: createScheduledTaskStore({
+      ...options,
+      createId: () => taskId,
+    }),
+    goalStore: createAgentGoalStore(options),
+    executionStore: createAgentExecutionStore(options),
+    memoryStore: createMemoryStore({
+      ...options,
+      createId: () => `memory_${taskId}`,
+    }),
+    workspaceStore: createAgentWorkspaceStore({
+      ...options,
+      createId: () => `workspace_${taskId}`,
+    }),
+    multiAgentSessionStore: createMultiAgentSessionStore({
+      ...options,
+      createId: () => `session_${taskId}`,
+    }),
+    learningStore: createAgentLearningStore({
+      ...options,
+      createId: () => `learning_${taskId}`,
+    }),
+    evalCandidateStore: createAgentEvalCandidateStore(options),
+    promotedFixtureStore: createPromotedAgentEvalFixtureStore(options),
+  };
+}

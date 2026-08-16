@@ -40,6 +40,16 @@ if (
   process.exit(2);
 }
 const exportPlan = args.planBackend === "sqlite";
+const convergedDomains = [
+  "goal",
+  "execution_checkpoint",
+  "memory",
+  "workspace",
+  "multi_agent_session",
+  "learning_candidate",
+  "eval_candidate",
+  "promoted_eval_fixture",
+];
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const { createStorageImpl } = await import(
@@ -58,6 +68,18 @@ const chatRepo = await import(
   path.join(
     root,
     "dist-electron/main/storage/repositories/chatSessionEventRepository.js",
+  )
+);
+const goalStores = await import(
+  path.join(root, "dist-electron/main/agentGoalStore.js")
+);
+const executionStores = await import(
+  path.join(root, "dist-electron/main/agentExecutionStore.js")
+);
+const memoryRepos = await import(
+  path.join(
+    root,
+    "dist-electron/main/storage/repositories/memoryRepository.js",
   )
 );
 const skillSnapshots = await import(
@@ -119,6 +141,20 @@ function assertSafeFileId(id, label) {
   if (!/^[a-zA-Z0-9_-]{1,200}$/.test(id)) {
     throw new Error(`unsafe ${label} id in SQLite: ${id}`);
   }
+}
+
+function toMultiAgentSession(record) {
+  return {
+    id: record.id,
+    title: record.title ?? "",
+    ...(record.rootRunId ? { rootRunId: record.rootRunId } : {}),
+    status: record.status ?? "running",
+    workspaceId: record.workspaceId ?? "",
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    childRunIds: [...(record.childRunIds ?? [])],
+    roles: { ...(record.roles ?? {}) },
+  };
 }
 
 let storage;
@@ -223,6 +259,123 @@ try {
     json({ schemaVersion: 1, latest: validation ?? null }),
   );
   counts.validation_snapshots = validation ? 1 : 0;
+
+  // P97 Goal records and ledgers. Reading through the compiled store preserves
+  // secret stripping, legacy normalization, and acceptance certificate policy.
+  stageDirectory("agent-goals");
+  const goalStore = goalStores.createAgentGoalStore({
+    configDir,
+    backend: "sqlite",
+    storage,
+  });
+  const goalRows = db
+    .prepare("SELECT id FROM goals ORDER BY id ASC")
+    .all();
+  let goalLedgerCount = 0;
+  for (const row of goalRows) {
+    assertSafeFileId(row.id, "Goal");
+    const goal = await goalStore.get(row.id);
+    if (!goal) {
+      throw new Error(`Goal "${row.id}" could not be read for rollback.`);
+    }
+    stageFile(path.join("agent-goals", `${row.id}.json`), json(goal));
+    const ledger = await goalStore.readLedger(row.id);
+    if (ledger.length > 0) {
+      stageFile(
+        path.join("agent-goals", `${row.id}.ledger.jsonl`),
+        jsonl(ledger),
+      );
+    }
+    goalLedgerCount += ledger.length;
+  }
+  counts.goals = goalRows.length;
+  counts.goal_ledger = goalLedgerCount;
+
+  // P97 runtime checkpoints. Other checkpoint kinds remain SQLite-only and
+  // are not misrepresented as legacy AgentExecution files.
+  stageDirectory("agent-executions");
+  const executionStore = executionStores.createAgentExecutionStore({
+    configDir,
+    backend: "sqlite",
+    storage,
+  });
+  const runtimeRunRows = db
+    .prepare(
+      `SELECT DISTINCT run_id
+         FROM checkpoints
+        WHERE kind = 'runtime'
+        ORDER BY run_id ASC`,
+    )
+    .all();
+  for (const row of runtimeRunRows) {
+    assertSafeFileId(row.run_id, "runtime checkpoint run");
+    const checkpoint = await executionStore.get(row.run_id);
+    if (!checkpoint) {
+      throw new Error(
+        `Runtime checkpoint "${row.run_id}" could not be read for rollback.`,
+      );
+    }
+    stageFile(
+      path.join("agent-executions", `${row.run_id}.json`),
+      json(checkpoint),
+    );
+  }
+  counts.runtime_checkpoints = runtimeRunRows.length;
+
+  // P97 Memory.
+  const memories = memoryRepos
+    .createMemoryRepository(storage)
+    .list({ includeArchived: true });
+  stageFile(
+    "memory-records.json",
+    json({ schemaVersion: 1, records: memories }),
+  );
+  counts.memory_records = memories.length;
+
+  // P97 Workspaces.
+  const workspaces = repos.createWorkspaceRepository(storage).list();
+  stageFile(
+    "agent-workspaces.json",
+    json({ schemaVersion: 1, workspaces }),
+  );
+  counts.workspaces = workspaces.length;
+
+  // P97 Multi-Agent Sessions. Repository ordering is stable by updatedAt/id.
+  const multiAgentSessions = sessRepo
+    .createSessionRepository(storage)
+    .listSessions({ kind: "multi_agent" })
+    .map(toMultiAgentSession);
+  stageFile(
+    "multi-agent-sessions.json",
+    json({ schemaVersion: 1, sessions: multiAgentSessions }),
+  );
+  counts.multi_agent_sessions = multiAgentSessions.length;
+
+  // P97 reviewed Learning and Eval candidates.
+  const learningCandidates =
+    repos.createLearningRepository(storage).list();
+  stageFile(
+    "agent-learning-candidates.json",
+    json({ schemaVersion: 1, candidates: learningCandidates }),
+  );
+  counts.learning_candidates = learningCandidates.length;
+
+  const evalCandidates =
+    repos.createEvalCandidateRepository(storage).list();
+  stageFile(
+    "agent-eval-candidates.json",
+    json({ schemaVersion: 1, candidates: evalCandidates }),
+  );
+  counts.eval_candidates = evalCandidates.length;
+
+  // P97 promoted fixtures preserve repository sort_order.
+  const promotedFixtures =
+    repos.createPromotedEvalFixtureRepository(storage).list();
+  stageFile(
+    "agent-promoted-eval-fixtures.json",
+    json({ schemaVersion: 1, fixtures: promotedFixtures }),
+  );
+  counts.promoted_eval_fixtures = promotedFixtures.length;
 
   // Plan is SQLite-authoritative only when the caller confirms that mode.
   if (exportPlan) {
@@ -403,6 +556,26 @@ try {
   );
 }
 
+const markerStorage = createStorageImpl({ dbPath });
+try {
+  const markJsonAuthority = markerStorage.db.prepare(
+    `INSERT INTO domain_authority_state (domain, source, imported_at)
+     VALUES (?, 'json_rollback', ?)
+     ON CONFLICT(domain) DO UPDATE SET
+       source = excluded.source,
+       imported_at = excluded.imported_at`,
+  );
+  const markedAt = new Date().toISOString();
+  const publishMarkers = markerStorage.db.transaction(() => {
+    for (const domain of convergedDomains) {
+      markJsonAuthority.run(domain, markedAt);
+    }
+  });
+  publishMarkers();
+} finally {
+  markerStorage.close();
+}
+
 rmSync(stagingRoot, { recursive: true, force: true });
 console.log(
   JSON.stringify(
@@ -416,7 +589,22 @@ console.log(
         "validation",
         "memory_profile",
         "tool_audit",
+        "goal",
+        "goal_ledger",
+        "execution_checkpoint",
+        "memory",
+        "workspace",
+        "multi_agent_session",
+        "learning_candidate",
+        "eval_candidate",
+        "promoted_eval_fixture",
         ...(exportPlan ? ["plan_sqlite_mode"] : []),
+      ],
+      fileBackedExclusions: [
+        "tool_result_blobs",
+        "workspace_run_ledger",
+        "raw_history",
+        "artifact_payloads",
       ],
       backups,
     },

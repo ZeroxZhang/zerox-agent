@@ -25,8 +25,7 @@ import { searchMemoryRecords } from "../../../shared/memory";
 import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../repositoryUtils";
 
 function recordToRow(record: MemoryRecord) {
-  // P7: dream/distill-sourced memories are project-scoped; others global.
-  const scope: MemoryScope = record.source.type === "dream" || record.source.type === "distill" ? "project" : "global";
+  const scope = deriveScope(record);
   return {
     id: record.id,
     kind: record.kind,
@@ -46,25 +45,74 @@ function recordToRow(record: MemoryRecord) {
   };
 }
 
+function deriveScope(record: MemoryRecord): MemoryScope {
+  if (record.kind === "session") {
+    return "session";
+  }
+  if (record.source.type === "dream" || record.source.type === "distill") {
+    return "project";
+  }
+  return "global";
+}
+
+const insertSql = `INSERT INTO memory_records
+  (id, kind, scope, title, content, tags, importance, embedding, embedded_at,
+   archived_at, archive_reason, source, payload, created_at, updated_at)
+ VALUES
+  (@id, @kind, @scope, @title, @content, @tags, @importance, @embedding,
+   @embedded_at, @archived_at, @archive_reason, @source, @payload, @created_at,
+   @updated_at)`;
+
 export function createMemoryRepository(storage: Storage): MemoryRepository {
   const db = storage.db;
+  const insert = db.prepare(insertSql);
+  const upsert = db.prepare(
+    `${insertSql}
+     ON CONFLICT(id) DO UPDATE SET
+       kind=excluded.kind,
+       scope=excluded.scope,
+       title=excluded.title,
+       content=excluded.content,
+       tags=excluded.tags,
+       importance=excluded.importance,
+       embedding=excluded.embedding,
+       embedded_at=excluded.embedded_at,
+       archived_at=excluded.archived_at,
+       archive_reason=excluded.archive_reason,
+       source=excluded.source,
+       payload=excluded.payload,
+       updated_at=excluded.updated_at`,
+  );
+  const replaceAll = db.transaction((
+    records: readonly MemoryRecord[],
+    expectedRecords?: readonly MemoryRecord[],
+  ) => {
+    if (expectedRecords) {
+      const current = selectPayloadRows<MemoryRecord>(
+        db,
+        "SELECT payload FROM memory_records ORDER BY id ASC",
+      );
+      if (canonicalRecords(current) !== canonicalRecords(expectedRecords)) {
+        throw new Error(
+          "Memory repository changed before the authoritative transaction committed.",
+        );
+      }
+    }
+    db.prepare("DELETE FROM memory_records").run();
+    for (const record of records) {
+      insert.run(recordToRow(record));
+    }
+  });
 
   return {
     write(record: Omit<MemoryRecord, "id"> & { id: string }): string {
       const full = record as MemoryRecord;
-      const row = recordToRow(full);
-      db.prepare(
-        `INSERT INTO memory_records
-           (id, kind, scope, title, content, tags, importance, embedding, embedded_at, archived_at, archive_reason, source, payload, created_at, updated_at)
-         VALUES (@id, @kind, @scope, @title, @content, @tags, @importance, @embedding, @embedded_at, @archived_at, @archive_reason, @source, @payload, @created_at, @updated_at)
-         ON CONFLICT(id) DO UPDATE SET
-           kind=excluded.kind, scope=excluded.scope, title=excluded.title, content=excluded.content,
-           tags=excluded.tags, importance=excluded.importance, embedding=excluded.embedding,
-           embedded_at=excluded.embedded_at, archived_at=excluded.archived_at,
-           archive_reason=excluded.archive_reason, source=excluded.source, payload=excluded.payload,
-           updated_at=excluded.updated_at`,
-      ).run(row);
+      upsert.run(recordToRow(full));
       return record.id;
+    },
+
+    replaceAll(records, expectedRecords): void {
+      replaceAll(records, expectedRecords);
     },
 
     get(id: string): MemoryRecord | null {
@@ -76,27 +124,30 @@ export function createMemoryRepository(storage: Storage): MemoryRepository {
     },
 
     search(query: MemorySearchOptions): MemorySearchResult[] {
-      // 1. Fetch candidate records (kind + archived filters in SQL).
-      const kind = query.kind && query.kind !== "all" ? query.kind : null;
-      const includeArchived = query.includeArchived ?? false;
-      let candidates: MemoryRecord[];
-      if (kind) {
-        candidates = selectPayloadRows<MemoryRecord>(
-          db,
-          includeArchived
-            ? "SELECT payload FROM memory_records WHERE kind = ?"
-            : "SELECT payload FROM memory_records WHERE kind = ? AND archived_at IS NULL",
-          [kind],
-        );
-      } else {
-        candidates = selectPayloadRows<MemoryRecord>(
-          db,
-          includeArchived
-            ? "SELECT payload FROM memory_records"
-            : "SELECT payload FROM memory_records WHERE archived_at IS NULL",
-        );
+      const clauses: string[] = [];
+      const params: unknown[] = [];
+      if (query.kind && query.kind !== "all") {
+        clauses.push("kind = ?");
+        params.push(query.kind);
       }
-      // 2. Delegate ranking to the shared pure function (parity with JSON store).
+      if (!query.includeArchived) {
+        clauses.push("archived_at IS NULL");
+      }
+      if (query.sessionId) {
+        clauses.push(
+          `(kind <> 'session' OR (
+             json_extract(payload, '$.source.type') = 'chat_session'
+             AND json_extract(payload, '$.source.sessionId') = ?
+           ))`,
+        );
+        params.push(query.sessionId);
+      }
+      const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+      const candidates = selectPayloadRows<MemoryRecord>(
+        db,
+        `SELECT payload FROM memory_records${where}`,
+        params,
+      );
       return searchMemoryRecords(candidates, query);
     },
 
@@ -137,22 +188,24 @@ export function createMemoryRepository(storage: Storage): MemoryRepository {
     list(options?: MemoryListOptions): MemoryRecord[] {
       const kind = options?.kind && options?.kind !== "all" ? options.kind : null;
       const includeArchived = options?.includeArchived ?? false;
-      const limit = options?.limit ?? 1000;
+      const clauses: string[] = [];
+      const params: unknown[] = [];
       if (kind) {
-        return selectPayloadRows<MemoryRecord>(
-          db,
-          includeArchived
-            ? "SELECT payload FROM memory_records WHERE kind = ? ORDER BY updated_at DESC LIMIT ?"
-            : "SELECT payload FROM memory_records WHERE kind = ? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT ?",
-          [kind, limit],
-        );
+        clauses.push("kind = ?");
+        params.push(kind);
+      }
+      if (!includeArchived) {
+        clauses.push("archived_at IS NULL");
+      }
+      const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+      const limit = options?.limit === undefined ? "" : " LIMIT ?";
+      if (options?.limit !== undefined) {
+        params.push(options.limit);
       }
       return selectPayloadRows<MemoryRecord>(
         db,
-        includeArchived
-          ? "SELECT payload FROM memory_records ORDER BY updated_at DESC LIMIT ?"
-          : "SELECT payload FROM memory_records WHERE archived_at IS NULL ORDER BY updated_at DESC LIMIT ?",
-        [limit],
+        `SELECT payload FROM memory_records${where} ORDER BY rowid ASC${limit}`,
+        params,
       );
     },
 
@@ -168,4 +221,10 @@ export function decodeEmbedding(blob: Buffer | null): number[] | null {
   if (!blob) return null;
   const parsed = parseJson<number[]>(blob.toString("utf8"));
   return parsed;
+}
+
+function canonicalRecords(records: readonly MemoryRecord[]): string {
+  return JSON.stringify(
+    [...records].sort((left, right) => left.id.localeCompare(right.id)),
+  );
 }

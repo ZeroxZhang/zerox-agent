@@ -9,7 +9,7 @@ import type {
   AgentArtifactProvenanceManifest,
   WriteArtifactProvenanceInput,
 } from "../../../shared/agentArtifactProvenance";
-import type { AgentWorkspace, AgentWorkspaceInput } from "../../../shared/agentWorkspace";
+import type { AgentWorkspace } from "../../../shared/agentWorkspace";
 import type { ScheduledTask, ScheduledTaskInput } from "../../../shared/scheduledTasks";
 import {
   computeNextRunAt,
@@ -23,18 +23,19 @@ import type {
 } from "../../../shared/agentLearning";
 import type {
   AgentEvalCandidate,
+  AgentEvalCandidateFixture,
   AgentEvalCandidateListOptions,
   AgentEvalCandidateStatus,
 } from "../../../shared/agentEvalCandidate";
 import type { ToolAuditEvent, ToolAuditEventInput } from "../../../shared/toolPermissions";
 import type { AgentBootstrapValidationSnapshot } from "../../../shared/agentBootstrap";
 import type { MemoryProfileDocument } from "../../../shared/memoryProfile";
-import type { AgentEvalFixture } from "../../eval/agentEvalFixtures";
 import type {
   ArtifactRepository,
   EvalCandidateRepository,
   LearningRepository,
   MemoryProfileRepository,
+  PromotedEvalFixtureRepository,
   Storage,
   TaskRepository,
   ToolAuditRepository,
@@ -222,26 +223,17 @@ export function createWorkspaceRepository(storage: Storage): WorkspaceRepository
     updated_at: w.updatedAt,
     last_used_at: w.lastUsedAt ?? null,
   });
-  const createFromInput = (input: AgentWorkspaceInput): AgentWorkspace => {
-    const now = new Date().toISOString();
-    return {
-      id: randomUUID(),
-      name: input.name,
-      rootPath: input.rootPath,
-      kind: input.kind,
-      cleanup: input.cleanup,
-      ...(input.git ? { git: input.git } : {}),
-      createdAt: now,
-      updatedAt: now,
-      lastUsedAt: null,
-    };
-  };
   return {
     get(id: string): AgentWorkspace | null {
       return getPayloadRow<AgentWorkspace>(db, "SELECT payload FROM workspaces WHERE id = ?", [id]);
     },
     list(): AgentWorkspace[] {
-      return selectPayloadRows<AgentWorkspace>(db, "SELECT payload FROM workspaces ORDER BY updated_at DESC");
+      return selectPayloadRows<AgentWorkspace>(
+        db,
+        `SELECT payload
+           FROM workspaces
+          ORDER BY COALESCE(last_used_at, updated_at) DESC, id DESC`,
+      );
     },
     save(workspace: AgentWorkspace): AgentWorkspace {
       const row = toRow(workspace);
@@ -254,17 +246,6 @@ export function createWorkspaceRepository(storage: Storage): WorkspaceRepository
            payload=excluded.payload, updated_at=excluded.updated_at, last_used_at=excluded.last_used_at`,
       ).run(row);
       return workspace;
-    },
-    create(input: AgentWorkspaceInput): AgentWorkspace {
-      const ws = createFromInput(input);
-      return this.save(ws);
-    },
-    touch(id: string): AgentWorkspace | null {
-      const existing = this.get(id);
-      if (!existing) return null;
-      const now = new Date().toISOString();
-      const updated: AgentWorkspace = { ...existing, lastUsedAt: now, updatedAt: now };
-      return this.save(updated);
     },
     delete(id: string): boolean {
       return db.prepare("DELETE FROM workspaces WHERE id = ?").run(id).changes > 0;
@@ -343,7 +324,7 @@ export function createArtifactRepository(storage: Storage): ArtifactRepository {
 export function createLearningRepository(storage: Storage): LearningRepository {
   const db = storage.db;
   return {
-    create(input: AgentLearningCandidateInput): AgentLearningCandidate {
+    create(input: Parameters<LearningRepository["create"]>[0]): AgentLearningCandidate {
       const existing = input as AgentLearningCandidateInput & Partial<AgentLearningCandidate>;
       const now = existing.createdAt ?? new Date().toISOString();
       const candidate: AgentLearningCandidate = {
@@ -371,40 +352,61 @@ export function createLearningRepository(storage: Storage): LearningRepository {
       return candidate;
     },
     list(options?: AgentLearningListOptions): AgentLearningCandidate[] {
+      if (options?.status && options.type) {
+        return selectPayloadRows<AgentLearningCandidate>(
+          db,
+          `SELECT payload
+             FROM learning_candidates
+            WHERE status = ? AND type = ?
+            ORDER BY created_at ASC, rowid ASC`,
+          [options.status, options.type],
+        );
+      }
       if (options?.status) {
         return selectPayloadRows<AgentLearningCandidate>(
           db,
-          "SELECT payload FROM learning_candidates WHERE status = ? ORDER BY created_at DESC",
+          `SELECT payload
+             FROM learning_candidates
+            WHERE status = ?
+            ORDER BY created_at ASC, rowid ASC`,
           [options.status],
         );
       }
       if (options?.type) {
         return selectPayloadRows<AgentLearningCandidate>(
           db,
-          "SELECT payload FROM learning_candidates WHERE type = ? ORDER BY created_at DESC",
+          `SELECT payload
+             FROM learning_candidates
+            WHERE type = ?
+            ORDER BY created_at ASC, rowid ASC`,
           [options.type],
         );
       }
       return selectPayloadRows<AgentLearningCandidate>(
         db,
-        "SELECT payload FROM learning_candidates ORDER BY created_at DESC",
+        "SELECT payload FROM learning_candidates ORDER BY created_at ASC, rowid ASC",
       );
     },
-    setStatus(candidateId: string, status: AgentLearningCandidateStatus): AgentLearningCandidate | null {
-      const existing = getPayloadRow<AgentLearningCandidate>(
-        db,
-        "SELECT payload FROM learning_candidates WHERE id = ?",
-        [candidateId],
-      );
-      if (!existing) return null;
-      const updated: AgentLearningCandidate = { ...existing, status, updatedAt: new Date().toISOString() };
-      db.prepare("UPDATE learning_candidates SET status = ?, payload = ?, updated_at = ? WHERE id = ?").run(
+    setStatus(
+      candidateId: string,
+      status: AgentLearningCandidateStatus,
+      updatedAt = new Date().toISOString(),
+    ): AgentLearningCandidate | null {
+      const row = db.prepare(
+        `UPDATE learning_candidates
+            SET status = ?,
+                payload = json_set(payload, '$.status', ?, '$.updatedAt', ?),
+                updated_at = ?
+          WHERE id = ?
+          RETURNING payload`,
+      ).get<{ payload: string }>(
         status,
-        jsonify(updated),
-        updated.updatedAt,
+        status,
+        updatedAt,
+        updatedAt,
         candidateId,
       );
-      return updated;
+      return parseJson<AgentLearningCandidate>(row?.payload);
     },
   };
 }
@@ -415,56 +417,115 @@ export function createLearningRepository(storage: Storage): LearningRepository {
 
 export function createEvalCandidateRepository(storage: Storage): EvalCandidateRepository {
   const db = storage.db;
+  const findByIdentity = (
+    candidate: AgentEvalCandidate,
+  ): AgentEvalCandidate | null =>
+    getPayloadRow<AgentEvalCandidate>(
+      db,
+      `SELECT payload
+         FROM eval_candidates
+        WHERE id = ?
+           OR (source_run_id = ? AND fixture_id = ?)
+        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, rowid ASC
+        LIMIT 1`,
+      [
+        candidate.id,
+        candidate.sourceRunId,
+        candidate.fixture.id,
+        candidate.id,
+      ],
+    );
   return {
     create(candidate: AgentEvalCandidate): AgentEvalCandidate {
       db.prepare(
-        `INSERT OR REPLACE INTO eval_candidates (id, source_run_id, status, payload, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(candidate.id, candidate.sourceRunId, candidate.status, jsonify(candidate), candidate.createdAt, candidate.updatedAt);
-      return candidate;
+        `INSERT INTO eval_candidates (
+           id,
+           source_run_id,
+           fixture_id,
+           status,
+           payload,
+           created_at,
+           updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO NOTHING`,
+      ).run(
+        candidate.id,
+        candidate.sourceRunId,
+        candidate.fixture.id,
+        candidate.status,
+        jsonify(candidate),
+        candidate.createdAt,
+        candidate.updatedAt,
+      );
+      return findByIdentity(candidate) ?? candidate;
+    },
+    get(candidateId: string): AgentEvalCandidate | null {
+      return getPayloadRow<AgentEvalCandidate>(
+        db,
+        "SELECT payload FROM eval_candidates WHERE id = ?",
+        [candidateId],
+      );
     },
     list(options?: AgentEvalCandidateListOptions): AgentEvalCandidate[] {
       if (options?.status) {
         return selectPayloadRows<AgentEvalCandidate>(
           db,
-          "SELECT payload FROM eval_candidates WHERE status = ? ORDER BY created_at DESC",
+          `SELECT payload
+             FROM eval_candidates
+            WHERE status = ?
+            ORDER BY created_at ASC, rowid ASC`,
           [options.status],
         );
       }
       return selectPayloadRows<AgentEvalCandidate>(
         db,
-        "SELECT payload FROM eval_candidates ORDER BY created_at DESC",
+        "SELECT payload FROM eval_candidates ORDER BY created_at ASC, rowid ASC",
       );
     },
-    setStatus(candidateId: string, status: AgentEvalCandidateStatus): AgentEvalCandidate | null {
-      const existing = getPayloadRow<AgentEvalCandidate>(
-        db,
-        "SELECT payload FROM eval_candidates WHERE id = ?",
-        [candidateId],
-      );
-      if (!existing) return null;
-      const updated: AgentEvalCandidate = { ...existing, status, updatedAt: new Date().toISOString() };
-      db.prepare("UPDATE eval_candidates SET status = ?, payload = ?, updated_at = ? WHERE id = ?").run(
+    setStatus(
+      candidateId: string,
+      status: AgentEvalCandidateStatus,
+      updatedAt = new Date().toISOString(),
+    ): AgentEvalCandidate | null {
+      const row = db.prepare(
+        `UPDATE eval_candidates
+            SET status = ?,
+                payload = json_set(payload, '$.status', ?, '$.updatedAt', ?),
+                updated_at = ?
+          WHERE id = ?
+          RETURNING payload`,
+      ).get<{ payload: string }>(
         status,
-        jsonify(updated),
-        updated.updatedAt,
+        status,
+        updatedAt,
+        updatedAt,
         candidateId,
       );
-      return updated;
+      return parseJson<AgentEvalCandidate>(row?.payload);
     },
     transitionStatus(
       candidateId: string,
       expected: AgentEvalCandidateStatus,
       next: AgentEvalCandidateStatus,
+      updatedAt = new Date().toISOString(),
     ): AgentEvalCandidate | null {
-      // CAS: only update if current status matches expected.
-      const existing = getPayloadRow<AgentEvalCandidate>(
-        db,
-        "SELECT payload FROM eval_candidates WHERE id = ?",
-        [candidateId],
+      const row = db.prepare(
+        `UPDATE eval_candidates
+            SET status = ?,
+                payload = json_set(payload, '$.status', ?, '$.updatedAt', ?),
+                updated_at = ?
+          WHERE id = ? AND status = ?
+          RETURNING payload`,
+      ).get<{ payload: string }>(
+        next,
+        next,
+        updatedAt,
+        updatedAt,
+        candidateId,
+        expected,
       );
-      if (!existing || existing.status !== expected) return null;
-      return this.setStatus(candidateId, next);
+      return parseJson<AgentEvalCandidate>(row?.payload);
     },
   };
 }
@@ -520,27 +581,46 @@ export function createMemoryProfileRepository(storage: Storage): MemoryProfileRe
 // PromotedEvalFixtureRepository
 // ---------------------------------------------------------------------------
 
-export interface PromotedEvalFixtureRepository {
-  list(): AgentEvalFixture[];
-  upsert(fixture: AgentEvalFixture): AgentEvalFixture;
-}
-
 export function createPromotedEvalFixtureRepository(
   storage: Storage,
 ): PromotedEvalFixtureRepository {
   const db = storage.db;
   return {
-    list(): AgentEvalFixture[] {
-      return selectPayloadRows<AgentEvalFixture>(
+    list(): AgentEvalCandidateFixture[] {
+      return selectPayloadRows<AgentEvalCandidateFixture>(
         db,
-        "SELECT payload FROM promoted_eval_fixtures ORDER BY created_at ASC",
+        `SELECT payload
+           FROM promoted_eval_fixtures
+          ORDER BY sort_order ASC, created_at ASC, rowid ASC`,
       );
     },
-    upsert(fixture: AgentEvalFixture): AgentEvalFixture {
+    upsert(
+      fixture: AgentEvalCandidateFixture,
+      options,
+    ): AgentEvalCandidateFixture {
       db.prepare(
-        `INSERT OR REPLACE INTO promoted_eval_fixtures (id, source_candidate_id, payload, created_at)
-         VALUES (?, ?, ?, ?)`,
-      ).run(fixture.id, null, jsonify(fixture), new Date().toISOString());
+        `INSERT INTO promoted_eval_fixtures (
+           id,
+           source_candidate_id,
+           payload,
+           created_at,
+           sort_order
+         )
+         SELECT ?, ?, ?, ?, COALESCE(MAX(sort_order), 0) + 1
+           FROM promoted_eval_fixtures
+          WHERE 1
+         ON CONFLICT(id) DO UPDATE SET
+           source_candidate_id = COALESCE(
+             excluded.source_candidate_id,
+             promoted_eval_fixtures.source_candidate_id
+           ),
+           payload = excluded.payload`,
+      ).run(
+        fixture.id,
+        options?.sourceCandidateId ?? null,
+        jsonify(fixture),
+        options?.createdAt ?? new Date().toISOString(),
+      );
       return fixture;
     },
   };

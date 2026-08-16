@@ -22,7 +22,7 @@
     "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
     "eval:memory:built": "node scripts/run-memory-evals.mjs",
     "harness:check": "node scripts/check-harness-state.mjs",
-    "program:check": "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs",
+    "program:check": "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs",
     "harness:score": "npm run build && node scripts/run-harness-score.mjs",
     "harness:score:built": "node scripts/run-harness-score.mjs",
     "episode:export": "npm run build && node scripts/export-agent-episode.mjs",

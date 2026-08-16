@@ -1,7 +1,61 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T17:15:00.000+08:00",
+  "updatedAt": "2026-08-16T19:48:03.000+08:00",
   "features": [
+    {
+      "id": "P97-sqlite-domain-storage-convergence",
+      "priority": 127,
+      "status": "done",
+      "title": "Converge remaining core domain stores on SQLite authority",
+      "files": [
+        "AGENTS.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/storage-convergence-program.json",
+        ".zerox/storage-convergence-program.md",
+        ".zerox/decisions/SC01-storage-convergence-program.md",
+        ".zerox/reviews/P97-storage-convergence-review.md",
+        "package.json",
+        "scripts/check-harness-state.mjs",
+        "scripts/check-storage-convergence-program.mjs",
+        "scripts/migrate-to-sqlite.mjs",
+        "scripts/rollback-sqlite-to-json.mjs",
+        "src/shared/storageContract.ts",
+        "src/shared/storageConvergenceProgram.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "src/main/container.ts",
+        "src/main/agentGoalStore.ts",
+        "src/main/agentExecutionStore.ts",
+        "src/main/memoryStore.ts",
+        "src/main/agentWorkspaceStore.ts",
+        "src/main/multiAgentSessionStore.ts",
+        "src/main/agentLearningStore.ts",
+        "src/main/agentEvalCandidateStore.ts",
+        "src/main/eval/agentPromotedEvalFixtures.ts",
+        "src/main/storage/**/*.ts",
+        "src/main/**/*.test.ts"
+      ],
+      "definitionOfDone": [
+        "one machine-readable program defines per-domain authority, dependency order, rollback, and explicit file-backed exclusions before runtime cutover",
+        "Goal and checkpoint persistence preserve conditional writes, irreversible terminal truth, acceptance certificates, ledgers, restart recovery, and Kernel settlement order on SQLite",
+        "Memory preserves embedding, hybrid search, reranking, maintenance, governance, session isolation, and reviewed learning semantics on SQLite",
+        "Workspace, Multi-Agent Session, Learning, Eval Candidate, and promoted fixture stores use SQLite authority with failure-visible dual shadows and atomic compatibility",
+        "file-backed exclusions such as scoped large tool-result blobs remain explicit and cannot be misrepresented as SQLite-authoritative",
+        "migration and rollback round trips preserve every converged domain and never overwrite a newer authority with a stale generation",
+        "independent architecture, security, and test engineers accept focused, full verify, runtime stress, real Seatbelt, Electron SQLite smoke, program, harness, audit, and whitespace evidence"
+      ],
+      "verification": [
+        "npm run typecheck:tests",
+        "focused storage convergence regression tests",
+        "npm run verify",
+        "npm run stress:runtime",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "npm audit --audit-level=high",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P96-architecture-efficiency-and-consistency-hardening",
       "priority": 126,

@@ -89,13 +89,14 @@ let taskSchedulerTimer: NodeJS.Timeout | null = null;
 let memoryMaintenanceTimer: NodeJS.Timeout | null = null;
 let appUpdateTimer: NodeJS.Timeout | null = null;
 let unsubscribeKernelEvents: (() => void) | null = null;
+let startupComplete = false;
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (app.isReady()) createMainWindow();
+    if (app.isReady() && startupComplete) createMainWindow();
   });
 }
 
@@ -587,8 +588,9 @@ async function runProductionStorageSmokeCheck(): Promise<ProductionStorageSmokeC
       required: true,
       passed: true,
       message:
-        ` Native SQLite dual-path passed (Electron ABI ${evidence.nativeRuntime.modulesAbi}, ` +
-        `migrations=${evidence.sqlite.migrationCount}, task=${evidence.dual.taskId}).`,
+        ` Native SQLite authority passed (Electron ABI ${evidence.nativeRuntime.modulesAbi}, ` +
+        `migrations=${evidence.sqlite.migrationCount}, domains=${evidence.authority.markerCount}, ` +
+        `task=${evidence.sqlite.taskId}).`,
       evidence,
     };
   } catch (error) {
@@ -886,6 +888,7 @@ function stopAppUpdateScheduler() {
 }
 
 app.whenReady().then(async () => {
+  await container.initializeStorageConvergence();
   registerAllIpcHandlers(container, {
     appUpdateService,
     isTrustedSender: isTrustedRendererIpcEvent,
@@ -918,6 +921,7 @@ app.whenReady().then(async () => {
   } catch {
     // Icon is cosmetic; don't block startup on failure
   }
+  startupComplete = true;
   if (
     shouldCreateMainWindowAtStartup(
       Boolean(app.getLoginItemSettings().wasOpenedAsHidden),
@@ -946,6 +950,13 @@ app.whenReady().then(async () => {
       createMainWindow();
     }
   });
+}).catch((error: unknown) => {
+  console.error(
+    `[lifecycle] Application startup failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+  app.exit(1);
 });
 
 async function seedPerformanceSmokeSessions(): Promise<void> {

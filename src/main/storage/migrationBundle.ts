@@ -448,4 +448,173 @@ END;
 INSERT INTO chat_session_title_fts(chat_session_title_fts) VALUES ('rebuild');
 `,
   },
+  {
+    name: "0004_goal_execution_authority.sql",
+    ordinal: 4,
+    sql: `-- P97 SC03: Goal CAS, exactly-once ledger publication, and runtime checkpoint access.
+
+ALTER TABLE goals ADD COLUMN plan_version INTEGER;
+ALTER TABLE goals ADD COLUMN active_plan_id TEXT;
+
+UPDATE goals
+SET plan_version = MAX(
+      1,
+      COALESCE(CAST(json_extract(payload, '$.planVersion') AS INTEGER), 1)
+    ),
+    active_plan_id = json_extract(payload, '$.activePlanRef.planId');
+
+CREATE INDEX IF NOT EXISTS idx_goals_plan_version
+  ON goals(id, plan_version, active_plan_id);
+
+CREATE TABLE goal_ledger_sc03 (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  goal_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  publication_key TEXT,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(goal_id, seq)
+);
+
+-- Historical implementations checked publication keys before insert without a
+-- database uniqueness constraint. Keep the earliest canonical publication if
+-- such a database already contains duplicates, preserve every ordinary event,
+-- and re-establish a dense deterministic sequence.
+WITH canonical AS (
+  SELECT
+    ledger.*,
+    CASE
+      WHEN json_type(ledger.payload, '$.publicationKey') = 'text'
+        THEN json_extract(ledger.payload, '$.publicationKey')
+      ELSE NULL
+    END AS canonical_publication_key
+  FROM goal_ledger ledger
+),
+deduplicated AS (
+  SELECT *
+  FROM canonical candidate
+  WHERE candidate.canonical_publication_key IS NULL
+     OR candidate.id = (
+       SELECT MIN(duplicate.id)
+       FROM canonical duplicate
+       WHERE duplicate.goal_id = candidate.goal_id
+         AND duplicate.canonical_publication_key =
+           candidate.canonical_publication_key
+     )
+),
+ranked AS (
+  SELECT
+    id,
+    goal_id,
+    ROW_NUMBER() OVER (
+      PARTITION BY goal_id
+      ORDER BY seq ASC, id ASC
+    ) AS canonical_seq,
+    canonical_publication_key,
+    payload,
+    created_at
+  FROM deduplicated
+)
+INSERT INTO goal_ledger_sc03 (
+  id,
+  goal_id,
+  seq,
+  publication_key,
+  payload,
+  created_at
+)
+SELECT
+  id,
+  goal_id,
+  canonical_seq,
+  canonical_publication_key,
+  payload,
+  created_at
+FROM ranked
+ORDER BY id ASC;
+
+DROP TABLE goal_ledger;
+ALTER TABLE goal_ledger_sc03 RENAME TO goal_ledger;
+
+CREATE INDEX idx_ledger_goal ON goal_ledger(goal_id, seq);
+CREATE UNIQUE INDEX idx_goal_ledger_publication_unique
+  ON goal_ledger(goal_id, publication_key)
+  WHERE publication_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS goal_ledger_sequences (
+  goal_id TEXT PRIMARY KEY,
+  next_seq INTEGER NOT NULL CHECK (next_seq >= 1)
+);
+
+INSERT INTO goal_ledger_sequences (goal_id, next_seq)
+SELECT goal_id, MAX(seq) + 1
+FROM goal_ledger
+GROUP BY goal_id
+ON CONFLICT(goal_id) DO UPDATE SET
+  next_seq = MAX(goal_ledger_sequences.next_seq, excluded.next_seq);
+
+CREATE INDEX IF NOT EXISTS idx_ckp_runtime_latest
+  ON checkpoints(run_id, created_at DESC)
+  WHERE kind = 'runtime';
+`,
+  },
+  {
+    name: "0005_reviewed_learning_eval_authority.sql",
+    ordinal: 5,
+    sql: `-- P97 SC06: reviewed learning/eval indexes, eval idempotency, and stable
+-- promoted-fixture ordering.
+
+CREATE INDEX IF NOT EXISTS idx_learning_status_type
+  ON learning_candidates(status, type, created_at);
+
+ALTER TABLE eval_candidates ADD COLUMN fixture_id TEXT;
+
+UPDATE eval_candidates
+SET fixture_id = json_extract(payload, '$.fixture.id');
+
+-- The JSON store has always treated (sourceRunId, fixture.id) as an identity.
+-- Keep the earliest row if a historical cross-process race bypassed that
+-- application-level check, then enforce the identity in SQLite.
+DELETE FROM eval_candidates
+WHERE fixture_id IS NOT NULL
+  AND rowid NOT IN (
+    SELECT MIN(rowid)
+    FROM eval_candidates
+    WHERE fixture_id IS NOT NULL
+    GROUP BY source_run_id, fixture_id
+  );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_eval_source_fixture_unique
+  ON eval_candidates(source_run_id, fixture_id)
+  WHERE fixture_id IS NOT NULL;
+
+ALTER TABLE promoted_eval_fixtures ADD COLUMN sort_order INTEGER;
+
+UPDATE promoted_eval_fixtures AS fixture
+SET sort_order = (
+  SELECT COUNT(*)
+  FROM promoted_eval_fixtures AS earlier
+  WHERE earlier.created_at < fixture.created_at
+     OR (
+       earlier.created_at = fixture.created_at
+       AND earlier.rowid <= fixture.rowid
+     )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_promoted_fixture_sort_order
+  ON promoted_eval_fixtures(sort_order);
+`,
+  },
+  {
+    name: "0006_domain_authority_state.sql",
+    ordinal: 6,
+    sql: `-- P97 SC07: durable per-domain bootstrap markers.
+
+CREATE TABLE IF NOT EXISTS domain_authority_state (
+  domain TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  imported_at TEXT NOT NULL
+);
+`,
+  },
 ];

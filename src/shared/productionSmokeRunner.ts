@@ -311,7 +311,7 @@ export async function runProductionSmoke(options: {
       ZEROX_AGENT_USER_DATA_DIR: path.join(tempDir, "user-data"),
       ZEROX_PRODUCTION_SMOKE_EVIDENCE_FILE: evidencePath,
       ZEROX_PRODUCTION_SMOKE_REQUIRE_SQLITE: "1",
-      ZEROX_STORAGE_BACKEND: "dual",
+      ZEROX_STORAGE_BACKEND: "sqlite",
     };
     delete appEnv.ELECTRON_RUN_AS_NODE;
     delete appEnv.ELECTRON_RENDERER_URL;
@@ -345,7 +345,7 @@ export async function runProductionSmoke(options: {
         if (!isProductionStorageSmokeEvidence(evidence)) {
           fail(
             "evidence",
-            "Electron exited successfully without valid native SQLite dual-path evidence.",
+            "Electron exited successfully without valid native SQLite authority evidence.",
           );
         }
       } catch (error) {

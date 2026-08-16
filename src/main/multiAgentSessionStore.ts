@@ -1,17 +1,23 @@
 import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  readFile,
-  rename,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AgentRole,
   MultiAgentSession,
   MultiAgentSessionStatus,
 } from "../shared/agentWorkspace";
+import type {
+  SessionRecord,
+  SessionRepository,
+  Storage,
+  StorageBackend,
+} from "../shared/storageContract";
+import type { PersistenceQueueDrainOptions } from "./failureVisibleSerialQueue";
+import {
+  createAuthoritativeStoreBackend,
+  writeStoreJsonAtomically,
+} from "./storage/authoritativeStore";
+import { createSessionRepository } from "./storage/repositories/sessionRepository";
 
 type StoredMultiAgentSessions = {
   schemaVersion: 1;
@@ -39,16 +45,29 @@ export type MultiAgentSessionStore = {
     sessionId: string,
     status: MultiAgentSessionStatus,
   ): Promise<MultiAgentSession | null>;
+  flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
 export function createMultiAgentSessionStore(options: {
   configDir: string;
   createId?: () => string;
   now?: () => Date;
+  backend?: StorageBackend;
+  storage?: Storage;
 }): MultiAgentSessionStore {
   const sessionsPath = path.join(options.configDir, "multi-agent-sessions.json");
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
+  const authoritativeBackend = createAuthoritativeStoreBackend({
+    backend: options.backend,
+    storage: options.storage,
+    domain: "Multi-agent session",
+  });
+  const repository: SessionRepository | null = authoritativeBackend.storage
+    ? createSessionRepository(authoritativeBackend.storage, {
+        now: () => now().toISOString(),
+      })
+    : null;
 
   async function awaitPendingMutations(): Promise<void> {
     await (mutationQueues.get(sessionsPath) ?? Promise.resolve());
@@ -71,6 +90,15 @@ export function createMultiAgentSessionStore(options: {
   }
 
   async function readStored(): Promise<StoredMultiAgentSessions> {
+    if (authoritativeBackend.backend !== "json") {
+      return {
+        schemaVersion: 1,
+        sessions: repository!
+          .listSessions({ kind: "multi_agent" })
+          .map(toMultiAgentSession),
+      };
+    }
+
     try {
       const raw = await readFile(sessionsPath, "utf8");
       const stored = JSON.parse(raw) as StoredMultiAgentSessions;
@@ -88,22 +116,26 @@ export function createMultiAgentSessionStore(options: {
   }
 
   async function writeStored(stored: StoredMultiAgentSessions) {
-    await mkdir(options.configDir, { recursive: true });
-    const temporaryPath = `${sessionsPath}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(
-        temporaryPath,
-        `${JSON.stringify(stored, null, 2)}\n`,
-        {
-          encoding: "utf8",
-          mode: 0o600,
-        },
-      );
-      await rename(temporaryPath, sessionsPath);
-    } catch (error) {
-      await unlink(temporaryPath).catch(() => undefined);
-      throw error;
-    }
+    await writeStoreJsonAtomically({
+      directory: options.configDir,
+      filePath: sessionsPath,
+      value: stored,
+    });
+  }
+
+  function enqueueSessionSnapshot(): void {
+    authoritativeBackend.enqueueShadow(() =>
+      writeStoreJsonAtomically({
+        directory: options.configDir,
+        filePath: sessionsPath,
+        value: {
+          schemaVersion: 1,
+          sessions: repository!
+            .listSessions({ kind: "multi_agent" })
+            .map(toMultiAgentSession),
+        } satisfies StoredMultiAgentSessions,
+      }),
+    );
   }
 
   async function updateSession(
@@ -126,19 +158,32 @@ export function createMultiAgentSessionStore(options: {
         return null;
       }
 
-      await writeStored({ schemaVersion: 1, sessions });
+      if (sessions.some((session, index) => session !== stored.sessions[index])) {
+        await writeStored({ schemaVersion: 1, sessions });
+      }
       return updatedSession;
     });
   }
 
   return {
     async get(id) {
+      if (authoritativeBackend.backend !== "json") {
+        const record = repository!.getSession(id);
+        return record?.kind === "multi_agent"
+          ? toMultiAgentSession(record)
+          : null;
+      }
       await awaitPendingMutations();
       const stored = await readStored();
       return stored.sessions.find((session) => session.id === id) ?? null;
     },
 
     async list() {
+      if (authoritativeBackend.backend !== "json") {
+        return repository!
+          .listSessions({ kind: "multi_agent" })
+          .map(toMultiAgentSession);
+      }
       await awaitPendingMutations();
       const stored = await readStored();
       return [...stored.sessions].sort(
@@ -150,19 +195,36 @@ export function createMultiAgentSessionStore(options: {
     },
 
     async create(input) {
+      const timestamp = now().toISOString();
+      const session: MultiAgentSession = {
+        id: createId(),
+        title: input.title,
+        ...(input.rootRunId ? { rootRunId: input.rootRunId } : {}),
+        status: "running",
+        workspaceId: input.workspaceId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        childRunIds: [],
+        roles: {},
+      };
+      if (authoritativeBackend.backend !== "json") {
+        authoritativeBackend.assertWritable();
+        const existing = repository!.getSession(session.id);
+        if (existing && existing.kind !== "multi_agent") {
+          throw new Error(
+            `Session "${session.id}" already belongs to "${existing.kind}".`,
+          );
+        }
+        const created = repository!.createSession({
+          ...session,
+          kind: "multi_agent",
+          payload: session,
+        });
+        enqueueSessionSnapshot();
+        return toMultiAgentSession(created);
+      }
+
       return serializeMutation(async () => {
-        const timestamp = now().toISOString();
-        const session: MultiAgentSession = {
-          id: createId(),
-          title: input.title,
-          ...(input.rootRunId ? { rootRunId: input.rootRunId } : {}),
-          status: "running",
-          workspaceId: input.workspaceId,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          childRunIds: [],
-          roles: {},
-        };
         const stored = await readStored();
         await writeStored({
           schemaVersion: 1,
@@ -172,8 +234,24 @@ export function createMultiAgentSessionStore(options: {
       });
     },
 
-    appendChildRun(sessionId, runId, role) {
+    async appendChildRun(sessionId, runId, role) {
+      if (authoritativeBackend.backend !== "json") {
+        authoritativeBackend.assertWritable();
+        const updated = repository!.appendChildRun(sessionId, runId, role);
+        if (!updated) {
+          return null;
+        }
+        enqueueSessionSnapshot();
+        return toMultiAgentSession(updated);
+      }
+
       return updateSession(sessionId, (session) => {
+        if (
+          session.childRunIds.includes(runId) &&
+          session.roles[runId] === role
+        ) {
+          return session;
+        }
         const timestamp = now().toISOString();
         const childRunIds = session.childRunIds.includes(runId)
           ? session.childRunIds
@@ -191,12 +269,47 @@ export function createMultiAgentSessionStore(options: {
       });
     },
 
-    setStatus(sessionId, status) {
-      return updateSession(sessionId, (session) => ({
-        ...session,
-        status,
-        updatedAt: now().toISOString(),
-      }));
+    async setStatus(sessionId, status) {
+      if (authoritativeBackend.backend !== "json") {
+        authoritativeBackend.assertWritable();
+        const updated = repository!.setSessionStatus(sessionId, status);
+        if (!updated) {
+          return null;
+        }
+        enqueueSessionSnapshot();
+        return toMultiAgentSession(updated);
+      }
+
+      return updateSession(sessionId, (session) =>
+        session.status === status
+          ? session
+          : {
+              ...session,
+              status,
+              updatedAt: now().toISOString(),
+            },
+      );
     },
+
+    async flushShadowWrites(flushOptions) {
+      if (authoritativeBackend.backend === "json") {
+        await awaitPendingMutations();
+      }
+      await authoritativeBackend.flushShadowWrites(flushOptions);
+    },
+  };
+}
+
+function toMultiAgentSession(record: SessionRecord): MultiAgentSession {
+  return {
+    id: record.id,
+    title: record.title ?? "",
+    ...(record.rootRunId ? { rootRunId: record.rootRunId } : {}),
+    status: record.status ?? "running",
+    workspaceId: record.workspaceId ?? "",
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    childRunIds: [...(record.childRunIds ?? [])],
+    roles: { ...(record.roles ?? {}) },
   };
 }

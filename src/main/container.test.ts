@@ -268,6 +268,7 @@ describe("app container goal drafts", () => {
   const originalToolWorkerEnv = process.env.ZEROX_TOOL_WORKER;
   const originalLegacyToolWorkerEnv = process.env.BUILDING_AGENT_TOOL_WORKER;
   const originalSkillMcpAllowlist = process.env.ZEROX_SKILL_MCP_ALLOWLIST;
+  const originalStorageBackend = process.env.ZEROX_STORAGE_BACKEND;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-container-"));
@@ -279,6 +280,7 @@ describe("app container goal drafts", () => {
     delete process.env.ZEROX_TOOL_WORKER;
     delete process.env.BUILDING_AGENT_TOOL_WORKER;
     delete process.env.ZEROX_SKILL_MCP_ALLOWLIST;
+    process.env.ZEROX_STORAGE_BACKEND = "json";
   });
 
   afterEach(async () => {
@@ -296,6 +298,11 @@ describe("app container goal drafts", () => {
       delete process.env.ZEROX_SKILL_MCP_ALLOWLIST;
     } else {
       process.env.ZEROX_SKILL_MCP_ALLOWLIST = originalSkillMcpAllowlist;
+    }
+    if (originalStorageBackend === undefined) {
+      delete process.env.ZEROX_STORAGE_BACKEND;
+    } else {
+      process.env.ZEROX_STORAGE_BACKEND = originalStorageBackend;
     }
     await rm(tempDir, {
       force: true,

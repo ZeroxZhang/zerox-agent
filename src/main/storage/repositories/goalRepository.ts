@@ -32,47 +32,116 @@ function isActive(status: GoalStatus): boolean {
   return !TERMINAL_GOAL_STATUSES.has(status);
 }
 
+function normalizedPlanVersion(goal: Goal): number {
+  return Math.max(1, Number(goal.planVersion ?? 1));
+}
+
 export function createGoalRepository(storage: Storage): GoalRepository {
   const db = storage.db;
+  const readStoredGoal = (goalId: string): Goal | null =>
+    sanitizeStoredGoal(
+      getPayloadRow<Goal>(
+        db,
+        "SELECT payload FROM goals WHERE id = ?",
+        [goalId],
+      ),
+    );
+  const writeGoal = (candidate: Goal): void => {
+    db.prepare(
+      `INSERT INTO goals (
+         id, chat_session_id, status, plan_version, active_plan_id,
+         payload, created_at, updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         chat_session_id = excluded.chat_session_id,
+         status = excluded.status,
+         plan_version = excluded.plan_version,
+         active_plan_id = excluded.active_plan_id,
+         payload = excluded.payload,
+         updated_at = excluded.updated_at`,
+    ).run(
+      candidate.id,
+      candidate.chatSessionId ?? null,
+      candidate.status,
+      normalizedPlanVersion(candidate),
+      candidate.activePlanRef?.planId ?? null,
+      jsonify(candidate),
+      candidate.createdAt,
+      candidate.updatedAt,
+    );
+  };
+  const saveTransaction = db.transaction((goal: Goal): Goal => {
+    const existing = readStoredGoal(goal.id);
+    if (existing?.status === "completed_unverified") {
+      return existing;
+    }
+    if (
+      existing &&
+      IRREVERSIBLE_GOAL_STATUSES.has(existing.status) &&
+      goal.status !== existing.status
+    ) {
+      return existing;
+    }
+    const candidate = sanitizeFinalJudgeReplay(
+      stripUnverifiedCompletionCertificate(goal),
+    );
+    writeGoal(candidate);
+    return candidate;
+  });
+  const ensureLedgerSequence = db.prepare(
+    `INSERT INTO goal_ledger_sequences (goal_id, next_seq)
+     VALUES (?, 1)
+     ON CONFLICT(goal_id) DO NOTHING`,
+  );
+  const allocateLedgerSequence = db.prepare(
+    `UPDATE goal_ledger_sequences
+     SET next_seq = next_seq + 1
+     WHERE goal_id = ?
+     RETURNING next_seq - 1 AS seq`,
+  );
+  const appendLedgerTransaction = db.transaction(
+    (
+      goalId: string,
+      event: ProgressLedgerEvent,
+      publicationKey?: string,
+    ): boolean => {
+      // This is deliberately the first statement in the transaction. It takes
+      // SQLite's writer lock before publication lookup or sequence allocation.
+      ensureLedgerSequence.run(goalId);
+      if (publicationKey !== undefined) {
+        const existing = db
+          .prepare(
+            `SELECT 1 FROM goal_ledger
+             WHERE goal_id = ? AND publication_key = ?`,
+          )
+          .get(goalId, publicationKey);
+        if (existing) return false;
+      }
+      const sequence = allocateLedgerSequence.get<{ seq: number }>(goalId);
+      if (!sequence) {
+        throw new Error(
+          `Unable to allocate Goal ledger sequence for "${goalId}".`,
+        );
+      }
+      db.prepare(
+        `INSERT INTO goal_ledger (
+           goal_id, seq, publication_key, payload, created_at
+         ) VALUES (?, ?, ?, ?, ?)`,
+      ).run(
+        goalId,
+        sequence.seq,
+        publicationKey ?? null,
+        jsonify(event),
+        event.at,
+      );
+      return true;
+    },
+  );
 
   return {
     save(goal: Goal): Goal {
-      const existingRaw = getPayloadRow<Goal>(
-        db,
-        "SELECT payload FROM goals WHERE id = ?",
-        [goal.id],
-      );
-      const existing = existingRaw
-        ? stripUnverifiedCompletionCertificate(existingRaw)
-        : null;
-      if (existing?.status === "completed_unverified") {
-        return existing;
-      }
-      if (
-        existing &&
-        IRREVERSIBLE_GOAL_STATUSES.has(existing.status) &&
-        goal.status !== existing.status
-      ) {
-        return existing;
-      }
-      const candidate = sanitizeFinalJudgeReplay(
-        stripUnverifiedCompletionCertificate(goal),
-      );
-      db.prepare(
-        `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           chat_session_id=excluded.chat_session_id, status=excluded.status,
-           payload=excluded.payload, updated_at=excluded.updated_at`,
-      ).run(
-        candidate.id,
-        candidate.chatSessionId ?? null,
-        candidate.status,
-        jsonify(candidate),
-        candidate.createdAt,
-        candidate.updatedAt,
-      );
-      return candidate;
+      return saveTransaction(goal);
     },
 
     saveIfStatus(goal: Goal, expectedStatus: GoalStatus) {
@@ -82,12 +151,15 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       const result = db.prepare(
         `UPDATE goals
          SET chat_session_id = ?, status = ?, payload = ?, updated_at = ?
+             , plan_version = ?, active_plan_id = ?
          WHERE id = ? AND status = ?`,
       ).run(
         candidate.chatSessionId ?? null,
         candidate.status,
         jsonify(candidate),
         candidate.updatedAt,
+        normalizedPlanVersion(candidate),
+        candidate.activePlanRef?.planId ?? null,
         candidate.id,
         expectedStatus,
       );
@@ -96,20 +168,84 @@ export function createGoalRepository(storage: Storage): GoalRepository {
       }
       return {
         saved: false,
-        goal: sanitizeStoredGoal(
-          getPayloadRow<Goal>(
-            db,
-            "SELECT payload FROM goals WHERE id = ?",
-            [goal.id],
-          ),
-        ),
+        goal: readStoredGoal(goal.id),
       };
     },
 
-    get(goalId: string): Goal | null {
-      return sanitizeStoredGoal(
-        getPayloadRow<Goal>(db, "SELECT payload FROM goals WHERE id = ?", [goalId]),
+    saveIfPlanVersion(
+      goal: Goal,
+      expectedPlanVersion: number,
+      expectedActivePlanId?: string,
+    ) {
+      const candidate = sanitizeFinalJudgeReplay(
+        stripUnverifiedCompletionCertificate(goal),
       );
+      const result = db.prepare(
+        `UPDATE goals
+         SET chat_session_id = ?,
+             status = ?,
+             plan_version = ?,
+             active_plan_id = ?,
+             payload = ?,
+             updated_at = ?
+         WHERE id = ?
+           AND COALESCE(
+             plan_version,
+             CAST(json_extract(payload, '$.planVersion') AS INTEGER),
+             1
+           ) = ?
+           AND status NOT IN ('achieved', 'completed_unverified', 'canceled')
+           AND (
+             ? IS NULL
+             OR COALESCE(
+               active_plan_id,
+               json_extract(payload, '$.activePlanRef.planId')
+             ) = ?
+           )`,
+      ).run(
+        candidate.chatSessionId ?? null,
+        candidate.status,
+        normalizedPlanVersion(candidate),
+        candidate.activePlanRef?.planId ?? null,
+        jsonify(candidate),
+        candidate.updatedAt,
+        candidate.id,
+        expectedPlanVersion,
+        expectedActivePlanId ?? null,
+        expectedActivePlanId ?? null,
+      );
+      return result.changes === 1
+        ? { saved: true, goal: candidate }
+        : { saved: false, goal: readStoredGoal(goal.id) };
+    },
+
+    get(goalId: string): Goal | null {
+      return readStoredGoal(goalId);
+    },
+
+    getMany(goalIds: readonly string[]): Goal[] {
+      const uniqueGoalIds = [...new Set(goalIds)];
+      if (uniqueGoalIds.length === 0) return [];
+      const placeholders = uniqueGoalIds.map(() => "?").join(", ");
+      const rows = db
+        .prepare(
+          `SELECT id, payload FROM goals WHERE id IN (${placeholders})`,
+        )
+        .all<{ id: string; payload: string }>(...uniqueGoalIds);
+      const goalsById = new Map(
+        rows
+          .map((row) => [
+            row.id,
+            sanitizeStoredGoal(parseJson<Goal>(row.payload)),
+          ] as const)
+          .filter(
+            (entry): entry is readonly [string, Goal] => entry[1] !== null,
+          ),
+      );
+      return uniqueGoalIds.flatMap((goalId) => {
+        const goal = goalsById.get(goalId);
+        return goal ? [goal] : [];
+      });
     },
 
     listActive(): Goal[] {
@@ -119,8 +255,8 @@ export function createGoalRepository(storage: Storage): GoalRepository {
          WHERE status NOT IN ('achieved','completed_unverified','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
          ORDER BY updated_at DESC`,
       )
-        .map(stripUnverifiedCompletionCertificate)
-        .filter((g) => isActive(g.status));
+        .map(sanitizeStoredGoal)
+        .filter((goal): goal is Goal => goal !== null && isActive(goal.status));
     },
 
     listByChatSession(chatSessionId: string): Goal[] {
@@ -128,7 +264,9 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         db,
         "SELECT payload FROM goals WHERE chat_session_id = ? ORDER BY updated_at DESC",
         [chatSessionId],
-      ).map(stripUnverifiedCompletionCertificate);
+      )
+        .map(sanitizeStoredGoal)
+        .filter((goal): goal is Goal => goal !== null);
     },
 
     delete(goalId: string): boolean {
@@ -137,36 +275,12 @@ export function createGoalRepository(storage: Storage): GoalRepository {
     },
 
     appendLedger(goalId: string, event: ProgressLedgerEvent): void {
-      const seqRow = db
-        .prepare("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM goal_ledger WHERE goal_id = ?")
-        .get(goalId) as { maxSeq: number };
-      const seq = seqRow.maxSeq + 1;
-      db.prepare(
-        `INSERT INTO goal_ledger (goal_id, seq, payload, created_at) VALUES (?, ?, ?, ?)`,
-      ).run(goalId, seq, jsonify(event), event.at);
+      appendLedgerTransaction(goalId, event);
     },
 
     appendLedgerIfAbsent(goalId, publicationKey, event) {
       const storedEvent = { ...event, publicationKey };
-      const result = db.prepare(
-        `INSERT INTO goal_ledger (goal_id, seq, payload, created_at)
-         SELECT ?,
-           COALESCE((SELECT MAX(seq) FROM goal_ledger WHERE goal_id = ?), 0) + 1,
-           ?, ?
-         WHERE NOT EXISTS (
-           SELECT 1 FROM goal_ledger
-           WHERE goal_id = ?
-             AND json_extract(payload, '$.publicationKey') = ?
-         )`,
-      ).run(
-        goalId,
-        goalId,
-        jsonify(storedEvent),
-        event.at,
-        goalId,
-        publicationKey,
-      );
-      return result.changes === 1;
+      return appendLedgerTransaction(goalId, storedEvent, publicationKey);
     },
 
     readLedger(goalId: string): ProgressLedgerEvent[] {

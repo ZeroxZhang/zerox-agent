@@ -10459,3 +10459,204 @@
 - Repeated the focused file five times: every run passed 49/49 tests.
 - Strict test type coverage, program, harness, and whitespace checks passed.
   A new remote `verify` run is required before this follow-up is complete.
+
+## 2026-08-16 - P97 SQLite Domain Storage Convergence Started
+
+- Activated `P97-sqlite-domain-storage-convergence` as the only unfinished
+  Feature after P96 and remote CI completion.
+- Established the independent eight-workstream storage convergence program,
+  checker, operating guide, and SC01 architecture decision without reopening
+  the completed Runtime Convergence or Kernel Migration programs.
+- Targeted Goal, execution checkpoints, Memory, Workspace, Multi-Agent
+  Session, Learning Candidate, Eval Candidate, and promoted eval fixtures for
+  per-domain JSON-to-SQLite convergence.
+- Kept encrypted model settings, large scoped tool-result blobs, raw history,
+  workspace-run ledgers, and artifact payloads explicitly file-backed.
+- Four independent read-only reviewers were assigned Goal/checkpoint, Memory,
+  Workspace and reviewed-learning stores, and v3.9.0 release readiness.
+- No production storage authority changed during SC01.
+
+## 2026-08-16 - P97 SC01 Program Foundation Completed
+
+- Added and validated the eight-workstream storage convergence Program,
+  operating guide, architecture decision, checker, package integration, and
+  Harness integration.
+- Governance gate: 4 files / 32 tests; strict test type coverage 285/285;
+  program, harness, and whitespace checks passed.
+- Domain reviews found blocking repository gaps that must be repaired before
+  cutover:
+  - Goal repository lacks certificate verification, Plan-version CAS, canonical
+    acceptance merging, and complete ledger uniqueness.
+  - Checkpoint repository misclassifies `succeeded` and lacks runtime-only CAS
+    and deletion.
+  - Memory repository ignores session isolation and does not preserve embedding,
+    reranking, or atomic maintenance semantics.
+  - Multi-Agent append is not idempotent; Eval dedupe/CAS/promotion are not
+    transactionally equivalent; Learning combined filters and Workspace ordering
+    differ from the JSON stores.
+- Confirmed file-backed exclusions for model credentials, scoped tool-result
+  blobs, raw history, workspace-run ledgers, and artifact payloads.
+- Rejected a legacy-primary shadow design. P97 retains SQLite-first authority
+  and uses JSON only as a tracked compatibility shadow.
+- SC01 is complete. SC02 is active for shared backend and shadow-drain
+  primitives; no production store has cut over yet.
+
+## 2026-08-16 - P97 SC02 Shared Store Primitives Completed
+
+- Added one explicit authoritative-store backend helper that rejects missing
+  SQLite dependencies, closes dual shadow admission, preserves the first shadow
+  failure, and drains admitted work before shutdown.
+- Added one private-mode atomic JSON snapshot writer for compatibility shadows.
+- Did not add a generic record table, global cutover flag, or shadow decision
+  engine; domain state machines remain in their existing stores.
+- Focused gate: 4 files / 22 tests. Strict test type coverage 286/286; program,
+  harness, and whitespace checks passed.
+- SC02 is complete. SC03 is active for Goal and execution checkpoint cutover.
+
+## 2026-08-16 - P97 SC03 Goal And Checkpoint Cutover Completed
+
+- Goal and AgentExecution stores now support explicit `json`, `sqlite`, and
+  `dual` backends while preserving their asynchronous compatibility APIs.
+- Goal policy remains in one shared store path: certificate verification,
+  canonical acceptance merge, irreversible terminal protection, status CAS,
+  Plan-version CAS, Skill secret sanitization, and stable list ordering.
+- SQLite Goal ledger allocation is transactional with unique sequence and
+  publication-key constraints.
+- Runtime checkpoints use runtime-only repository methods, preserve
+  Kernel/markdown checkpoints, classify `succeeded` as terminal, and reject
+  stale non-terminal writes after a terminal checkpoint in every backend.
+- Container wiring honors the explicit storage backend and drains Goal and
+  checkpoint shadows before closing SQLite.
+- Focused gate: 5 files / 150 tests. Strict test type coverage 287/287;
+  program, harness, and whitespace checks passed.
+- SC03 is complete. SC04 is active for Memory cutover.
+
+## 2026-08-16 - P97 SC04 Memory Cutover Completed
+
+- MemoryStore now uses SQLite authority for `sqlite` and `dual` while retaining
+  the existing normalize, embedding, hybrid/RRF search, reranker, maintenance,
+  governance, export, and session-isolation service behavior.
+- Repository `replaceAll` is one transaction and rejects a stale expected
+  snapshot, preventing direct dream/distill writes from being silently lost.
+- Dual mode commits SQLite before publishing one atomic JSON compatibility
+  snapshot; shadow failures remain visible through shutdown drain.
+- Container wiring honors the explicit backend and drains Memory before SQLite
+  closes.
+- Focused gate: 4 files / 105 tests. Strict test type coverage 288/288;
+  program, harness, and whitespace checks passed.
+- SC04 is complete. SC05 is active for Workspace and Multi-Agent Session.
+
+## 2026-08-16 - P97 SC05 Workspace And Multi-Agent Cutover Completed
+
+- Workspace and Multi-Agent Session stores now support explicit
+  `json/sqlite/dual` authority and failure-visible atomic JSON shadows.
+- Workspace IDs and clocks remain store-owned; SQLite list ordering exactly
+  matches `lastUsedAt ?? updatedAt` with the existing ID tie-break.
+- Multi-Agent session rows expose complete child-run and role projections.
+  Child append and status changes execute in SQLite transactions, repeated
+  run IDs are idempotent, and concurrent 100-child coverage loses no updates.
+- Container wiring honors the explicit backend and drains both shadows before
+  SQLite close.
+- Focused gate: 4 files / 80 tests. Strict test type coverage 289/289;
+  program, harness, and whitespace checks passed.
+- SC05 is complete. SC06 is active for reviewed learning and evaluation stores.
+
+## 2026-08-16 - P97 SC06 Reviewed Learning And Eval Cutover Completed
+
+- Learning, Eval Candidate, and promoted fixture stores now support
+  `json/sqlite/dual` authority and failure-visible atomic JSON shadows.
+- Learning preserves combined status/type filtering and stable source order.
+- Eval create is idempotent by ID or `(sourceRunId, fixtureId)`, and status
+  transition uses one SQL `UPDATE ... WHERE status = ?` CAS.
+- SQLite promotion updates the accepted candidate and upserts the promoted
+  fixture in one transaction. Injected fixture failure rolls back candidate
+  status; promoted replacement preserves original order and creation time.
+- Container wiring honors the explicit backend and drains all three shadows
+  before SQLite close.
+- Focused gate: 6 files / 95 tests. Strict test type coverage 290/290;
+  program, harness, and whitespace checks passed.
+- SC06 is complete. SC07 is active for migration, rollback, bootstrap, and
+  production authority convergence.
+
+## 2026-08-16 - P97 SC05 Workspace And Multi-Agent Storage Implemented
+
+- AgentWorkspaceStore and MultiAgentSessionStore now expose explicit
+  `json`, `sqlite`, and `dual` backends with SQLite-first commits, SQLite reads,
+  atomic full JSON compatibility snapshots, and failure-visible shadow drains.
+- Workspace identity and clocks remain store-owned. WorkspaceRepository is
+  limited to save/get/list/delete and orders by
+  `lastUsedAt ?? updatedAt`, then id.
+- Multi-Agent repository rows return complete child-run and role state.
+  Child append is transactionally idempotent across repository instances, and
+  status updates are transactional.
+- Focused gate: 9 files / 72 tests, including 100-child concurrency, duplicate
+  runs, restart recovery, and shadow failures. Strict test type coverage
+  289/289; harness and whitespace checks passed.
+
+## 2026-08-16 - P97 SC07 Migration And Rollback Implemented
+
+- Extended JSON-to-SQLite canonical import and content-level verification for
+  Goal/ledger, runtime checkpoints, Memory, Workspace, Multi-Agent Session,
+  Learning Candidate, Eval Candidate, and promoted eval fixtures.
+- Imports use compiled stores/repositories. Goal import and export traverse the
+  production secret-sanitization and acceptance-certificate policy.
+- Added explicit identity keys, idempotent second verification, stale/equal
+  generation conflict rejection, and cross-kind session identity rejection.
+- Extended SQLite-to-JSON rollback to stage every P97 domain before publish,
+  preserve repository ordering, and compensate all published paths in reverse
+  order after an injected commit failure.
+- Tool-result blobs, workspace-run ledgers, raw history, and artifact payloads
+  remain file-backed and are neither imported nor overwritten.
+- Focused gate: migration round-trip 11/11; script boundary tests 15/15; strict
+  test type coverage 290/290; program, harness, syntax, and whitespace checks
+  passed. Program state remains unchanged while SC06 is active.
+
+## 2026-08-16 - P97 SC07 Production Authority Convergence Completed
+
+- Added one-time, per-domain startup bootstrap for Goal, runtime checkpoints,
+  Memory, Workspace, Multi-Agent Session, Learning, Eval Candidate, and
+  promoted fixtures. Each legacy import and its durable authority marker commit
+  atomically; failed imports roll back prior SQLite state and remain unmarked.
+- Changed the release default to `ZEROX_STORAGE_BACKEND=sqlite`. Container tests
+  now declare their legacy JSON fixture backend explicitly, while resolver
+  tests independently enforce the production default.
+- Upgraded production smoke evidence to schema v2. It now requires SQLite
+  without fallback, WAL and foreign keys, all eight authority markers, real
+  Store writes for all eight P97 domains, Goal ledger and Multi-Agent child
+  mutations, and absence of legacy JSON shadows.
+- Updated the storage runbook and bilingual README authority description.
+- Focused convergence gate: 13 files / 155 tests. Strict application and test
+  type checks passed with 291/291 test files covered; audit reported zero
+  vulnerabilities; program, harness, and whitespace checks passed.
+- Real Electron production smoke accepted Electron ABI 146, seven migrations,
+  eight authority markers, eight persisted domain records, no JSON fallback or
+  legacy shadows, and restored the Node ABI to 137.
+- SC07 is complete. SC08 is active for independent code, security,
+  architecture, stress, Seatbelt, and final QA acceptance.
+
+## 2026-08-16 - P97 Independent Review And Acceptance Completed
+
+- Independent code and architecture review found seven Major consistency
+  defects in the SC07 candidate: pre-verification markers, stale bootstrap
+  replacement, unsafe native fallback, recoverable ledger parsing, stale
+  rollback markers, pre-bootstrap second-instance windows, and cross-kind
+  Multi-Agent session mutation.
+- Repaired all seven and added focused regressions for canonical marker gating,
+  newer SQLite conflict preservation, strict Goal ledger rollback,
+  JSON-authority reimport after rollback, fail-closed backend availability,
+  startup admission, and Chat/Multi-Agent row isolation.
+- Independent security review returned `CLEAN`: bound SQL values, validated
+  rollback path identifiers, preserved Goal/Skill sanitization, no credential
+  persistence, and no new command, code-execution, or authorization bypass.
+- Final focused P97 suite passed 14 files / 165 tests.
+- Full verify passed 2,967 tests with six stress-only tests skipped by design;
+  build, Agent evals 26/26, and Memory evals 2/2 passed.
+- Runtime stress passed 6/6. Real macOS Seatbelt effects passed 10/10.
+- Final Electron authority smoke accepted Node ABI 137 to Electron ABI 146 to
+  Node ABI 137, seven migrations, eight markers, all eight domain records, no
+  JSON fallback, and no legacy P97 shadows.
+- Strict test types covered 291/291 files. Program, harness, audit, and
+  whitespace checks passed; audit reported zero vulnerabilities.
+- Code, security, architecture, and independent QA verdicts: `ACCEPT`.
+- Review evidence:
+  `.zerox/reviews/P97-storage-convergence-review.md`.

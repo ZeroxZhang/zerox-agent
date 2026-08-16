@@ -20,7 +20,6 @@ import type {
   AgentRole,
   AgentSandboxPolicy,
   AgentWorkspace,
-  AgentWorkspaceInput,
   MultiAgentSessionStatus,
 } from "./agentWorkspace";
 import type { ScheduledTask, ScheduledTaskInput } from "./scheduledTasks";
@@ -32,6 +31,7 @@ import type {
 } from "./agentLearning";
 import type {
   AgentEvalCandidate,
+  AgentEvalCandidateFixture,
   AgentEvalCandidateListOptions,
   AgentEvalCandidateStatus,
 } from "./agentEvalCandidate";
@@ -53,6 +53,7 @@ import type {
   MemorySearchResult,
 } from "./memory";
 import type { MemoryProfileDocument } from "./memoryProfile";
+import type { AgentExecutionCheckpoint } from "./agentExecution";
 
 // ---------------------------------------------------------------------------
 // Storage service (contract §1.3)
@@ -78,7 +79,9 @@ export interface StorageDatabase {
   prepare(sql: string): StorageStatement;
   exec(sql: string): void;
   pragma(sql: string): unknown;
-  transaction<T>(fn: () => T): T;
+  transaction<TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => TResult,
+  ): (...args: TArgs) => TResult;
   close(): void;
 }
 
@@ -155,11 +158,17 @@ export interface CheckpointRecord {
 
 export interface CheckpointRepository {
   write(runId: string, kind: CheckpointKind, data: unknown): string;
+  writeRuntime(
+    checkpoint: AgentExecutionCheckpoint,
+  ): AgentExecutionCheckpoint;
   latest(runId: string, kind?: CheckpointKind): CheckpointRecord | null;
+  latestRuntime(runId: string): AgentExecutionCheckpoint | null;
   list(runId: string): CheckpointRecord[];
   read<T = unknown>(ref: string): T | null;
   listActive(): CheckpointRecord[];
-  delete(runId: string): boolean;
+  listActiveRuntime(): AgentExecutionCheckpoint[];
+  delete(runId: string, kind?: CheckpointKind): boolean;
+  deleteRuntime(runId: string): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +185,10 @@ export type MemoryArchiveReason =
 
 export interface MemoryRepository {
   write(record: Omit<MemoryRecord, "id"> & { id: string }): string;
+  replaceAll(
+    records: readonly MemoryRecord[],
+    expectedRecords?: readonly MemoryRecord[],
+  ): void;
   get(id: string): MemoryRecord | null;
   search(query: MemorySearchOptions): MemorySearchResult[];
   archive(
@@ -198,7 +211,13 @@ export interface GoalRepository {
     goal: Goal,
     expectedStatus: Goal["status"],
   ): { saved: boolean; goal: Goal | null };
+  saveIfPlanVersion(
+    goal: Goal,
+    expectedPlanVersion: number,
+    expectedActivePlanId?: string,
+  ): { saved: boolean; goal: Goal | null };
   get(goalId: string): Goal | null;
+  getMany(goalIds: readonly string[]): Goal[];
   listActive(): Goal[];
   listByChatSession(chatSessionId: string): Goal[];
   delete(goalId: string): boolean;
@@ -368,8 +387,6 @@ export interface WorkspaceRepository {
   get(id: string): AgentWorkspace | null;
   list(): AgentWorkspace[];
   save(workspace: AgentWorkspace): AgentWorkspace;
-  create(input: AgentWorkspaceInput): AgentWorkspace;
-  touch(id: string): AgentWorkspace | null;
   delete(id: string): boolean;
 }
 
@@ -380,26 +397,49 @@ export interface ArtifactRepository {
 }
 
 export interface LearningRepository {
-  create(input: AgentLearningCandidateInput): AgentLearningCandidate;
+  create(
+    input: AgentLearningCandidateInput &
+      Partial<
+        Pick<
+          AgentLearningCandidate,
+          "id" | "status" | "createdAt" | "updatedAt"
+        >
+      >,
+  ): AgentLearningCandidate;
   list(options?: AgentLearningListOptions): AgentLearningCandidate[];
   setStatus(
     candidateId: string,
     status: AgentLearningCandidateStatus,
+    updatedAt?: string,
   ): AgentLearningCandidate | null;
 }
 
 export interface EvalCandidateRepository {
   create(candidate: AgentEvalCandidate): AgentEvalCandidate;
+  get(candidateId: string): AgentEvalCandidate | null;
   list(options?: AgentEvalCandidateListOptions): AgentEvalCandidate[];
   setStatus(
     candidateId: string,
     status: AgentEvalCandidateStatus,
+    updatedAt?: string,
   ): AgentEvalCandidate | null;
   transitionStatus(
     candidateId: string,
     expected: AgentEvalCandidateStatus,
     next: AgentEvalCandidateStatus,
+    updatedAt?: string,
   ): AgentEvalCandidate | null;
+}
+
+export interface PromotedEvalFixtureRepository {
+  list(): AgentEvalCandidateFixture[];
+  upsert(
+    fixture: AgentEvalCandidateFixture,
+    options?: {
+      sourceCandidateId?: string;
+      createdAt?: string;
+    },
+  ): AgentEvalCandidateFixture;
 }
 
 export interface ValidationRepository {

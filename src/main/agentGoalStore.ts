@@ -29,6 +29,17 @@ import {
   goalContractMatchesRef,
 } from "./goalPlanContractService";
 import { createPublicSkillSnapshot } from "../shared/skills";
+import type {
+  GoalRepository,
+  Storage,
+  StorageBackend,
+} from "../shared/storageContract";
+import type { PersistenceQueueDrainOptions } from "./failureVisibleSerialQueue";
+import {
+  createAuthoritativeStoreBackend,
+  writeStoreJsonAtomically,
+} from "./storage/authoritativeStore";
+import { createGoalRepository } from "./storage/repositories/goalRepository";
 
 export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
@@ -55,6 +66,7 @@ export type AgentGoalStore = {
   ): Promise<boolean>;
   readLedger(goalId: string): Promise<ProgressLedgerEvent[]>;
   delete(goalId: string): Promise<boolean>;
+  flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
 export type GoalConditionalSaveResult = {
@@ -78,10 +90,73 @@ const irreversibleGoalStatuses = new Set<GoalStatus>([
 ]);
 const goalMutationQueues = new Map<string, Promise<void>>();
 
-export function createAgentGoalStore(options: {
+type PreparedGoalSave =
+  | { candidate: Goal }
+  | { result: GoalConditionalSaveResult };
+
+function prepareGoalSave(existing: Goal | null, incoming: Goal): PreparedGoalSave {
+  if (existing && hasInvalidProtocolV2Achievement(existing)) {
+    return {
+      result: { saved: false, goal: sanitizeGoalForRead(existing) },
+    };
+  }
+  if (existing && isCanonicalCertifiedAchievement(existing)) {
+    return { result: { saved: false, goal: existing } };
+  }
+  if (existing?.status === "completed_unverified") {
+    return {
+      result: { saved: false, goal: sanitizeGoalForRead(existing) },
+    };
+  }
+  const candidate = normalizeGoal(
+    sanitizeFinalJudgeReplay(
+      stripUnverifiedCompletionCertificate(
+        preserveCanonicalAcceptance(existing, incoming),
+      ),
+    ),
+  );
+  if (
+    existing &&
+    irreversibleGoalStatuses.has(existing.status) &&
+    candidate.status !== existing.status
+  ) {
+    return { result: { saved: false, goal: existing } };
+  }
+  if (
+    candidate.acceptanceProtocolVersion === 2 &&
+    candidate.status === "achieved"
+  ) {
+    const terminalVerification = verifyProtocolV2Achievement(candidate);
+    if (!terminalVerification.ok) {
+      if (existing) {
+        return { result: { saved: false, goal: existing } };
+      }
+      throw new Error(
+        `Cannot save protocol-v2 achieved goal: ${terminalVerification.reason}`,
+      );
+    }
+  }
+  return { candidate };
+}
+
+export interface AgentGoalStoreOptions {
   configDir: string;
-}): AgentGoalStore {
+  backend?: StorageBackend;
+  storage?: Storage;
+}
+
+export function createAgentGoalStore(
+  options: AgentGoalStoreOptions,
+): AgentGoalStore {
   const goalsDir = path.join(options.configDir, "agent-goals");
+  const authoritativeBackend = createAuthoritativeStoreBackend({
+    backend: options.backend,
+    storage: options.storage,
+    domain: "Goal",
+  });
+  const repository: GoalRepository | null = authoritativeBackend.storage
+    ? createGoalRepository(authoritativeBackend.storage)
+    : null;
 
   function goalPath(goalId: string): string {
     return path.join(goalsDir, `${goalId}.json`);
@@ -160,41 +235,11 @@ export function createAgentGoalStore(options: {
           goal: existing ? sanitizeGoalForRead(existing) : null,
         };
       }
-      if (existing && hasInvalidProtocolV2Achievement(existing)) {
-        return { saved: false, goal: sanitizeGoalForRead(existing) };
+      const prepared = prepareGoalSave(existing, goal);
+      if ("result" in prepared) {
+        return prepared.result;
       }
-      if (existing && isCanonicalCertifiedAchievement(existing)) {
-        return { saved: false, goal: existing };
-      }
-      if (existing?.status === "completed_unverified") {
-        return { saved: false, goal: sanitizeGoalForRead(existing) };
-      }
-      const candidate = normalizeGoal(
-        sanitizeFinalJudgeReplay(
-          stripUnverifiedCompletionCertificate(
-            preserveCanonicalAcceptance(existing, goal),
-          ),
-        ),
-      );
-      if (
-        existing &&
-        irreversibleGoalStatuses.has(existing.status) &&
-        candidate.status !== existing.status
-      ) {
-        return { saved: false, goal: existing };
-      }
-      if (
-        candidate.acceptanceProtocolVersion === 2 &&
-        candidate.status === "achieved"
-      ) {
-        const terminalVerification = verifyProtocolV2Achievement(candidate);
-        if (!terminalVerification.ok) {
-          if (existing) return { saved: false, goal: existing };
-          throw new Error(
-            `Cannot save protocol-v2 achieved goal: ${terminalVerification.reason}`,
-          );
-        }
-      }
+      const { candidate } = prepared;
       await writeJsonFileAtomically(
         goalsDir,
         goalPath(candidate.id),
@@ -204,7 +249,7 @@ export function createAgentGoalStore(options: {
     });
   }
 
-  return {
+  const jsonImpl: AgentGoalStore = {
     async save(goal) {
       const result = await persistGoal(goal);
       if (!result.goal) {
@@ -232,13 +277,11 @@ export function createAgentGoalStore(options: {
             goal: existing ? sanitizeGoalForRead(existing) : null,
           };
         }
-        const candidate = normalizeGoal(
-          sanitizeFinalJudgeReplay(
-            stripUnverifiedCompletionCertificate(
-              preserveCanonicalAcceptance(existing, goal),
-            ),
-          ),
-        );
+        const prepared = prepareGoalSave(existing, goal);
+        if ("result" in prepared) {
+          return prepared.result;
+        }
+        const { candidate } = prepared;
         await writeJsonFileAtomically(
           goalsDir,
           goalPath(candidate.id),
@@ -253,9 +296,13 @@ export function createAgentGoalStore(options: {
     },
 
     async getMany(goalIds) {
-      const requested = new Set(goalIds);
-      if (requested.size === 0) return [];
-      return (await readAllGoals()).filter((goal) => requested.has(goal.id));
+      const goalsById = new Map(
+        (await readAllGoals()).map((goal) => [goal.id, goal]),
+      );
+      return [...new Set(goalIds)].flatMap((goalId) => {
+        const goal = goalsById.get(goalId);
+        return goal ? [goal] : [];
+      });
     },
 
     async listActive() {
@@ -318,6 +365,232 @@ export function createAgentGoalStore(options: {
           throw error;
         }
       });
+    },
+    async flushShadowWrites(flushOptions) {
+      await authoritativeBackend.flushShadowWrites(flushOptions);
+    },
+  };
+
+  if (authoritativeBackend.backend === "json") {
+    return jsonImpl;
+  }
+  if (!repository) {
+    throw new Error("Goal store SQLite repository is unavailable.");
+  }
+
+  function readSqliteGoal(goalId: string): Goal | null {
+    const goal = repository!.get(goalId);
+    return goal ? normalizeGoal(goal) : null;
+  }
+
+  function normalizeRepositoryResult(
+    result: GoalConditionalSaveResult,
+  ): GoalConditionalSaveResult {
+    return {
+      saved: result.saved,
+      goal: result.goal
+        ? sanitizeGoalForRead(normalizeGoal(result.goal))
+        : null,
+    };
+  }
+
+  function enqueueGoalShadow(goal: Goal): void {
+    authoritativeBackend.enqueueShadow(() =>
+      writeStoreJsonAtomically({
+        directory: goalsDir,
+        filePath: goalPath(goal.id),
+        value: goal,
+      }),
+    );
+  }
+
+  function enqueueGoalDeleteShadow(goalId: string): void {
+    authoritativeBackend.enqueueShadow(async () => {
+      try {
+        await unlink(goalPath(goalId));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      }
+    });
+  }
+
+  function enqueueLedgerShadow(
+    goalId: string,
+    event: ProgressLedgerEvent,
+  ): void {
+    authoritativeBackend.enqueueShadow(async () => {
+      await mkdir(goalsDir, { recursive: true });
+      await writeFile(ledgerPath(goalId), `${JSON.stringify(event)}\n`, {
+        encoding: "utf8",
+        flag: "a",
+      });
+    });
+  }
+
+  function enqueueLedgerPublicationShadow(
+    goalId: string,
+    publicationKey: string,
+    event: ProgressLedgerEvent,
+  ): void {
+    authoritativeBackend.enqueueShadow(() =>
+      serializeMutation(goalsDir, async () => {
+        const ledger = await readRecoverableJsonl<ProgressLedgerEvent>(
+          ledgerPath(goalId),
+        );
+        if (
+          ledger.some(
+            (candidate) => candidate.publicationKey === publicationKey,
+          )
+        ) {
+          return;
+        }
+        await mkdir(goalsDir, { recursive: true });
+        await writeFile(
+          ledgerPath(goalId),
+          `${JSON.stringify({ ...event, publicationKey })}\n`,
+          { encoding: "utf8", flag: "a" },
+        );
+      }),
+    );
+  }
+
+  return {
+    async save(goal) {
+      authoritativeBackend.assertWritable();
+      const existing = readSqliteGoal(goal.id);
+      const prepared = prepareGoalSave(existing, goal);
+      if ("result" in prepared) {
+        const current = normalizeRepositoryResult(prepared.result);
+        if (!current.goal) {
+          throw new Error(`Goal "${goal.id}" could not be saved.`);
+        }
+        enqueueGoalShadow(current.goal);
+        return current.goal;
+      }
+      const saved = sanitizeGoalForRead(
+        normalizeGoal(repository.save(prepared.candidate)),
+      );
+      enqueueGoalShadow(saved);
+      return saved;
+    },
+
+    async saveIfStatus(goal, expectedStatus) {
+      authoritativeBackend.assertWritable();
+      const existing = readSqliteGoal(goal.id);
+      if (existing?.status !== expectedStatus) {
+        return {
+          saved: false,
+          goal: existing ? sanitizeGoalForRead(existing) : null,
+        };
+      }
+      const prepared = prepareGoalSave(existing, goal);
+      if ("result" in prepared) {
+        return normalizeRepositoryResult(prepared.result);
+      }
+      const result = normalizeRepositoryResult(
+        repository.saveIfStatus(prepared.candidate, expectedStatus),
+      );
+      if (result.saved && result.goal) enqueueGoalShadow(result.goal);
+      return result;
+    },
+
+    async saveIfPlanVersion(
+      goal,
+      expectedPlanVersion,
+      expectedActivePlanId,
+    ) {
+      authoritativeBackend.assertWritable();
+      const existing = readSqliteGoal(goal.id);
+      if (
+        !existing ||
+        existing.planVersion !== expectedPlanVersion ||
+        irreversibleGoalStatuses.has(existing.status) ||
+        (expectedActivePlanId !== undefined &&
+          existing.activePlanRef?.planId !== expectedActivePlanId)
+      ) {
+        return {
+          saved: false,
+          goal: existing ? sanitizeGoalForRead(existing) : null,
+        };
+      }
+      const prepared = prepareGoalSave(existing, goal);
+      if ("result" in prepared) {
+        return normalizeRepositoryResult(prepared.result);
+      }
+      const result = normalizeRepositoryResult(
+        repository.saveIfPlanVersion(
+          prepared.candidate,
+          expectedPlanVersion,
+          expectedActivePlanId,
+        ),
+      );
+      if (result.saved && result.goal) enqueueGoalShadow(result.goal);
+      return result;
+    },
+
+    async get(goalId) {
+      const goal = readSqliteGoal(goalId);
+      return goal ? sanitizeGoalForRead(goal) : null;
+    },
+
+    async getMany(goalIds) {
+      return repository
+        .getMany(goalIds)
+        .map(normalizeGoal)
+        .map(sanitizeGoalForRead);
+    },
+
+    async listActive() {
+      return repository
+        .listActive()
+        .map(normalizeGoal)
+        .map(sanitizeGoalForRead)
+        .filter(isActiveGoal)
+        .sort(compareGoalsByUpdatedAtDesc);
+    },
+
+    async listByChatSession(chatSessionId) {
+      return repository
+        .listByChatSession(chatSessionId)
+        .map(normalizeGoal)
+        .map(sanitizeGoalForRead)
+        .sort(compareGoalsByUpdatedAtDesc);
+    },
+
+    async appendLedger(goalId, event) {
+      authoritativeBackend.assertWritable();
+      repository.appendLedger(goalId, event);
+      enqueueLedgerShadow(goalId, event);
+    },
+
+    async appendLedgerIfAbsent(goalId, publicationKey, event) {
+      authoritativeBackend.assertWritable();
+      const appended = repository.appendLedgerIfAbsent(
+        goalId,
+        publicationKey,
+        event,
+      );
+      if (appended) {
+        enqueueLedgerPublicationShadow(goalId, publicationKey, event);
+      }
+      return appended;
+    },
+
+    async readLedger(goalId) {
+      return repository.readLedger(goalId);
+    },
+
+    async delete(goalId) {
+      authoritativeBackend.assertWritable();
+      const deleted = repository.delete(goalId);
+      if (deleted) enqueueGoalDeleteShadow(goalId);
+      return deleted;
+    },
+
+    async flushShadowWrites(flushOptions) {
+      await authoritativeBackend.flushShadowWrites(flushOptions);
     },
   };
 }

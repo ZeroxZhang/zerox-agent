@@ -1,10 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   AgentWorkspace,
   AgentWorkspaceInput,
 } from "../shared/agentWorkspace";
+import type {
+  Storage,
+  StorageBackend,
+  WorkspaceRepository,
+} from "../shared/storageContract";
+import type { PersistenceQueueDrainOptions } from "./failureVisibleSerialQueue";
+import {
+  createAuthoritativeStoreBackend,
+  writeStoreJsonAtomically,
+} from "./storage/authoritativeStore";
+import { createWorkspaceRepository } from "./storage/repositories";
 
 export type { AgentWorkspaceInput } from "../shared/agentWorkspace";
 
@@ -20,18 +31,36 @@ export type AgentWorkspaceStore = {
   create(input: AgentWorkspaceInput): Promise<AgentWorkspace>;
   touch(id: string): Promise<AgentWorkspace | null>;
   delete(id: string): Promise<boolean>;
+  flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
 export function createAgentWorkspaceStore(options: {
   configDir: string;
   createId?: () => string;
   now?: () => Date;
+  backend?: StorageBackend;
+  storage?: Storage;
 }): AgentWorkspaceStore {
   const workspacesPath = path.join(options.configDir, "agent-workspaces.json");
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
+  const authoritativeBackend = createAuthoritativeStoreBackend({
+    backend: options.backend,
+    storage: options.storage,
+    domain: "Agent workspace",
+  });
+  const repository: WorkspaceRepository | null = authoritativeBackend.storage
+    ? createWorkspaceRepository(authoritativeBackend.storage)
+    : null;
 
   async function readStored(): Promise<StoredAgentWorkspaces> {
+    if (authoritativeBackend.backend !== "json") {
+      return {
+        schemaVersion: 1,
+        workspaces: repository!.list(),
+      };
+    }
+
     try {
       const raw = await readFile(workspacesPath, "utf8");
       const stored = JSON.parse(raw) as StoredAgentWorkspaces;
@@ -49,34 +78,67 @@ export function createAgentWorkspaceStore(options: {
   }
 
   async function writeStored(stored: StoredAgentWorkspaces) {
-    await mkdir(options.configDir, { recursive: true });
-    await writeFile(workspacesPath, `${JSON.stringify(stored, null, 2)}\n`, {
-      encoding: "utf8",
+    await writeStoreJsonAtomically({
+      directory: options.configDir,
+      filePath: workspacesPath,
+      value: stored,
     });
+  }
+
+  function enqueueWorkspaceSnapshot(): void {
+    authoritativeBackend.enqueueShadow(() =>
+      writeStoreJsonAtomically({
+        directory: options.configDir,
+        filePath: workspacesPath,
+        value: {
+          schemaVersion: 1,
+          workspaces: repository!.list(),
+        } satisfies StoredAgentWorkspaces,
+      }),
+    );
+  }
+
+  async function saveWorkspace(
+    workspace: AgentWorkspace,
+  ): Promise<AgentWorkspace> {
+    if (authoritativeBackend.backend !== "json") {
+      authoritativeBackend.assertWritable();
+      const saved = repository!.save(workspace);
+      enqueueWorkspaceSnapshot();
+      return saved;
+    }
+
+    const stored = await readStored();
+    const index = stored.workspaces.findIndex((item) => item.id === workspace.id);
+    const workspaces =
+      index === -1
+        ? [...stored.workspaces, workspace]
+        : stored.workspaces.map((item) =>
+            item.id === workspace.id ? workspace : item,
+          );
+    await writeStored({ schemaVersion: 1, workspaces });
+    return workspace;
   }
 
   return {
     async get(id) {
+      if (authoritativeBackend.backend !== "json") {
+        return repository!.get(id);
+      }
       const stored = await readStored();
       return stored.workspaces.find((workspace) => workspace.id === id) ?? null;
     },
 
     async list() {
+      if (authoritativeBackend.backend !== "json") {
+        return repository!.list();
+      }
       const stored = await readStored();
       return [...stored.workspaces].sort(compareWorkspaceRecency);
     },
 
     async save(workspace) {
-      const stored = await readStored();
-      const index = stored.workspaces.findIndex((item) => item.id === workspace.id);
-      const workspaces =
-        index === -1
-          ? [...stored.workspaces, workspace]
-          : stored.workspaces.map((item) =>
-              item.id === workspace.id ? workspace : item,
-            );
-      await writeStored({ schemaVersion: 1, workspaces });
-      return workspace;
+      return saveWorkspace(workspace);
     },
 
     async create(input) {
@@ -93,17 +155,19 @@ export function createAgentWorkspaceStore(options: {
         cleanup: input.cleanup,
       };
 
-      return this.save(workspace);
+      return saveWorkspace(workspace);
     },
 
     async touch(id) {
-      const workspace = await this.get(id);
+      const workspace = authoritativeBackend.backend === "json"
+        ? (await readStored()).workspaces.find((item) => item.id === id) ?? null
+        : repository!.get(id);
       if (!workspace) {
         return null;
       }
 
       const timestamp = now().toISOString();
-      return this.save({
+      return saveWorkspace({
         ...workspace,
         updatedAt: timestamp,
         lastUsedAt: timestamp,
@@ -111,6 +175,15 @@ export function createAgentWorkspaceStore(options: {
     },
 
     async delete(id) {
+      if (authoritativeBackend.backend !== "json") {
+        authoritativeBackend.assertWritable();
+        const deleted = repository!.delete(id);
+        if (deleted) {
+          enqueueWorkspaceSnapshot();
+        }
+        return deleted;
+      }
+
       const stored = await readStored();
       const workspaces = stored.workspaces.filter((workspace) => workspace.id !== id);
       if (workspaces.length === stored.workspaces.length) {
@@ -119,6 +192,10 @@ export function createAgentWorkspaceStore(options: {
 
       await writeStored({ schemaVersion: 1, workspaces });
       return true;
+    },
+
+    async flushShadowWrites(flushOptions) {
+      await authoritativeBackend.flushShadowWrites(flushOptions);
     },
   };
 }

@@ -5,13 +5,16 @@ import {
   runProductionSmoke,
   type ProductionSmokeCommand,
 } from "./productionSmokeRunner";
-import type { ProductionStorageSmokeEvidence } from "./productionSmoke";
+import {
+  productionStorageAuthorityDomains,
+  type ProductionStorageSmokeEvidence,
+} from "./productionSmoke";
 
 const validEvidence: ProductionStorageSmokeEvidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   kind: "production_storage_smoke",
-  requestedBackend: "dual",
-  resolvedBackend: "dual",
+  requestedBackend: "sqlite",
+  resolvedBackend: "sqlite",
   nativeRuntime: {
     runtime: "electron",
     electronVersion: "42.9.0",
@@ -21,13 +24,26 @@ const validEvidence: ProductionStorageSmokeEvidence = {
   sqlite: {
     foreignKeys: 1,
     journalMode: "wal",
-    migrationCount: 3,
+    migrationCount: 7,
     taskRowPersisted: true,
-  },
-  dual: {
-    jsonShadowPersisted: true,
     taskId: "smoke_task",
     taskName: "Production SQLite smoke",
+  },
+  authority: {
+    domains: [...productionStorageAuthorityDomains],
+    markerCount: 8,
+    recordIds: {
+      goal: "goal_smoke",
+      execution_checkpoint: "run_smoke",
+      memory: "memory_smoke",
+      workspace: "workspace_smoke",
+      multi_agent_session: "session_smoke",
+      learning_candidate: "learning_smoke",
+      eval_candidate: "candidate_smoke",
+      promoted_eval_fixture: "fixture_smoke",
+    },
+    domainRowsPersisted: true,
+    legacyJsonShadowsAbsent: true,
   },
 };
 
@@ -118,7 +134,7 @@ describe("production smoke runner", () => {
     expect(electronApp?.env).toMatchObject({
       BUILDING_AGENT_SMOKE: "1",
       ZEROX_PRODUCTION_SMOKE_REQUIRE_SQLITE: "1",
-      ZEROX_STORAGE_BACKEND: "dual",
+      ZEROX_STORAGE_BACKEND: "sqlite",
     });
     expect(electronApp).toMatchObject({
       timeoutMs: 15_000,

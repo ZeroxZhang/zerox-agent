@@ -38,7 +38,42 @@ type SessionRow = {
   updated_at: string;
 };
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function buildSessionPayload(input: SessionInput): unknown {
+  if (input.kind !== "multi_agent") {
+    return input.payload ?? null;
+  }
+
+  const payload = asRecord(input.payload);
+  const childRunIds = input.childRunIds ??
+    (Array.isArray(payload.childRunIds)
+      ? payload.childRunIds.filter(
+          (runId): runId is string => typeof runId === "string",
+        )
+      : []);
+  const roles = input.roles ??
+    (asRecord(payload.roles) as SessionRecord["roles"]);
+  return {
+    ...payload,
+    childRunIds: [...childRunIds],
+    roles: { ...roles },
+  };
+}
+
 function rowToSession(row: SessionRow): SessionRecord {
+  const payload = parseJson<unknown>(row.payload);
+  const payloadRecord = asRecord(payload);
+  const childRunIds = Array.isArray(payloadRecord.childRunIds)
+    ? payloadRecord.childRunIds.filter(
+        (runId): runId is string => typeof runId === "string",
+      )
+    : [];
+  const roles = asRecord(payloadRecord.roles) as SessionRecord["roles"];
   return {
     id: row.id,
     kind: row.kind as SessionKind,
@@ -48,7 +83,8 @@ function rowToSession(row: SessionRow): SessionRecord {
     rootRunId: row.root_run_id ?? undefined,
     status: (row.status ?? undefined) as SessionRecord["status"],
     workspaceId: row.workspace_id ?? undefined,
-    payload: parseJson(row.payload),
+    ...(row.kind === "multi_agent" ? { childRunIds, roles } : {}),
+    payload,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -57,8 +93,12 @@ function rowToSession(row: SessionRow): SessionRecord {
 const SESSION_COLUMNS =
   "id, kind, parent_session_id, agent_role, title, root_run_id, status, workspace_id, payload, created_at, updated_at";
 
-export function createSessionRepository(storage: Storage): SessionRepository {
+export function createSessionRepository(
+  storage: Storage,
+  options: { now?: () => string } = {},
+): SessionRepository {
   const db = storage.db;
+  const now = options.now ?? (() => new Date().toISOString());
 
   function getSession(id: string): SessionRecord | null {
     const row = db
@@ -68,8 +108,9 @@ export function createSessionRepository(storage: Storage): SessionRepository {
   }
 
   function upsert(input: SessionInput): SessionRecord {
-    const now = input.updatedAt ?? new Date().toISOString();
-    const createdAt = input.createdAt ?? now;
+    const updatedAt = input.updatedAt ?? now();
+    const createdAt = input.createdAt ?? updatedAt;
+    const payload = buildSessionPayload(input);
     db.prepare(
       `INSERT INTO sessions (id, kind, parent_session_id, agent_role, title, root_run_id, status, workspace_id, payload, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -86,12 +127,68 @@ export function createSessionRepository(storage: Storage): SessionRepository {
       input.rootRunId ?? null,
       input.status ?? null,
       input.workspaceId ?? null,
-      jsonify(input.payload ?? null),
+      jsonify(payload),
       createdAt,
-      now,
+      updatedAt,
     );
     return getSession(input.id)!;
   }
+
+  const appendChildRunTransaction = db.transaction(
+    (
+      sessionId: string,
+      runId: string,
+      role: Parameters<SessionRepository["appendChildRun"]>[2],
+    ): SessionRecord | null => {
+      const existing = getSession(sessionId);
+      if (!existing || existing.kind !== "multi_agent") return null;
+
+      const childRunIds = existing.childRunIds ?? [];
+      const roles = existing.roles ?? {};
+      if (childRunIds.includes(runId) && roles[runId] === role) {
+        return existing;
+      }
+
+      const nextChildRunIds = childRunIds.includes(runId)
+        ? childRunIds
+        : [...childRunIds, runId];
+      const nextRoles = { ...roles, [runId]: role };
+      return upsert({
+        ...existing,
+        id: sessionId,
+        kind: existing.kind,
+        childRunIds: nextChildRunIds,
+        roles: nextRoles,
+        payload: {
+          ...asRecord(existing.payload),
+          childRunIds: nextChildRunIds,
+          roles: nextRoles,
+        },
+        updatedAt: now(),
+      });
+    },
+  );
+
+  const setSessionStatusTransaction = db.transaction(
+    (
+      sessionId: string,
+      status: Parameters<SessionRepository["setSessionStatus"]>[1],
+    ): SessionRecord | null => {
+      const existing = getSession(sessionId);
+      if (!existing || existing.kind !== "multi_agent") return null;
+      if (existing.status === status) {
+        return existing;
+      }
+      return upsert({
+        ...existing,
+        id: sessionId,
+        kind: existing.kind,
+        status,
+        payload: { ...asRecord(existing.payload), status },
+        updatedAt: now(),
+      });
+    },
+  );
 
   return {
     createSession(input: SessionInput): SessionRecord {
@@ -103,10 +200,10 @@ export function createSessionRepository(storage: Storage): SessionRepository {
     listSessions(options?: { kind?: SessionKind }): SessionRecord[] {
       const rows = options?.kind
         ? (db
-            .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE kind = ? ORDER BY updated_at DESC`)
+            .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE kind = ? ORDER BY updated_at DESC, id DESC`)
             .all(options.kind) as SessionRow[])
         : (db
-            .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY updated_at DESC`)
+            .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY updated_at DESC, id DESC`)
             .all() as SessionRow[]);
       return rows.map(rowToSession);
     },
@@ -114,41 +211,16 @@ export function createSessionRepository(storage: Storage): SessionRepository {
     appendChildRun(
       sessionId: string,
       runId: string,
-      role: SessionRecord["agentRole"],
+      role: Parameters<SessionRepository["appendChildRun"]>[2],
     ): SessionRecord | null {
-      const existing = getSession(sessionId);
-      if (!existing) return null;
-      const payload = (existing.payload ?? {}) as {
-        childRunIds?: string[];
-        roles?: Record<string, string>;
-      };
-      const childRunIds = [...(payload.childRunIds ?? []), runId];
-      const roles = { ...(payload.roles ?? {}), [runId]: role };
-      return upsert({
-        ...existing,
-        id: sessionId,
-        kind: existing.kind,
-        childRunIds,
-        roles: roles as SessionRecord["roles"],
-        payload: { ...payload, childRunIds, roles },
-        updatedAt: new Date().toISOString(),
-      });
+      return appendChildRunTransaction(sessionId, runId, role);
     },
 
     setSessionStatus(
       sessionId: string,
-      status: SessionRecord["status"],
+      status: Parameters<SessionRepository["setSessionStatus"]>[1],
     ): SessionRecord | null {
-      const existing = getSession(sessionId);
-      if (!existing) return null;
-      return upsert({
-        ...existing,
-        id: sessionId,
-        kind: existing.kind,
-        status,
-        payload: { ...(existing.payload as object), status },
-        updatedAt: new Date().toISOString(),
-      });
+      return setSessionStatusTransaction(sessionId, status);
     },
 
     appendMessage(input: AppendChatMessageInput): AppendChatMessageResult {

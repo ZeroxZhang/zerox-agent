@@ -9,7 +9,7 @@ Zerox Agent is a local-first desktop control plane for permissioned, observable,
 1. Run `./init.sh`.
 2. Read `.zerox/feature_list.json`.
 3. Read the active program manifest. For the current iteration this is
-   `.zerox/kernel-migration-program.json`.
+   `.zerox/storage-convergence-program.json`.
 4. Pick exactly one unfinished feature.
 5. Before editing, inspect the files named by that feature.
 6. After editing, run the feature verification command plus

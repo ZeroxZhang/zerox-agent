@@ -484,15 +484,56 @@ describe("remaining repositories", () => {
     storage.close();
   });
 
-  it("workspace create/save/touch/list/get/delete", async () => {
+  it("workspace save/list/get/delete preserves store-owned identity and ordering", async () => {
     const storage = await createInMemoryStorage();
     const ws = createWorkspaceRepository(storage);
-    const w = ws.create({ name: "proj", rootPath: "/tmp/proj", kind: "project", cleanup: "keep" });
-    expect(ws.get(w.id)?.rootPath).toBe("/tmp/proj");
-    ws.touch(w.id);
-    expect(ws.get(w.id)?.lastUsedAt).toBeTruthy();
-    expect(ws.list().length).toBe(1);
-    expect(ws.delete(w.id)).toBe(true);
+    const createdAt = "2026-06-19T00:00:00.000Z";
+    const first = {
+      id: "workspace_a",
+      name: "first",
+      rootPath: "/tmp/first",
+      kind: "project" as const,
+      cleanup: "keep" as const,
+      createdAt,
+      updatedAt: "2026-06-19T00:02:00.000Z",
+      lastUsedAt: null,
+    };
+    const second = {
+      ...first,
+      id: "workspace_b",
+      name: "second",
+      rootPath: "/tmp/second",
+    };
+    const touched = {
+      ...first,
+      updatedAt: "2026-06-19T00:03:00.000Z",
+      lastUsedAt: "2026-06-19T00:03:00.000Z",
+    };
+    const updatedAfterOlderUse = {
+      ...second,
+      updatedAt: "2026-06-19T00:04:00.000Z",
+      lastUsedAt: "2026-06-19T00:01:00.000Z",
+    };
+
+    ws.save(first);
+    ws.save(second);
+    expect(ws.get(first.id)?.rootPath).toBe("/tmp/first");
+    expect(ws.list().map((workspace) => workspace.id)).toEqual([
+      "workspace_b",
+      "workspace_a",
+    ]);
+    ws.save(touched);
+    expect(ws.get(first.id)?.lastUsedAt).toBe(touched.lastUsedAt);
+    expect(ws.list().map((workspace) => workspace.id)).toEqual([
+      "workspace_a",
+      "workspace_b",
+    ]);
+    ws.save(updatedAfterOlderUse);
+    expect(ws.list().map((workspace) => workspace.id)).toEqual([
+      "workspace_a",
+      "workspace_b",
+    ]);
+    expect(ws.delete(first.id)).toBe(true);
     storage.close();
   });
 

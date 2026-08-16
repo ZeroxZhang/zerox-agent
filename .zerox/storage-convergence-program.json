@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "programId": "sqlite-domain-storage-convergence-2026-08",
+  "title": "SQLite Domain Storage Convergence",
+  "updatedAt": "2026-08-16T19:48:03.000+08:00",
+  "sourceBaseline": {
+    "release": "v3.8.2",
+    "commit": "95c02bcd879f1c5bcd9306a09e4421360065114f"
+  },
+  "operatingGuide": ".zerox/storage-convergence-program.md",
+  "architectureDecision": ".zerox/decisions/SC01-storage-convergence-program.md",
+  "status": "completed",
+  "activeFeatureId": null,
+  "activeWorkstreamId": null,
+  "maxActiveFeatures": 1,
+  "invariants": [
+    "SQLite becomes authoritative one domain at a time; a global backend flag never implies unimplemented authority.",
+    "Every authoritative mutation is committed to SQLite before any compatibility shadow is attempted.",
+    "Dual JSON shadows are serialized, failure-visible, closeable, and fully drained before SQLite closes.",
+    "Goal terminal, acceptance certificate, Plan lineage, checkpoint, ledger, and Kernel run_end ordering remain unchanged.",
+    "Memory session isolation, reviewed learning, embedding compatibility, and deterministic ranking remain unchanged.",
+    "Migration and rollback compare canonical records by identity and never overwrite a newer authority with a stale generation."
+  ],
+  "domainAuthority": [
+    {
+      "domain": "goal",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC03"
+    },
+    {
+      "domain": "execution_checkpoint",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC03"
+    },
+    {
+      "domain": "memory",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC04"
+    },
+    {
+      "domain": "workspace",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC05"
+    },
+    {
+      "domain": "multi_agent_session",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC05"
+    },
+    {
+      "domain": "learning_candidate",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC06"
+    },
+    {
+      "domain": "eval_candidate",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC06"
+    },
+    {
+      "domain": "promoted_eval_fixture",
+      "current": "json",
+      "target": "sqlite",
+      "workstream": "SC06"
+    }
+  ],
+  "fileBackedExclusions": [
+    {
+      "domain": "model_settings_and_credentials",
+      "reason": "Electron safeStorage ciphertext and optimistic revision semantics remain a dedicated local settings boundary."
+    },
+    {
+      "domain": "tool_result_blobs",
+      "reason": "Large scoped result blobs remain atomic file pairs; SQLite stores may index metadata only in a future program."
+    },
+    {
+      "domain": "workspace_run_ledger",
+      "reason": "The append-only file ledger remains compatibility evidence until a measured production pressure or product query requires a dedicated schema."
+    },
+    {
+      "domain": "raw_history",
+      "reason": "Raw history remains an append-only redacted JSONL evidence log and is not part of the core authority cutover."
+    },
+    {
+      "domain": "artifact_payloads",
+      "reason": "User deliverables remain files; only provenance metadata may be indexed independently."
+    }
+  ],
+  "workstreams": [
+    {
+      "id": "SC01",
+      "title": "Program foundation and per-domain contracts",
+      "state": "completed",
+      "dependsOn": [],
+      "rollback": "Remove the P97 program artifacts and checker; no runtime data or production authority changes are involved.",
+      "verification": [
+        "program checker tests",
+        "package script tests",
+        "npm run program:check",
+        "npm run harness:check"
+      ]
+    },
+    {
+      "id": "SC02",
+      "title": "Shared authoritative store and shadow-drain primitives",
+      "state": "completed",
+      "dependsOn": [
+        "SC01"
+      ],
+      "rollback": "Keep each domain on its current store and remove only unused shared adapter primitives.",
+      "verification": [
+        "shared adapter parity",
+        "failure-visible shadow drain",
+        "close admission and restart tests"
+      ]
+    },
+    {
+      "id": "SC03",
+      "title": "Goal and execution checkpoint SQLite cutover",
+      "state": "completed",
+      "dependsOn": [
+        "SC02"
+      ],
+      "rollback": "Switch Goal and checkpoints back to JSON authority after canonical SQLite-to-JSON export; preserve terminal and acceptance evidence.",
+      "verification": [
+        "Goal CAS and irreversible terminal parity",
+        "acceptance certificate and ledger parity",
+        "checkpoint restart and Kernel settlement ordering"
+      ]
+    },
+    {
+      "id": "SC04",
+      "title": "Memory SQLite cutover",
+      "state": "completed",
+      "dependsOn": [
+        "SC02"
+      ],
+      "rollback": "Export canonical memory records to JSON while retaining SQLite unchanged for forensic recovery.",
+      "verification": [
+        "embedding and hybrid ranking parity",
+        "session isolation",
+        "maintenance and governance parity"
+      ]
+    },
+    {
+      "id": "SC05",
+      "title": "Workspace and Multi-Agent Session SQLite cutover",
+      "state": "completed",
+      "dependsOn": [
+        "SC02"
+      ],
+      "rollback": "Export canonical workspace and multi-agent records to JSON with no lost child-run or role updates.",
+      "verification": [
+        "workspace CRUD parity",
+        "concurrent child-run mutation parity",
+        "restart and rollback round trip"
+      ]
+    },
+    {
+      "id": "SC06",
+      "title": "Reviewed learning and evaluation SQLite cutover",
+      "state": "completed",
+      "dependsOn": [
+        "SC02"
+      ],
+      "rollback": "Export learning candidates, eval candidates, and promoted fixtures without changing review states or fixture identities.",
+      "verification": [
+        "learning review transition parity",
+        "eval transition CAS parity",
+        "promoted fixture idempotency"
+      ]
+    },
+    {
+      "id": "SC07",
+      "title": "Migration, rollback, and production authority convergence",
+      "state": "completed",
+      "dependsOn": [
+        "SC03",
+        "SC04",
+        "SC05",
+        "SC06"
+      ],
+      "rollback": "Retain per-domain rollback flags and do not remove JSON compatibility until complete canonical round-trip evidence passes.",
+      "verification": [
+        "idempotent migration",
+        "atomic rollback compensation",
+        "mixed-generation conflict rejection",
+        "Electron SQLite production smoke"
+      ]
+    },
+    {
+      "id": "SC08",
+      "title": "Independent review, stress, and closure",
+      "state": "completed",
+      "dependsOn": [
+        "SC07"
+      ],
+      "rollback": "Keep the last accepted per-domain authority matrix and leave P97 active until every rejected review or QA finding is repaired.",
+      "verification": [
+        "independent code and security review",
+        "independent architecture review",
+        "full verify and runtime stress",
+        "real Seatbelt and Electron smoke",
+        "program and harness closure"
+      ]
+    }
+  ]
+}

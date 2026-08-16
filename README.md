@@ -305,7 +305,9 @@ macOS 通常对应：
 ~/Library/Application Support/Zerox Agent/config
 ~~~
 
-存储权威按数据域划分：Chat、Run、Trajectory、Task、Validation、MemoryProfile 和 ToolAudit 使用 SQLite，Plan 在 SQLite 模式下使用 SQLite；尚未转换的 Goal、Memory、Workspace、Multi-Agent 等域继续以 JSON/JSONL 为权威。`ZEROX_STORAGE_BACKEND=sqlite` 和 `dual` 只切换已声明支持的域。API Key 不以明文进入业务记录：Electron `safeStorage` 加密后的密文保存在 `model-settings.json`，renderer、Plan 和运行轨迹不会获得已保存密钥。
+SQLite 是正式运行时的默认存储权威。Chat、Run、Trajectory、Task、Validation、MemoryProfile、ToolAudit、Goal、执行 checkpoint、Memory、Workspace、Multi-Agent Session、审核后的 Learning、Eval Candidate 和 promoted fixture 都写入 `zerox.db`；首次升级会逐域原子导入旧 JSON，并写入持久化 marker，旧 shadow 不会在后续启动时复活已删除的 SQLite 数据。`ZEROX_STORAGE_BACKEND=dual` 仅用于显式兼容，SQLite 仍先提交且保持权威；`json` 仅用于显式回滚和诊断。若 native SQLite 无法加载，`sqlite/dual` 会拒绝启动，而不是静默回退并分裂权威。
+
+加密模型设置、受作用域约束的大型 Tool Result、Workspace Run ledger、raw history 和 artifact payload 继续保留为明确的文件型边界。API Key 不以明文进入业务记录：Electron `safeStorage` 加密后的密文保存在 `model-settings.json`，renderer、Plan 和运行轨迹不会获得已保存密钥。
 
 常见记录包括会话、Plan、Goal、checkpoint、trajectory、tool audit、memory、scheduled task、`agent-validation.json` 和 multi-agent session。
 
@@ -576,6 +578,15 @@ Stored secrets are encrypted with Electron `safeStorage` and are never exposed t
 - Checkpoints, trajectories, ledgers, and run records remain local and recoverable.
 - Learning candidates require user review before they affect future behavior.
 - Renderer state is never the source of truth for tool permission, Plan adoption, Goal completion, or acceptance certificates.
+
+SQLite is the default authority for structured runtime domains, including
+Chat, Goal, execution checkpoints, Memory, Workspace, Multi-Agent sessions,
+reviewed Learning, Eval candidates, and promoted fixtures. Startup imports each
+legacy JSON domain atomically once and records a durable marker. Encrypted model
+settings, scoped large tool results, workspace-run ledgers, raw history, and
+artifact payloads remain explicit file-backed boundaries. If native SQLite is
+unavailable, `sqlite` and `dual` fail startup instead of silently forking writes
+into legacy JSON.
 
 ## Skills, memory, and multi-agent work
 

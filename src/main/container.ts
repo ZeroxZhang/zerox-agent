@@ -1,7 +1,10 @@
 import { app, BrowserWindow, safeStorage } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { createAgentExecutionStore } from "./agentExecutionStore";
+import {
+  createAgentExecutionStore,
+  type AgentExecutionStore,
+} from "./agentExecutionStore";
 import {
   createAgentTrajectoryStore,
   type AgentTrajectoryStore,
@@ -12,7 +15,10 @@ import { createAgentEvalCandidateStore } from "./agentEvalCandidateStore";
 import { createAgentEvalCandidateService } from "./agentEvalCandidateService";
 import { createAgentWorkspaceStore } from "./agentWorkspaceStore";
 import { createWorkspaceRunStore } from "./workspaceRunStore";
-import { createAgentGoalStore } from "./agentGoalStore";
+import {
+  createAgentGoalStore,
+  type AgentGoalStore,
+} from "./agentGoalStore";
 import { createAgentGoalController } from "./agentGoalController";
 import {
   createAgentGoalAcceptance,
@@ -71,6 +77,7 @@ import { providerSupportsEmbeddings } from "./providers/providerRegistry";
 import {
   createMemoryStore,
   type MemoryEmbeddingService,
+  type MemoryStore,
 } from "./memoryStore";
 import { createMemoryProfileStore } from "./memoryProfileStore";
 import { createHistoryIndexStore } from "./historyIndexStore";
@@ -101,7 +108,11 @@ import { productionKernelCovers } from "./kernel/productionKernelScope";
 import { createToolRuntime } from "./toolRuntime";
 import { registerReadCodeTool } from "./readCodeTool";
 import { createStorageImpl } from "./storage/storageDb";
-import { resolveStorageBackend } from "./storage/backendResolver";
+import {
+  requireStorageBackendAvailability,
+  resolveStorageBackend,
+} from "./storage/backendResolver";
+import { bootstrapSqliteDomainAuthority } from "./storage/domainAuthorityBootstrap";
 import {
   createProvider,
   resolveProviderBaseUrl,
@@ -424,27 +435,16 @@ export function createAppContainer(options: {
   const skillsDir = path.join(app.getAppPath(), "skills");
   const appMeta = getAppMeta();
 
-  // P1 SQLite storage. The Storage singleton is created lazily and is
-  // fault-tolerant: if better-sqlite3 fails to load (e.g. an Electron ABI
-  // mismatch before @electron/rebuild runs), the container falls back to the
-  // `json` backend so the app still starts. Stores that have been converted to
-  // dual-write proxies (agentRunStore, agentTrajectoryStore) consume this.
+  // SQLite is the release authority. An unavailable native module must fail
+  // startup for sqlite/dual; silently writing legacy JSON would fork authority.
   let storageBackendCache: "json" | "sqlite" | "dual" | null = null;
   function storageBackend(): "json" | "sqlite" | "dual" {
     if (storageBackendCache) return storageBackendCache;
     const resolved = resolveStorageBackend();
-    if (resolved !== "json") {
-      const opened = storage(); // ensure the native module loads + migrates
-      if (!opened) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          "[storage] SQLite backend unavailable; falling back to json.",
-        );
-        storageBackendCache = "json";
-        return "json";
-      }
-    }
-    storageBackendCache = resolved;
+    storageBackendCache = requireStorageBackendAvailability(
+      resolved,
+      resolved === "json" || storage() !== null,
+    );
     return resolved;
   }
 
@@ -456,8 +456,8 @@ export function createAppContainer(options: {
         return createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
       } catch (error) {
         // eslint-disable-next-line no-console
-        console.warn(
-          `[storage] could not open SQLite (${String(error)}); continuing on JSON.`,
+        console.error(
+          `[storage] could not open SQLite authority (${String(error)}).`,
         );
         return null;
       }
@@ -478,6 +478,28 @@ export function createAppContainer(options: {
       runtimeVersions: process.versions,
       storage: resolvedBackend === "json" ? null : storage(),
       taskStore: scheduledTaskStore(),
+      goalStore: agentGoalStore(),
+      executionStore: agentExecutionStore(),
+      memoryStore: memoryStore(),
+      workspaceStore: agentWorkspaceStore(),
+      multiAgentSessionStore: multiAgentSessionStore(),
+      learningStore: agentLearningStore(),
+      evalCandidateStore: agentEvalCandidateStore(),
+      promotedFixtureStore: promotedAgentEvalFixtureStore(),
+    });
+  }
+
+  async function initializeStorageConvergence() {
+    if (storageBackend() === "json") {
+      return { imported: [], existing: [] };
+    }
+    const sqlite = storage();
+    if (!sqlite) {
+      return { imported: [], existing: [] };
+    }
+    return bootstrapSqliteDomainAuthority({
+      configDir,
+      storage: sqlite,
     });
   }
 
@@ -1241,7 +1263,13 @@ export function createAppContainer(options: {
   }
 
   function agentExecutionStore() {
-    return lazy("agentExecutionStore", () => createAgentExecutionStore({ configDir }));
+    return lazy("agentExecutionStore", () =>
+      createAgentExecutionStore({
+        configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
+      }),
+    );
   }
 
   function agentTrajectoryStore() {
@@ -1251,11 +1279,23 @@ export function createAppContainer(options: {
   }
 
   function agentGoalStore() {
-    return lazy("agentGoalStore", () => createAgentGoalStore({ configDir }));
+    return lazy("agentGoalStore", () =>
+      createAgentGoalStore({
+        configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
+      }),
+    );
   }
 
   function agentWorkspaceStore() {
-    return lazy("agentWorkspaceStore", () => createAgentWorkspaceStore({ configDir }));
+    return lazy("agentWorkspaceStore", () =>
+      createAgentWorkspaceStore({
+        configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
+      }),
+    );
   }
 
   function workspaceRunStore() {
@@ -1311,7 +1351,13 @@ export function createAppContainer(options: {
   }
 
   function multiAgentSessionStore() {
-    return lazy("multiAgentSessionStore", () => createMultiAgentSessionStore({ configDir }));
+    return lazy("multiAgentSessionStore", () =>
+      createMultiAgentSessionStore({
+        configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
+      }),
+    );
   }
 
   function planStore() {
@@ -1365,16 +1411,32 @@ export function createAppContainer(options: {
   }
 
   function agentLearningStore() {
-    return lazy("agentLearningStore", () => createAgentLearningStore({ configDir }));
+    return lazy("agentLearningStore", () =>
+      createAgentLearningStore({
+        configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
+      }),
+    );
   }
 
   function agentEvalCandidateStore() {
-    return lazy("agentEvalCandidateStore", () => createAgentEvalCandidateStore({ configDir }));
+    return lazy("agentEvalCandidateStore", () =>
+      createAgentEvalCandidateStore({
+        configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
+      }),
+    );
   }
 
   function promotedAgentEvalFixtureStore() {
     return lazy("promotedAgentEvalFixtureStore", () =>
-      createPromotedAgentEvalFixtureStore({ configDir }),
+      createPromotedAgentEvalFixtureStore({
+        configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
+      }),
     );
   }
 
@@ -1398,6 +1460,8 @@ export function createAppContainer(options: {
     return lazy("memoryStore", () =>
       createMemoryStore({
         configDir,
+        backend: storageBackend(),
+        storage: activeSqliteStorage() ?? undefined,
         embeddingService: createModelProfileEmbeddingService({
           modelSettingsStore,
         }),
@@ -4493,8 +4557,27 @@ export function createAppContainer(options: {
       goalProgressDeliveryQueue,
       (lazyStore.get("agentRunStore") as AgentRunStore | undefined)
         ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("agentExecutionStore") as AgentExecutionStore | undefined)
+        ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
       (lazyStore.get("agentTrajectoryStore") as AgentTrajectoryStore | undefined)
         ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("agentGoalStore") as AgentGoalStore | undefined)
+        ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("agentWorkspaceStore") as
+        | ReturnType<typeof createAgentWorkspaceStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("multiAgentSessionStore") as
+        | ReturnType<typeof createMultiAgentSessionStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("agentLearningStore") as
+        | ReturnType<typeof createAgentLearningStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("agentEvalCandidateStore") as
+        | ReturnType<typeof createAgentEvalCandidateStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("promotedAgentEvalFixtureStore") as
+        | ReturnType<typeof createPromotedAgentEvalFixtureStore>
+        | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
       (lazyStore.get("scheduledTaskStore") as
         | ReturnType<typeof createScheduledTaskStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
@@ -4504,6 +4587,8 @@ export function createAppContainer(options: {
       (lazyStore.get("memoryProfileStore") as
         | ReturnType<typeof createMemoryProfileStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
+      (lazyStore.get("memoryStore") as MemoryStore | undefined)
+        ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
       (lazyStore.get("toolAuditLog") as
         | ReturnType<typeof createToolAuditLog>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
@@ -4526,6 +4611,7 @@ export function createAppContainer(options: {
 
   return {
     appMeta,
+    initializeStorageConvergence,
     getNavigationSections,
     buildDesktopRuntimeInfo: () =>
       buildDesktopRuntimeInfo({

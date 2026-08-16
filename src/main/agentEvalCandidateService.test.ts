@@ -110,6 +110,27 @@ describe("agent eval candidate service", () => {
     expect(promotedFixtureStore.fixtures).toEqual([accepted.fixture]);
   });
 
+  it("serializes competing JSON promotions so only one succeeds", async () => {
+    const accepted = createCandidate("run_1", "accepted");
+    const candidateStore = createMemoryCandidateStore([accepted]);
+    const promotedFixtureStore = createMemoryPromotedFixtureStore();
+    const service = createAgentEvalCandidateService({
+      runStore: createMemoryRunStore([]),
+      trajectoryStore: createMemoryTrajectoryStore({}),
+      candidateStore,
+      promotedFixtureStore,
+    });
+
+    const results = await Promise.all([
+      service.promoteAccepted(accepted.id),
+      service.promoteAccepted(accepted.id),
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(candidateStore.candidates[0]?.status).toBe("promoted");
+    expect(promotedFixtureStore.fixtures).toEqual([accepted.fixture]);
+  });
+
   it("accepts only candidates that are still pending review", async () => {
     const pending = createCandidate("run_1", "pending_review");
     const promoted = createCandidate("run_2", "promoted");
@@ -253,6 +274,9 @@ function createMemoryCandidateStore(initial: AgentEvalCandidate[] = []) {
       store.candidates[candidateIndex] = updated;
       return updated;
     },
+    async flushShadowWrites() {
+      return;
+    },
   };
   return store;
 }
@@ -273,6 +297,9 @@ function createMemoryPromotedFixtureStore() {
         store.fixtures[existingIndex] = fixture;
       }
       return fixture;
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
   return store;

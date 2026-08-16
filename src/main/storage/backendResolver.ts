@@ -1,9 +1,10 @@
 // BackendResolver (contracts v1.4 §1.4, spec T1.4).
 //
 // Reads `ZEROX_STORAGE_BACKEND` from the environment (`json` | `sqlite` | `dual`).
-// Invalid or unset values fall back to `json`, the only backend implemented by
-// every core domain store. The flag is read ONLY from process.env — never from
-// modelSettingsStore — to avoid a circular dependency with the config layer.
+// Invalid or unset values use the release default (`sqlite` after P97).
+// The flag is read ONLY from process.env — never from modelSettingsStore — to
+// avoid a circular dependency with the config layer. Native-open failure is
+// fatal for sqlite/dual so an unavailable authority cannot silently write JSON.
 
 import type { StorageBackend } from "../../shared/storageContract";
 import { readFeatureFlags } from "../../shared/featureFlags";
@@ -45,4 +46,16 @@ export function writesToSqlite(backend: StorageBackend): boolean {
 /** True when SQLite is the read source (sqlite or dual). */
 export function readsFromSqlite(backend: StorageBackend): boolean {
   return backend === "sqlite" || backend === "dual";
+}
+
+export function requireStorageBackendAvailability(
+  backend: StorageBackend,
+  sqliteAvailable: boolean,
+): StorageBackend {
+  if (backend !== "json" && !sqliteAvailable) {
+    throw new Error(
+      `Storage backend "${backend}" requires SQLite authority, but SQLite is unavailable.`,
+    );
+  }
+  return backend;
 }

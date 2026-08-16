@@ -211,6 +211,18 @@ describe("package scripts", () => {
         (workstream) => workstream.featureId,
       ),
     );
+    const storageConvergenceProgram = JSON.parse(
+      readFileSync(
+        path.join(
+          process.cwd(),
+          ".zerox/storage-convergence-program.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      activeFeatureId: string | null;
+      maxActiveFeatures: number;
+    };
 
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
@@ -318,17 +330,20 @@ describe("package scripts", () => {
       Math.min(
         runtimeProgram.maxActiveFeatures,
         kernelMigrationProgram.maxActiveFeatures,
+        storageConvergenceProgram.maxActiveFeatures,
       ),
     );
     const activeProgramFeatureIds = [
       runtimeProgram.activeFeatureId,
       kernelMigrationProgram.activeFeatureId,
+      storageConvergenceProgram.activeFeatureId,
     ].filter((featureId): featureId is string => Boolean(featureId));
     expect(
       openFeatureIds.filter(
         (featureId) =>
           convergenceFeatureIds.has(featureId) ||
-          kernelMigrationFeatureIds.has(featureId),
+          kernelMigrationFeatureIds.has(featureId) ||
+          featureId === storageConvergenceProgram.activeFeatureId,
       ),
     ).toEqual(
       activeProgramFeatureIds,
@@ -977,7 +992,7 @@ describe("package scripts", () => {
     expect(packageJson.scripts).toMatchObject({
       "harness:check": "node scripts/check-harness-state.mjs",
       "program:check":
-        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs",
+        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs",
       "harness:score": "npm run build && node scripts/run-harness-score.mjs",
       "episode:export":
         "npm run build && node scripts/export-agent-episode.mjs",

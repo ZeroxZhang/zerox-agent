@@ -21,7 +21,7 @@ export interface FeatureFlags {
   ZEROX_SHELL_ANALYZER: "plan" | "legacy";
   /** Checkpoint writer mode: "on" (default) or "off". */
   ZEROX_CHECKPOINT_WRITER: "on" | "off";
-  /** Storage backend: "json" (complete default), "sqlite", or "dual". */
+  /** Storage backend: "sqlite" (release default), "json", or "dual". */
   ZEROX_STORAGE_BACKEND: "dual" | "sqlite" | "json";
   /** Self-improvement / dream-distill background loop: "off" (default) or "on". */
   ZEROX_SELF_IMPROVEMENT: "on" | "off";
@@ -49,7 +49,7 @@ const DEFAULTS: FeatureFlags = {
   ZEROX_TOOL_WORKER: "inproc",
   ZEROX_SHELL_ANALYZER: "plan",
   ZEROX_CHECKPOINT_WRITER: "on",
-  ZEROX_STORAGE_BACKEND: "json",
+  ZEROX_STORAGE_BACKEND: "sqlite",
   ZEROX_SELF_IMPROVEMENT: "off",
   ZEROX_MAX_MODE: "off",
   ZEROX_COMPACTION_STRATEGY: "auto",

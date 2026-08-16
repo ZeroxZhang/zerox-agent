@@ -1,7 +1,21 @@
 import type { StorageBackend } from "./storageContract";
 
+export const productionStorageAuthorityDomains = [
+  "goal",
+  "execution_checkpoint",
+  "memory",
+  "workspace",
+  "multi_agent_session",
+  "learning_candidate",
+  "eval_candidate",
+  "promoted_eval_fixture",
+] as const;
+
+export type ProductionStorageAuthorityDomain =
+  (typeof productionStorageAuthorityDomains)[number];
+
 export type ProductionStorageSmokeEvidence = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   kind: "production_storage_smoke";
   requestedBackend: StorageBackend;
   resolvedBackend: StorageBackend;
@@ -16,11 +30,15 @@ export type ProductionStorageSmokeEvidence = {
     journalMode: "wal";
     migrationCount: number;
     taskRowPersisted: true;
-  };
-  dual: {
-    jsonShadowPersisted: true;
     taskId: string;
     taskName: string;
+  };
+  authority: {
+    domains: ProductionStorageAuthorityDomain[];
+    markerCount: 8;
+    recordIds: Record<ProductionStorageAuthorityDomain, string>;
+    domainRowsPersisted: true;
+    legacyJsonShadowsAbsent: true;
   };
 };
 
@@ -74,11 +92,13 @@ export function isProductionStorageSmokeEvidence(
   }
 
   const evidence = value as ProductionStorageSmokeEvidence;
+  const authorityDomains = evidence.authority?.domains;
+  const recordIds = evidence.authority?.recordIds;
   return (
-    evidence.schemaVersion === 1 &&
+    evidence.schemaVersion === 2 &&
     evidence.kind === "production_storage_smoke" &&
-    evidence.requestedBackend === "dual" &&
-    evidence.resolvedBackend === "dual" &&
+    evidence.requestedBackend === "sqlite" &&
+    evidence.resolvedBackend === "sqlite" &&
     evidence.nativeRuntime?.runtime === "electron" &&
     typeof evidence.nativeRuntime.electronVersion === "string" &&
     evidence.nativeRuntime.electronVersion.length > 0 &&
@@ -91,10 +111,38 @@ export function isProductionStorageSmokeEvidence(
     Number.isInteger(evidence.sqlite.migrationCount) &&
     evidence.sqlite.migrationCount > 0 &&
     evidence.sqlite.taskRowPersisted === true &&
-    evidence.dual?.jsonShadowPersisted === true &&
-    typeof evidence.dual.taskId === "string" &&
-    evidence.dual.taskId.length > 0 &&
-    typeof evidence.dual.taskName === "string" &&
-    evidence.dual.taskName.length > 0
+    typeof evidence.sqlite.taskId === "string" &&
+    evidence.sqlite.taskId.length > 0 &&
+    typeof evidence.sqlite.taskName === "string" &&
+    evidence.sqlite.taskName.length > 0 &&
+    Array.isArray(authorityDomains) &&
+    authorityDomains.length === productionStorageAuthorityDomains.length &&
+    authorityDomains.every(
+      (domain, index) => domain === productionStorageAuthorityDomains[index],
+    ) &&
+    evidence.authority.markerCount === productionStorageAuthorityDomains.length &&
+    hasExactAuthorityRecordIds(recordIds) &&
+    evidence.authority.domainRowsPersisted === true &&
+    evidence.authority.legacyJsonShadowsAbsent === true
+  );
+}
+
+function hasExactAuthorityRecordIds(
+  value: unknown,
+): value is Record<ProductionStorageAuthorityDomain, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  const expected = [...productionStorageAuthorityDomains].sort();
+  return (
+    keys.length === expected.length &&
+    keys.every((key, index) => key === expected[index]) &&
+    productionStorageAuthorityDomains.every(
+      (domain) =>
+        typeof record[domain] === "string" &&
+        (record[domain] as string).length > 0,
+    )
   );
 }

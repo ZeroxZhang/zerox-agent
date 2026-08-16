@@ -86,6 +86,25 @@ describe("P1 migration scripts round-trip", () => {
         JSON.stringify({ schemaVersion: 1, workspaces: [{ id: "workspace_1", name: "Project", rootPath: dir, kind: "project", cleanup: "keep", createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z", lastUsedAt: null }] }),
       );
       writeFileSync(
+        path.join(dir, "multi-agent-sessions.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          sessions: [
+            {
+              id: "multi_session_1",
+              title: "Migration session",
+              rootRunId: "run-1",
+              status: "paused",
+              workspaceId: "workspace_1",
+              childRunIds: ["run-child-1"],
+              roles: { "run-child-1": "reviewer" },
+              createdAt: "2026-06-19T00:00:00.000Z",
+              updatedAt: "2026-06-19T00:00:02.000Z",
+            },
+          ],
+        }),
+      );
+      writeFileSync(
         path.join(dir, "scheduled-tasks.json"),
         JSON.stringify({ schemaVersion: 1, tasks: [{ id: "task_1", name: "Disabled daily", skillName: "noop", enabled: false, schedule: { kind: "daily", time: "09:30" }, input: {}, permissions: { filesystem: "read_only", network: "none", shell: "none", mcpServers: [] }, createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z", lastRunAt: null, nextRunAt: null }] }),
       );
@@ -120,6 +139,15 @@ describe("P1 migration scripts round-trip", () => {
       );
       mkdirSync(path.join(dir, "tool-result-refs"), { recursive: true });
       writeFileSync(path.join(dir, "tool-result-refs", "tool_ref_1.json"), "raw tool output");
+      mkdirSync(path.join(dir, "workspace-runs"), { recursive: true });
+      writeFileSync(
+        path.join(dir, "workspace-runs", "runs.jsonl"),
+        '{"workspaceRunId":"workspace_run_1"}\n',
+      );
+      writeFileSync(
+        path.join(dir, "raw-history.jsonl"),
+        '{"id":"history_1","content":"raw evidence"}\n',
+      );
       writeFileSync(
         path.join(dir, "agent-learning-candidates.json"),
         JSON.stringify({
@@ -158,9 +186,35 @@ describe("P1 migration scripts round-trip", () => {
           executionUsage: {},
           reviewPolicy: "review_final_only",
           planVersion: 1,
+          selectedSkill: createPrivateP97SkillSnapshot(),
           acceptanceCertificate: { forged: true },
           createdAt: "2026-06-19T00:00:00.000Z",
           updatedAt: "2026-06-19T00:00:01.000Z",
+        }),
+      );
+      writeFileSync(
+        path.join(goalsDir, "goal-manual-historical.ledger.jsonl"),
+        `${JSON.stringify({
+          at: "2026-06-19T00:00:01.000Z",
+          kind: "goal_completed",
+          summary: "Historical completion retained.",
+        })}\n`,
+      );
+      const executionsDir = path.join(dir, "agent-executions");
+      mkdirSync(executionsDir, { recursive: true });
+      writeFileSync(
+        path.join(executionsDir, "run-checkpoint-1.json"),
+        JSON.stringify({
+          id: "checkpoint_1",
+          runId: "run-checkpoint-1",
+          taskId: "task_1",
+          status: "paused",
+          currentStepId: "step_1",
+          steps: [],
+          messages: [],
+          toolCallCount: 1,
+          createdAt: "2026-06-19T00:00:00.000Z",
+          updatedAt: "2026-06-19T00:00:03.000Z",
         }),
       );
       const plansDir = path.join(dir, "plans");
@@ -196,28 +250,76 @@ describe("P1 migration scripts round-trip", () => {
       const migrateOut = runMigrationVerify(dir);
       expect(migrateOut).toContain('"runs": 1');
       expect(migrateOut).toContain('"plan_records": 1');
-      expect(migrateOut).not.toContain('"memory_records": 1');
-      expect(migrateOut).not.toContain('"learning_candidates": 2');
-      expect(migrateOut).not.toContain('"goals": 1');
+      expect(migrateOut).toContain('"memory_records": 1');
+      expect(migrateOut).toContain('"workspaces": 1');
+      expect(migrateOut).toContain('"multi_agent_sessions": 1');
+      expect(migrateOut).toContain('"learning_candidates": 2');
+      expect(migrateOut).toContain('"eval_candidates": 1');
+      expect(migrateOut).toContain('"promoted_eval_fixtures": 1');
+      expect(migrateOut).toContain('"goals": 1');
+      expect(migrateOut).toContain('"goal_ledger": 1');
+      expect(migrateOut).toContain('"runtime_checkpoints": 1');
       expect(migrateOut).toContain('"chat_session_events": 1');
+      expect(migrateOut).toContain('"goal.id + ledger sequence"');
+      expect(migrateOut).toContain('"workspace_run_ledger"');
       expect(existsSync(path.join(dir, "zerox.db"))).toBe(true);
       const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
       try {
         expect(
           db.prepare("SELECT COUNT(*) AS count FROM memory_records").get(),
-        ).toEqual({ count: 0 });
+        ).toEqual({ count: 1 });
         expect(
           db.prepare("SELECT COUNT(*) AS count FROM learning_candidates").get(),
-        ).toEqual({ count: 0 });
+        ).toEqual({ count: 2 });
         expect(
           db.prepare("SELECT COUNT(*) AS count FROM goals").get(),
-        ).toEqual({ count: 0 });
+        ).toEqual({ count: 1 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM goal_ledger").get(),
+        ).toEqual({ count: 1 });
+        expect(
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM checkpoints WHERE kind = 'runtime'",
+            )
+            .get(),
+        ).toEqual({ count: 1 });
         expect(
           db.prepare("SELECT COUNT(*) AS count FROM workspaces").get(),
-        ).toEqual({ count: 0 });
+        ).toEqual({ count: 1 });
+        expect(
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM sessions WHERE kind = 'multi_agent'",
+            )
+            .get(),
+        ).toEqual({ count: 1 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM eval_candidates").get(),
+        ).toEqual({ count: 1 });
+        expect(
+          db
+            .prepare("SELECT COUNT(*) AS count FROM promoted_eval_fixtures")
+            .get(),
+        ).toEqual({ count: 1 });
         expect(
           db.prepare("SELECT COUNT(*) AS count FROM tool_results").get(),
         ).toEqual({ count: 0 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM artifacts").get(),
+        ).toEqual({ count: 0 });
+        const migratedGoal = JSON.parse(
+          (
+            db
+              .prepare("SELECT payload FROM goals WHERE id = ?")
+              .get("goal-manual-historical") as { payload: string }
+          ).payload,
+        ) as Record<string, unknown>;
+        expect(migratedGoal.status).toBe("completed_unverified");
+        expect(migratedGoal).not.toHaveProperty("acceptanceCertificate");
+        expect(JSON.stringify(migratedGoal)).not.toContain(
+          "P97_PRIVATE_SECRET",
+        );
         expect(
           db.prepare("SELECT payload FROM plan_records WHERE id = ?").get(
             "plan_1",
@@ -239,15 +341,33 @@ describe("P1 migration scripts round-trip", () => {
         db.close();
       }
 
-      // Simulate newer JSON that must be preserved even when the operator
-      // explicitly confirms SQLite as the rollback source.
+      // Explicit rollback confirmation replaces stale JSON and preserves it as
+      // one directory backup while exporting canonical SQLite authority.
       writeFileSync(
         path.join(goalsDir, "goal-manual-historical.json"),
-        JSON.stringify({ id: "goal-manual-historical", marker: "newer-json" }),
+        JSON.stringify({ id: "goal-manual-historical", marker: "stale-json" }),
       );
 
       // 2. Roll back SQLite → JSON.
-      execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir, "--confirmSqliteAuthoritative", "--planBackend", "sqlite"], { encoding: "utf8", cwd: root });
+      const rollbackOut = execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir, "--confirmSqliteAuthoritative", "--planBackend", "sqlite"], { encoding: "utf8", cwd: root });
+      expect(rollbackOut).toContain('"execution_checkpoint"');
+      expect(rollbackOut).toContain('"promoted_eval_fixture"');
+      const rolledBackDb = new Database(path.join(dir, "zerox.db"), {
+        readonly: true,
+      });
+      try {
+        expect(
+          rolledBackDb
+            .prepare(
+              `SELECT COUNT(*) AS count
+                 FROM domain_authority_state
+                WHERE source = 'json_rollback'`,
+            )
+            .get(),
+        ).toEqual({ count: 8 });
+      } finally {
+        rolledBackDb.close();
+      }
       // The rollback re-exports agent-runs.jsonl (freezing the original as .legacy).
       const rolledBackRuns = path.join(dir, "agent-runs.jsonl");
       expect(existsSync(rolledBackRuns)).toBe(true);
@@ -257,6 +377,8 @@ describe("P1 migration scripts round-trip", () => {
       const mem = readFileSync(path.join(dir, "memory-records.json"), "utf8");
       expect(mem).toContain("hello");
       expect(readFileSync(path.join(dir, "agent-workspaces.json"), "utf8")).toContain("workspace_1");
+      expect(readFileSync(path.join(dir, "multi-agent-sessions.json"), "utf8")).toContain("multi_session_1");
+      expect(readFileSync(path.join(executionsDir, "run-checkpoint-1.json"), "utf8")).toContain("checkpoint_1");
       expect(readFileSync(path.join(dir, "scheduled-tasks.json"), "utf8")).toContain("task_1");
       const rolledBackChat = JSON.parse(
         readFileSync(path.join(dir, "chat-sessions.json"), "utf8"),
@@ -271,6 +393,8 @@ describe("P1 migration scripts round-trip", () => {
         }),
       ]);
       expect(readFileSync(path.join(dir, "tool-result-refs", "tool_ref_1.json"), "utf8")).toBe("raw tool output");
+      expect(readFileSync(path.join(dir, "workspace-runs", "runs.jsonl"), "utf8")).toContain("workspace_run_1");
+      expect(readFileSync(path.join(dir, "raw-history.jsonl"), "utf8")).toContain("history_1");
       const learning = JSON.parse(readFileSync(path.join(dir, "agent-learning-candidates.json"), "utf8"));
       expect(learning.candidates).toEqual([
         expect.objectContaining({ id: "learn_accepted", status: "accepted" }),
@@ -285,15 +409,42 @@ describe("P1 migration scripts round-trip", () => {
           "utf8",
         ),
       );
-      expect(rolledBackGoal).toEqual({
+      expect(rolledBackGoal).toMatchObject({
         id: "goal-manual-historical",
-        marker: "newer-json",
+        status: "completed_unverified",
       });
+      expect(rolledBackGoal).not.toHaveProperty("acceptanceCertificate");
+      expect(JSON.stringify(rolledBackGoal)).not.toContain(
+        "P97_PRIVATE_SECRET",
+      );
+      expect(
+        readFileSync(
+          path.join(
+            goalsDir,
+            "goal-manual-historical.ledger.jsonl",
+          ),
+          "utf8",
+        ),
+      ).toContain("Historical completion retained.");
       expect(
         existsSync(
-          path.join(goalsDir, "goal-manual-historical.legacy.json"),
+          path.join(
+            dir,
+            "agent-goals.legacy",
+            "goal-manual-historical.json",
+          ),
         ),
-      ).toBe(false);
+      ).toBe(true);
+      expect(
+        readFileSync(
+          path.join(
+            dir,
+            "agent-goals.legacy",
+            "goal-manual-historical.json",
+          ),
+          "utf8",
+        ),
+      ).toContain("stale-json");
       expect(
         JSON.parse(
           readFileSync(path.join(plansDir, "plan_1.json"), "utf8"),
@@ -305,6 +456,45 @@ describe("P1 migration scripts round-trip", () => {
           "utf8",
         ),
       ).toContain("plan_event_1");
+
+      const stableP97Paths = [
+        "agent-goals/goal-manual-historical.json",
+        "agent-goals/goal-manual-historical.ledger.jsonl",
+        "agent-executions/run-checkpoint-1.json",
+        "memory-records.json",
+        "agent-workspaces.json",
+        "multi-agent-sessions.json",
+        "agent-learning-candidates.json",
+        "agent-eval-candidates.json",
+        "agent-promoted-eval-fixtures.json",
+      ];
+      const firstExport = new Map(
+        stableP97Paths.map((relativePath) => [
+          relativePath,
+          readFileSync(path.join(dir, relativePath), "utf8"),
+        ]),
+      );
+      execFileSync(
+        process.execPath,
+        [
+          path.join(
+            scriptRoot,
+            "scripts",
+            "rollback-sqlite-to-json.mjs",
+          ),
+          "--configDir",
+          dir,
+          "--confirmSqliteAuthoritative",
+          "--planBackend",
+          "sqlite",
+        ],
+        { encoding: "utf8", cwd: root },
+      );
+      for (const [relativePath, content] of firstExport) {
+        expect(readFileSync(path.join(dir, relativePath), "utf8")).toBe(
+          content,
+        );
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -411,6 +601,57 @@ describe("P1 migration scripts round-trip", () => {
     }
   });
 
+  it("does not publish authority markers before canonical verification passes", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-marker-gate-"));
+    try {
+      const baseMemory = {
+        id: "memory_duplicate",
+        kind: "semantic",
+        title: "Duplicate identity",
+        tags: [],
+        source: { type: "manual" },
+        importance: 3,
+        createdAt: "2026-08-16T00:00:00.000Z",
+      };
+      writeFileSync(
+        path.join(dir, "memory-records.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          records: [
+            {
+              ...baseMemory,
+              content: "older",
+              updatedAt: "2026-08-16T00:00:01.000Z",
+            },
+            {
+              ...baseMemory,
+              content: "newer",
+              updatedAt: "2026-08-16T00:00:02.000Z",
+            },
+          ],
+        }),
+      );
+
+      const failure = captureMigrationFailure(dir);
+      expect(failure.status).not.toBe(0);
+      expect(failure.stdout).toContain(
+        "MISMATCH (source=2, unique=1, canonical=1)",
+      );
+      const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
+      try {
+        expect(
+          db
+            .prepare("SELECT COUNT(*) AS count FROM domain_authority_state")
+            .get(),
+        ).toEqual({ count: 0 });
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps consecutive --verify runs idempotent and fail-closed", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-preexisting-"));
     try {
@@ -428,15 +669,150 @@ describe("P1 migration scripts round-trip", () => {
           finishedAt: "2026-08-16T00:00:01.000Z",
         })}\n`,
       );
+      seedP97Fixture(dir);
 
       expect(runMigrationVerify(dir)).toMatch(
         /"targetCounts":\s*{\s*"runs": 1/,
       );
       const second = runMigrationVerify(dir);
       expect(second).toMatch(/"targetCounts":\s*{\s*"runs": 1/);
+      for (const table of [
+        "goals",
+        "goal_ledger",
+        "runtime_checkpoints",
+        "memory_records",
+        "workspaces",
+        "multi_agent_sessions",
+        "learning_candidates",
+        "eval_candidates",
+        "promoted_eval_fixtures",
+      ]) {
+        expect(second).toContain(`"${table}": 1`);
+      }
       expect(second).toContain('"mismatches": []');
       expect(second).toContain('"parse": 0');
       expect(second).toContain('"write": 0');
+      const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
+      try {
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM goal_ledger").get(),
+        ).toEqual({ count: 1 });
+        expect(
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM checkpoints WHERE kind = 'runtime'",
+            )
+            .get(),
+        ).toEqual({ count: 1 });
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects stale JSON when SQLite has a newer P97 generation", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-generation-"));
+    try {
+      seedP97Fixture(dir);
+      runMigrationVerify(dir);
+      const db = new Database(path.join(dir, "zerox.db"));
+      try {
+        const row = db
+          .prepare("SELECT payload FROM memory_records WHERE id = ?")
+          .get("memory_p97") as { payload: string };
+        const newer = {
+          ...JSON.parse(row.payload),
+          title: "Newer SQLite authority",
+          updatedAt: "2026-08-16T23:00:00.000Z",
+        };
+        db.prepare(
+          `UPDATE memory_records
+              SET title = ?, payload = ?, updated_at = ?
+            WHERE id = ?`,
+        ).run(
+          newer.title,
+          JSON.stringify(newer),
+          newer.updatedAt,
+          newer.id,
+        );
+      } finally {
+        db.close();
+      }
+
+      const failure = captureMigrationFailure(dir);
+      expect(failure.status).not.toBe(0);
+      expect(failure.stdout).toContain("mixed-generation conflict");
+      expect(failure.stdout).toContain('"store": "memory_records"');
+      const verifyDb = new Database(path.join(dir, "zerox.db"), {
+        readonly: true,
+      });
+      try {
+        expect(
+          verifyDb
+            .prepare("SELECT title FROM memory_records WHERE id = ?")
+            .get("memory_p97"),
+        ).toEqual({ title: "Newer SQLite authority" });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails canonical verify when a P97 repository write is injected to fail", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-p97-write-"));
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          path.join(scriptRoot, "scripts", "migrate-to-sqlite.mjs"),
+          "--configDir",
+          dir,
+        ],
+        { encoding: "utf8", cwd: root },
+      );
+      const db = new Database(path.join(dir, "zerox.db"));
+      try {
+        db.exec(`
+          CREATE TRIGGER reject_p97_memory
+          BEFORE INSERT ON memory_records
+          WHEN NEW.id = 'memory_p97'
+          BEGIN
+            SELECT RAISE(ABORT, 'injected P97 memory failure');
+          END;
+        `);
+      } finally {
+        db.close();
+      }
+      writeFileSync(
+        path.join(dir, "memory-records.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          records: [createP97Memory()],
+        }),
+      );
+
+      const failure = captureMigrationFailure(dir);
+      expect(failure.status).not.toBe(0);
+      expect(failure.stdout).toContain('"table": "memory_records"');
+      expect(
+        readFileSync(path.join(dir, "migration-errors.jsonl"), "utf8"),
+      ).toContain("injected P97 memory failure");
+      const verifyDb = new Database(path.join(dir, "zerox.db"), {
+        readonly: true,
+      });
+      try {
+        expect(
+          verifyDb
+            .prepare("SELECT COUNT(*) AS count FROM memory_records")
+            .get(),
+        ).toEqual({ count: 0 });
+      } finally {
+        verifyDb.close();
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -647,9 +1023,24 @@ describe("P1 migration scripts round-trip", () => {
         chatPath,
         JSON.stringify({ schemaVersion: 1, sessions: [] }),
       );
+      seedP97Fixture(dir);
       runMigrationVerify(dir);
       const beforeRuns = readFileSync(runsPath, "utf8");
       const beforeChat = readFileSync(chatPath, "utf8");
+      const preservedP97 = new Map(
+        [
+          "agent-goals/goal_p97.json",
+          "agent-goals/goal_p97.ledger.jsonl",
+          "agent-executions/run_p97.json",
+          "memory-records.json",
+          "agent-workspaces.json",
+          "multi-agent-sessions.json",
+          "agent-learning-candidates.json",
+        ].map((relativePath) => [
+          relativePath,
+          readFileSync(path.join(dir, relativePath), "utf8"),
+        ]),
+      );
 
       expect(() =>
         execFileSync(
@@ -671,7 +1062,7 @@ describe("P1 migration scripts round-trip", () => {
             env: {
               ...process.env,
               NODE_ENV: "test",
-              ZEROX_ROLLBACK_TEST_FAIL_AFTER_PUBLISH: "2",
+              ZEROX_ROLLBACK_TEST_FAIL_AFTER_PUBLISH: "13",
             },
           },
         ),
@@ -679,6 +1070,11 @@ describe("P1 migration scripts round-trip", () => {
 
       expect(readFileSync(runsPath, "utf8")).toBe(beforeRuns);
       expect(readFileSync(chatPath, "utf8")).toBe(beforeChat);
+      for (const [relativePath, content] of preservedP97) {
+        expect(readFileSync(path.join(dir, relativePath), "utf8")).toBe(
+          content,
+        );
+      }
       expect(existsSync(path.join(dir, "agent-trajectories"))).toBe(false);
       expect(
         readdirSync(dir).some((name) =>
@@ -690,6 +1086,188 @@ describe("P1 migration scripts round-trip", () => {
     }
   });
 });
+
+function createPrivateP97SkillSnapshot() {
+  return {
+    rootDir: "/tmp/private-p97-skill",
+    skillFile: "/tmp/private-p97-skill/SKILL.md",
+    body: "# Private P97 Skill",
+    manifest: {
+      name: "private-p97-skill",
+      description: "Exercises migration credential stripping.",
+      execution: { mode: "agent", entrypoint: null },
+      inputs: [],
+      permissions: {
+        files: { read: [], write: [] },
+        shell: { commands: [] },
+        web: { search: false, fetchDomains: [] },
+        memory: { read: false, write: false },
+      },
+      mcpServers: [
+        {
+          name: "private-p97-server",
+          transport: "stdio",
+          command: "node",
+          env: { PRIVATE_TOKEN: "P97_PRIVATE_SECRET" },
+        },
+      ],
+    },
+  };
+}
+
+function createP97Memory() {
+  return {
+    id: "memory_p97",
+    kind: "semantic",
+    title: "P97 memory",
+    content: "Canonical storage convergence.",
+    tags: ["p97"],
+    source: { type: "manual" },
+    importance: 4,
+    createdAt: "2026-08-16T00:00:00.000Z",
+    updatedAt: "2026-08-16T00:00:00.000Z",
+  };
+}
+
+function seedP97Fixture(configDir: string): void {
+  writeFileSync(
+    path.join(configDir, "memory-records.json"),
+    JSON.stringify({ schemaVersion: 1, records: [createP97Memory()] }),
+  );
+  writeFileSync(
+    path.join(configDir, "agent-workspaces.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      workspaces: [
+        {
+          id: "workspace_p97",
+          name: "P97 workspace",
+          rootPath: configDir,
+          kind: "project",
+          cleanup: "keep",
+          createdAt: "2026-08-16T00:00:00.000Z",
+          updatedAt: "2026-08-16T00:00:00.000Z",
+          lastUsedAt: null,
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    path.join(configDir, "multi-agent-sessions.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      sessions: [
+        {
+          id: "session_p97",
+          title: "P97 session",
+          rootRunId: "run_p97",
+          status: "paused",
+          workspaceId: "workspace_p97",
+          childRunIds: ["run_child_p97"],
+          roles: { run_child_p97: "reviewer" },
+          createdAt: "2026-08-16T00:00:00.000Z",
+          updatedAt: "2026-08-16T00:01:00.000Z",
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    path.join(configDir, "agent-learning-candidates.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      candidates: [
+        {
+          id: "learning_p97",
+          type: "failure_lesson",
+          sourceRunId: "run_p97",
+          sourceTrajectoryEventIds: ["event_p97"],
+          claim: "Canonical import is verified.",
+          recommendedAction: "Keep identity checks.",
+          risk: "low",
+          status: "accepted",
+          createdAt: "2026-08-16T00:00:00.000Z",
+          updatedAt: "2026-08-16T00:01:00.000Z",
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    path.join(configDir, "agent-eval-candidates.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      candidates: [
+        {
+          id: "eval_p97",
+          sourceRunId: "run_p97",
+          status: "accepted",
+          rationale: "P97 fixture",
+          fixture: {
+            id: "fixture_p97",
+            description: "P97 candidate fixture",
+            events: [],
+            requiredEventTypes: [],
+          },
+          createdAt: "2026-08-16T00:00:00.000Z",
+          updatedAt: "2026-08-16T00:01:00.000Z",
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    path.join(configDir, "agent-promoted-eval-fixtures.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      fixtures: [
+        {
+          id: "promoted_p97",
+          description: "P97 promoted fixture",
+          events: [],
+          requiredEventTypes: [],
+        },
+      ],
+    }),
+  );
+  const goalsDir = path.join(configDir, "agent-goals");
+  mkdirSync(goalsDir, { recursive: true });
+  writeFileSync(
+    path.join(goalsDir, "goal_p97.json"),
+    JSON.stringify({
+      id: "goal_p97",
+      description: "P97 canonical Goal",
+      successCriteria: [],
+      milestones: [],
+      status: "completed_unverified",
+      budget: {},
+      executionUsage: {},
+      reviewPolicy: "review_final_only",
+      planVersion: 1,
+      acceptanceCertificate: { forged: true },
+      createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T00:01:00.000Z",
+    }),
+  );
+  writeFileSync(
+    path.join(goalsDir, "goal_p97.ledger.jsonl"),
+    '{"at":"2026-08-16T00:01:00.000Z","kind":"goal_completed","summary":"P97 Goal complete."}\n',
+  );
+  const executionsDir = path.join(configDir, "agent-executions");
+  mkdirSync(executionsDir, { recursive: true });
+  writeFileSync(
+    path.join(executionsDir, "run_p97.json"),
+    JSON.stringify({
+      id: "checkpoint_p97",
+      runId: "run_p97",
+      taskId: "task_p97",
+      status: "paused",
+      currentStepId: "step_p97",
+      steps: [],
+      messages: [],
+      toolCallCount: 1,
+      createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T00:01:00.000Z",
+    }),
+  );
+}
 
 function captureMigrationFailure(configDir: string): {
   status: number | null;

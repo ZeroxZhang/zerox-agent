@@ -595,6 +595,7 @@ describe("agent runtime engine", () => {
         },
         async listActive() { return [persisted]; },
         async delete() { return true; },
+        async flushShadowWrites() { return; },
       },
       trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
       resolveSkill: async () => createSkillRecord(),
@@ -2341,6 +2342,9 @@ function createMemoryExecutionStore(
     async delete(runId) {
       return byRunId.delete(runId);
     },
+    async flushShadowWrites() {
+      return;
+    },
   };
 }
 
@@ -2409,6 +2413,9 @@ function createMemoryLearningStore(
     },
     async setStatus() {
       return null;
+    },
+    async flushShadowWrites() {
+      return;
     },
   };
 }

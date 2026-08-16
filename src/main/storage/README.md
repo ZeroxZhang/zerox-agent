@@ -1,4 +1,4 @@
-# Zerox Storage Layer (P1 — SQLite unified storage)
+# Zerox Storage Layer (P97 - SQLite authority)
 
 This module implements the `contracts v1.4 §1` Storage contract: a SQLite
 (better-sqlite3, synchronous) backend with versioned migrations, repository
@@ -12,10 +12,14 @@ interfaces, and a dual-write migration path off the legacy JSON/JSONL stores.
   `migrations/*.sql` via `node scripts/sync-migration-bundle.mjs`).
 - `migrations/0000_initial.sql` — canonical initial schema (all contract §1.2
   tables + v1.1 patch tables + FTS5 + triggers + indexes).
+- `migrations/0004_*.sql` through `0006_*.sql` — Goal/checkpoint CAS,
+  reviewed learning/eval identity, and durable per-domain authority markers.
 - `repositories/` — one repository per table, implementing the frozen interfaces
   in `src/shared/storageContract.ts` (synchronous API). Downstream phases
   (P2/P5/P6/P7) consume these directly.
 - `backendResolver.ts` — reads `ZEROX_STORAGE_BACKEND` (`json` | `sqlite` | `dual`).
+- `domainAuthorityBootstrap.ts` — atomically imports each legacy JSON domain
+  once, then records its durable authority marker.
 - `repositoryUtils.ts` — JSON payload (de)serialization helpers (parity invariant).
 
 ## Backend flag
@@ -24,23 +28,25 @@ interfaces, and a dual-write migration path off the legacy JSON/JSONL stores.
 
 | value    | writes            | reads   | use |
 |----------|-------------------|---------|-----|
-| `json`   | JSON for unconverted domains | per-domain | safe default for unconverted domains |
-| `sqlite` | SQLite for converted domains | per-domain | converted-domain cutover |
-| `dual`   | SQLite + JSON shadow where implemented | per-domain | explicit transition mode |
+| `json`   | JSON/JSONL in backend-switched domains | JSON/JSONL | explicit rollback and diagnosis |
+| `sqlite` | SQLite | SQLite | release default |
+| `dual`   | SQLite, then tracked JSON shadow | SQLite | explicit compatibility mode |
 
-Invalid/unset values fall back to `json` with a warning because it is the only
-backend covering every core domain store.
+Invalid or unset values resolve to `sqlite`. If the native SQLite module cannot
+open, `sqlite` and `dual` fail startup instead of writing a divergent JSON
+authority. JSON writes require the explicit `json` backend.
 
-Storage authority is domain-specific, not global. Chat, Run, Trajectory, Task,
-Validation, MemoryProfile, and ToolAudit are SQLite-authoritative. Plan is
-SQLite-authoritative only when the runtime uses the SQLite backend. Goal,
-Memory, Workspace, Multi-Agent Session, Tool Result files, Learning, and other
-unconverted stores remain JSON-authoritative. Migration and rollback must not
-export stale SQLite rows over those JSON domains.
+Chat remains on its independently completed SQLite event/projection cutover
+when native SQLite is available; P97 does not regress that boundary.
 
-The container's `storage()` singleton is fault-tolerant: if better-sqlite3
-fails to load (e.g. an Electron ABI mismatch before `@electron/rebuild` runs),
-the container falls back to `json` and the app still starts.
+Chat, Run, Trajectory, Task, Validation, MemoryProfile, ToolAudit, Goal,
+execution checkpoints, Memory, Workspace, Multi-Agent Session, reviewed
+Learning, Eval Candidate, and promoted eval fixtures are SQLite-authoritative
+under the release default. Plan is SQLite-authoritative in SQLite mode.
+
+Encrypted model settings, scoped tool-result blobs, workspace-run ledgers, raw
+history, and artifact payloads remain explicit file-backed boundaries. Their
+presence does not make a structured runtime domain JSON-authoritative.
 
 ## Parity invariant
 
@@ -67,24 +73,26 @@ output whether events come from the JSON store or the SQLite repository.
 ## Migration / rollback runbook
 
 ```sh
-# 1. migrate existing JSON data into zerox.db (idempotent, upserts)
+# Normal startup imports each legacy JSON domain once and records a marker.
+# Use the CLI for offline verification or an explicit maintenance migration.
 node scripts/migrate-to-sqlite.mjs --configDir <userData>/config --verify
 
-# 2. switch the runtime backend
-export ZEROX_STORAGE_BACKEND=sqlite   # or 'dual' for the transition period
+# SQLite is the default. This override is optional.
+export ZEROX_STORAGE_BACKEND=sqlite
 
-# 3. roll back to JSON if needed (freezes existing JSON as *.legacy.json)
+# Roll back to JSON if needed (freezes existing JSON as *.legacy.json).
 node scripts/rollback-sqlite-to-json.mjs --configDir <userData>/config --confirmSqliteAuthoritative --planBackend sqlite
 export ZEROX_STORAGE_BACKEND=json
 ```
 
 The confirmation flag is intentionally required. `--planBackend sqlite` is
 required only when Plan actually used SQLite. Rollback stages every exported
-domain before commit and restores prior files if any publish step fails.
-JSON-authoritative domains are never overwritten from SQLite.
+domain before commit and restores prior files if any publish step fails. Import
+rejects a conflicting SQLite generation that is at least as new as its JSON
+source.
 
-Migration errors are appended to `<configDir>/migration-errors.jsonl` and do not
-abort the overall run.
+Migration errors are appended to `<configDir>/migration-errors.jsonl`;
+`--verify` exits nonzero on parse, write, conflict, or canonical mismatch.
 
 ## Native module note
 
@@ -101,7 +109,6 @@ is used directly. The FTS5 compile option is self-checked at startup.
 
 `npm run dist:mac` and `npm run pack:mac` rebuild better-sqlite3 against the
 **Electron** ABI before invoking electron-builder, then run
-`npm rebuild better-sqlite3` to restore the **Node** ABI for local tests. The
-container's fault-tolerant `storage()` singleton falls back to the JSON backend
-if the native module fails to load, so the app still starts, but the SQLite path
-is the production target.
+`npm rebuild better-sqlite3` to restore the **Node** ABI for local tests. A
+native-module load failure is fatal in `sqlite` or `dual` mode so the
+application cannot fork authority into stale JSON files.

@@ -13,10 +13,15 @@ import type {
 } from "../../../shared/storageContract";
 import { jsonify, parseJson } from "../repositoryUtils";
 import { randomUUID } from "node:crypto";
+import {
+  isTerminalExecutionStatus,
+  type AgentExecutionCheckpoint,
+} from "../../../shared/agentExecution";
 
 const TERMINAL_STATUSES = new Set([
   "done",
   "completed",
+  "succeeded",
   "failed",
   "canceled",
   "stopped",
@@ -39,48 +44,102 @@ export function createCheckpointRepository(storage: Storage): CheckpointReposito
     return null;
   }
 
+  function writeCheckpoint(
+    runId: string,
+    kind: CheckpointKind,
+    data: unknown,
+  ): string {
+    const id = randomUUID();
+    const ref = `checkpoints/${runId}/${id}`;
+    const createdAt = new Date().toISOString();
+    const status = extractStatus(data);
+    db.prepare(
+      `INSERT INTO checkpoints (id, run_id, kind, ref, status, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, runId, kind, ref, status, jsonify(data), createdAt);
+    return ref;
+  }
+
+  function latestRuntime(runId: string): AgentExecutionCheckpoint | null {
+    const record = latestCheckpoint(runId, "runtime");
+    if (!record?.payload || typeof record.payload !== "object") return null;
+    const checkpoint = record.payload as AgentExecutionCheckpoint;
+    return checkpoint?.runId === runId ? checkpoint : null;
+  }
+
+  function latestCheckpoint(
+    runId: string,
+    kind?: CheckpointKind,
+  ): CheckpointRecord | null {
+    const row = kind
+      ? db
+          .prepare(
+            "SELECT id, run_id, kind, ref, payload, created_at FROM checkpoints WHERE run_id = ? AND kind = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+          )
+          .get(runId, kind)
+      : db
+          .prepare(
+            "SELECT id, run_id, kind, ref, payload, created_at FROM checkpoints WHERE run_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+          )
+          .get(runId);
+    if (!row) return null;
+    const record = row as {
+      id: string;
+      run_id: string;
+      kind: string;
+      ref: string;
+      payload: string;
+      created_at: string;
+    };
+    return {
+      id: record.id,
+      runId: record.run_id,
+      kind: record.kind as CheckpointKind,
+      ref: record.ref,
+      payload: parseJson(record.payload),
+      createdAt: record.created_at,
+    };
+  }
+
+  const writeRuntime = db.transaction(
+    (checkpoint: AgentExecutionCheckpoint): AgentExecutionCheckpoint => {
+      const existing = latestRuntime(checkpoint.runId);
+      if (existing && isTerminalExecutionStatus(existing.status)) {
+        return existing;
+      }
+      writeCheckpoint(checkpoint.runId, "runtime", checkpoint);
+      return checkpoint;
+    },
+  );
+
   return {
     write(runId: string, kind: CheckpointKind, data: unknown): string {
-      const id = randomUUID();
-      const ref = `checkpoints/${runId}/${id}`;
-      const createdAt = new Date().toISOString();
-      const status = extractStatus(data);
-      db.prepare(
-        `INSERT INTO checkpoints (id, run_id, kind, ref, status, payload, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(id, runId, kind, ref, status, jsonify(data), createdAt);
-      return ref;
+      return writeCheckpoint(runId, kind, data);
+    },
+
+    writeRuntime,
+
+    latestRuntime,
+
+    listActiveRuntime() {
+      return this.listActive()
+        .map((record) => {
+          const checkpoint = record.payload as AgentExecutionCheckpoint;
+          return checkpoint.runId === record.runId ? checkpoint : null;
+        })
+        .filter(
+          (checkpoint): checkpoint is AgentExecutionCheckpoint =>
+            checkpoint !== null &&
+            !isTerminalExecutionStatus(checkpoint.status),
+        );
+    },
+
+    deleteRuntime(runId) {
+      return this.delete(runId, "runtime");
     },
 
     latest(runId: string, kind?: CheckpointKind): CheckpointRecord | null {
-      const row = kind
-        ? db
-            .prepare(
-              "SELECT id, run_id, kind, ref, payload, created_at FROM checkpoints WHERE run_id = ? AND kind = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-            )
-            .get(runId, kind)
-        : db
-            .prepare(
-              "SELECT id, run_id, kind, ref, payload, created_at FROM checkpoints WHERE run_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-            )
-            .get(runId);
-      if (!row) return null;
-      const r = row as {
-        id: string;
-        run_id: string;
-        kind: string;
-        ref: string;
-        payload: string;
-        created_at: string;
-      };
-      return {
-        id: r.id,
-        runId: r.run_id,
-        kind: r.kind as CheckpointKind,
-        ref: r.ref,
-        payload: parseJson(r.payload),
-        createdAt: r.created_at,
-      };
+      return latestCheckpoint(runId, kind);
     },
 
     list(runId: string): CheckpointRecord[] {
@@ -150,8 +209,14 @@ export function createCheckpointRepository(storage: Storage): CheckpointReposito
         }));
     },
 
-    delete(runId: string): boolean {
-      const res = db.prepare("DELETE FROM checkpoints WHERE run_id = ?").run(runId);
+    delete(runId: string, kind?: CheckpointKind): boolean {
+      const res = kind
+        ? db
+            .prepare(
+              "DELETE FROM checkpoints WHERE run_id = ? AND kind = ?",
+            )
+            .run(runId, kind)
+        : db.prepare("DELETE FROM checkpoints WHERE run_id = ?").run(runId);
       return res.changes > 0;
     },
   };

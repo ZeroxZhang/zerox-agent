@@ -1,8 +1,14 @@
 import { createEvalCandidateFromEpisode } from "./agentEvalCandidateGenerator";
-import type { AgentEvalCandidateStore } from "./agentEvalCandidateStore";
+import {
+  getAgentEvalCandidateStoreSqliteAccess,
+  type AgentEvalCandidateStore,
+} from "./agentEvalCandidateStore";
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
-import type { PromotedAgentEvalFixtureStore } from "./eval/agentPromotedEvalFixtures";
+import {
+  getPromotedAgentEvalFixtureStoreSqliteAccess,
+  type PromotedAgentEvalFixtureStore,
+} from "./eval/agentPromotedEvalFixtures";
 import type {
   AgentEvalCandidate,
   GenerateEvalCandidateForRunResult,
@@ -103,6 +109,67 @@ export function createAgentEvalCandidateService(options: {
           reviewQueue = nextQueue;
         },
         async () => {
+          const candidateSqlite =
+            getAgentEvalCandidateStoreSqliteAccess(options.candidateStore);
+          const fixtureSqlite =
+            getPromotedAgentEvalFixtureStoreSqliteAccess(
+              options.promotedFixtureStore,
+            );
+          if (candidateSqlite || fixtureSqlite) {
+            if (
+              !candidateSqlite ||
+              !fixtureSqlite ||
+              candidateSqlite.storage !== fixtureSqlite.storage
+            ) {
+              throw new Error(
+                "SQLite eval promotion requires candidate and fixture stores to share one storage instance.",
+              );
+            }
+
+            candidateSqlite.assertWritable();
+            fixtureSqlite.assertWritable();
+            const promote = candidateSqlite.storage.db.transaction(() => {
+              const candidate = candidateSqlite.get(candidateId);
+              if (!candidate) {
+                return {
+                  ok: false,
+                  message: "eval candidate 不存在。",
+                } as const;
+              }
+              if (candidate.status !== "accepted") {
+                return {
+                  ok: false,
+                  message: "只有已接受的 eval candidate 可以晋升。",
+                } as const;
+              }
+
+              const promoted = candidateSqlite.transitionStatus(
+                candidate.id,
+                "accepted",
+                "promoted",
+              );
+              if (!promoted) {
+                return {
+                  ok: false,
+                  message: "只有已接受的 eval candidate 可以晋升。",
+                } as const;
+              }
+
+              fixtureSqlite.upsert(candidate.fixture, candidate.id);
+              return {
+                ok: true,
+                candidate: promoted,
+                fixtureId: candidate.fixture.id,
+              } as const;
+            });
+            const result = promote();
+            if (result.ok) {
+              candidateSqlite.enqueueShadowSnapshot();
+              fixtureSqlite.enqueueShadowSnapshot();
+            }
+            return result;
+          }
+
           const candidate = await findCandidate(options.candidateStore, candidateId);
           if (!candidate) {
             return {

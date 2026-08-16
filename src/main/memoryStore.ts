@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createMemoryMaintenancePlan, type MemoryMaintenanceOptions } from "../shared/memoryMaintenance";
 import {
   createMemoryGovernanceReport,
   type MemoryGovernanceReport,
 } from "../shared/memoryGovernance";
-import { createChunkingService, type ChunkingService } from "./chunking";
+import type { ChunkingService } from "./chunking";
 import { createReranker, type Reranker } from "./reranker";
 import {
   exportMemoryRecords,
@@ -22,6 +22,17 @@ import {
   type MemorySearchResult,
   type MemoryValidationErrors,
 } from "../shared/memory";
+import type {
+  MemoryRepository,
+  Storage,
+  StorageBackend,
+} from "../shared/storageContract";
+import type { PersistenceQueueDrainOptions } from "./failureVisibleSerialQueue";
+import {
+  createAuthoritativeStoreBackend,
+  writeStoreJsonAtomically,
+} from "./storage/authoritativeStore";
+import { createMemoryRepository } from "./storage/repositories/memoryRepository";
 
 type StoredMemoryRecords = {
   schemaVersion: 1;
@@ -43,6 +54,7 @@ export type MemoryStore = {
     now?: string;
     staleAfterDays?: number;
   }): Promise<MemoryGovernanceReport>;
+  flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
 export class MemoryValidationError extends Error {
@@ -58,13 +70,21 @@ export function createMemoryStore(options: {
   embeddingService?: MemoryEmbeddingService;
   chunkingService?: ChunkingService;
   reranker?: Reranker;
+  backend?: StorageBackend;
+  storage?: Storage;
 }): MemoryStore {
   const memoryPath = path.join(options.configDir, "memory-records.json");
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
-  const chunkingService = options.chunkingService ?? createChunkingService();
   const reranker = options.reranker ?? createReranker();
-  const maxContentLength = 8000;
+  const authoritativeBackend = createAuthoritativeStoreBackend({
+    backend: options.backend,
+    storage: options.storage,
+    domain: "Memory",
+  });
+  const repository: MemoryRepository | null = authoritativeBackend.storage
+    ? createMemoryRepository(authoritativeBackend.storage)
+    : null;
   let mutationQueue: Promise<void> = Promise.resolve();
 
   async function withMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -77,6 +97,15 @@ export function createMemoryStore(options: {
   }
 
   async function readStoredRecords(): Promise<StoredMemoryRecords> {
+    if (authoritativeBackend.backend !== "json") {
+      return {
+        schemaVersion: 1,
+        records: repository!
+          .list({ includeArchived: true })
+          .map(normalizeStoredRecord),
+      };
+    }
+
     try {
       const raw = await readFile(memoryPath, { encoding: "utf8" });
       const stored = JSON.parse(raw) as StoredMemoryRecords;
@@ -95,18 +124,28 @@ export function createMemoryStore(options: {
     }
   }
 
-  async function writeStoredRecords(stored: StoredMemoryRecords) {
-    await mkdir(options.configDir, { recursive: true });
-    const temporary = `${memoryPath}.${process.pid}-${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, `${JSON.stringify(stored, null, 2)}\n`, {
-        encoding: "utf8",
+  async function writeStoredRecords(
+    stored: StoredMemoryRecords,
+    expectedRecords?: readonly MemoryRecord[],
+  ): Promise<void> {
+    if (authoritativeBackend.backend === "json") {
+      await writeStoreJsonAtomically({
+        directory: options.configDir,
+        filePath: memoryPath,
+        value: stored,
       });
-      await rename(temporary, memoryPath);
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
+      return;
     }
+
+    authoritativeBackend.assertWritable();
+    repository!.replaceAll(stored.records, expectedRecords);
+    authoritativeBackend.enqueueShadow(() =>
+      writeStoreJsonAtomically({
+        directory: options.configDir,
+        filePath: memoryPath,
+        value: stored,
+      }),
+    );
   }
 
   return {
@@ -134,7 +173,7 @@ export function createMemoryStore(options: {
         await writeStoredRecords({
           schemaVersion: 1,
           records: [...stored.records, record],
-        });
+        }, stored.records);
 
         return record;
       });
@@ -199,7 +238,7 @@ export function createMemoryStore(options: {
         await writeStoredRecords({
           schemaVersion: 1,
           records: nextRecords,
-        });
+        }, stored.records);
         return true;
       });
     },
@@ -276,7 +315,7 @@ export function createMemoryStore(options: {
           await writeStoredRecords({
             schemaVersion: 1,
             records: [...archivedRecords, ...createdMemories],
-          });
+          }, stored.records);
         }
 
         return {
@@ -294,6 +333,10 @@ export function createMemoryStore(options: {
     async reviewGovernance(governanceOptions) {
       const stored = await readStoredRecords();
       return createMemoryGovernanceReport(stored.records, governanceOptions);
+    },
+
+    async flushShadowWrites(flushOptions) {
+      await authoritativeBackend.flushShadowWrites(flushOptions);
     },
   };
 }

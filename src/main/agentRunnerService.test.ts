@@ -882,6 +882,9 @@ function createMemoryExecutionStore(
     async delete(runId) {
       return byRunId.delete(runId);
     },
+    async flushShadowWrites() {
+      return;
+    },
   };
 }
 

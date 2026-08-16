@@ -12,6 +12,8 @@ const requiredFiles = [
   ".zerox/runtime-convergence-program.md",
   ".zerox/kernel-migration-program.json",
   ".zerox/kernel-migration-program.md",
+  ".zerox/storage-convergence-program.json",
+  ".zerox/storage-convergence-program.md",
   "docs/superpowers/specs/2026-06-09-harness-engineering-iteration-spec.md",
   "docs/superpowers/plans/2026-06-09-harness-engineering-iteration.md",
 ];
@@ -58,5 +60,6 @@ if (missing.length) {
 
 await import("./check-runtime-convergence-program.mjs");
 await import("./check-kernel-migration-program.mjs");
+await import("./check-storage-convergence-program.mjs");
 
 console.log("Harness check passed.");
