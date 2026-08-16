@@ -10877,3 +10877,26 @@
 - R03 is complete. R04 is active for the final frozen release commit,
   clean-tree compatibility package, signed manifest, annotated tag, and
   Release workflow.
+
+## 2026-08-16 - Zerox Agent v3.9.1 Published
+
+- Final release commit `8850389` passed remote verify run `31954423767`.
+- Built local arm64 DMG/ZIP from the clean release commit in explicit
+  `legacy-adhoc` mode. App and ZIP codesign, DMG verification, embedded
+  version/build commit/release mode, blockmaps, and Node ABI restoration
+  passed.
+- Created annotated tag `v3.9.1`; tag object `698b1df` resolves locally and
+  remotely to release commit `8850389`.
+- Release workflow `31954677054` passed source verification, protected
+  Ed25519 key materialization, signed package/preflight, publication, and key
+  removal.
+- Published Release is latest, non-draft, and non-prerelease:
+  `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.1`.
+- Exactly six assets are present. All independently downloaded SHA-256 digests
+  match GitHub metadata; remote DMG and ZIP App verification passed.
+- Ed25519 envelope verified against tracked key
+  `a9e4a8f7350d43543d5b76811548ab54`, tag `v3.9.1`, sequence `3009001`, and
+  the exact downloaded manifest bytes.
+- R04 and R05 are complete. P103 and the v3.9.1 Release Program are closed.
+- Release evidence:
+  `.zerox/reviews/P103-v3.9.1-release-review.md`.

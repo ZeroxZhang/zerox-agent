@@ -3,10 +3,10 @@
   "programId": "v3.9.1-context-hotfix-release-2026-08",
   "version": "3.9.1",
   "tag": "v3.9.1",
-  "status": "active",
-  "updatedAt": "2026-08-16T23:05:00.000+08:00",
-  "activeFeatureId": "P103-v3.9.1-context-orchestration-hotfix-release",
-  "activeWorkstreamId": "R04",
+  "status": "completed",
+  "updatedAt": "2026-08-16T23:13:00.000+08:00",
+  "activeFeatureId": null,
+  "activeWorkstreamId": null,
   "maxActiveFeatures": 1,
   "sourceBaseline": {
     "commit": "546129c7681de81c2a200b915ccd0c32ba97930a",
@@ -61,7 +61,7 @@
     {
       "id": "R04",
       "title": "Clean-tree package, signing, preflight, tag, and Release workflow",
-      "state": "in_progress",
+      "state": "completed",
       "dependsOn": [
         "R03"
       ],
@@ -78,7 +78,7 @@
     {
       "id": "R05",
       "title": "Published asset, digest, and signature closure",
-      "state": "planned",
+      "state": "completed",
       "dependsOn": [
         "R04"
       ],
