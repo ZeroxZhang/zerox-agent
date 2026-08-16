@@ -1474,18 +1474,25 @@ describe("agent tool executor", () => {
     });
     const command =
       `${JSON.stringify(process.execPath)} ${JSON.stringify(parentPath)}`;
+    const controller = new AbortController();
 
-    await expect(
-      executor.execute(
-        {
-          toolName: "shell_exec",
-          args: { command, timeoutMs: 100 },
-        },
-        { runContext, authorizedShellCommand: command },
-      ),
-    ).resolves.toMatchObject({
+    const execution = executor.execute(
+      {
+        toolName: "shell_exec",
+        args: { command, timeoutMs: 5_000 },
+      },
+      {
+        runContext,
+        authorizedShellCommand: command,
+        signal: controller.signal,
+      },
+    );
+    await waitForFile(pidPath);
+    controller.abort(new Error("stop resistant descendant fixture"));
+
+    await expect(execution).resolves.toMatchObject({
       ok: false,
-      errorDetails: { kind: "timeout" },
+      errorDetails: { kind: "canceled" },
     });
 
     const descendantPid = Number(await readFile(pidPath, "utf8"));
@@ -2145,6 +2152,22 @@ function isProcessAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+async function waitForFile(
+  filePath: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await access(filePath);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error(`Timed out waiting for fixture file: ${filePath}`);
 }
 
 function createMemoryRecord(

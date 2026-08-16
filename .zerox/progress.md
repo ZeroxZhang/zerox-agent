@@ -10446,3 +10446,16 @@
   architecture rechecks accepted every AE-01 through AE-16 repair.
 - Review and closure evidence:
   `.zerox/reviews/P96-architecture-efficiency-review.md`.
+
+## 2026-08-16 - P96 Remote CI Stability Follow-Up
+
+- GitHub Actions run `31939140360` rejected commit `e0b087b` because
+  `agentToolExecutor.test.ts` assumed a resistant child process would create
+  its PID file within a fixed 100 ms timeout on Linux CI.
+- The production owned-process and termination behavior was unchanged. The
+  regression now waits for explicit PID-file readiness, then aborts through
+  the runtime signal and verifies descendant termination before sandbox lease
+  cleanup.
+- Repeated the focused file five times: every run passed 49/49 tests.
+- Strict test type coverage, program, harness, and whitespace checks passed.
+  A new remote `verify` run is required before this follow-up is complete.
