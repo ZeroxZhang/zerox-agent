@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "project": {
+    "slug": "zerox-agent-v3-9",
+    "title": "Zerox Agent v3.9.0 产品介绍",
+    "created_at": "2026-08-16T12:57:39+00:00",
+    "updated_at": "2026-08-16T13:11:47+00:00"
+  },
+  "paths": {
+    "source": "source",
+    "blueprint": "blueprint.json",
+    "ir": "onepager.ir.json",
+    "builds": "builds"
+  },
+  "builds": [
+    {
+      "version": "v001",
+      "created_at": "2026-08-16T13:11:47+00:00",
+      "tool": {
+        "name": "onepager",
+        "version": "1.5.0"
+      },
+      "configuration": {
+        "A": "A1",
+        "B": "B9",
+        "C": "C2",
+        "T": "T1",
+        "E": "E1",
+        "F": "Zerox Zhang"
+      },
+      "artifacts": [
+        {
+          "kind": "html",
+          "path": "builds/v001/output.html",
+          "sha256": "59c442c307a24d8df57ee1d3c618082b6069bc5d593eda7f9b8a36a5d90fb261",
+          "bytes": 39579
+        },
+        {
+          "kind": "png",
+          "path": "builds/v001/output.png",
+          "sha256": "30a9d751a8d43196f5bfcb6d814d85346a1d4ee6adb42eb27bb9ba4a92571f81",
+          "bytes": 1439528
+        }
+      ],
+      "checks": [
+        {
+          "kind": "static",
+          "path": "builds/v001/static-check.json",
+          "verdict": "PASS",
+          "sha256": "854fba85b61b35ba782e2fa8610757f7097e2a5703ffaa00c53a682ab488609e"
+        },
+        {
+          "kind": "render",
+          "path": "builds/v001/render-check.json",
+          "verdict": "PASS",
+          "sha256": "6667144a6cb41427f9af7da5f0066eb80c8489d6ea2aeb42d5e6b047e99f1423"
+        }
+      ]
+    }
+  ]
+}

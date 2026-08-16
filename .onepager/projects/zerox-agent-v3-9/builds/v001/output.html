@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=800, initial-scale=1.0">
+  <title>Zerox Agent v3.9.0 产品介绍</title>
+  <style>
+    /* design intent: 以 Google 四色分区作为主视觉语言，白与浅灰建立阅读节奏，Google 蓝只承担数据和 CTA；96px BigNumber 对 9px 元信息形成 10.67:1 字号对比。 */
+    :root {
+      --bg: #ffffff;
+      --surface: #f8f9fa;
+      --ink: #202124;
+      --muted: #5f6368;
+      --quiet: #80868b;
+      --line: #dadce0;
+      --cta: #1a73e8;
+      --cta-hover: #1967d2;
+      --blue: #4285f4;
+      --red: #ea4335;
+      --yellow: #fbbc04;
+      --green: #34a853;
+      --font: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+      --mono: "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas,
+        "PingFang SC", monospace;
+      --page: 800px;
+      --pad: 48px;
+      --radius: 8px;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: var(--page);
+      margin: 0;
+      background: var(--bg);
+    }
+
+    body {
+      color: var(--ink);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.7;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: geometricPrecision;
+    }
+
+    .page {
+      width: var(--page);
+      min-height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .icon {
+      width: 24px;
+      height: 24px;
+      display: inline-block;
+      flex: none;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .icon-sm {
+      width: 16px;
+      height: 16px;
+    }
+
+    .brand-rail {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      height: 8px;
+    }
+
+    .rail-blue { background: var(--blue); }
+    .rail-red { background: var(--red); }
+    .rail-yellow { background: var(--yellow); }
+    .rail-green { background: var(--green); }
+
+    .inner {
+      padding-right: var(--pad);
+      padding-left: var(--pad);
+    }
+
+    .header {
+      padding-top: 48px;
+      padding-bottom: 48px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 56px;
+    }
+
+    .wordmark {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .brand-dots {
+      display: flex;
+      gap: 5px;
+    }
+
+    .brand-dots span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .dot-blue { background: var(--blue); }
+    .dot-red { background: var(--red); }
+    .dot-yellow { background: var(--yellow); }
+    .dot-green { background: var(--green); }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .meta-pill,
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--bg);
+      font-family: var(--mono);
+      font-size: 9px;
+      line-height: 1.4;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .meta-pill {
+      padding: 5px 9px;
+    }
+
+    .eyebrow,
+    .section-kicker {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--cta);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.5;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      margin-bottom: 20px;
+    }
+
+    .eyebrow::after {
+      width: 72px;
+      height: 2px;
+      background: var(--cta);
+      content: "";
+    }
+
+    h1 {
+      max-width: 680px;
+      margin-bottom: 24px;
+      font-size: 52px;
+      font-weight: 700;
+      line-height: 1.16;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 660px;
+      margin-bottom: 28px;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.72;
+    }
+
+    .tag-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      padding: 7px 11px;
+    }
+
+    .hero-note {
+      display: grid;
+      grid-template-columns: 4px 1fr;
+      gap: 16px;
+      margin-top: 32px;
+      background: var(--surface);
+    }
+
+    .hero-note-line {
+      background: var(--red);
+    }
+
+    .hero-note p {
+      padding: 18px 20px 18px 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .hero-note strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .section {
+      padding-top: 64px;
+      padding-bottom: 64px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-gray {
+      background: var(--surface);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 240px;
+      gap: 32px;
+      align-items: end;
+      margin-top: 16px;
+      margin-bottom: 40px;
+    }
+
+    .section-title {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .section-lead {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .bignum-module {
+      padding-top: 56px;
+      padding-bottom: 56px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .bignum-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+
+    .bignum-item {
+      min-height: 240px;
+      padding: 32px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .bignum-value {
+      color: var(--cta);
+      font-family: var(--mono);
+      font-size: 96px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .bignum-label {
+      margin-top: 20px;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .bignum-context {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .proof-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+
+    .proof-strip-item {
+      min-height: 104px;
+      padding: 20px;
+      border-right: 1px solid var(--line);
+    }
+
+    .proof-strip-item:last-child {
+      border-right: 0;
+    }
+
+    .proof-strip-value {
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+
+    .proof-strip-label {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .flow-grid {
+      display: grid;
+      grid-template-columns: 1fr 24px 1fr 24px 1fr 24px 1fr;
+      align-items: stretch;
+    }
+
+    .flow-card {
+      min-height: 224px;
+      padding: 20px 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    .flow-index,
+    .feature-index {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .flow-card:nth-child(1) .flow-index { color: var(--blue); }
+    .flow-card:nth-child(3) .flow-index { color: var(--red); }
+    .flow-card:nth-child(5) .flow-index { color: var(--yellow); }
+    .flow-card:nth-child(7) .flow-index { color: var(--green); }
+
+    .flow-icon {
+      width: 40px;
+      height: 40px;
+      margin-top: 24px;
+      margin-bottom: 20px;
+      color: var(--muted);
+    }
+
+    .flow-title {
+      margin-bottom: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .flow-copy {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .flow-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--quiet);
+    }
+
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      margin-top: 24px;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+
+    .mode-item {
+      padding: 24px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .mode-label {
+      color: var(--quiet);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .mode-title {
+      margin-top: 8px;
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+
+    .mode-copy {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .acceptance-note {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 16px;
+      align-items: center;
+      margin-top: 24px;
+      padding: 20px 24px;
+      border-left: 4px solid var(--green);
+      background: var(--surface);
+    }
+
+    .acceptance-note .icon {
+      width: 40px;
+      height: 40px;
+      color: var(--green);
+    }
+
+    .acceptance-note strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    .acceptance-note p {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .surface-band {
+      padding-top: 64px;
+      padding-bottom: 64px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .surface-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .surface-item {
+      min-height: 240px;
+      padding: 32px;
+    }
+
+    .surface-blue {
+      color: var(--bg);
+      background: var(--blue);
+    }
+
+    .surface-red {
+      color: var(--bg);
+      background: var(--red);
+    }
+
+    .surface-yellow {
+      color: var(--ink);
+      background: var(--yellow);
+    }
+
+    .surface-green {
+      color: var(--bg);
+      background: var(--green);
+    }
+
+    .surface-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .surface-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .surface-title {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .surface-copy {
+      margin-top: 12px;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .upgrade-layout {
+      display: grid;
+      grid-template-columns: 5fr 7fr;
+      gap: 32px;
+      align-items: start;
+    }
+
+    .authority-diagram {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .diagram-title {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .authority-core {
+      padding: 28px 20px;
+      color: var(--bg);
+      background: var(--blue);
+    }
+
+    .authority-core-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .authority-core-title {
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .authority-core-copy {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .domain-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .domain-item {
+      min-height: 64px;
+      padding: 14px 16px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .domain-item:nth-child(even) {
+      border-right: 0;
+    }
+
+    .domain-item:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
+
+    .authority-foot {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      background: var(--surface);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .authority-foot .icon {
+      color: var(--green);
+    }
+
+    .feature-list {
+      border-top: 1px solid var(--line);
+    }
+
+    .feature-row {
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      gap: 16px;
+      padding: 22px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .feature-index {
+      color: var(--cta);
+    }
+
+    .feature-title {
+      margin-bottom: 6px;
+      font-size: 17px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .feature-copy {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .trust-layout {
+      display: grid;
+      grid-template-columns: 4fr 8fr;
+      gap: 40px;
+      align-items: start;
+    }
+
+    .trust-intro {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .trust-intro strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .trust-stack {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .trust-layer {
+      display: grid;
+      grid-template-columns: 48px 1fr 120px;
+      gap: 16px;
+      align-items: center;
+      min-height: 112px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .trust-layer:last-child {
+      border-bottom: 0;
+    }
+
+    .trust-layer-main {
+      background: var(--surface);
+    }
+
+    .trust-layer .icon {
+      color: var(--cta);
+    }
+
+    .trust-layer-title {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .trust-layer-copy {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .trust-layer-meta {
+      color: var(--quiet);
+      font-family: var(--mono);
+      font-size: 9px;
+      line-height: 1.5;
+      text-align: right;
+    }
+
+    .security-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      margin-top: 32px;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+
+    .security-item {
+      min-height: 184px;
+      padding: 24px 20px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .security-item .icon {
+      margin-bottom: 24px;
+      color: var(--muted);
+    }
+
+    .security-title {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .security-copy {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.65;
+    }
+
+    .evidence-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+
+    .evidence-item {
+      min-height: 168px;
+      padding: 24px 20px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .evidence-value {
+      color: var(--cta);
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.15;
+    }
+
+    .evidence-value-long {
+      font-size: 20px;
+    }
+
+    .evidence-title {
+      margin-top: 16px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .evidence-copy {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.55;
+    }
+
+    .evidence-source {
+      margin-top: 24px;
+      color: var(--quiet);
+      font-size: 10px;
+      line-height: 1.6;
+    }
+
+    .footer {
+      color: var(--bg);
+      background: var(--ink);
+    }
+
+    .footer-main {
+      display: grid;
+      grid-template-columns: 1fr 220px;
+      gap: 48px;
+      align-items: end;
+      padding-top: 64px;
+      padding-bottom: 56px;
+    }
+
+    .footer-kicker {
+      color: var(--bg);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+
+    .footer-title {
+      margin-top: 16px;
+      font-size: 36px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .footer-copy {
+      max-width: 430px;
+      margin-top: 16px;
+      color: var(--line);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .cta-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 64px;
+      padding: 0 24px;
+      border: 0;
+      border-radius: var(--radius);
+      color: var(--bg);
+      background: var(--cta);
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.4;
+      text-decoration: none;
+    }
+
+    .cta-link:hover {
+      background: var(--cta-hover);
+    }
+
+    .footer-meta {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: end;
+      padding-top: 24px;
+      padding-bottom: 32px;
+      border-top: 1px solid var(--muted);
+      color: var(--quiet);
+      font-family: var(--mono);
+      font-size: 9px;
+      line-height: 1.7;
+    }
+
+    .signature {
+      color: var(--quiet);
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+    <symbol id="icon-arrow-right" viewBox="0 0 24 24">
+      <path d="M5 12h14M13 6l6 6-6 6"/>
+    </symbol>
+    <symbol id="icon-message" viewBox="0 0 24 24">
+      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
+    </symbol>
+    <symbol id="icon-target" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <circle cx="12" cy="12" r="5"/>
+      <circle cx="12" cy="12" r="1"/>
+    </symbol>
+    <symbol id="icon-terminal" viewBox="0 0 24 24">
+      <path d="M4 5h16v14H4zM7 9l3 3-3 3M12 15h5"/>
+    </symbol>
+    <symbol id="icon-check-circle" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="m8 12 3 3 5-6"/>
+    </symbol>
+    <symbol id="icon-activity" viewBox="0 0 24 24">
+      <path d="M3 12h4l2-6 4 12 2-6h6"/>
+    </symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 7v5l3 2"/>
+    </symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.5 1A8 8 0 0 0 15 6l-.4-2.7h-4L10 6a8 8 0 0 0-1.5 1L6 6 4 9.5 6.1 11a7 7 0 0 0 0 2L4 14.5 6 18l2.5-1a8 8 0 0 0 1.5 1l.5 2.7h4L15 18a8 8 0 0 0 1.5-1l2.5 1 2-3.5-2.1-1.5c.1-.3.1-.7.1-1z"/>
+    </symbol>
+    <symbol id="icon-database" viewBox="0 0 24 24">
+      <ellipse cx="12" cy="5" rx="8" ry="3"/>
+      <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>
+    </symbol>
+    <symbol id="icon-shield" viewBox="0 0 24 24">
+      <path d="M12 3 20 6v6c0 5-3.4 8-8 10-4.6-2-8-5-8-10V6z"/>
+      <path d="m9 12 2 2 4-5"/>
+    </symbol>
+    <symbol id="icon-lock" viewBox="0 0 24 24">
+      <rect x="5" y="10" width="14" height="10" rx="2"/>
+      <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+    </symbol>
+    <symbol id="icon-refresh" viewBox="0 0 24 24">
+      <path d="M20 7v5h-5M4 17v-5h5"/>
+      <path d="M6.1 8A7 7 0 0 1 18 6l2 2M18 16a7 7 0 0 1-11.9 2L4 16"/>
+    </symbol>
+    <symbol id="icon-file" viewBox="0 0 24 24">
+      <path d="M6 3h8l4 4v14H6zM14 3v5h4M9 13h6M9 17h6"/>
+    </symbol>
+  </svg>
+
+  <main class="page page-a1">
+    <div class="brand-rail" aria-hidden="true">
+      <span class="rail-blue"></span>
+      <span class="rail-red"></span>
+      <span class="rail-yellow"></span>
+      <span class="rail-green"></span>
+    </div>
+
+    <header class="header inner">
+      <div class="brand-row">
+        <div class="wordmark">
+          <span class="brand-dots" aria-hidden="true">
+            <span class="dot-blue"></span>
+            <span class="dot-red"></span>
+            <span class="dot-yellow"></span>
+            <span class="dot-green"></span>
+          </span>
+          <span>ZEROX AGENT</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-pill">v3.9.0</span>
+          <span class="meta-pill">macOS arm64</span>
+          <span class="meta-pill">LOCAL-FIRST</span>
+        </div>
+      </div>
+
+      <div class="eyebrow">LOCAL DESKTOP AGENT CONTROL PLANE</div>
+      <h1>让本地 Agent<br>真正完成工作。</h1>
+      <p class="hero-copy">
+        把模型、工作区、技能、工具权限、长期记忆、计划、运行轨迹与验收证据，
+        收束到一个可审计、可恢复的桌面控制平面。
+      </p>
+      <div class="tag-row">
+        <span class="tag">CHAT</span>
+        <span class="tag">GOAL MODE</span>
+        <span class="tag">SCHEDULED TASKS</span>
+        <span class="tag">REVIEWED LEARNING</span>
+      </div>
+      <div class="hero-note">
+        <span class="hero-note-line" aria-hidden="true"></span>
+        <p>
+          <strong>重点不是让模型无限自主。</strong>
+          Zerox Agent 让真实工作拥有清晰目标、明确边界、可见过程、可恢复状态和有证据的完成判断。
+        </p>
+      </div>
+    </header>
+
+    <section class="bignum-module inner" aria-labelledby="snapshot-title">
+      <div class="section-kicker">CURRENT RELEASE EVIDENCE</div>
+      <div class="section-head">
+        <h2 class="section-title" id="snapshot-title">当前产品，<br>不写模糊形容词</h2>
+        <p class="section-lead">
+          v3.9.0 的可信度来自可复核的本地状态与发布门禁，而不是一次模型输出的自我声明。
+        </p>
+      </div>
+      <div class="bignum-grid">
+        <div class="bignum-item">
+          <div class="bignum-value">8</div>
+          <div class="bignum-label">结构化运行时收敛域</div>
+          <p class="bignum-context">Goal、Checkpoint、Memory、Workspace、Multi-Agent、Learning 与 Eval 统一进入 SQLite 权威。</p>
+        </div>
+        <div class="bignum-item">
+          <div class="bignum-value">2,970</div>
+          <div class="bignum-label">全量测试通过</div>
+          <p class="bignum-context">发布树同时通过严格测试类型检查、构建、Agent Eval 与 Memory Eval。</p>
+        </div>
+      </div>
+      <div class="proof-strip">
+        <div class="proof-strip-item">
+          <div class="proof-strip-value">6/6</div>
+          <div class="proof-strip-label">Runtime Stress</div>
+        </div>
+        <div class="proof-strip-item">
+          <div class="proof-strip-value">10/10</div>
+          <div class="proof-strip-label">Seatbelt 真机效果</div>
+        </div>
+        <div class="proof-strip-item">
+          <div class="proof-strip-value">6</div>
+          <div class="proof-strip-label">远端发布资产逐项复核</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section inner" aria-labelledby="flow-title">
+      <div class="section-kicker">GOAL → PLAN → RUN → ACCEPT</div>
+      <div class="section-head">
+        <h2 class="section-title" id="flow-title">从一句话，<br>到有证据的完成</h2>
+        <p class="section-lead">
+          目标语义先冻结，路径再规划；执行必须经过授权边界，完成必须经过独立验收。
+        </p>
+      </div>
+
+      <div class="flow-grid" aria-label="Zerox Agent 工作闭环">
+        <article class="flow-card">
+          <div class="flow-index">01 / INTENT</div>
+          <svg class="icon flow-icon" aria-hidden="true"><use href="#icon-message"/></svg>
+          <h3 class="flow-title">会话输入</h3>
+          <p class="flow-copy">普通 Chat 处理清晰任务；复杂工作进入 session-native Goal Mode。</p>
+        </article>
+        <div class="flow-arrow" aria-hidden="true">
+          <svg class="icon icon-sm"><use href="#icon-arrow-right"/></svg>
+        </div>
+        <article class="flow-card">
+          <div class="flow-index">02 / CONTRACT</div>
+          <svg class="icon flow-icon" aria-hidden="true"><use href="#icon-target"/></svg>
+          <h3 class="flow-title">目标与计划</h3>
+          <p class="flow-copy">Goal Contract 冻结结果与约束；Direct 或 Debate 生成可审查路径。</p>
+        </article>
+        <div class="flow-arrow" aria-hidden="true">
+          <svg class="icon icon-sm"><use href="#icon-arrow-right"/></svg>
+        </div>
+        <article class="flow-card">
+          <div class="flow-index">03 / RUNTIME</div>
+          <svg class="icon flow-icon" aria-hidden="true"><use href="#icon-terminal"/></svg>
+          <h3 class="flow-title">受管执行</h3>
+          <p class="flow-copy">Kernel、工具授权与工作区沙箱共同约束本地文件、进程与网络。</p>
+        </article>
+        <div class="flow-arrow" aria-hidden="true">
+          <svg class="icon icon-sm"><use href="#icon-arrow-right"/></svg>
+        </div>
+        <article class="flow-card">
+          <div class="flow-index">04 / EVIDENCE</div>
+          <svg class="icon flow-icon" aria-hidden="true"><use href="#icon-check-circle"/></svg>
+          <h3 class="flow-title">最终验收</h3>
+          <p class="flow-copy">成功标准通过并生成有效证书后，Goal 才会进入 achieved。</p>
+        </article>
+      </div>
+
+      <div class="mode-grid">
+        <article class="mode-item">
+          <div class="mode-label">DEFAULT PLANNING</div>
+          <h3 class="mode-title">Direct</h3>
+          <p class="mode-copy">调查、生成、独立冷审与质量门禁。适合目标清晰、路径可直接收敛的工作。</p>
+        </article>
+        <article class="mode-item">
+          <div class="mode-label">ADVERSARIAL PLANNING</div>
+          <h3 class="mode-title">Debate</h3>
+          <p class="mode-copy">A/B 对抗审查、C 独立综合。适合约束复杂、方案争议大或需要保留少数意见的工作。</p>
+        </article>
+      </div>
+
+      <div class="acceptance-note">
+        <svg class="icon" aria-hidden="true"><use href="#icon-check-circle"/></svg>
+        <div>
+          <strong>Plan steps_completed 不等于 Goal achieved。</strong>
+          <p>路径执行完成后仍要按 Goal Contract 做最终验收；证据不足时，系统会如实保留未达成状态。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="surface-band" aria-labelledby="surface-title">
+      <div class="inner">
+        <div class="section-kicker">ONE WORKSPACE · FOUR SURFACES</div>
+        <div class="section-head">
+          <h2 class="section-title" id="surface-title">从对话开始，<br>在证据中结束</h2>
+          <p class="section-lead">
+            主流程只保留四个入口。复杂能力进入设置和运行详情，不与核心工作流争夺注意力。
+          </p>
+        </div>
+      </div>
+      <div class="surface-grid">
+        <article class="surface-item surface-blue">
+          <div class="surface-top">
+            <span class="surface-label">01 / CHAT</span>
+            <svg class="icon" aria-hidden="true"><use href="#icon-message"/></svg>
+          </div>
+          <h3 class="surface-title">会话</h3>
+          <p class="surface-copy">普通 Chat、Goal Mode、技能、工作区、计划确认、执行、验收与恢复都在同一会话。</p>
+        </article>
+        <article class="surface-item surface-red">
+          <div class="surface-top">
+            <span class="surface-label">02 / RUNS</span>
+            <svg class="icon" aria-hidden="true"><use href="#icon-activity"/></svg>
+          </div>
+          <h3 class="surface-title">任务记录</h3>
+          <p class="surface-copy">查看结果、失败原因、checkpoint、trajectory、工具调用和下一步动作。</p>
+        </article>
+        <article class="surface-item surface-yellow">
+          <div class="surface-top">
+            <span class="surface-label">03 / TASKS</span>
+            <svg class="icon" aria-hidden="true"><use href="#icon-clock"/></svg>
+          </div>
+          <h3 class="surface-title">自动任务</h3>
+          <p class="surface-copy">把稳定工作保存为每日、工作日、每周或固定间隔运行的本地自动任务。</p>
+        </article>
+        <article class="surface-item surface-green">
+          <div class="surface-top">
+            <span class="surface-label">04 / SETTINGS</span>
+            <svg class="icon" aria-hidden="true"><use href="#icon-settings"/></svg>
+          </div>
+          <h3 class="surface-title">设置</h3>
+          <p class="surface-copy">配置模型连接、工具、记忆、Skills、学习、评测与系统状态，保持边界可见。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section section-gray inner" aria-labelledby="upgrade-title">
+      <div class="section-kicker">v3.9.0 · SQLITE AUTHORITY</div>
+      <div class="section-head">
+        <h2 class="section-title" id="upgrade-title">一个权威来源，<br>一条可信状态链</h2>
+        <p class="section-lead">
+          v3.9.0 不再扩张界面，而是把运行时基础收敛为可事务化、可恢复、可验证的生产系统。
+        </p>
+      </div>
+
+      <div class="upgrade-layout">
+        <div class="authority-diagram" aria-label="SQLite 权威结构图">
+          <div class="diagram-title">STRUCTURED RUNTIME AUTHORITY</div>
+          <div class="authority-core">
+            <div class="authority-core-label">LOCAL DATABASE</div>
+            <div class="authority-core-title">zerox.db</div>
+            <p class="authority-core-copy">SQLite 是正式结构化运行时的默认权威。</p>
+          </div>
+          <div class="domain-grid">
+            <div class="domain-item">Goal</div>
+            <div class="domain-item">Checkpoint</div>
+            <div class="domain-item">Memory</div>
+            <div class="domain-item">Workspace</div>
+            <div class="domain-item">Multi-Agent</div>
+            <div class="domain-item">Learning</div>
+            <div class="domain-item">Eval Candidate</div>
+            <div class="domain-item">Promoted Fixture</div>
+          </div>
+          <div class="authority-foot">
+            <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"/></svg>
+            <span>旧 JSON 逐域原子导入；canonical 校验通过后才写入 authority marker。</span>
+          </div>
+        </div>
+
+        <div class="feature-list">
+          <article class="feature-row">
+            <div class="feature-index">01</div>
+            <div>
+              <h3 class="feature-title">状态变更可事务化</h3>
+              <p class="feature-copy">Goal status、Plan version、checkpoint、ledger publication 与 Eval promotion 拥有明确的 CAS、幂等或事务边界。</p>
+            </div>
+          </article>
+          <article class="feature-row">
+            <div class="feature-index">02</div>
+            <div>
+              <h3 class="feature-title">迁移失败不会留下半状态</h3>
+              <p class="feature-copy">损坏源、代际冲突或 canonical mismatch 会回滚当前域；显式 JSON rollback 可被后续安全重导。</p>
+            </div>
+          </article>
+          <article class="feature-row">
+            <div class="feature-index">03</div>
+            <div>
+              <h3 class="feature-title">原生执行服从同一边界</h3>
+              <p class="feature-copy">代码搜索和 Git 读取进入受管进程、最小环境、只读 Seatbelt、无网络、取消和进程树回收。</p>
+            </div>
+          </article>
+          <article class="feature-row">
+            <div class="feature-index">04</div>
+            <div>
+              <h3 class="feature-title">大历史仍保持有界读取</h3>
+              <p class="feature-copy">Chat 使用 trigram FTS、projection、metadata 批量读取和 80-message cursor 窗口，避免扫描与大 transcript 传输。</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section inner" aria-labelledby="trust-title">
+      <div class="section-kicker">TRUST IS THE PRODUCT</div>
+      <div class="section-head">
+        <h2 class="section-title" id="trust-title">权限、恢复与证据，<br>构成一条完整边界</h2>
+        <p class="section-lead">
+          renderer 的按钮不是授权真源。最终裁决始终发生在主进程，并在持久化完成后才对外发布终态。
+        </p>
+      </div>
+
+      <div class="trust-layout">
+        <p class="trust-intro">
+          <strong>模型只看到当前任务允许使用的工具。</strong><br><br>
+          每一次执行都经过可见性、授权和工作区约束；高风险、不可逆或扩大权限的操作仍需要人工确认。
+        </p>
+        <div class="trust-stack" aria-label="Zerox Agent 信任边界架构">
+          <div class="trust-layer">
+            <svg class="icon" aria-hidden="true"><use href="#icon-message"/></svg>
+            <div>
+              <div class="trust-layer-title">Renderer</div>
+              <div class="trust-layer-copy">展示状态、收集决策、发起操作，不持有最终权限真相。</div>
+            </div>
+            <div class="trust-layer-meta">DISPLAY<br>AND INTENT</div>
+          </div>
+          <div class="trust-layer trust-layer-main">
+            <svg class="icon" aria-hidden="true"><use href="#icon-shield"/></svg>
+            <div>
+              <div class="trust-layer-title">Kernel + ToolAuthorizationService</div>
+              <div class="trust-layer-copy">裁决工具、风险、批准状态与运行终态；dispatch 前再次检查 AbortSignal。</div>
+            </div>
+            <div class="trust-layer-meta">MAIN PROCESS<br>AUTHORITY</div>
+          </div>
+          <div class="trust-layer">
+            <svg class="icon" aria-hidden="true"><use href="#icon-lock"/></svg>
+            <div>
+              <div class="trust-layer-title">Workspace Sandbox + Seatbelt</div>
+              <div class="trust-layer-copy">重新检查路径、符号链接、工作目录、额外根目录与网络范围。</div>
+            </div>
+            <div class="trust-layer-meta">OS-ENFORCED<br>BOUNDARY</div>
+          </div>
+          <div class="trust-layer trust-layer-main">
+            <svg class="icon" aria-hidden="true"><use href="#icon-database"/></svg>
+            <div>
+              <div class="trust-layer-title">Durable local state</div>
+              <div class="trust-layer-copy">checkpoint、trajectory、ledger 与 acceptance certificate 支持重启恢复和审计。</div>
+            </div>
+            <div class="trust-layer-meta">OBSERVABLE<br>RECOVERABLE</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="security-grid">
+        <article class="security-item">
+          <svg class="icon" aria-hidden="true"><use href="#icon-terminal"/></svg>
+          <h3 class="security-title">原生进程受管</h3>
+          <p class="security-copy">Shell、rg、Git 与 Skill MCP 使用最小环境、超时、取消和进程树 drain，不运行未受约束的回退路径。</p>
+        </article>
+        <article class="security-item">
+          <svg class="icon" aria-hidden="true"><use href="#icon-lock"/></svg>
+          <h3 class="security-title">凭据不进入业务快照</h3>
+          <p class="security-copy">API Key 由 safeStorage 加密；MCP env 与 headers 不进入 renderer、Goal、Plan 或运行轨迹。</p>
+        </article>
+        <article class="security-item">
+          <svg class="icon" aria-hidden="true"><use href="#icon-check-circle"/></svg>
+          <h3 class="security-title">终态只发布一次</h3>
+          <p class="security-copy">Kernel 只在 durable settlement 完成后发布唯一 run_end，失败不会被伪装成成功。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section section-gray inner" aria-labelledby="evidence-title">
+      <div class="section-kicker">RELEASE GATE · VERIFIED LOCALLY AND REMOTELY</div>
+      <div class="section-head">
+        <h2 class="section-title" id="evidence-title">发布质量，<br>由证据定义</h2>
+        <p class="section-lead">
+          测试、压力负载、真实沙箱、原生 ABI、签名与远端摘要共同构成发布门禁。
+        </p>
+      </div>
+
+      <div class="evidence-grid">
+        <article class="evidence-item">
+          <div class="evidence-value">2,970</div>
+          <h3 class="evidence-title">全量测试</h3>
+          <p class="evidence-copy">六项 stress-only 测试在常规验证中按设计跳过。</p>
+        </article>
+        <article class="evidence-item">
+          <div class="evidence-value">6/6</div>
+          <h3 class="evidence-title">Runtime Stress</h3>
+          <p class="evidence-copy">覆盖 25k Context、10k Chat、25k trajectory、5k 并发与取消。</p>
+        </article>
+        <article class="evidence-item">
+          <div class="evidence-value">10/10</div>
+          <h3 class="evidence-title">Seatbelt 真机效果</h3>
+          <p class="evidence-copy">验证允许路径、相邻路径、符号链接、只读与无网络边界。</p>
+        </article>
+        <article class="evidence-item">
+          <div class="evidence-value evidence-value-long">137→146→137</div>
+          <h3 class="evidence-title">Electron ABI 往返</h3>
+          <p class="evidence-copy">生产 smoke 验证原生 SQLite、WAL 与 Node ABI 恢复。</p>
+        </article>
+        <article class="evidence-item">
+          <div class="evidence-value">8</div>
+          <h3 class="evidence-title">Authority Markers</h3>
+          <p class="evidence-copy">八个收敛域真实写入，无 JSON fallback 与旧 P97 shadow。</p>
+        </article>
+        <article class="evidence-item">
+          <div class="evidence-value">6</div>
+          <h3 class="evidence-title">签名发布资产</h3>
+          <p class="evidence-copy">DMG、ZIP、两个 blockmap、manifest 与 Ed25519 signature。</p>
+        </article>
+      </div>
+      <p class="evidence-source">
+        Source: Zerox Agent v3.9.0 README、Release Notes、P97 Storage Convergence Review、P98 Release Review。
+      </p>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-main inner">
+        <div>
+          <div class="footer-kicker">START FROM ONE CLEAR TASK</div>
+          <h2 class="footer-title">下载 Zerox Agent v3.9.0</h2>
+          <p class="footer-copy">
+            当前版本适用于 Apple Silicon Mac，采用 legacy-adhoc 兼容签名。
+            请仅从项目 GitHub Release 获取你信任的安装包。
+          </p>
+        </div>
+        <a class="cta-link" href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.0">
+          <span>打开 GitHub Release</span>
+          <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-arrow-right"/></svg>
+        </a>
+      </div>
+      <div class="footer-meta inner">
+        <div>github.com/ZeroxZhang/zerox-agent · LOCAL-FIRST · PERMISSIONED · OBSERVABLE · RECOVERABLE</div>
+        <div class="signature">Zerox Zhang · 2026.08.16</div>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "project": {
+    "slug": "zerox-agent-v3-9",
+    "title": "Zerox Agent v3.9.0 产品介绍",
+    "created_at": "2026-08-16T12:57:39+00:00"
+  },
+  "blueprint": {
+    "schema_version": 1,
+    "goal": "为 README 提供一张准确介绍 Zerox Agent v3.9.0 产品定位、工作闭环、信任边界与发布证据的中文长图。",
+    "audience": "希望在 macOS 上安全运行本地 Agent，并重视权限、可观测性、恢复能力和验收证据的独立开发者与高级用户。",
+    "core_claim": "Zerox Agent 把一句话转化为一次受权限约束、过程可见、状态可恢复并以证据验收的本地 Agent 运行。",
+    "logic": "narrative",
+    "modules": [
+      {
+        "id": "positioning",
+        "role": "answer",
+        "title": "本地 Agent 控制平面",
+        "summary": "统一模型、工作区、技能、工具权限、记忆、计划、执行轨迹和验收证据，让本地 Agent 真正完成工作。",
+        "source_refs": [
+          "source/README.md",
+          "source/zerox-positioning.md"
+        ]
+      },
+      {
+        "id": "execution_loop",
+        "role": "answer",
+        "title": "从目标到验收",
+        "summary": "通过 Goal Contract、Direct 或 Debate 规划、受管执行与证据验收，把开放式请求收束为可追踪的工作闭环。",
+        "source_refs": [
+          "source/README.md"
+        ]
+      },
+      {
+        "id": "product_surfaces",
+        "role": "evidence",
+        "title": "四个产品入口",
+        "summary": "会话承载工作，任务记录解释结果，自动任务处理重复工作，设置集中管理能力、边界与质量。",
+        "source_refs": [
+          "source/README.md"
+        ]
+      },
+      {
+        "id": "v390_upgrade",
+        "role": "comparison",
+        "title": "v3.9.0 生产基础",
+        "summary": "八个结构化运行时域收敛到 SQLite 权威，并以事务、CAS、幂等和严格迁移回滚保护状态真实性。",
+        "source_refs": [
+          "source/README.md",
+          "source/v3.9.0.md",
+          "source/P97-storage-convergence-review.md"
+        ]
+      },
+      {
+        "id": "trust_boundary",
+        "role": "evidence",
+        "title": "信任是产品本身",
+        "summary": "工具授权、工作区沙箱、macOS Seatbelt、凭据隔离和 durable settlement 共同覆盖模型可触达的执行路径。",
+        "source_refs": [
+          "source/README.md",
+          "source/P97-storage-convergence-review.md"
+        ]
+      },
+      {
+        "id": "release_evidence",
+        "role": "evidence",
+        "title": "发布证据",
+        "summary": "2,970 项测试、6/6 Runtime Stress、10/10 Seatbelt 真机效果和 Electron ABI 往返验证构成 v3.9.0 发布门禁。",
+        "source_refs": [
+          "source/P98-v3.9.0-release-review.md"
+        ]
+      },
+      {
+        "id": "download",
+        "role": "cta",
+        "title": "下载 Zerox Agent v3.9.0",
+        "summary": "从项目 GitHub Release 获取适用于 Apple Silicon Mac 的 v3.9.0 安装包。",
+        "source_refs": [
+          "source/README.md",
+          "source/P98-v3.9.0-release-review.md"
+        ]
+      }
+    ],
+    "missing": [
+      {
+        "field": "客户规模与商业转化数据",
+        "reason": "当前仓库没有可验证的客户或商业指标，因此海报仅使用工程与发布验证数据。"
+      }
+    ]
+  },
+  "configuration": {
+    "A": "A1",
+    "B": "B9",
+    "B_mode": "Light",
+    "C": "C2",
+    "T": "T1",
+    "focus": "product",
+    "E": "E1",
+    "F": "Zerox Zhang"
+  },
+  "modules": [
+    {
+      "id": "positioning",
+      "role": "value-proposition",
+      "content": {
+        "title": "让本地 Agent 真正完成工作。",
+        "body": "Zerox Agent 是面向 macOS 的 local-first desktop control plane。它把模型、工作区、技能、工具权限、长期记忆、计划、执行轨迹与验收证据放进同一个可审计、可恢复的桌面工作台。"
+      },
+      "source_refs": [
+        "source/README.md",
+        "source/zerox-positioning.md"
+      ],
+      "visual_priority": 5,
+      "diagram": null,
+      "locked": {
+        "content": true,
+        "layout": true
+      }
+    },
+    {
+      "id": "execution_loop",
+      "role": "product-flow",
+      "content": {
+        "title": "从一句话，到有证据的完成",
+        "body": "会话输入进入 Goal Contract，经 Direct 或 Debate 形成可审查计划；用户确认后，Kernel 在统一授权与工作区边界内执行，最终按成功标准生成验收证书。Plan 步骤完成不等于 Goal 达成。"
+      },
+      "source_refs": [
+        "source/README.md"
+      ],
+      "visual_priority": 5,
+      "diagram": "flow",
+      "locked": {
+        "content": true,
+        "layout": true
+      }
+    },
+    {
+      "id": "product_surfaces",
+      "role": "product-map",
+      "content": {
+        "title": "一个工作台，四个清晰入口",
+        "body": "Chat 负责对话、Goal 与恢复；Runs 展示结果、轨迹和检查点；Tasks 管理每日、工作日、每周与间隔自动任务；Settings 集中配置模型、工具、记忆、技能、学习、评测与系统状态。"
+      },
+      "source_refs": [
+        "source/README.md"
+      ],
+      "visual_priority": 4,
+      "diagram": "matrix",
+      "locked": {
+        "content": true,
+        "layout": true
+      }
+    },
+    {
+      "id": "v390_upgrade",
+      "role": "release-upgrade",
+      "content": {
+        "title": "v3.9.0：一个权威来源，一条可信状态链",
+        "body": "Goal、checkpoint、Memory、Workspace、Multi-Agent Session、Learning、Eval Candidate 和 promoted fixture 收敛到 zerox.db。逐域原子导入、generation 冲突拒绝和 rollback marker 防止旧 JSON 覆盖新权威。",
+        "data": [
+          {
+            "value": 8,
+            "label": "SQLite 收敛域",
+            "source_ref": "source/P97-storage-convergence-review.md",
+            "assumption": false
+          },
+          {
+            "value": 7,
+            "label": "生产 SQLite migrations",
+            "source_ref": "source/P98-v3.9.0-release-review.md",
+            "assumption": false
+          }
+        ]
+      },
+      "source_refs": [
+        "source/README.md",
+        "source/v3.9.0.md",
+        "source/P97-storage-convergence-review.md",
+        "source/P98-v3.9.0-release-review.md"
+      ],
+      "visual_priority": 5,
+      "diagram": "comparison",
+      "locked": {
+        "content": true,
+        "layout": true
+      }
+    },
+    {
+      "id": "trust_boundary",
+      "role": "trust-architecture",
+      "content": {
+        "title": "信任不是附加功能，而是产品本身",
+        "body": "renderer 只展示和发起操作；ToolAuthorizationService 负责主进程授权；工作区沙箱与 macOS Seatbelt 再次收窄文件、进程和网络边界；Kernel 只在 durable settlement 后发布唯一 run_end。"
+      },
+      "source_refs": [
+        "source/README.md",
+        "source/v3.9.0.md",
+        "source/P97-storage-convergence-review.md"
+      ],
+      "visual_priority": 5,
+      "diagram": "architecture",
+      "locked": {
+        "content": true,
+        "layout": true
+      }
+    },
+    {
+      "id": "release_evidence",
+      "role": "proof",
+      "content": {
+        "title": "发布质量由证据定义",
+        "body": "v3.9.0 通过完整测试、压力负载、Seatbelt 真机效果与 Electron 原生 SQLite 启动验证；发布清单使用 Ed25519 签名，远端六资产逐项复核摘要。",
+        "data": [
+          {
+            "value": "2,970",
+            "label": "全量测试通过",
+            "source_ref": "source/P98-v3.9.0-release-review.md",
+            "assumption": false
+          },
+          {
+            "value": "6/6",
+            "label": "Runtime Stress",
+            "source_ref": "source/P98-v3.9.0-release-review.md",
+            "assumption": false
+          },
+          {
+            "value": "10/10",
+            "label": "Seatbelt 真机效果",
+            "source_ref": "source/P98-v3.9.0-release-review.md",
+            "assumption": false
+          },
+          {
+            "value": "137→146→137",
+            "label": "Node / Electron ABI 往返",
+            "source_ref": "source/P98-v3.9.0-release-review.md",
+            "assumption": false
+          }
+        ]
+      },
+      "source_refs": [
+        "source/P98-v3.9.0-release-review.md"
+      ],
+      "visual_priority": 4,
+      "diagram": null,
+      "locked": {
+        "content": true,
+        "layout": true
+      }
+    },
+    {
+      "id": "download",
+      "role": "cta",
+      "content": {
+        "title": "下载 Zerox Agent v3.9.0",
+        "body": "从 GitHub Release 获取 Apple Silicon Mac 安装包。当前版本采用 legacy-adhoc 兼容签名，不包含 Apple Developer ID 公证。"
+      },
+      "source_refs": [
+        "source/README.md",
+        "source/P98-v3.9.0-release-review.md"
+      ],
+      "visual_priority": 4,
+      "diagram": null,
+      "locked": {
+        "content": true,
+        "layout": true
+      }
+    }
+  ],
+  "design_intent": {
+    "visual_language": "color-blocks",
+    "color_role": "main",
+    "type_ratio": 10.67
+  },
+  "brand_ref": null
+}

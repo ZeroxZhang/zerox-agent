@@ -1,7 +1,45 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T20:45:00.000+08:00",
+  "updatedAt": "2026-08-16T21:12:56.000+08:00",
   "features": [
+    {
+      "id": "P100-v3.9.0-onepager-refresh",
+      "priority": 130,
+      "status": "done",
+      "title": "Refresh the README product Onepager for Zerox Agent v3.9.0",
+      "files": [
+        ".gitignore",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".onepager/projects/zerox-agent-v3-9/**",
+        "docs/product/zerox-agent-A1-B9-20260803.html",
+        "docs/product/zerox-agent-A1-B9-20260803.png",
+        "docs/product/zerox-agent-A1-B9-20260816.html",
+        "docs/product/zerox-agent-A1-B9-20260816.png",
+        "docs/product/zerox-agent-product-intro.jpg",
+        "README.md",
+        "src/shared/readme.test.ts"
+      ],
+      "definitionOfDone": [
+        "the README product image presents the current v3.9.0 product position and no longer identifies v3.8.1",
+        "the Onepager uses confirmed A1, B9-Light, C2, T1 product, E1, and Zerox Zhang configuration",
+        "all product, architecture, security, and release claims are traceable to current repository sources",
+        "static and browser-rendered Onepager checks pass before capture",
+        "the reproducible Onepager project records source, blueprint, IR, build artifacts, checks, and validated hashes",
+        "README, program, harness, and whitespace verification pass"
+      ],
+      "verification": [
+        "onepager static quality check",
+        "onepager browser render check",
+        "onepager project validation with required sources",
+        "npm test -- --run src/shared/readme.test.ts",
+        "npm run typecheck:tests",
+        "npm run verify",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P99-v3.9.0-readme-upgrade-summary",
       "priority": 129,

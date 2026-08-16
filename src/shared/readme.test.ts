@@ -228,20 +228,25 @@ describe("README", () => {
     );
     const sourcePath = path.join(
       process.cwd(),
-      "docs/product/zerox-agent-A1-B9-20260803.html",
+      "docs/product/zerox-agent-A1-B9-20260816.html",
     );
 
+    expect(readme).toContain(
+      'alt="Zerox Agent v3.9.0 产品介绍"',
+    );
     expect(readme).toContain("docs/product/zerox-agent-product-intro.jpg");
     expect(existsSync(imagePath)).toBe(true);
     expect(existsSync(sourcePath)).toBe(true);
 
     const source = readFileSync(sourcePath, "utf8");
-    expect(source).toContain("Zerox Agent v3.8.1");
-    expect(source).toContain("GoalContract r1");
+    expect(source).toContain("Zerox Agent v3.9.0");
+    expect(source).toContain("Goal Contract");
     expect(source).toContain("Direct");
     expect(source).toContain("Debate");
-    expect(source).toContain("Plan steps_completed ≠ Goal achieved");
-    expect(source).toContain("19</div>");
-    expect(source).not.toContain("v3.6.1");
+    expect(source).toContain("Plan steps_completed 不等于 Goal achieved");
+    expect(source).toContain("zerox.db");
+    expect(source).toContain("2,970");
+    expect(source).toContain("10/10");
+    expect(source).not.toContain("v3.8.1");
   });
 });

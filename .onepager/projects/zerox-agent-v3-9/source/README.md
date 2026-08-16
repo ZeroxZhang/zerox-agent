@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/product/zerox-agent-product-intro.jpg" alt="Zerox Agent v3.9.0 产品介绍" width="820" />
+  <img src="docs/product/zerox-agent-product-intro.jpg" alt="Zerox Agent 产品介绍" width="820" />
 </p>
 
 ---

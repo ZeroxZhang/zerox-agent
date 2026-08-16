@@ -10735,3 +10735,30 @@
 - Focused README/package/release-program tests passed 21/21. Strict test type
   coverage remains 292/292; program, harness, and whitespace checks passed.
 - Closed `P99-v3.9.0-readme-upgrade-summary`.
+
+## 2026-08-16 - P100 v3.9.0 README Onepager Refresh Completed
+
+- Regenerated the README product Onepager with the confirmed
+  `A1 / B9-Light / C2 / T1 product / E1 / Zerox Zhang` configuration.
+- Rebuilt the product narrative from the current README, positioning,
+  v3.9.0 release notes, P97 storage convergence review, and P98 release
+  review. The page now presents the Goal-to-acceptance loop, four product
+  surfaces, SQLite authority convergence, trust boundary, and verified
+  release evidence without unverified customer or commercial metrics.
+- Replaced `docs/product/zerox-agent-product-intro.jpg` with the visually
+  accepted 1600x11142 v3.9.0 image. Added the dated HTML and PNG sources,
+  updated the README alt text, and removed the stale v3.8.1 HTML and PNG.
+- Initialized `.onepager/projects/zerox-agent-v3-9`, stored source material,
+  blueprint, IR, and build `v001`, then validated all recorded artifact and
+  report hashes with `--require-sources`.
+- Onepager static quality check passed with no warnings: B9 palette 12/12,
+  no emoji, gradients, glow, or absolute content positioning, body contrast
+  16.10:1, and BigNumber contrast 4.51:1.
+- Browser render check passed with no warnings: 800px root width,
+  5570.71875px auto-height canvas, no clipping, no out-of-bounds content,
+  no page errors, and no failed network requests.
+- Focused README tests passed 7/7. Strict test types covered 292/292 files.
+  Full verify passed 2,971 tests with six stress-only tests skipped by
+  design; production build, Agent evals 26/26, and Memory evals 2/2 passed.
+- Program, harness, Onepager project validation, and whitespace checks
+  passed. Closed `P100-v3.9.0-onepager-refresh`.

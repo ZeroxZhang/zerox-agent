@@ -1,0 +1,15 @@
+{
+  "file": "docs/product/zerox-agent-A1-B9-20260816.html",
+  "size": "A1",
+  "verdict": "PASS",
+  "errors": [],
+  "warnings": [],
+  "passed": [
+    "[CANVAS] Root width matches 800px",
+    "[CANVAS] Auto-height canvas is 5570.71875px tall",
+    "[OVERFLOW] No text clipping detected",
+    "[BOUNDARY] Normal-flow content stays inside the canvas",
+    "[PAGE] No JavaScript page errors",
+    "[NETWORK] No failed resource requests"
+  ]
+}

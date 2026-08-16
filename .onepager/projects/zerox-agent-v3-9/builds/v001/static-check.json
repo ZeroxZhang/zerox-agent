@@ -1,0 +1,25 @@
+{
+  "file": "docs/product/zerox-agent-A1-B9-20260816.html",
+  "style": "B9",
+  "size": "A1",
+  "verdict": "PASS",
+  "errors": [],
+  "warnings": [],
+  "passed": [
+    "[STRUCTURE] UTF-8 charset declared",
+    "[STRUCTURE] No web font import; system fallback mode",
+    "[STRUCTURE] Main heading present",
+    "[STRUCTURE] Footer present",
+    "[BIGNUMBER] BigNumber module present",
+    "[EMOJI] No emoji characters detected",
+    "[COLOR] Palette uses 12 unique colors (limit 12)",
+    "[COLOR] No unexpected blue/purple tones",
+    "[GRADIENT] No gradients used",
+    "[SHADOW] No glow-like shadows detected",
+    "[LAYOUT] No flex:1 usage detected",
+    "[LAYOUT] Absolute positioning is absent or marked decorative",
+    "[CONTRAST] Body text: 16.10:1",
+    "[CONTRAST] BigNumber: 4.51:1",
+    "[CONSISTENCY] Border-radius values are consistent (2 unique)"
+  ]
+}

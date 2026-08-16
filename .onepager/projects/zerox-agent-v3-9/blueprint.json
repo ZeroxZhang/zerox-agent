@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "goal": "为 README 提供一张准确介绍 Zerox Agent v3.9.0 产品定位、工作闭环、信任边界与发布证据的中文长图。",
+  "audience": "希望在 macOS 上安全运行本地 Agent，并重视权限、可观测性、恢复能力和验收证据的独立开发者与高级用户。",
+  "core_claim": "Zerox Agent 把一句话转化为一次受权限约束、过程可见、状态可恢复并以证据验收的本地 Agent 运行。",
+  "logic": "narrative",
+  "modules": [
+    {
+      "id": "positioning",
+      "role": "answer",
+      "title": "本地 Agent 控制平面",
+      "summary": "统一模型、工作区、技能、工具权限、记忆、计划、执行轨迹和验收证据，让本地 Agent 真正完成工作。",
+      "source_refs": [
+        "source/README.md",
+        "source/zerox-positioning.md"
+      ]
+    },
+    {
+      "id": "execution_loop",
+      "role": "answer",
+      "title": "从目标到验收",
+      "summary": "通过 Goal Contract、Direct 或 Debate 规划、受管执行与证据验收，把开放式请求收束为可追踪的工作闭环。",
+      "source_refs": [
+        "source/README.md"
+      ]
+    },
+    {
+      "id": "product_surfaces",
+      "role": "evidence",
+      "title": "四个产品入口",
+      "summary": "会话承载工作，任务记录解释结果，自动任务处理重复工作，设置集中管理能力、边界与质量。",
+      "source_refs": [
+        "source/README.md"
+      ]
+    },
+    {
+      "id": "v390_upgrade",
+      "role": "comparison",
+      "title": "v3.9.0 生产基础",
+      "summary": "八个结构化运行时域收敛到 SQLite 权威，并以事务、CAS、幂等和严格迁移回滚保护状态真实性。",
+      "source_refs": [
+        "source/README.md",
+        "source/v3.9.0.md",
+        "source/P97-storage-convergence-review.md"
+      ]
+    },
+    {
+      "id": "trust_boundary",
+      "role": "evidence",
+      "title": "信任是产品本身",
+      "summary": "工具授权、工作区沙箱、macOS Seatbelt、凭据隔离和 durable settlement 共同覆盖模型可触达的执行路径。",
+      "source_refs": [
+        "source/README.md",
+        "source/P97-storage-convergence-review.md"
+      ]
+    },
+    {
+      "id": "release_evidence",
+      "role": "evidence",
+      "title": "发布证据",
+      "summary": "2,970 项测试、6/6 Runtime Stress、10/10 Seatbelt 真机效果和 Electron ABI 往返验证构成 v3.9.0 发布门禁。",
+      "source_refs": [
+        "source/P98-v3.9.0-release-review.md"
+      ]
+    },
+    {
+      "id": "download",
+      "role": "cta",
+      "title": "下载 Zerox Agent v3.9.0",
+      "summary": "从项目 GitHub Release 获取适用于 Apple Silicon Mac 的 v3.9.0 安装包。",
+      "source_refs": [
+        "source/README.md",
+        "source/P98-v3.9.0-release-review.md"
+      ]
+    }
+  ],
+  "missing": [
+    {
+      "field": "客户规模与商业转化数据",
+      "reason": "当前仓库没有可验证的客户或商业指标，因此海报仅使用工程与发布验证数据。"
+    }
+  ]
+}
