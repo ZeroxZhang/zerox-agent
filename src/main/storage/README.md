@@ -24,12 +24,19 @@ interfaces, and a dual-write migration path off the legacy JSON/JSONL stores.
 
 | value    | writes            | reads   | use |
 |----------|-------------------|---------|-----|
-| `json`   | complete JSON/JSONL coverage | JSON | safe default |
-| `sqlite` | SQLite only       | SQLite  | cutover target |
-| `dual`   | SQLite + JSON shadow for converted stores | SQLite | explicit transition mode |
+| `json`   | JSON for unconverted domains | per-domain | safe default for unconverted domains |
+| `sqlite` | SQLite for converted domains | per-domain | converted-domain cutover |
+| `dual`   | SQLite + JSON shadow where implemented | per-domain | explicit transition mode |
 
 Invalid/unset values fall back to `json` with a warning because it is the only
 backend covering every core domain store.
+
+Storage authority is domain-specific, not global. Chat, Run, Trajectory, Task,
+Validation, MemoryProfile, and ToolAudit are SQLite-authoritative. Plan is
+SQLite-authoritative only when the runtime uses the SQLite backend. Goal,
+Memory, Workspace, Multi-Agent Session, Tool Result files, Learning, and other
+unconverted stores remain JSON-authoritative. Migration and rollback must not
+export stale SQLite rows over those JSON domains.
 
 The container's `storage()` singleton is fault-tolerant: if better-sqlite3
 fails to load (e.g. an Electron ABI mismatch before `@electron/rebuild` runs),
@@ -67,13 +74,14 @@ node scripts/migrate-to-sqlite.mjs --configDir <userData>/config --verify
 export ZEROX_STORAGE_BACKEND=sqlite   # or 'dual' for the transition period
 
 # 3. roll back to JSON if needed (freezes existing JSON as *.legacy.json)
-node scripts/rollback-sqlite-to-json.mjs --configDir <userData>/config --confirmSqliteAuthoritative
+node scripts/rollback-sqlite-to-json.mjs --configDir <userData>/config --confirmSqliteAuthoritative --planBackend sqlite
 export ZEROX_STORAGE_BACKEND=json
 ```
 
-The confirmation flag is intentionally required: v3.7.0 defaults to JSON, so
-an unverified SQLite export could otherwise replace newer authoritative JSON.
-Existing JSON files are moved to unique `.legacy*` backups before export.
+The confirmation flag is intentionally required. `--planBackend sqlite` is
+required only when Plan actually used SQLite. Rollback stages every exported
+domain before commit and restores prior files if any publish step fails.
+JSON-authoritative domains are never overwritten from SQLite.
 
 Migration errors are appended to `<configDir>/migration-errors.jsonl` and do not
 abort the overall run.

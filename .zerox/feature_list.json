@@ -1,7 +1,44 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T11:41:45.000+08:00",
+  "updatedAt": "2026-08-16T17:15:00.000+08:00",
   "features": [
+    {
+      "id": "P96-architecture-efficiency-and-consistency-hardening",
+      "priority": 126,
+      "status": "done",
+      "title": "Diagnose and repair architecture redundancy, performance, and consistency",
+      "files": [
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/reviews/P96-architecture-efficiency-review.md",
+        "README.md",
+        "src/main/storage/README.md",
+        "src/main/**/*.ts",
+        "src/renderer/**/*.ts",
+        "src/renderer/**/*.tsx",
+        "src/shared/**/*.ts",
+        "scripts/**/*.mjs"
+      ],
+      "definitionOfDone": [
+        "independent domain reviewers trace runtime, storage, trust-boundary, IPC, and renderer performance paths before production edits",
+        "two independent validators confirm every actionable Critical or Major finding and exclude unsupported candidates",
+        "confirmed redundancy, performance, completeness, and consistency defects are repaired without bypassing ToolRuntime, workspace guards, or Kernel settlement invariants",
+        "focused regressions cover each repaired finding and preserve Chat, Goal, Scheduled Task, persistence, and Electron compatibility",
+        "an independent test engineer accepts focused, full verify, runtime stress, production smoke, program, harness, audit, and whitespace evidence",
+        "review, remediation, architecture self-check, and final acceptance evidence remain recorded under .zerox"
+      ],
+      "verification": [
+        "npm run typecheck:tests",
+        "focused architecture regression tests",
+        "npm run verify",
+        "npm run stress:runtime",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "npm audit --audit-level=high",
+        "git diff --check"
+      ]
+    },
     {
       "id": "P95-architecture-stability-and-trust-hardening",
       "priority": 125,

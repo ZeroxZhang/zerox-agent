@@ -13,6 +13,8 @@ import type {
   ChatSessionActivitySnapshot,
   ChatSessionListItem,
   ChatSessionRecord,
+  ChatSessionTranscriptPage,
+  ChatSessionTranscriptPageOptions,
   ChatSessionTokenUsage,
   ChatTaskStatusEvent,
   ChatWorkspaceSummary,
@@ -65,7 +67,13 @@ export type AppendChatMessageResult = {
 export type ChatSessionStore = {
   flush(): Promise<void>;
   list(): Promise<ChatSessionListItem[]>;
+  listMetadata(): Promise<ChatSessionMetadata[]>;
   get(sessionId: string): Promise<ChatSessionRecord | null>;
+  getMetadata(sessionId: string): Promise<ChatSessionMetadata | null>;
+  getTranscriptPage(
+    sessionId: string,
+    options?: ChatSessionTranscriptPageOptions,
+  ): Promise<ChatSessionTranscriptPage | null>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
   rename(sessionId: string, title: string): Promise<ChatSessionRecord | null>;
   archive(sessionId: string): Promise<ChatSessionRecord | null>;
@@ -222,10 +230,27 @@ function createJsonChatSessionStore(options: {
         .map(toListItem);
     },
 
+    async listMetadata() {
+      await mutationQueue;
+      const stored = await readStoredSessions();
+      return stored.sessions.map(toSessionMetadata);
+    },
+
     async get(sessionId) {
       await mutationQueue;
       const stored = await readStoredSessions();
       return stored.sessions.find((session) => session.id === sessionId) ?? null;
+    },
+
+    async getMetadata(sessionId) {
+      const session = await this.get(sessionId);
+      return session ? toSessionMetadata(session) : null;
+    },
+
+    async getTranscriptPage(sessionId, pageOptions) {
+      const session = await this.get(sessionId);
+      if (!session) return null;
+      return pageJsonTranscript(session, pageOptions);
     },
 
     async appendMessage(input) {
@@ -570,10 +595,30 @@ function createSqliteChatSessionStore(options: {
         .map(toListItemFromProjection);
     },
 
+    async listMetadata() {
+      await mutationQueue;
+      await ensureReady();
+      return repository
+        .listProjections()
+        .map((projection) => projection.session);
+    },
+
     async get(sessionId) {
       await mutationQueue;
       await ensureReady();
       return repository.getSession(sessionId);
+    },
+
+    async getMetadata(sessionId) {
+      await mutationQueue;
+      await ensureReady();
+      return repository.getProjection(sessionId)?.session ?? null;
+    },
+
+    async getTranscriptPage(sessionId, pageOptions) {
+      await mutationQueue;
+      await ensureReady();
+      return repository.getTranscriptPage(sessionId, pageOptions);
     },
 
     async appendMessage(input) {
@@ -854,6 +899,39 @@ function toSessionMetadata(
 ): ChatSessionMetadata {
   const { messages: _messages, ...metadata } = session;
   return metadata;
+}
+
+function pageJsonTranscript(
+  session: ChatSessionRecord,
+  options?: ChatSessionTranscriptPageOptions,
+): ChatSessionTranscriptPage {
+  const totalMessages = session.messages.length;
+  const limit = Math.max(
+    1,
+    Math.min(200, Math.floor(Number(options?.limit ?? 80)) || 80),
+  );
+  const beforeSequence = Math.max(
+    1,
+    Math.min(
+      totalMessages + 1,
+      Math.floor(Number(options?.beforeSequence ?? totalMessages + 1)) ||
+        totalMessages + 1,
+    ),
+  );
+  const endIndex = beforeSequence - 1;
+  const startIndex = Math.max(0, endIndex - limit);
+  return {
+    session: {
+      ...session,
+      messages: session.messages.slice(startIndex, endIndex),
+    },
+    page: {
+      startSequence: startIndex + 1,
+      endSequence: endIndex,
+      totalMessages,
+      hasMoreBefore: startIndex > 0,
+    },
+  };
 }
 
 function toListItemFromProjection(

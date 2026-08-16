@@ -11,6 +11,8 @@ import type {
   ChatSessionListItem,
   ChatSessionOperationResult,
   ChatSessionRecord,
+  ChatSessionTranscriptPage,
+  ChatSessionTranscriptPageOptions,
   ChatTaskStatusEvent,
   GoalProgressEvent,
   SendChatMessageInput,
@@ -603,6 +605,11 @@ const buildingAgent = {
     ipcRenderer.invoke("chatSessions:list"),
   getChatSession: (sessionId: string): Promise<ChatSessionRecord | null> =>
     ipcRenderer.invoke("chatSessions:get", sessionId),
+  getChatSessionTranscriptPage: (
+    sessionId: string,
+    options?: ChatSessionTranscriptPageOptions,
+  ): Promise<ChatSessionTranscriptPage | null> =>
+    ipcRenderer.invoke("chatSessions:getTranscriptPage", sessionId, options),
   archiveChatSession: (
     sessionId: string,
   ): Promise<ChatSessionOperationResult> =>

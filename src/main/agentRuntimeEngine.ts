@@ -764,8 +764,11 @@ export function createAgentRuntimeEngine(options: {
     if (!options.productionKernelDriver) {
       return (await executePersistedSegment()).result;
     }
-    return (
-      await options.productionKernelDriver.run({
+    let durableFailureSettlement:
+      | { error: unknown; result: RunScheduledTaskResult }
+      | undefined;
+    try {
+      const outcome = await options.productionKernelDriver.run({
         runId: current.runId,
         mode: "scheduled_task",
         ...(signal ? { signal } : {}),
@@ -781,8 +784,30 @@ export function createAgentRuntimeEngine(options: {
             ),
           );
         },
-      })
-    ).segment.result;
+        async settleFailed(error) {
+          const settlement = await persistSegment(
+            createSettledLoopResult(
+              "failed",
+              formatFailureMessage(error),
+            ),
+          );
+          durableFailureSettlement = {
+            error,
+            result: settlement.result,
+          };
+          return settlement;
+        },
+      });
+      return outcome.segment.result;
+    } catch (error) {
+      if (
+        durableFailureSettlement &&
+        error === durableFailureSettlement.error
+      ) {
+        return durableFailureSettlement.result;
+      }
+      throw error;
+    }
   }
 
   async function runFromCheckpoint(

@@ -14,6 +14,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -162,53 +163,71 @@ describe("P1 migration scripts round-trip", () => {
           updatedAt: "2026-06-19T00:00:01.000Z",
         }),
       );
+      const plansDir = path.join(dir, "plans");
+      mkdirSync(plansDir, { recursive: true });
+      const plan = {
+        id: "plan_1",
+        sessionId: "chat_1",
+        sourceMessage: "Plan migration",
+        mode: "direct",
+        status: "awaiting_confirmation",
+        actionGate: "ready",
+        revision: 1,
+        createdAt: "2026-06-19T00:00:00.000Z",
+        updatedAt: "2026-06-19T00:00:01.000Z",
+      };
+      const planEvent = {
+        id: "plan_event_1",
+        planId: "plan_1",
+        type: "plan_created",
+        revision: 1,
+        createdAt: "2026-06-19T00:00:00.000Z",
+      };
+      writeFileSync(
+        path.join(plansDir, "plan_1.json"),
+        JSON.stringify(plan),
+      );
+      writeFileSync(
+        path.join(plansDir, "plan_1.events.jsonl"),
+        `${JSON.stringify(planEvent)}\n`,
+      );
 
       // 1. Migrate JSON → SQLite (--verify asserts counts).
       const migrateOut = runMigrationVerify(dir);
       expect(migrateOut).toContain('"runs": 1');
-      expect(migrateOut).toContain('"memory_records": 1');
-      expect(migrateOut).toContain('"learning_candidates": 2');
-      expect(migrateOut).toContain('"goals": 1');
+      expect(migrateOut).toContain('"plan_records": 1');
+      expect(migrateOut).not.toContain('"memory_records": 1');
+      expect(migrateOut).not.toContain('"learning_candidates": 2');
+      expect(migrateOut).not.toContain('"goals": 1');
       expect(migrateOut).toContain('"chat_session_events": 1');
       expect(existsSync(path.join(dir, "zerox.db"))).toBe(true);
       const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
       try {
-        const migratedLearning = db
-          .prepare("SELECT payload FROM learning_candidates ORDER BY id ASC")
-          .all()
-          .map((row) => JSON.parse((row as { payload: string }).payload));
-        expect(migratedLearning).toEqual([
-          expect.objectContaining({
-            id: "learn_accepted",
-            status: "accepted",
-            createdAt: "2026-06-19T00:00:02.000Z",
-            updatedAt: "2026-06-19T00:00:03.000Z",
-            claim: "Accepted claim",
-            sourceTrajectoryEventIds: ["evt-1"],
-            recommendedAction: "Keep the fix",
-          }),
-          expect.objectContaining({
-            id: "learn_rejected",
-            status: "rejected",
-            createdAt: "2026-06-19T00:00:04.000Z",
-            updatedAt: "2026-06-19T00:00:05.000Z",
-            claim: "Rejected claim",
-            sourceTrajectoryEventIds: ["evt-2"],
-            recommendedAction: "Do not keep",
-          }),
-        ]);
-        const migratedGoal = JSON.parse(
-          (
-            db.prepare("SELECT payload FROM goals WHERE id = ?").get(
-              "goal-manual-historical",
-            ) as { payload: string }
-          ).payload,
-        );
-        expect(migratedGoal).toMatchObject({
-          id: "goal-manual-historical",
-          status: "completed_unverified",
-        });
-        expect(migratedGoal).not.toHaveProperty("acceptanceCertificate");
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM memory_records").get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM learning_candidates").get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM goals").get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM workspaces").get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM tool_results").get(),
+        ).toEqual({ count: 0 });
+        expect(
+          db.prepare("SELECT payload FROM plan_records WHERE id = ?").get(
+            "plan_1",
+          ),
+        ).toEqual({ payload: JSON.stringify(plan) });
+        expect(
+          db.prepare("SELECT type FROM plan_events WHERE id = ?").get(
+            "plan_event_1",
+          ),
+        ).toEqual({ type: "plan_created" });
         expect(
           db
             .prepare(
@@ -228,7 +247,7 @@ describe("P1 migration scripts round-trip", () => {
       );
 
       // 2. Roll back SQLite → JSON.
-      execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir, "--confirmSqliteAuthoritative"], { encoding: "utf8", cwd: root });
+      execFileSync(process.execPath, [path.join(scriptRoot, "scripts", "rollback-sqlite-to-json.mjs"), "--configDir", dir, "--confirmSqliteAuthoritative", "--planBackend", "sqlite"], { encoding: "utf8", cwd: root });
       // The rollback re-exports agent-runs.jsonl (freezing the original as .legacy).
       const rolledBackRuns = path.join(dir, "agent-runs.jsonl");
       expect(existsSync(rolledBackRuns)).toBe(true);
@@ -266,13 +285,26 @@ describe("P1 migration scripts round-trip", () => {
           "utf8",
         ),
       );
+      expect(rolledBackGoal).toEqual({
+        id: "goal-manual-historical",
+        marker: "newer-json",
+      });
+      expect(
+        existsSync(
+          path.join(goalsDir, "goal-manual-historical.legacy.json"),
+        ),
+      ).toBe(false);
+      expect(
+        JSON.parse(
+          readFileSync(path.join(plansDir, "plan_1.json"), "utf8"),
+        ),
+      ).toEqual(plan);
       expect(
         readFileSync(
-          path.join(goalsDir, "goal-manual-historical.legacy.json"),
+          path.join(plansDir, "plan_1.events.jsonl"),
           "utf8",
         ),
-      ).toContain("newer-json");
-      expect(rolledBackGoal).not.toHaveProperty("acceptanceCertificate");
+      ).toContain("plan_event_1");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -379,7 +411,7 @@ describe("P1 migration scripts round-trip", () => {
     }
   });
 
-  it("does not count a pre-existing target row as a write from this invocation", () => {
+  it("keeps consecutive --verify runs idempotent and fail-closed", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-preexisting-"));
     try {
       writeFileSync(
@@ -400,13 +432,11 @@ describe("P1 migration scripts round-trip", () => {
       expect(runMigrationVerify(dir)).toMatch(
         /"targetCounts":\s*{\s*"runs": 1/,
       );
-      const failure = captureMigrationFailure(dir);
-      expect(failure.status).not.toBe(0);
-      expect(failure.stdout).toContain('"table": "runs"');
-      expect(failure.stdout).toContain('"source": 1');
-      expect(failure.stdout).toContain('"target": 0');
-      expect(failure.stdout).toContain('"baseline": 1');
-      expect(failure.stdout).toContain('"total": 1');
+      const second = runMigrationVerify(dir);
+      expect(second).toMatch(/"targetCounts":\s*{\s*"runs": 1/);
+      expect(second).toContain('"mismatches": []');
+      expect(second).toContain('"parse": 0');
+      expect(second).toContain('"write": 0');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -589,6 +619,72 @@ describe("P1 migration scripts round-trip", () => {
           "utf8",
         ),
       ).toContain("event_orphan");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("compensates a failed staged rollback without exposing mixed generations", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-rollback-compensate-"));
+    const runsPath = path.join(dir, "agent-runs.jsonl");
+    const chatPath = path.join(dir, "chat-sessions.json");
+    try {
+      writeFileSync(
+        runsPath,
+        `${JSON.stringify({
+          id: "run_old",
+          taskId: "task_1",
+          taskName: "Old",
+          skillName: "skill",
+          status: "succeeded",
+          summary: "old generation",
+          events: [],
+          startedAt: "2026-08-16T00:00:00.000Z",
+          finishedAt: "2026-08-16T00:00:01.000Z",
+        })}\n`,
+      );
+      writeFileSync(
+        chatPath,
+        JSON.stringify({ schemaVersion: 1, sessions: [] }),
+      );
+      runMigrationVerify(dir);
+      const beforeRuns = readFileSync(runsPath, "utf8");
+      const beforeChat = readFileSync(chatPath, "utf8");
+
+      expect(() =>
+        execFileSync(
+          process.execPath,
+          [
+            path.join(
+              scriptRoot,
+              "scripts",
+              "rollback-sqlite-to-json.mjs",
+            ),
+            "--configDir",
+            dir,
+            "--confirmSqliteAuthoritative",
+          ],
+          {
+            encoding: "utf8",
+            cwd: root,
+            stdio: "pipe",
+            env: {
+              ...process.env,
+              NODE_ENV: "test",
+              ZEROX_ROLLBACK_TEST_FAIL_AFTER_PUBLISH: "2",
+            },
+          },
+        ),
+      ).toThrow(/compensation completed/);
+
+      expect(readFileSync(runsPath, "utf8")).toBe(beforeRuns);
+      expect(readFileSync(chatPath, "utf8")).toBe(beforeChat);
+      expect(existsSync(path.join(dir, "agent-trajectories"))).toBe(false);
+      expect(
+        readdirSync(dir).some((name) =>
+          name.startsWith("rollback-recovery-")
+        ),
+      ).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

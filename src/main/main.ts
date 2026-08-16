@@ -885,7 +885,7 @@ function stopAppUpdateScheduler() {
   appUpdateTimer = null;
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerAllIpcHandlers(container, {
     appUpdateService,
     isTrustedSender: isTrustedRendererIpcEvent,
@@ -897,6 +897,9 @@ app.whenReady().then(() => {
   if (validationMode.enabled) {
     void runValidationModeAndExit();
     return;
+  }
+  if (smokeMode.performanceEnabled) {
+    await seedPerformanceSmokeSessions();
   }
 
   if (app.isPackaged) {
@@ -944,6 +947,35 @@ app.whenReady().then(() => {
     }
   });
 });
+
+async function seedPerformanceSmokeSessions(): Promise<void> {
+  const store = container.chatSessionStore();
+  const existing = await store.list();
+  if (
+    existing.length >= 6 &&
+    existing.some((session) => session.messageCount >= 400)
+  ) {
+    return;
+  }
+
+  for (let sessionIndex = 0; sessionIndex < 6; sessionIndex += 1) {
+    let sessionId: string | undefined;
+    const messageCount = sessionIndex === 0 ? 480 : 12;
+    for (let messageIndex = 0; messageIndex < messageCount; messageIndex += 1) {
+      const appended = await store.appendMessage({
+        ...(sessionId ? { sessionId } : {}),
+        role: messageIndex % 2 === 0 ? "user" : "assistant",
+        content:
+          `Performance smoke session ${sessionIndex + 1}, message ${messageIndex + 1}. ` +
+          "Bounded transcript payload verifies SQLite paging, IPC cloning, and renderer windowing.",
+      });
+      sessionId = appended.session.id;
+    }
+    if (sessionId && sessionIndex >= 4) {
+      await store.archive(sessionId);
+    }
+  }
+}
 
 function registerToolApprovalIpcHandlers() {
   ipcMain.handle("toolApproval:getMode", (event) => {

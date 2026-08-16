@@ -134,6 +134,21 @@ export type ChatSessionRecord = {
   updatedAt: string;
 };
 
+export type ChatSessionTranscriptPageOptions = {
+  beforeSequence?: number;
+  limit?: number;
+};
+
+export type ChatSessionTranscriptPage = {
+  session: ChatSessionRecord;
+  page: {
+    startSequence: number;
+    endSequence: number;
+    totalMessages: number;
+    hasMoreBefore: boolean;
+  };
+};
+
 export type ChatSessionListItem = {
   id: string;
   title: string;

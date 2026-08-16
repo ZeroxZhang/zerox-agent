@@ -1094,6 +1094,20 @@ describe("plan debate orchestrator", () => {
             web: { search: false, fetchDomains: [] },
             memory: { read: false, write: false },
           },
+          mcpServers: [
+            {
+              name: "private-local",
+              transport: "stdio",
+              command: "node",
+              env: { PRIVATE_TOKEN: "PLAN_SERVICE_STDIO_SECRET" },
+            },
+            {
+              name: "private-remote",
+              transport: "http",
+              url: "https://mcp.example.test/rpc",
+              headers: { authorization: "PLAN_SERVICE_REMOTE_SECRET" },
+            },
+          ],
         },
       },
       mode: "direct",
@@ -1101,6 +1115,8 @@ describe("plan debate orchestrator", () => {
     });
 
     expect(plan.selectedSkill?.manifest.name).toBe("dbs");
+    expect(JSON.stringify(plan)).not.toContain("PLAN_SERVICE_STDIO_SECRET");
+    expect(JSON.stringify(plan)).not.toContain("PLAN_SERVICE_REMOTE_SECRET");
     expect(plan.evidence).toContainEqual(
       expect.objectContaining({
         id: "evidence_selected_skill",

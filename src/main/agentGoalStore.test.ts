@@ -45,6 +45,64 @@ describe("agent goal store", () => {
     );
     expect(JSON.parse(raw)).toEqual(goal);
     await expect(store.get("goal_1")).resolves.toEqual(goal);
+    await expect(store.getMany(["missing", "goal_1"])).resolves.toEqual([
+      goal,
+    ]);
+  });
+
+  it("persists and returns credential-free Skill snapshots for new and legacy goals", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    const fresh = {
+      ...createGoal("goal_private_skill", "planning"),
+      selectedSkill: createPrivateSkillSnapshot(),
+    };
+
+    const saved = await store.save(fresh);
+    const freshPayload = await readFile(
+      path.join(goalsDir, `${fresh.id}.json`),
+      "utf8",
+    );
+
+    expect(saved.selectedSkill?.manifest.mcpServers).toEqual([
+      {
+        name: "local-private",
+        transport: "stdio",
+        command: "node",
+      },
+      {
+        name: "remote-private",
+        transport: "http",
+        url: "https://mcp.example.test/rpc",
+      },
+    ]);
+    expect(freshPayload).not.toContain("GOAL_STDIO_SECRET");
+    expect(freshPayload).not.toContain("GOAL_REMOTE_SECRET");
+
+    const legacy = {
+      ...createGoal("goal_legacy_private_skill", "planning"),
+      selectedSkill: createPrivateSkillSnapshot(),
+    };
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(
+      path.join(goalsDir, `${legacy.id}.json`),
+      JSON.stringify(legacy),
+      "utf8",
+    );
+
+    const loaded = await store.get(legacy.id);
+
+    expect(JSON.stringify(loaded)).not.toContain("GOAL_STDIO_SECRET");
+    expect(JSON.stringify(loaded)).not.toContain("GOAL_REMOTE_SECRET");
+    const rewrittenLegacyPayload = await readFile(
+      path.join(goalsDir, `${legacy.id}.json`),
+      "utf8",
+    );
+    expect(rewrittenLegacyPayload).not.toContain("GOAL_STDIO_SECRET");
+    expect(rewrittenLegacyPayload).not.toContain("GOAL_REMOTE_SECRET");
+    expect(loaded?.selectedSkill?.manifest.mcpServers).toEqual(
+      saved.selectedSkill?.manifest.mcpServers,
+    );
   });
 
   it("updates an existing goal for status, milestones, and budget usage", async () => {
@@ -1225,6 +1283,42 @@ function createGoal(
     ...goal,
     goalContractSnapshot,
     goalContractRef: createGoalContractRef(goalContractSnapshot),
+  };
+}
+
+function createPrivateSkillSnapshot(): NonNullable<Goal["selectedSkill"]> {
+  return {
+    rootDir: "/tmp/private-skill",
+    skillFile: "/tmp/private-skill/SKILL.md",
+    body: "# Private Skill",
+    manifest: {
+      name: "private-skill",
+      displayName: "Private Skill",
+      description: "Uses private MCP runtime configuration.",
+      version: "1.0.0",
+      execution: { mode: "agent", entrypoint: null },
+      inputs: [],
+      permissions: {
+        files: { read: [], write: [] },
+        shell: { commands: [] },
+        web: { search: false, fetchDomains: [] },
+        memory: { read: false, write: false },
+      },
+      mcpServers: [
+        {
+          name: "local-private",
+          transport: "stdio",
+          command: "node",
+          env: { PRIVATE_TOKEN: "GOAL_STDIO_SECRET" },
+        },
+        {
+          name: "remote-private",
+          transport: "http",
+          url: "https://mcp.example.test/rpc",
+          headers: { authorization: "GOAL_REMOTE_SECRET" },
+        },
+      ],
+    },
   };
 }
 

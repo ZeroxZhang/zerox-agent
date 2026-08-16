@@ -11,12 +11,14 @@ import type {
   CancelChatMessageResult,
   ChatStreamEvent,
   ChatSessionOperationResult,
+  ChatSessionTranscriptPageOptions,
   ChatTaskStatusEvent,
   SendChatMessageInput,
   SendChatMessageResult,
   SkillInputResponse,
   SkillInputResponseResult,
 } from "../../shared/chat";
+import { createPublicSkillDiscoveryResult } from "../../shared/skills";
 import type {
   CancelScheduledTaskRunResult,
   OpenAgentRunSessionResult,
@@ -265,7 +267,9 @@ function registerAppIpcHandlers(
       }
     },
   );
-  handleTrustedIpc("skills:list", () => container.discoverSkills());
+  handleTrustedIpc("skills:list", async () =>
+    createPublicSkillDiscoveryResult(await container.discoverSkills()),
+  );
 }
 
 function registerTasksIpcHandlers(container: AppContainer): void {
@@ -1369,6 +1373,14 @@ function registerChatIpcHandlers(container: AppContainer): void {
   handleTrustedIpc("chatSessions:list", () => container.listChatSessions());
   handleTrustedIpc("chatSessions:get", (_event, sessionId: string) =>
     container.getChatSession(sessionId),
+  );
+  handleTrustedIpc(
+    "chatSessions:getTranscriptPage",
+    (
+      _event,
+      sessionId: string,
+      options?: ChatSessionTranscriptPageOptions,
+    ) => container.getChatSessionTranscriptPage(sessionId, options),
   );
   handleTrustedIpc(
     "chatSessions:archive",

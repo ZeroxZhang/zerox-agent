@@ -305,7 +305,7 @@ macOS 通常对应：
 ~/Library/Application Support/Zerox Agent/config
 ~~~
 
-默认存储后端是完整的 JSON/JSONL；`ZEROX_STORAGE_BACKEND=sqlite` 和 `dual` 是显式迁移/验证路径。API Key 不以明文进入业务记录：Electron `safeStorage` 加密后的密文保存在 `model-settings.json`，renderer、Plan 和运行轨迹不会获得已保存密钥。
+存储权威按数据域划分：Chat、Run、Trajectory、Task、Validation、MemoryProfile 和 ToolAudit 使用 SQLite，Plan 在 SQLite 模式下使用 SQLite；尚未转换的 Goal、Memory、Workspace、Multi-Agent 等域继续以 JSON/JSONL 为权威。`ZEROX_STORAGE_BACKEND=sqlite` 和 `dual` 只切换已声明支持的域。API Key 不以明文进入业务记录：Electron `safeStorage` 加密后的密文保存在 `model-settings.json`，renderer、Plan 和运行轨迹不会获得已保存密钥。
 
 常见记录包括会话、Plan、Goal、checkpoint、trajectory、tool audit、memory、scheduled task、`agent-validation.json` 和 multi-agent session。
 

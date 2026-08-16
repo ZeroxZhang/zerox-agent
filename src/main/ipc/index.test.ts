@@ -76,6 +76,19 @@ describe("chat IPC handlers", () => {
     expect(openProjectSource).toContain("return null");
   });
 
+  it("keeps Skill credentials out of renderer IPC and exposes bounded transcript pages", () => {
+    const skillsHandler = getHandlerSource(ipcSource, '"skills:list"');
+    const transcriptHandler = getHandlerSource(
+      ipcSource,
+      '"chatSessions:getTranscriptPage"',
+    );
+
+    expect(skillsHandler).toContain("createPublicSkillDiscoveryResult");
+    expect(transcriptHandler).toContain(
+      "container.getChatSessionTranscriptPage",
+    );
+  });
+
   it("forwards guided skill continuation status and stream events to the invoking renderer", async () => {
     electronState.ipcHandlers.clear();
     const { registerAllIpcHandlers } = await import("./index");

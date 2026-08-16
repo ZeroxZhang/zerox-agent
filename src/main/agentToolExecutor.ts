@@ -807,6 +807,8 @@ function registerBuiltinTools(
         workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         query: String(args.query ?? ""),
         maxResults: optionalNumber(args.maxResults),
+        signal: executionOptions?.signal,
+        processSandbox: options.processSandbox,
       }),
     "built-in",
     defineNativeToolDescriptor({
@@ -841,6 +843,8 @@ function registerBuiltinTools(
     async (args, executionOptions) =>
       readGitStatus({
         workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
+        signal: executionOptions?.signal,
+        processSandbox: options.processSandbox,
       }),
     "built-in",
     defineNativeToolDescriptor({
@@ -880,6 +884,8 @@ function registerBuiltinTools(
       readGitDiff({
         workspaceRoot: getWorkspaceRootArg(args, executionOptions?.runContext),
         staged: Boolean(args.staged),
+        signal: executionOptions?.signal,
+        processSandbox: options.processSandbox,
       }),
     "built-in",
     defineNativeToolDescriptor({

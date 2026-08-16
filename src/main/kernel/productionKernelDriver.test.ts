@@ -155,7 +155,7 @@ describe("production Kernel driver", () => {
     });
   });
 
-  it("publishes and rethrows a failure-settlement error without masking it", async () => {
+  it("does not publish run_end when durable failure settlement fails", async () => {
     const bus = new KernelEventBus();
     const settlementError = new Error("failure persistence failed");
 
@@ -172,11 +172,9 @@ describe("production Kernel driver", () => {
       }),
     ).rejects.toBe(settlementError);
 
-    expect(bus.history().at(-1)).toMatchObject({
-      type: "run_end",
-      status: "failed",
-      reason: "failure persistence failed",
-    });
+    expect(
+      bus.history().filter((event) => event.type === "run_end"),
+    ).toEqual([]);
   });
 
   it("rejects a failure settlement that does not return failed", async () => {
@@ -198,11 +196,9 @@ describe("production Kernel driver", () => {
       }),
     ).rejects.toThrow(/status must be failed/i);
 
-    expect(bus.history().at(-1)).toMatchObject({
-      type: "run_end",
-      status: "failed",
-      reason: expect.stringMatching(/status must be failed/i),
-    });
+    expect(
+      bus.history().filter((event) => event.type === "run_end"),
+    ).toEqual([]);
   });
 
   it("does not execute a pre-canceled production segment", async () => {
@@ -301,7 +297,7 @@ describe("production Kernel driver", () => {
     expect(lifecycle).toEqual(["persisted", "run_end"]);
   });
 
-  it("publishes failed when pre-abort settlement cannot persist", async () => {
+  it("does not publish run_end when pre-abort settlement cannot persist", async () => {
     const bus = new KernelEventBus();
     const controller = new AbortController();
     controller.abort("pause");
@@ -321,13 +317,7 @@ describe("production Kernel driver", () => {
       }),
     ).rejects.toBe(settlementError);
 
-    expect(bus.history()).toEqual([
-      expect.objectContaining({
-        type: "run_end",
-        status: "failed",
-        reason: "pause persistence failed",
-      }),
-    ]);
+    expect(bus.history()).toEqual([]);
   });
 
   it("rejects a stale success when cancellation wins before segment settlement", async () => {

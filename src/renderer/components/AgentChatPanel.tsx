@@ -1,6 +1,8 @@
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -159,6 +161,7 @@ import {
 type AgentChatPanelProps = {
   newChatRequestKey?: number;
   requestedSessionId?: string | null;
+  sidebarSessions?: ChatSessionListItem[];
   activeChatSessionTitle?: string | null;
   onActiveSessionChange?: (sessionId: string | null) => void;
   onChatSessionsChange?: (sessions: ChatSidebarSession[]) => void;
@@ -238,14 +241,28 @@ const fallbackSessions: ChatSession[] = [
 const initialMessages: ChatMessage[] = [];
 const MAX_RENDERED_RUNTIME_EVENTS = 80;
 const MESSAGE_LIST_BOTTOM_THRESHOLD_PX = 96;
+export const INITIAL_RENDERED_CHAT_MESSAGE_COUNT = 80;
+export const CHAT_MESSAGE_RENDER_INCREMENT = 80;
 const composerRiskTooltips = {
   auto: "自动授权：普通文件、Shell 和网络操作默认放行；数据破坏、提权、密钥外传、生产发布和对外发送仍需确认。",
   goal: "目标模式：先在只读 Plan Mode 生成计划；只有你确认 Ready 计划后，才创建新的可写 Goal Run。",
 } as const;
 
+export function getRenderedChatMessageWindow<T>(
+  messages: readonly T[],
+  renderedMessageCount: number,
+): T[] {
+  const boundedCount = Math.min(
+    messages.length,
+    Math.max(0, Math.floor(renderedMessageCount)),
+  );
+  return messages.slice(messages.length - boundedCount);
+}
+
 export function AgentChatPanel({
   newChatRequestKey = 0,
   requestedSessionId = null,
+  sidebarSessions,
   activeChatSessionTitle = null,
   onActiveSessionChange,
   onChatSessionsChange,
@@ -278,6 +295,21 @@ export function AgentChatPanel({
 
       return visibleMessages;
   }, [messages]);
+  const [renderedMessageCount, setRenderedMessageCount] = useState(
+    INITIAL_RENDERED_CHAT_MESSAGE_COUNT,
+  );
+  const renderedChatMessages = useMemo(
+    () => getRenderedChatMessageWindow(visibleChatMessages, renderedMessageCount),
+    [renderedMessageCount, visibleChatMessages],
+  );
+  const [earlierMessageSequence, setEarlierMessageSequence] = useState<
+    number | null
+  >(null);
+  const [earlierMessagesPending, setEarlierMessagesPending] = useState(false);
+  const locallyHiddenMessageCount =
+    visibleChatMessages.length - renderedChatMessages.length;
+  const hiddenMessageCount =
+    locallyHiddenMessageCount + Math.max(0, (earlierMessageSequence ?? 1) - 1);
   const pendingInputRequest = chatStreamState.pendingInputRequest;
   const [draft, setDraft] = useState("");
   const [draftCursor, setDraftCursor] = useState(0);
@@ -314,7 +346,9 @@ export function AgentChatPanel({
     action: "confirm" | "discard";
     sequence: number;
   } | null>(null);
-  const [sessions, setSessions] = useState<ChatSession[]>(fallbackSessions);
+  const [sessions, setSessions] = useState<ChatSession[]>(() =>
+    sidebarSessions?.map(toSessionRailItem) ?? fallbackSessions,
+  );
   const [tasks, setTasks] = useState<ScheduledTask[]>(demoTasks);
   const [runs, setRuns] = useState<AgentRunRecord[]>(demoRuns);
   const [memories, setMemories] = useState<MemoryRecord[]>(demoMemories);
@@ -369,9 +403,12 @@ export function AgentChatPanel({
   >({});
   const [chatStatusExpanded, setChatStatusExpanded] = useState(false);
   const [activityTick, setActivityTick] = useState(Date.now());
-  const [messageTimeTick, setMessageTimeTick] = useState(Date.now());
   const messageListRef = useRef<HTMLDivElement>(null);
   const shouldStickToLatestMessageRef = useRef(true);
+  const pendingEarlierScrollRestoreRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(sessionId);
   const sessionSelectionGenerationRef = useRef(0);
@@ -461,6 +498,90 @@ export function AgentChatPanel({
     shouldStickToLatestMessageRef.current = isNearMessageListBottom(messageList);
   }, []);
 
+  const handleLoadEarlierMessages = useCallback(async () => {
+    if (hiddenMessageCount <= 0) {
+      return;
+    }
+    const messageList = messageListRef.current;
+    pendingEarlierScrollRestoreRef.current = messageList
+      ? {
+          scrollHeight: messageList.scrollHeight,
+          scrollTop: messageList.scrollTop,
+        }
+      : null;
+    shouldStickToLatestMessageRef.current = false;
+    if (locallyHiddenMessageCount > 0 || !earlierMessageSequence) {
+      setRenderedMessageCount((current) =>
+        Math.min(
+          visibleChatMessages.length,
+          current + CHAT_MESSAGE_RENDER_INCREMENT,
+        ),
+      );
+      return;
+    }
+
+    const activeSessionId = sessionIdRef.current;
+    const generation = sessionSelectionGenerationRef.current;
+    if (
+      !activeSessionId ||
+      !window.buildingAgent ||
+      earlierMessagesPending
+    ) {
+      return;
+    }
+    setEarlierMessagesPending(true);
+    try {
+      const page = await window.buildingAgent.getChatSessionTranscriptPage(
+        activeSessionId,
+        {
+          beforeSequence: earlierMessageSequence,
+          limit: CHAT_MESSAGE_RENDER_INCREMENT,
+        },
+      );
+      if (
+        !page ||
+        sessionIdRef.current !== activeSessionId ||
+        sessionSelectionGenerationRef.current !== generation
+      ) {
+        return;
+      }
+      const olderMessages = page.session.messages.map(toChatMessage);
+      setMessages((current) => {
+        const currentIds = new Set(current.map((message) => message.id));
+        return [
+          ...olderMessages.filter((message) => !currentIds.has(message.id)),
+          ...current,
+        ];
+      });
+      setRenderedMessageCount((current) =>
+        current + olderMessages.length,
+      );
+      setEarlierMessageSequence(
+        page.page.hasMoreBefore ? page.page.startSequence : null,
+      );
+    } finally {
+      setEarlierMessagesPending(false);
+    }
+  }, [
+    earlierMessageSequence,
+    earlierMessagesPending,
+    hiddenMessageCount,
+    locallyHiddenMessageCount,
+    visibleChatMessages.length,
+  ]);
+
+  useLayoutEffect(() => {
+    const pendingRestore = pendingEarlierScrollRestoreRef.current;
+    const messageList = messageListRef.current;
+    if (!pendingRestore || !messageList) {
+      return;
+    }
+    pendingEarlierScrollRestoreRef.current = null;
+    messageList.scrollTop =
+      pendingRestore.scrollTop +
+      (messageList.scrollHeight - pendingRestore.scrollHeight);
+  }, [renderedChatMessages.length]);
+
   useEffect(() => {
     if (!shouldStickToLatestMessageRef.current) {
       return;
@@ -479,6 +600,18 @@ export function AgentChatPanel({
     sessionIdRef.current = sessionId;
     onActiveSessionChange?.(sessionId);
   }, [onActiveSessionChange, sessionId]);
+
+  useEffect(() => {
+    if (!sidebarSessions) {
+      return;
+    }
+    const nextSessions = sidebarSessions.map(toSessionRailItem);
+    setSessions((currentSessions) =>
+      areChatSessionListsEqual(currentSessions, nextSessions)
+        ? currentSessions
+        : nextSessions,
+    );
+  }, [sidebarSessions]);
 
   useEffect(() => {
     onChatSessionsChange?.(sessions);
@@ -547,7 +680,11 @@ export function AgentChatPanel({
     sessionLoadPendingRef.current = null;
     sessionSelectionGenerationRef.current += 1;
     sessionIdRef.current = null;
+    pendingEarlierScrollRestoreRef.current = null;
     setSessionId(null);
+    setRenderedMessageCount(INITIAL_RENDERED_CHAT_MESSAGE_COUNT);
+    setEarlierMessageSequence(null);
+    setEarlierMessagesPending(false);
     setChatStreamState(createChatStreamState(initialMessages));
     setStatus({ kind: "ready", message: "会话已就绪" });
     setWorkPhase("idle");
@@ -595,6 +732,8 @@ export function AgentChatPanel({
 
     resetActiveChatRefs();
     setSessionId(requestedSessionId);
+    setRenderedMessageCount(INITIAL_RENDERED_CHAT_MESSAGE_COUNT);
+    setEarlierMessageSequence(null);
     setMessages(initialMessages);
   }, [requestedSessionId, sessionId]);
 
@@ -818,21 +957,6 @@ export function AgentChatPanel({
   }, [taskActivity.kind, taskActivity.startedAt]);
 
   useEffect(() => {
-    if (messages.length === 0) {
-      return;
-    }
-
-    setMessageTimeTick(Date.now());
-    const intervalId = window.setInterval(() => {
-      setMessageTimeTick(Date.now());
-    }, 30_000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [messages.length]);
-
-  useEffect(() => {
     if (!window.buildingAgent) {
       const snapshot = loadPreviewValidationSnapshot(window.localStorage);
       if (snapshot) {
@@ -852,7 +976,6 @@ export function AgentChatPanel({
       window.buildingAgent.listMemories({ limit: 6 }),
       window.buildingAgent.listSkills(),
       window.buildingAgent.listAgentWorkspaces(),
-      window.buildingAgent.listChatSessions(),
       window.buildingAgent.loadAgentValidation(),
       window.buildingAgent.loadModelCatalog(),
     ])
@@ -864,7 +987,6 @@ export function AgentChatPanel({
           loadedMemories,
           skills,
           loadedWorkspaces,
-          loadedSessions,
           validation,
           loadedModelCatalog,
         ]) => {
@@ -879,14 +1001,6 @@ export function AgentChatPanel({
         setWorkspaces(loadedWorkspaces);
         if (validation.ok && validation.snapshot) {
           setLastValidationSnapshot(validation.snapshot);
-        }
-        const nextSessions = loadedSessions.map(toSessionRailItem);
-        if (
-          sessionSelectionGenerationRef.current === 0 &&
-          sessionIdRef.current === null &&
-          !activeChatRequestIdRef.current
-        ) {
-          setSessions(nextSessions);
         }
         },
       )
@@ -904,7 +1018,7 @@ export function AgentChatPanel({
           });
         }
       });
-  }, [onChatSessionsChange]);
+  }, []);
 
   async function loadPersistedSession(sessionIdToLoad: string) {
     if (!window.buildingAgent) {
@@ -917,7 +1031,11 @@ export function AgentChatPanel({
     sessionSelectionGenerationRef.current = loadGeneration;
     sessionLoadPendingRef.current = loadGeneration;
     sessionIdRef.current = sessionIdToLoad;
+    pendingEarlierScrollRestoreRef.current = null;
     setSessionId(sessionIdToLoad);
+    setRenderedMessageCount(INITIAL_RENDERED_CHAT_MESSAGE_COUNT);
+    setEarlierMessageSequence(null);
+    setEarlierMessagesPending(false);
     // Drafts and their pending actions belong to the previous session. Clear
     // them synchronously so an old in-flight completion cannot strand or
     // expose session-scoped controls while the next transcript is loading.
@@ -958,7 +1076,12 @@ export function AgentChatPanel({
     activeStatusSessionIdRef.current = null;
 
     try {
-      const loadedSession = await window.buildingAgent.getChatSession(sessionIdToLoad);
+      const loadedPage =
+        await window.buildingAgent.getChatSessionTranscriptPage(
+          sessionIdToLoad,
+          { limit: INITIAL_RENDERED_CHAT_MESSAGE_COUNT },
+        );
+      const loadedSession = loadedPage?.session ?? null;
       if (
         !shouldApplyPersistedSessionRefresh(
           sessionIdRef.current,
@@ -976,6 +1099,11 @@ export function AgentChatPanel({
       }
 
       setSessionId(loadedSession.id);
+      setEarlierMessageSequence(
+        loadedPage?.page.hasMoreBefore
+          ? loadedPage.page.startSequence
+          : null,
+      );
       setSelectedWorkspaceId(loadedSession.workspaceId ?? null);
       const restoredActivity = restoreChatTaskActivity(loadedSession.activity);
       shouldStickToLatestMessageRef.current = true;
@@ -1206,9 +1334,18 @@ export function AgentChatPanel({
       return;
     }
 
-    const loadedSession = await window.buildingAgent
-      .getChatSession(currentSessionId)
+    const loadedPage = await window.buildingAgent
+      .getChatSessionTranscriptPage(currentSessionId, {
+        limit: Math.min(
+          200,
+          Math.max(
+            INITIAL_RENDERED_CHAT_MESSAGE_COUNT,
+            renderedMessageCount,
+          ),
+        ),
+      })
       .catch(() => null);
+    const loadedSession = loadedPage?.session;
     if (!loadedSession) {
       return;
     }
@@ -1228,7 +1365,23 @@ export function AgentChatPanel({
     if (!sessionIdRef.current) {
       setSessionId(loadedSession.id);
     }
-    setMessages(loadedSession.messages.map(toChatMessage));
+    const recentMessages = loadedSession.messages.map(toChatMessage);
+    setMessages((current) => {
+      const recentIds = new Set(recentMessages.map((message) => message.id));
+      return [
+        ...current.filter((message) => !recentIds.has(message.id)),
+        ...recentMessages,
+      ];
+    });
+    setEarlierMessageSequence((current) => {
+      const next = loadedPage.page.hasMoreBefore
+        ? loadedPage.page.startSequence
+        : null;
+      if (current !== null && next !== null) {
+        return Math.min(current, next);
+      }
+      return current ?? next;
+    });
   }
 
   function applyGoalSummaryToSessions(goal: ChatSessionGoalSummary) {
@@ -3551,9 +3704,11 @@ export function AgentChatPanel({
           />
         ) : (
             <ChatMessageList
+              earlierMessagesPending={earlierMessagesPending}
               goal={activeGoalDetail}
-              messageTimeTick={messageTimeTick}
-              messages={visibleChatMessages}
+              hiddenMessageCount={hiddenMessageCount}
+              messages={renderedChatMessages}
+              onLoadEarlier={handleLoadEarlierMessages}
             />
         )}
 
@@ -6154,65 +6309,122 @@ function buildSkillInputResponseValues(
   }, {});
 }
 
+const ChatMessageNowContext = createContext(new Date());
+
 const ChatMessageList = memo(function ChatMessageList({
+  earlierMessagesPending,
   goal,
-  messageTimeTick,
+  hiddenMessageCount,
   messages,
+  onLoadEarlier,
 }: {
+  earlierMessagesPending: boolean;
   goal: Goal | null;
-  messageTimeTick: number;
+  hiddenMessageCount: number;
   messages: VisibleChatMessage[];
+  onLoadEarlier: () => void;
 }) {
-  const now = useMemo(() => new Date(messageTimeTick), [messageTimeTick]);
+  const [now, setNow] = useState(() => new Date());
   const terminalTruth = useMemo(
     () => getGoalTerminalTruthNotice(goal),
     [goal],
   );
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(new Date());
+    }, 30_000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   return (
-    <div className="message-list" aria-label="消息列表">
-      {messages.map((message) => (
-        <article
-          className={`chat-message is-${message.role}${message.isStreaming ? " is-streaming" : ""}`}
-          data-message-id={message.id}
-          key={message.id}
-        >
-          <header className="chat-message-meta">
-            <span>{message.role === "assistant" ? "智能体" : "你"}</span>
-            <time dateTime={message.createdAt}>
-              {formatChatMessageTime({
-                role: message.role,
-                createdAt: message.createdAt,
-                now,
-              })}
-            </time>
-          </header>
-          {message.role === "assistant" ? (
-            <>
-              {terminalTruth &&
-              message.goalId === goal?.id &&
-              message.goalEventRef?.startsWith("goal-terminal:") ? (
-                <section className="goal-terminal-truth-notice" role="status">
-                  <strong>{terminalTruth.title}</strong>
-                  <p>{terminalTruth.detail}</p>
-                </section>
-              ) : null}
-              <AnswerBlock parts={message.outputParts} />
-            </>
-          ) : (
-            <>
-              {message.attachments?.length ? (
-                <ChatAttachmentChips
-                  attachments={message.attachments}
-                  className="message-attachment-list"
-                />
-              ) : null}
-              <MarkdownMessage content={message.content} />
-            </>
-          )}
-        </article>
-      ))}
-    </div>
+    <ChatMessageNowContext.Provider value={now}>
+      <div className="message-list" aria-label="消息列表">
+        {hiddenMessageCount > 0 ? (
+          <button
+            aria-label={`加载更早消息，尚有 ${hiddenMessageCount} 条`}
+            className="chat-message-collapse-button"
+            disabled={earlierMessagesPending}
+            onClick={onLoadEarlier}
+            type="button"
+          >
+            {earlierMessagesPending
+              ? "正在加载更早消息"
+              : `加载更早消息（${hiddenMessageCount}）`}
+          </button>
+        ) : null}
+        {messages.map((message) => (
+          <ChatMessageItem
+            activeGoalId={goal?.id ?? null}
+            key={message.id}
+            message={message}
+            terminalTruth={terminalTruth}
+          />
+        ))}
+      </div>
+    </ChatMessageNowContext.Provider>
+  );
+});
+
+const ChatMessageItem = memo(function ChatMessageItem({
+  activeGoalId,
+  message,
+  terminalTruth,
+}: {
+  activeGoalId: string | null;
+  message: VisibleChatMessage;
+  terminalTruth: ReturnType<typeof getGoalTerminalTruthNotice>;
+}) {
+  return (
+    <article
+      className={`chat-message is-${message.role}${message.isStreaming ? " is-streaming" : ""}`}
+      data-message-id={message.id}
+    >
+      <header className="chat-message-meta">
+        <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+        <ChatMessageTimestamp createdAt={message.createdAt} role={message.role} />
+      </header>
+      {message.role === "assistant" ? (
+        <>
+          {terminalTruth &&
+          message.goalId === activeGoalId &&
+          message.goalEventRef?.startsWith("goal-terminal:") ? (
+            <section className="goal-terminal-truth-notice" role="status">
+              <strong>{terminalTruth.title}</strong>
+              <p>{terminalTruth.detail}</p>
+            </section>
+          ) : null}
+          <AnswerBlock parts={message.outputParts} />
+        </>
+      ) : (
+        <>
+          {message.attachments?.length ? (
+            <ChatAttachmentChips
+              attachments={message.attachments}
+              className="message-attachment-list"
+            />
+          ) : null}
+          <MarkdownMessage content={message.content} />
+        </>
+      )}
+    </article>
+  );
+});
+
+const ChatMessageTimestamp = memo(function ChatMessageTimestamp({
+  createdAt,
+  role,
+}: {
+  createdAt: string;
+  role: VisibleChatMessage["role"];
+}) {
+  const now = useContext(ChatMessageNowContext);
+
+  return (
+    <time dateTime={createdAt}>
+      {formatChatMessageTime({ role, createdAt, now })}
+    </time>
   );
 });
 
@@ -6486,6 +6698,13 @@ function toSessionRailItem(session: ChatSessionListItem): ChatSession {
     ...(session.workspaceSummary ? { workspaceSummary: session.workspaceSummary } : {}),
     updatedAt: session.updatedAt,
   };
+}
+
+function areChatSessionListsEqual(
+  left: ChatSession[],
+  right: ChatSession[],
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function toSkillMentionCandidate(skill: {

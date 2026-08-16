@@ -197,6 +197,8 @@ import type {
   ChatSessionListItem,
   ChatSessionOperationResult,
   ChatSessionRecord,
+  ChatSessionTranscriptPage,
+  ChatSessionTranscriptPageOptions,
   GoalProgressEvent,
 } from "../shared/chat";
 import {
@@ -758,7 +760,7 @@ export function createAppContainer(options: {
     sessionId: string,
     summary: ChatSessionGoalSummary,
   ): Promise<boolean> {
-    const session = await chatSessionStore().get(sessionId);
+    const session = await chatSessionStore().getMetadata(sessionId);
     if (!session) {
       return false;
     }
@@ -840,6 +842,18 @@ export function createAppContainer(options: {
     }
 
     const goal = await agentGoalStore().get(activeGoal.id);
+    return reconcileLoadedChatSessionGoalSummary(
+      sessionId,
+      activeGoal,
+      goal,
+    );
+  }
+
+  async function reconcileLoadedChatSessionGoalSummary(
+    sessionId: string,
+    activeGoal: ChatSessionGoalSummary,
+    goal: Goal | null,
+  ): Promise<ChatSessionGoalSummary | undefined> {
     if (!goal) {
       return activeGoal;
     }
@@ -851,78 +865,141 @@ export function createAppContainer(options: {
 
   async function listChatSessions(): Promise<ChatSessionListItem[]> {
     const sessions = await chatSessionStore().list();
+    const summaryGoalIds = [
+      ...new Set(
+        sessions.flatMap((session) =>
+          [session.activeGoal?.id, session.recoveryGoal?.id].filter(
+            (goalId): goalId is string => Boolean(goalId),
+          ),
+        ),
+      ),
+    ];
+    const summaryGoals = summaryGoalIds.length
+      ? await agentGoalStore().getMany(summaryGoalIds)
+      : [];
+    const summaryGoalsById = new Map(
+      summaryGoals.map((goal) => [goal.id, goal]),
+    );
     await Promise.all(
       sessions.map(async (session) => {
-        const record = await chatSessionStore().get(session.id);
-        if (!record) return;
-        const activeGoal = getActiveGoalSummary(record);
-        const recoveryGoal = getRecoveryGoalSummary(record);
+        const activeGoal = session.activeGoal;
+        const recoveryGoal = session.recoveryGoal;
         if (activeGoal) {
-          await reconcileChatSessionGoalSummary(session.id, activeGoal);
+          await reconcileLoadedChatSessionGoalSummary(
+            session.id,
+            activeGoal,
+            summaryGoalsById.get(activeGoal.id) ?? null,
+          );
         }
         if (recoveryGoal && recoveryGoal.id !== activeGoal?.id) {
-          await reconcileChatSessionGoalSummary(session.id, recoveryGoal);
+          await reconcileLoadedChatSessionGoalSummary(
+            session.id,
+            recoveryGoal,
+            summaryGoalsById.get(recoveryGoal.id) ?? null,
+          );
         }
       }),
     );
-    return Promise.all(
-      (await chatSessionStore().list()).map(enrichChatSessionListItemUsage),
-    );
-  }
-
-  async function enrichChatSessionListItemUsage(
-    session: ChatSessionListItem,
-  ): Promise<ChatSessionListItem> {
-    const record = await chatSessionStore().get(session.id);
-    if (!record) return session;
-    const [plans, goals] = await Promise.all([
-      planStore().listBySession(session.id),
-      Promise.all(
-        (record.goalIds ?? []).map((goalId) => agentGoalStore().get(goalId)),
-      ),
+    const [refreshedSessions, metadata, plans] = await Promise.all([
+      chatSessionStore().list(),
+      chatSessionStore().listMetadata(),
+      planStore().listAll(),
     ]);
-    const tokenUsage = projectChatSessionTokenUsage({
-      chatUsage: record.tokenUsage,
-      plans,
-      goals: goals.filter((goal): goal is Goal => Boolean(goal)),
+    const metadataBySession = new Map(
+      metadata.map((session) => [session.id, session]),
+    );
+    const plansBySession = new Map<string, PlanRecord[]>();
+    for (const plan of plans) {
+      const sessionPlans = plansBySession.get(plan.sessionId) ?? [];
+      sessionPlans.push(plan);
+      plansBySession.set(plan.sessionId, sessionPlans);
+    }
+    const goalIds = [
+      ...new Set(
+        metadata.flatMap((session) => session.goalIds ?? []),
+      ),
+    ];
+    const goals = await agentGoalStore().getMany(goalIds);
+    const goalsById = new Map(goals.map((goal) => [goal.id, goal]));
+    return refreshedSessions.map((session) => {
+      const sessionMetadata = metadataBySession.get(session.id);
+      if (!sessionMetadata) return session;
+      const tokenUsage = projectChatSessionTokenUsage({
+        chatUsage: sessionMetadata.tokenUsage,
+        plans: plansBySession.get(session.id) ?? [],
+        goals: (sessionMetadata.goalIds ?? [])
+          .map((goalId) => goalsById.get(goalId))
+          .filter((goal): goal is Goal => Boolean(goal)),
+      });
+      return {
+        ...session,
+        ...(tokenUsage ? { tokenUsage } : {}),
+      };
     });
-    return {
-      ...session,
-      ...(tokenUsage ? { tokenUsage } : {}),
-    };
   }
 
   async function getChatSession(
     sessionId: string,
   ): Promise<ChatSessionRecord | null> {
-    const session = await chatSessionStore().get(sessionId);
-    if (!session) return null;
-    const activeGoal = getActiveGoalSummary(session);
-    const recoveryGoal = getRecoveryGoalSummary(session);
+    const metadata = await chatSessionStore().getMetadata(sessionId);
+    if (!metadata) return null;
+    const activeGoal = getActiveGoalSummary(metadata);
+    const recoveryGoal = getRecoveryGoalSummary(metadata);
     if (activeGoal) {
-      await reconcileChatSessionGoalSummary(session.id, activeGoal);
+      await reconcileChatSessionGoalSummary(sessionId, activeGoal);
     }
     if (recoveryGoal && recoveryGoal.id !== activeGoal?.id) {
-      await reconcileChatSessionGoalSummary(session.id, recoveryGoal);
+      await reconcileChatSessionGoalSummary(sessionId, recoveryGoal);
     }
 
     const repairedSession = await chatSessionStore().get(sessionId);
     if (!repairedSession) return repairedSession;
+    return enrichChatSessionRecordUsage(repairedSession);
+  }
+
+  async function getChatSessionTranscriptPage(
+    sessionId: string,
+    pageOptions?: ChatSessionTranscriptPageOptions,
+  ): Promise<ChatSessionTranscriptPage | null> {
+    const metadata = await chatSessionStore().getMetadata(sessionId);
+    if (!metadata) return null;
+    const activeGoal = getActiveGoalSummary(metadata);
+    const recoveryGoal = getRecoveryGoalSummary(metadata);
+    if (activeGoal) {
+      await reconcileChatSessionGoalSummary(sessionId, activeGoal);
+    }
+    if (recoveryGoal && recoveryGoal.id !== activeGoal?.id) {
+      await reconcileChatSessionGoalSummary(sessionId, recoveryGoal);
+    }
+    const transcriptPage = await chatSessionStore().getTranscriptPage(
+      sessionId,
+      pageOptions,
+    );
+    if (!transcriptPage) return null;
+    return {
+      ...transcriptPage,
+      session: await enrichChatSessionRecordUsage(transcriptPage.session),
+    };
+  }
+
+  async function enrichChatSessionRecordUsage(
+    session: ChatSessionRecord,
+  ): Promise<ChatSessionRecord> {
     const [plans, goals] = await Promise.all([
-      planStore().listBySession(sessionId),
+      planStore().listBySession(session.id),
       Promise.all(
-        (repairedSession.goalIds ?? []).map((goalId) =>
+        (session.goalIds ?? []).map((goalId) =>
           agentGoalStore().get(goalId),
         ),
       ),
     ]);
     const tokenUsage = projectChatSessionTokenUsage({
-      chatUsage: repairedSession.tokenUsage,
+      chatUsage: session.tokenUsage,
       plans,
       goals: goals.filter((goal): goal is Goal => Boolean(goal)),
     });
     return projectChatSessionForTranscript({
-      ...repairedSession,
+      ...session,
       ...(tokenUsage ? { tokenUsage } : {}),
     });
   }
@@ -1272,6 +1349,7 @@ export function createAppContainer(options: {
         availableAcceptanceKinds: () =>
           agentGoalValidatorRegistry().listKinds(),
         enableDirectReview: true,
+        processSandbox: processSandboxProvider(),
       }),
     );
   }
@@ -2043,9 +2121,10 @@ export function createAppContainer(options: {
     );
   }
 
-  let mcpInitialized = false;
   let runtimeShuttingDown = false;
   let mcpInitializationPromise: Promise<void> | null = null;
+  let mcpInitializationTail: Promise<void> = Promise.resolve();
+  const initializedMcpServers = new Set<string>();
   const activeMcpClients: McpClient[] = [];
   const activeTaskRunControllers = new Map<string, AbortController>();
   const activeTaskRunCompletions = new Map<string, Promise<void>>();
@@ -2067,12 +2146,20 @@ export function createAppContainer(options: {
     return invocation;
   }
 
-  async function initializeMcpTools(
+  function initializeMcpTools(
     toolExecutor: ReturnType<typeof createAgentToolExecutor>,
   ): Promise<void> {
-    if (mcpInitialized || runtimeShuttingDown) return;
-    mcpInitialized = true;
+    const operation = mcpInitializationTail
+      .catch(() => undefined)
+      .then(() => initializeMcpToolsOnce(toolExecutor));
+    mcpInitializationTail = operation.catch(() => undefined);
+    return operation;
+  }
 
+  async function initializeMcpToolsOnce(
+    toolExecutor: ReturnType<typeof createAgentToolExecutor>,
+  ): Promise<void> {
+    if (runtimeShuttingDown) return;
     try {
       const mcpConfigs = await collectSkillMcpConfigs({
         skillsDir,
@@ -2081,6 +2168,8 @@ export function createAppContainer(options: {
 
       for (const config of mcpConfigs) {
         if (runtimeShuttingDown) break;
+        const serverKey = `${config.sourceSkill}\0${config.name}`;
+        if (initializedMcpServers.has(serverKey)) continue;
         let client: McpClient | undefined;
         try {
           client = await createSkillMcpClient(config, {
@@ -2119,6 +2208,7 @@ export function createAppContainer(options: {
               // Skip tools that conflict with already registered ones
             }
           }
+          initializedMcpServers.add(serverKey);
 
           console.log(
             `MCP server "${config.name}" initialized with ${mcpTools.length} tools (from skill: ${config.sourceSkill})`,
@@ -2719,7 +2809,10 @@ export function createAppContainer(options: {
           plan,
         };
       }
-      const evidenceVerification = await verifyPlanEvidence(plan);
+      const evidenceVerification = await verifyPlanEvidence(
+        plan,
+        processSandboxProvider(),
+      );
       if (!evidenceVerification.ok) {
         return {
           ok: false,
@@ -3856,7 +3949,10 @@ export function createAppContainer(options: {
       if (!(await planArtifactWriter().verify(plan))) {
         return { ok: false, message: "Plan 投影已漂移，请重新生成。", plan };
       }
-      const evidenceVerification = await verifyPlanEvidence(plan);
+      const evidenceVerification = await verifyPlanEvidence(
+        plan,
+        processSandboxProvider(),
+      );
       if (!evidenceVerification.ok) {
         return { ok: false, message: "Plan 反馈证据已漂移，请重新规划。", plan };
       }
@@ -4380,11 +4476,12 @@ export function createAppContainer(options: {
       | ReturnType<typeof createActorRuntime>
       | undefined)?.shutdown?.() ?? Promise.resolve();
     const drainResults = await Promise.allSettled([
-      Promise.allSettled([...activeTaskRunCompletions.values()]),
-      Promise.allSettled([...activeRuntimeInvocationCompletions]),
+      ...activeTaskRunCompletions.values(),
+      ...activeRuntimeInvocationCompletions,
       goalClose,
-      Promise.allSettled(initialMcpCloses),
+      ...initialMcpCloses,
       mcpInitializationPromise ?? Promise.resolve(),
+      mcpInitializationTail,
       workerClose,
       actorClose,
     ]);
@@ -4486,6 +4583,7 @@ export function createAppContainer(options: {
     chatSessionStore,
     listChatSessions,
     getChatSession,
+    getChatSessionTranscriptPage,
     archiveChatSession,
     restoreChatSession,
     renameChatSession,
@@ -4537,7 +4635,7 @@ export function createAppContainer(options: {
         return recovered;
       });
     },
-    initializeMcpTools,
+    initializeMcpTools: () => initializeMcpTools(createToolExecutor()),
     getActiveMcpClients: () => activeMcpClients,
     getActiveTaskRunControllers: () => activeTaskRunControllers,
     shutdownRuntime,

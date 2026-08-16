@@ -120,6 +120,62 @@ describe("task scheduler service", () => {
     });
     expect(runTaskIds).toEqual([]);
   });
+
+  it("shares one complete due sweep across overlapping calls", async () => {
+    const releaseFirstRun = deferred<void>();
+    const runTaskIds: string[] = [];
+    let listCalls = 0;
+    const tasks = [
+      createTask({
+        id: "first_due_task",
+        nextRunAt: "2026-06-06T08:00:00.000Z",
+      }),
+      createTask({
+        id: "later_due_task",
+        nextRunAt: "2026-06-06T08:00:00.000Z",
+      }),
+    ];
+    const service = createTaskSchedulerService({
+      taskStore: {
+        async list() {
+          listCalls += 1;
+          return tasks;
+        },
+      },
+      async runScheduledTask(taskId) {
+        runTaskIds.push(taskId);
+        if (taskId === "first_due_task") {
+          await releaseFirstRun.promise;
+        }
+        return createRunResult(taskId);
+      },
+      now: () => new Date("2026-06-06T08:05:00.000Z"),
+    });
+
+    const firstSweep = service.runDueTasks();
+    await waitUntil(() => runTaskIds.length === 1);
+    const overlappingSweep = service.runDueTasks();
+
+    expect(overlappingSweep).toBe(firstSweep);
+    expect(listCalls).toBe(1);
+    expect(runTaskIds).toEqual(["first_due_task"]);
+
+    releaseFirstRun.resolve();
+    const [firstReport, overlappingReport] = await Promise.all([
+      firstSweep,
+      overlappingSweep,
+    ]);
+
+    expect(overlappingReport).toBe(firstReport);
+    expect(firstReport).toEqual({
+      checked: 2,
+      due: 2,
+      ran: 2,
+      failed: 0,
+      runIds: ["run_first_due_task", "run_later_due_task"],
+    });
+    expect(runTaskIds).toEqual(["first_due_task", "later_due_task"]);
+  });
 });
 
 function createTaskStore(
@@ -169,4 +225,20 @@ function createRunResult(taskId: string): RunScheduledTaskResult {
       finishedAt: "2026-06-06T08:05:00.000Z",
     },
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error("Timed out waiting for scheduler sweep.");
 }

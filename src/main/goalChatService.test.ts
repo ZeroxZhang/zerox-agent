@@ -223,6 +223,28 @@ describe("goal chat service", () => {
     const ledgerEvents: ProgressLedgerEvent[] = [];
     let plannedSkillName: string | undefined;
     let plannedSkillBody: string | undefined;
+    let plannedSkillSnapshot = "";
+    const selectedSkill = createSkillRecord({
+      name: "onepager",
+      body: "Onepager 技能流程：必须先做内容架构分析。",
+      manifest: {
+        name: "onepager",
+        mcpServers: [
+          {
+            name: "private-local",
+            transport: "stdio",
+            command: "node",
+            env: { PRIVATE_TOKEN: "GOAL_SERVICE_STDIO_SECRET" },
+          },
+          {
+            name: "private-remote",
+            transport: "http",
+            url: "https://mcp.example.test/rpc",
+            headers: { authorization: "GOAL_SERVICE_REMOTE_SECRET" },
+          },
+        ],
+      },
+    });
     const service = createGoalChatService({
       controller: createController(),
       goalStore: createGoalStore({ savedGoals, ledgerEvents }),
@@ -230,6 +252,7 @@ describe("goal chat service", () => {
         async plan(description, planOptions) {
           plannedSkillName = planOptions.selectedSkill?.manifest.name;
           plannedSkillBody = planOptions.selectedSkill?.body;
+          plannedSkillSnapshot = JSON.stringify(planOptions.selectedSkill);
           return [
             {
               id: "milestone_skill_report",
@@ -255,14 +278,14 @@ describe("goal chat service", () => {
       sessionId: "chat_1",
       originMessageId: "message_1",
       description: "生成一份可阅读 HTML 报告",
-      selectedSkill: createSkillRecord({
-        name: "onepager",
-        body: "Onepager 技能流程：必须先做内容架构分析。",
-      }),
+      selectedSkill,
     });
 
     expect(plannedSkillName).toBe("onepager");
     expect(plannedSkillBody).toBe("Onepager 技能流程：必须先做内容架构分析。");
+    expect(plannedSkillSnapshot).not.toContain("GOAL_SERVICE_STDIO_SECRET");
+    expect(plannedSkillSnapshot).not.toContain("GOAL_SERVICE_REMOTE_SECRET");
+    expect(JSON.stringify(selectedSkill)).toContain("GOAL_SERVICE_STDIO_SECRET");
     expect(savedGoals[0]).toMatchObject({
       id: "goal_skill_report",
       selectedSkill: {
@@ -273,6 +296,12 @@ describe("goal chat service", () => {
         },
       },
     });
+    expect(JSON.stringify(savedGoals[0])).not.toContain(
+      "GOAL_SERVICE_STDIO_SECRET",
+    );
+    expect(JSON.stringify(savedGoals[0])).not.toContain(
+      "GOAL_SERVICE_REMOTE_SECRET",
+    );
   });
 
   it("creates a real goal from a confirmed draft without losing criteria or skill snapshots", async () => {
@@ -2071,7 +2100,11 @@ function createGoalStore(options: {
 }
 
 function createSkillRecord(
-  partial: Partial<SkillRecord> & Pick<SkillRecord["manifest"], "name"> & { body?: string },
+  partial: {
+    name: string;
+    body?: string;
+    manifest?: Partial<SkillRecord["manifest"]>;
+  },
 ): SkillRecord {
   const name = partial.name;
   return {

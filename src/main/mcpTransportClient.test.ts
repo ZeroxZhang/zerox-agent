@@ -15,7 +15,7 @@ function mockFetch(responses: Record<string, unknown>): typeof fetch {
 
 const resolvePublicHostname = async () => ["93.184.216.34"];
 
-describe("createMcpTransportClient (P8 http/sse MCP activation)", () => {
+describe("createMcpTransportClient", () => {
   it("connects, lists tools, and calls a tool over the http transport", async () => {
     const config: McpServerTransportConfig = {
       name: "svc",
@@ -62,18 +62,20 @@ describe("createMcpTransportClient (P8 http/sse MCP activation)", () => {
     expect((result as { error: string }).error).toBe("invalid params");
   });
 
-  it("sse transport routes through the sse transport factory", async () => {
+  it("fails closed for SSE before issuing a network request", () => {
     const config: McpServerTransportConfig = { name: "svc", transport: "sse", url: "https://mcp.example.com/sse" };
-    const fetchImpl = mockFetch({
-      "tools/list": { jsonrpc: "2.0", id: 1, result: { tools: [] } },
-    });
-    const client = createMcpTransportClient(config, {
-      fetch: fetchImpl,
-      resolveHostname: resolvePublicHostname,
-    });
-    await client.connect();
-    const tools = await client.listTools();
-    expect(tools).toEqual([]);
+    let fetchCalls = 0;
+
+    expect(() =>
+      createMcpTransportClient(config, {
+        fetch: (async () => {
+          fetchCalls += 1;
+          return new Response("{}");
+        }) as typeof fetch,
+        resolveHostname: resolvePublicHostname,
+      }),
+    ).toThrow(/MCP SSE transport is not implemented/);
+    expect(fetchCalls).toBe(0);
   });
 
   it("revalidates DNS before each MCP request and blocks rebinding", async () => {

@@ -342,8 +342,9 @@ describe("Design System — Obsidian desktop control surface", () => {
 
   it("renders chat messages with structured readable metadata and polished markdown blocks", () => {
     expect(chatPanelSource).toContain("formatChatMessageTime");
-    expect(chatPanelSource).toContain("messageTimeTick");
-    expect(chatPanelSource).toContain("dateTime={message.createdAt}");
+    expect(chatPanelSource).not.toContain("messageTimeTick");
+    expect(chatPanelSource).toContain("ChatMessageTimestamp");
+    expect(chatPanelSource).toContain("dateTime={createdAt}");
     expect(chatPanelSource).not.toContain('createdAt: "刚刚"');
     expect(chatPanelSource).toContain("chat-message-meta");
     expect(chatPanelSource).toContain("markdown-code-block");

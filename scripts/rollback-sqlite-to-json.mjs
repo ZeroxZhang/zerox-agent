@@ -1,34 +1,68 @@
 #!/usr/bin/env node
-// P1 rollback: re-export legacy JSON/JSONL files from zerox.db, freezing any
-// existing on-disk JSON as *.legacy.json first so nothing is overwritten
-// destructively. Inverse of migrate-to-sqlite.mjs.
+// Export only SQLite-authoritative domains to legacy JSON. Every artifact is
+// staged before any live path changes. A failed commit restores all previous
+// paths in reverse order and records compensation evidence.
 //
-//   node scripts/rollback-sqlite-to-json.mjs --configDir <path> --confirmSqliteAuthoritative
+//   node scripts/rollback-sqlite-to-json.mjs \
+//     --configDir <path> --confirmSqliteAuthoritative \
+//     [--planBackend sqlite]
 
-import { existsSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 const args = parseArgs(process.argv.slice(2));
 const configDir = args.configDir;
 if (!configDir) {
-  console.error("usage: node scripts/rollback-sqlite-to-json.mjs --configDir <path> --confirmSqliteAuthoritative");
+  console.error(
+    "usage: node scripts/rollback-sqlite-to-json.mjs --configDir <path> --confirmSqliteAuthoritative [--planBackend sqlite]",
+  );
   process.exit(2);
 }
 if (args.confirmSqliteAuthoritative !== true) {
   console.error(
-    "refusing rollback export: JSON is the v3.7.0 default source of truth; pass --confirmSqliteAuthoritative only after verifying SQLite was authoritative",
+    "refusing rollback export: pass --confirmSqliteAuthoritative only after verifying the per-domain SQLite authority matrix",
   );
   process.exit(2);
 }
+if (
+  args.planBackend !== undefined &&
+  args.planBackend !== "json" &&
+  args.planBackend !== "sqlite"
+) {
+  console.error("--planBackend must be json or sqlite");
+  process.exit(2);
+}
+const exportPlan = args.planBackend === "sqlite";
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
-const { createStorageImpl } = await import(path.join(root, "dist-electron/main/storage/storageDb.js"));
-const runsRepo = await import(path.join(root, "dist-electron/main/storage/repositories/runRepository.js"));
-const repos = await import(path.join(root, "dist-electron/main/storage/repositories/index.js"));
-const goalRepo = await import(path.join(root, "dist-electron/main/storage/repositories/goalRepository.js"));
-const memRepo = await import(path.join(root, "dist-electron/main/storage/repositories/memoryRepository.js"));
-const sessRepo = await import(path.join(root, "dist-electron/main/storage/repositories/sessionRepository.js"));
-const chatRepo = await import(path.join(root, "dist-electron/main/storage/repositories/chatSessionEventRepository.js"));
+const { createStorageImpl } = await import(
+  path.join(root, "dist-electron/main/storage/storageDb.js")
+);
+const runsRepo = await import(
+  path.join(root, "dist-electron/main/storage/repositories/runRepository.js")
+);
+const repos = await import(
+  path.join(root, "dist-electron/main/storage/repositories/index.js")
+);
+const sessRepo = await import(
+  path.join(root, "dist-electron/main/storage/repositories/sessionRepository.js")
+);
+const chatRepo = await import(
+  path.join(
+    root,
+    "dist-electron/main/storage/repositories/chatSessionEventRepository.js",
+  )
+);
+const skillSnapshots = await import(
+  path.join(root, "dist-electron/shared/skills.js")
+);
 
 const dbPath = path.join(configDir, "zerox.db");
 if (!existsSync(dbPath)) {
@@ -36,97 +70,100 @@ if (!existsSync(dbPath)) {
   process.exit(0);
 }
 
-function freeze(file) {
-  if (!existsSync(file)) return;
-  const base = file.replace(/(\.[^.]+)$/, ".legacy$1");
-  let backup = base;
-  let suffix = 1;
-  while (existsSync(backup)) {
-    backup = `${base}.${suffix++}`;
-  }
-  renameSync(file, backup);
-}
-function writeJson(file, obj) {
-  mkdirSync(path.dirname(file), { recursive: true });
-  freeze(file);
-  writeFileSync(file, JSON.stringify(obj, null, 2) + "\n", "utf8");
-}
-function writeJsonl(file, rows) {
-  mkdirSync(path.dirname(file), { recursive: true });
-  freeze(file);
-  writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
-}
+mkdirSync(configDir, { recursive: true });
+const stagingRoot = path.join(
+  configDir,
+  `.zerox-rollback-staging-${process.pid}-${randomUUID()}`,
+);
+mkdirSync(stagingRoot, { recursive: true });
 
-const storage = createStorageImpl({ dbPath });
-await storage.migrate();
-const db = storage.db;
+const stagedArtifacts = [];
+const stagedDirectoryRoots = [];
 const counts = {};
 
-// runs + trajectory
-{
-  const runs = runsRepo.createRunRepository(storage).list({ limit: Number.MAX_SAFE_INTEGER });
-  freeze(path.join(configDir, "agent-runs.jsonl"));
-  writeJsonl(path.join(configDir, "agent-runs.jsonl"), runs);
+function stageFile(relativePath, content) {
+  const destination = path.join(stagingRoot, relativePath);
+  mkdirSync(path.dirname(destination), { recursive: true });
+  writeFileSync(destination, content, { encoding: "utf8", mode: 0o600 });
+  if (
+    !stagedDirectoryRoots.some(
+      (rootPath) =>
+        relativePath === rootPath ||
+        relativePath.startsWith(`${rootPath}${path.sep}`),
+    )
+  ) {
+    stagedArtifacts.push({ relativePath, kind: "file" });
+  }
+}
+
+function stageDirectory(relativePath) {
+  mkdirSync(path.join(stagingRoot, relativePath), {
+    recursive: true,
+    mode: 0o700,
+  });
+  stagedDirectoryRoots.push(relativePath);
+  stagedArtifacts.push({ relativePath, kind: "directory" });
+}
+
+function json(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function jsonl(rows) {
+  return rows.length
+    ? `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`
+    : "";
+}
+
+function assertSafeFileId(id, label) {
+  if (!/^[a-zA-Z0-9_-]{1,200}$/.test(id)) {
+    throw new Error(`unsafe ${label} id in SQLite: ${id}`);
+  }
+}
+
+let storage;
+try {
+  storage = createStorageImpl({ dbPath });
+  await storage.migrate();
+  const db = storage.db;
+  const runRepository = runsRepo.createRunRepository(storage);
+
+  // Runs.
+  const runs = runRepository.list({ limit: Number.MAX_SAFE_INTEGER });
+  stageFile("agent-runs.jsonl", jsonl(runs));
   counts.runs = runs.length;
-  const trajDir = path.join(configDir, "agent-trajectories");
-  let trajCount = 0;
-  const trajectoryRunIds = db
-    .prepare("SELECT DISTINCT run_id FROM trajectory_events ORDER BY run_id ASC")
-    .all()
-    .map((row) => row.run_id);
-  for (const runId of trajectoryRunIds) {
-    const events = runsRepo
-      .createRunRepository(storage)
-      .getTrajectory(runId);
-    if (events.length) {
-      writeJsonl(path.join(trajDir, `${runId}.jsonl`), events);
-      trajCount += events.length;
-    }
+
+  // Trajectory events, including groups with no run row.
+  stageDirectory("agent-trajectories");
+  const trajectoryRows = db
+    .prepare(
+      `SELECT run_id, payload
+         FROM trajectory_events
+        ORDER BY run_id ASC, seq ASC, created_at ASC, rowid ASC`,
+    )
+    .all();
+  const trajectories = new Map();
+  for (const row of trajectoryRows) {
+    const group = trajectories.get(row.run_id) ?? [];
+    group.push(JSON.parse(row.payload));
+    trajectories.set(row.run_id, group);
   }
-  counts.trajectory_events = trajCount;
-}
-
-// memory_records
-{
-  const records = memRepo.createMemoryRepository(storage).list({ limit: Number.MAX_SAFE_INTEGER });
-  freeze(path.join(configDir, "memory-records.json"));
-  writeJson(path.join(configDir, "memory-records.json"), { schemaVersion: 1, records });
-  counts.memory_records = records.length;
-}
-
-// memory_profile
-{
-  const profile = repos.createMemoryProfileRepository(storage).read();
-  if (profile.content) {
-    freeze(path.join(configDir, "memory-persona.md"));
-    writeFileSync(path.join(configDir, "memory-persona.md"), profile.content, "utf8");
-    counts.memory_profile = 1;
+  for (const [runId, events] of trajectories) {
+    assertSafeFileId(runId, "run");
+    stageFile(
+      path.join("agent-trajectories", `${runId}.jsonl`),
+      jsonl(events),
+    );
   }
-}
+  counts.trajectory_events = trajectoryRows.length;
 
-// goals + ledger
-{
-  const dir = path.join(configDir, "agent-goals");
-  mkdirSync(dir, { recursive: true });
-  const rows = db.prepare("SELECT payload FROM goals").all().map((r) => JSON.parse(r.payload));
-  for (const g of rows) {
-    writeJson(path.join(dir, `${g.id}.json`), g);
-    const ledger = goalRepo.createGoalRepository(storage).readLedger(g.id);
-    if (ledger.length) writeJsonl(path.join(dir, `${g.id}.ledger.jsonl`), ledger);
-  }
-  counts.goals = rows.length;
-}
-
-// chat sessions (authoritative event projection + message rows)
-{
+  // Chat event projections plus pre-RC05 compatibility rows.
   const repository = chatRepo.createChatSessionEventRepository(storage);
   const projected = repository
     .listProjections()
     .map((projection) => repository.getSession(projection.session.id))
     .filter(Boolean);
   const projectedIds = new Set(projected.map((session) => session.id));
-  // Merge compatibility rows from databases created before RC05. A mixed
-  // database can contain both projected and not-yet-projected Chat sessions.
   const legacy = sessRepo
     .createSessionRepository(storage)
     .listSessions({ kind: "chat" })
@@ -135,10 +172,11 @@ const counts = {};
       const payload = session.payload ?? {};
       const messages = db
         .prepare(
-          `SELECT payload FROM chat_messages
-           WHERE session_id = ?
-           ORDER BY COALESCE(seq, 9223372036854775807) ASC,
-                    created_at ASC, rowid ASC`,
+          `SELECT payload
+             FROM chat_messages
+            WHERE session_id = ?
+            ORDER BY COALESCE(seq, 9223372036854775807) ASC,
+                     created_at ASC, rowid ASC`,
         )
         .all(session.id)
         .map((row) => JSON.parse(row.payload));
@@ -148,106 +186,255 @@ const counts = {};
         messages: messages.length ? messages : (payload.messages ?? []),
       };
     });
-  const out = [...projected, ...legacy];
-  writeJson(path.join(configDir, "chat-sessions.json"), {
-    schemaVersion: 1,
-    sessions: out,
-  });
-  counts.sessions = out.length;
-}
+  const chatSessions = [...projected, ...legacy];
+  stageFile(
+    "chat-sessions.json",
+    json({ schemaVersion: 1, sessions: chatSessions }),
+  );
+  counts.sessions = chatSessions.length;
 
-// multi-agent sessions
-{
-  const sessions = sessRepo.createSessionRepository(storage).listSessions({ kind: "multi_agent" });
-  const out = sessions.map((s) => s.payload ?? {});
-  if (out.length) { freeze(path.join(configDir, "multi-agent-sessions.json")); writeJson(path.join(configDir, "multi-agent-sessions.json"), { schemaVersion: 1, sessions: out }); }
-  counts.sessions_multi = out.length;
-}
-
-// workspaces
-{
-  const workspaces = repos.createWorkspaceRepository(storage).list();
-  if (workspaces.length) { freeze(path.join(configDir, "agent-workspaces.json")); writeJson(path.join(configDir, "agent-workspaces.json"), { schemaVersion: 1, workspaces }); }
-  counts.workspaces = workspaces.length;
-}
-
-// scheduled tasks
-{
+  // Scheduled Tasks.
   const tasks = repos.createTaskRepository(storage).list();
-  if (tasks.length) { freeze(path.join(configDir, "scheduled-tasks.json")); writeJson(path.join(configDir, "scheduled-tasks.json"), { schemaVersion: 1, tasks }); }
+  stageFile(
+    "scheduled-tasks.json",
+    json({ schemaVersion: 1, tasks }),
+  );
   counts.tasks = tasks.length;
-}
 
-// tool_audit
-{
-  const rows = db.prepare("SELECT payload FROM tool_audit ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
-  if (rows.length) { freeze(path.join(configDir, "tool-audit.jsonl")); writeJsonl(path.join(configDir, "tool-audit.jsonl"), rows); }
-  counts.tool_audit = rows.length;
-}
+  // Memory Profile.
+  const profile = repos.createMemoryProfileRepository(storage).read();
+  stageFile("memory-persona.md", profile.content ?? "");
+  counts.memory_profile = profile.content ? 1 : 0;
 
-// tool_results
-{
-  const rows = db.prepare("SELECT ref_key, blob FROM tool_results ORDER BY created_at ASC").all();
-  const dir = path.join(configDir, "tool-result-refs");
-  if (rows.length) mkdirSync(dir, { recursive: true });
-  for (const row of rows) {
-    const file = path.join(dir, `${row.ref_key}.json`);
-    freeze(file);
-    writeFileSync(file, row.blob, "utf8");
+  // Tool authorization audit.
+  const auditRows = db
+    .prepare(
+      "SELECT payload FROM tool_audit ORDER BY created_at ASC, rowid ASC",
+    )
+    .all()
+    .map((row) => JSON.parse(row.payload));
+  stageFile("tool-audit.jsonl", jsonl(auditRows));
+  counts.tool_audit = auditRows.length;
+
+  // Validation snapshot.
+  const validation = repos.createValidationRepository(storage).load();
+  stageFile(
+    "agent-validation.json",
+    json({ schemaVersion: 1, latest: validation ?? null }),
+  );
+  counts.validation_snapshots = validation ? 1 : 0;
+
+  // Plan is SQLite-authoritative only when the caller confirms that mode.
+  if (exportPlan) {
+    stageDirectory("plans");
+    const planRows = db
+      .prepare(
+        "SELECT id, session_id, payload, updated_at FROM plan_records ORDER BY updated_at DESC, id ASC",
+      )
+      .all();
+    const sessionIndex = { version: 1, sessions: {} };
+    for (const row of planRows) {
+      assertSafeFileId(row.id, "Plan");
+      const rawPlan = JSON.parse(row.payload);
+      const plan = rawPlan.selectedSkill
+        ? {
+            ...rawPlan,
+            selectedSkill: skillSnapshots.createPublicSkillSnapshot(
+              rawPlan.selectedSkill,
+            ),
+          }
+        : rawPlan;
+      stageFile(path.join("plans", `${row.id}.json`), json(plan));
+      if (!sessionIndex.sessions[row.session_id]) {
+        sessionIndex.sessions[row.session_id] = {
+          planId: row.id,
+          updatedAt: row.updated_at,
+        };
+      }
+    }
+    const eventRows = db
+      .prepare(
+        `SELECT id, plan_id, type, revision, payload, created_at
+           FROM plan_events
+          ORDER BY plan_id ASC, revision ASC, created_at ASC, rowid ASC`,
+      )
+      .all();
+    const eventsByPlan = new Map();
+    for (const row of eventRows) {
+      assertSafeFileId(row.plan_id, "Plan");
+      const events = eventsByPlan.get(row.plan_id) ?? [];
+      events.push({
+        id: row.id,
+        planId: row.plan_id,
+        type: row.type,
+        revision: row.revision,
+        ...(row.payload ? { payload: JSON.parse(row.payload) } : {}),
+        createdAt: row.created_at,
+      });
+      eventsByPlan.set(row.plan_id, events);
+    }
+    for (const [planId, events] of eventsByPlan) {
+      stageFile(
+        path.join("plans", `${planId}.events.jsonl`),
+        jsonl(events),
+      );
+    }
+    stageFile(
+      path.join("plans", "session-index.json"),
+      json(sessionIndex),
+    );
+    counts.plan_records = planRows.length;
+    counts.plan_events = eventRows.length;
   }
-  counts.tool_results = rows.length;
+} catch (error) {
+  storage?.close();
+  rmSync(stagingRoot, { recursive: true, force: true });
+  throw error;
 }
-
-// learning_candidates
-{
-  const candidates = db.prepare("SELECT payload FROM learning_candidates ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
-  if (candidates.length) { freeze(path.join(configDir, "agent-learning-candidates.json")); writeJson(path.join(configDir, "agent-learning-candidates.json"), { schemaVersion: 1, candidates }); }
-  counts.learning_candidates = candidates.length;
-}
-
-// eval_candidates
-{
-  const candidates = db.prepare("SELECT payload FROM eval_candidates ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
-  if (candidates.length) { freeze(path.join(configDir, "agent-eval-candidates.json")); writeJson(path.join(configDir, "agent-eval-candidates.json"), { schemaVersion: 1, candidates }); }
-  counts.eval_candidates = candidates.length;
-}
-
-// promoted_eval_fixtures
-{
-  const fixtures = db.prepare("SELECT payload FROM promoted_eval_fixtures ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
-  if (fixtures.length) { freeze(path.join(configDir, "agent-promoted-eval-fixtures.json")); writeJson(path.join(configDir, "agent-promoted-eval-fixtures.json"), { schemaVersion: 1, fixtures }); }
-  counts.promoted_eval_fixtures = fixtures.length;
-}
-
-// artifacts (provenance sidecars)
-{
-  const manifests = db.prepare("SELECT payload FROM artifacts ORDER BY created_at ASC").all().map((r) => JSON.parse(r.payload));
-  for (const manifest of manifests) {
-    if (!manifest.destination?.path) continue;
-    const file = `${manifest.destination.path}.provenance.json`;
-    freeze(file);
-    writeJson(file, manifest);
-  }
-  counts.artifacts = manifests.length;
-}
-
-// validation
-{
-  const v = repos.createValidationRepository(storage).load();
-  if (v) { freeze(path.join(configDir, "agent-validation.json")); writeJson(path.join(configDir, "agent-validation.json"), { schemaVersion: 1, latest: v }); counts.validation = 1; }
-}
-
 storage.close();
-console.log(JSON.stringify({ rolledBack: counts }, null, 2));
+
+function nextBackupPath(target) {
+  const parsed = path.parse(target);
+  const base = parsed.ext
+    ? path.join(parsed.dir, `${parsed.name}.legacy${parsed.ext}`)
+    : `${target}.legacy`;
+  let candidate = base;
+  let suffix = 1;
+  while (existsSync(candidate)) {
+    candidate = `${base}.${suffix++}`;
+  }
+  return candidate;
+}
+
+function recoveryEvidencePath() {
+  return path.join(
+    configDir,
+    `rollback-recovery-${Date.now()}-${randomUUID()}.json`,
+  );
+}
+
+const committed = [];
+const backups = [];
+const testFailAfter =
+  process.env.NODE_ENV === "test"
+    ? Number.parseInt(
+        process.env.ZEROX_ROLLBACK_TEST_FAIL_AFTER_PUBLISH ?? "",
+        10,
+      )
+    : Number.NaN;
+
+try {
+  for (const artifact of stagedArtifacts) {
+    const stagedPath = path.join(stagingRoot, artifact.relativePath);
+    const targetPath = path.join(configDir, artifact.relativePath);
+    mkdirSync(path.dirname(targetPath), { recursive: true });
+    let backupPath = null;
+    if (existsSync(targetPath)) {
+      backupPath = nextBackupPath(targetPath);
+      renameSync(targetPath, backupPath);
+      backups.push(backupPath);
+    }
+    try {
+      renameSync(stagedPath, targetPath);
+    } catch (error) {
+      if (backupPath && existsSync(backupPath)) {
+        renameSync(backupPath, targetPath);
+      }
+      throw error;
+    }
+    committed.push({
+      ...artifact,
+      targetPath,
+      backupPath,
+    });
+    if (
+      Number.isFinite(testFailAfter) &&
+      committed.length >= testFailAfter
+    ) {
+      throw new Error(
+        `injected rollback commit failure after ${committed.length} artifacts`,
+      );
+    }
+  }
+} catch (commitError) {
+  const compensation = [];
+  for (const artifact of [...committed].reverse()) {
+    try {
+      const recoveredPath = path.join(
+        stagingRoot,
+        "published-before-failure",
+        artifact.relativePath,
+      );
+      mkdirSync(path.dirname(recoveredPath), { recursive: true });
+      if (existsSync(artifact.targetPath)) {
+        renameSync(artifact.targetPath, recoveredPath);
+      }
+      if (artifact.backupPath && existsSync(artifact.backupPath)) {
+        renameSync(artifact.backupPath, artifact.targetPath);
+      }
+      compensation.push({
+        relativePath: artifact.relativePath,
+        restored: Boolean(artifact.backupPath),
+        removedNewPath: true,
+      });
+    } catch (error) {
+      compensation.push({
+        relativePath: artifact.relativePath,
+        restored: false,
+        error: String(error),
+      });
+    }
+  }
+  const evidencePath = recoveryEvidencePath();
+  writeFileSync(
+    evidencePath,
+    json({
+      schemaVersion: 1,
+      failedAt: new Date().toISOString(),
+      error: String(commitError),
+      stagingRoot,
+      compensation,
+    }),
+    { encoding: "utf8", mode: 0o600 },
+  );
+  const compensationFailed = compensation.some((item) => item.error);
+  throw new Error(
+    `rollback commit failed and compensation ${compensationFailed ? "was incomplete" : "completed"}; evidence: ${evidencePath}; cause: ${String(commitError)}`,
+  );
+}
+
+rmSync(stagingRoot, { recursive: true, force: true });
+console.log(
+  JSON.stringify(
+    {
+      rolledBack: counts,
+      authority: [
+        "chat",
+        "run",
+        "trajectory",
+        "task",
+        "validation",
+        "memory_profile",
+        "tool_audit",
+        ...(exportPlan ? ["plan_sqlite_mode"] : []),
+      ],
+      backups,
+    },
+    null,
+    2,
+  ),
+);
 
 function parseArgs(argv) {
   const out = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith("--")) {
-      const key = a.slice(2);
-      if (argv[i + 1] && !argv[i + 1].startsWith("--")) out[key] = argv[++i];
-      else out[key] = true;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (!argument.startsWith("--")) continue;
+    const key = argument.slice(2);
+    if (argv[index + 1] && !argv[index + 1].startsWith("--")) {
+      out[key] = argv[++index];
+    } else {
+      out[key] = true;
     }
   }
   return out;

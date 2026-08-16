@@ -173,6 +173,16 @@ describe("MCP transports", () => {
     await transport.close();
   });
 
+  it("fails closed when the configured transport is SSE", () => {
+    expect(() =>
+      createMcpTransport({
+        name: "sse-service",
+        transport: "sse",
+        url: "https://mcp.example.com/sse",
+      }),
+    ).toThrow(/MCP SSE transport is not implemented/);
+  });
+
   it("stdio transport preserves the legacy path (throws, directing to existing mcpClient)", () => {
     expect(() => createMcpTransport({ name: "s", transport: "stdio", command: "x" })).toThrow("existing mcpClient");
   });

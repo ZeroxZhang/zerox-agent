@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -77,6 +77,128 @@ describe("plan store parity", () => {
         { type: "plan_created", revision: 1 },
         { type: "plan_ready", revision: 2 },
       ]);
+    } finally {
+      storage.close();
+    }
+  });
+
+  it("persists and returns credential-free Skill snapshots for JSON, SQLite, and legacy Plans", async () => {
+    const jsonConfigDir = path.join(tempDir, "private-json");
+    const json = createPlanStore({ configDir: jsonConfigDir });
+    const privateRecord: PlanRecord = {
+      ...createRecord(),
+      id: "plan-private-json",
+      selectedSkill: createPrivateSkillSnapshot(),
+    };
+
+    const jsonCreated = await json.create(privateRecord);
+    const jsonPayload = await readFile(
+      path.join(jsonConfigDir, "plans", `${privateRecord.id}.json`),
+      "utf8",
+    );
+
+    expect(JSON.stringify(jsonCreated)).not.toContain("PLAN_STDIO_SECRET");
+    expect(JSON.stringify(jsonCreated)).not.toContain("PLAN_REMOTE_SECRET");
+    expect(jsonPayload).not.toContain("PLAN_STDIO_SECRET");
+    expect(jsonPayload).not.toContain("PLAN_REMOTE_SECRET");
+
+    const legacyRecord: PlanRecord = {
+      ...createRecord(),
+      id: "plan-private-legacy",
+      selectedSkill: createPrivateSkillSnapshot(),
+    };
+    await writeFile(
+      path.join(jsonConfigDir, "plans", `${legacyRecord.id}.json`),
+      JSON.stringify(legacyRecord),
+      "utf8",
+    );
+
+    const legacyLoaded = await json.get(legacyRecord.id);
+
+    expect(JSON.stringify(legacyLoaded)).not.toContain("PLAN_STDIO_SECRET");
+    expect(JSON.stringify(legacyLoaded)).not.toContain("PLAN_REMOTE_SECRET");
+    const rewrittenLegacyPayload = await readFile(
+      path.join(
+        jsonConfigDir,
+        "plans",
+        `${legacyRecord.id}.json`,
+      ),
+      "utf8",
+    );
+    expect(rewrittenLegacyPayload).not.toContain("PLAN_STDIO_SECRET");
+    expect(rewrittenLegacyPayload).not.toContain("PLAN_REMOTE_SECRET");
+
+    const storage = createStorageImpl({
+      dbPath: path.join(tempDir, "private-plan.db"),
+      skipFts5Check: true,
+    });
+    try {
+      const sqlite = createPlanStore({
+        configDir: path.join(tempDir, "sqlite-unused"),
+        storage,
+      });
+      const sqliteRecord = {
+        ...privateRecord,
+        id: "plan-private-sqlite",
+      };
+      const sqliteCreated = await sqlite.create(sqliteRecord);
+      const row = storage.db
+        .prepare("SELECT payload FROM plan_records WHERE id = ?")
+        .get<{ payload: string }>(sqliteRecord.id);
+
+      expect(JSON.stringify(sqliteCreated)).not.toContain("PLAN_STDIO_SECRET");
+      expect(JSON.stringify(sqliteCreated)).not.toContain("PLAN_REMOTE_SECRET");
+      expect(row?.payload).not.toContain("PLAN_STDIO_SECRET");
+      expect(row?.payload).not.toContain("PLAN_REMOTE_SECRET");
+
+      const legacySqliteRecord = ensurePlanGoalContract({
+        ...createRecord(),
+        id: "plan-private-legacy-sqlite",
+        sessionId: "session-private-legacy-sqlite",
+        selectedSkill: createPrivateSkillSnapshot(),
+        updatedAt: "2026-07-30T01:00:00.000Z",
+      });
+      storage.db
+        .prepare(
+          `INSERT INTO plan_records
+            (id, session_id, mode, status, action_gate, revision, payload, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          legacySqliteRecord.id,
+          legacySqliteRecord.sessionId,
+          legacySqliteRecord.mode,
+          legacySqliteRecord.status,
+          legacySqliteRecord.actionGate,
+          legacySqliteRecord.revision,
+          JSON.stringify(legacySqliteRecord),
+          legacySqliteRecord.createdAt,
+          legacySqliteRecord.updatedAt,
+        );
+
+      const legacySqliteLoaded = (await sqlite.listAll()).find(
+        (plan) => plan.id === legacySqliteRecord.id,
+      );
+
+      expect(JSON.stringify(legacySqliteLoaded)).not.toContain(
+        "PLAN_STDIO_SECRET",
+      );
+      expect(JSON.stringify(legacySqliteLoaded)).not.toContain(
+        "PLAN_REMOTE_SECRET",
+      );
+      await expect(
+        sqlite.listBySession(legacySqliteRecord.sessionId),
+      ).resolves.toEqual([
+        expect.objectContaining({ id: legacySqliteRecord.id }),
+      ]);
+      await expect(
+        sqlite.getLatestBySession(legacySqliteRecord.sessionId),
+      ).resolves.toMatchObject({ id: legacySqliteRecord.id });
+      const rewrittenSqlitePayload = storage.db
+        .prepare("SELECT payload FROM plan_records WHERE id = ?")
+        .get<{ payload: string }>(legacySqliteRecord.id)?.payload;
+      expect(rewrittenSqlitePayload).not.toContain("PLAN_STDIO_SECRET");
+      expect(rewrittenSqlitePayload).not.toContain("PLAN_REMOTE_SECRET");
     } finally {
       storage.close();
     }
@@ -295,5 +417,41 @@ function createRecord(): PlanRecord {
     rounds: [],
     createdAt: "2026-07-30T00:00:00.000Z",
     updatedAt: "2026-07-30T00:00:00.000Z",
+  };
+}
+
+function createPrivateSkillSnapshot(): NonNullable<PlanRecord["selectedSkill"]> {
+  return {
+    rootDir: "/tmp/private-plan-skill",
+    skillFile: "/tmp/private-plan-skill/SKILL.md",
+    body: "# Private Plan Skill",
+    manifest: {
+      name: "private-plan-skill",
+      displayName: "Private Plan Skill",
+      description: "Uses private MCP runtime configuration.",
+      version: "1.0.0",
+      execution: { mode: "agent", entrypoint: null },
+      inputs: [],
+      permissions: {
+        files: { read: [], write: [] },
+        shell: { commands: [] },
+        web: { search: false, fetchDomains: [] },
+        memory: { read: false, write: false },
+      },
+      mcpServers: [
+        {
+          name: "local-private",
+          transport: "stdio",
+          command: "node",
+          env: { PRIVATE_TOKEN: "PLAN_STDIO_SECRET" },
+        },
+        {
+          name: "remote-private",
+          transport: "sse",
+          url: "https://mcp.example.test/events",
+          headers: { authorization: "PLAN_REMOTE_SECRET" },
+        },
+      ],
+    },
   };
 }

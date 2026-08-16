@@ -10326,3 +10326,123 @@
 - Review and closure evidence:
   `.zerox/reviews/P95-architecture-stability-review.md`. P95 is complete with
   no unfinished Feature.
+
+## 2026-08-16 - Architecture Efficiency And Consistency Review Started
+
+- Activated `P96-architecture-efficiency-and-consistency-hardening` as the only
+  unfinished Feature without reopening the completed Kernel migration.
+- Separated the work into independent review, implementation and architecture
+  self-check, and final test-engineer acceptance phases.
+- Dispatched read-only domain reviews for runtime and cancellation, storage
+  and projections, system trust boundaries, and renderer plus IPC performance.
+- Fixed the review scope across architecture redundancy, resource ownership,
+  query and serialization cost, terminal and persistence consistency, recovery
+  completeness, and production compatibility.
+- Production source remains unchanged until candidate findings are challenged
+  by two independent validators and the review report is written.
+
+## 2026-08-16 - P96 Independent Review Completed
+
+- Four read-only domain reviewers inspected runtime and cancellation, storage
+  and projections, system trust boundaries, and renderer plus IPC performance.
+- The main reviewer consolidated 18 candidates. Two fresh validators checked
+  every candidate independently against production call paths and tests.
+- Confirmed 16 actionable findings: one Critical, ten high-confidence Major,
+  and five medium-confidence findings whose existence was unanimous but whose
+  Major versus Minor severity differed.
+- Excluded a signal-ignoring model Promise concern from production remediation;
+  one validator rejected it and the other classified it Minor because built-in
+  providers propagate the request AbortSignal.
+- Classified repeated migration `--verify` failure as a same-domain Minor
+  improvement after both validators downgraded it; it is not part of the 16
+  serious-finding completion denominator.
+- Baseline focused gate passed before production edits: 9 files / 140 tests.
+- Review evidence, Mermaid flow diagrams, exact code links, confidence, repair
+  order, and acceptance constraints are recorded in
+  `.zerox/reviews/P96-architecture-efficiency-review.md`.
+
+## 2026-08-16 - P96 Repair Architecture Approved
+
+- An independent system architect converted the review into eight bounded
+  implementation seams: restricted native processes, public and persisted
+  Skill snapshots, atomic file artifacts, a domain authority registry, durable
+  terminal coordination, scheduler single-flight, a Chat read model, and
+  per-server MCP lifecycle state.
+- The authority matrix keeps Chat, Run, Trajectory, Task, Validation,
+  MemoryProfile, ToolAudit, and SQLite-mode Plan on SQLite. Goal, Memory,
+  Workspace, Multi-Agent Session, Tool Result files, Learning, and other
+  unconverted domains remain JSON-authoritative and may not be overwritten by
+  stale SQLite rows during rollback.
+- Required invariants remain unchanged: every process stays behind ToolRuntime,
+  authorization, workspace guards, and Seatbelt; `run_end` follows durable
+  settlement; Chat and Goal parity remain intact; no deferred Kernel capability
+  is enabled.
+- Five development workstreams were assigned non-overlapping ownership for
+  native processes and tool results, runtime and scheduler settlement, storage
+  and migration, Skill credential snapshots, and renderer performance.
+  Container, IPC, preload, and final cross-domain integration remain centrally
+  owned to prevent conflicting edits.
+
+## 2026-08-16 - P96 Implementation And Architecture Review Completed
+
+- Five development engineers completed the non-overlapping workstreams, then
+  central integration added metadata-only Chat listing, cursor transcript IPC,
+  per-server MCP retry, flat shutdown drains, and production Plan/Git sandbox
+  injection.
+- Closed the Critical command execution path by placing model queries after
+  `rg -e` and `--`, and routing native code and Git reads through one owned,
+  read-only, network-denied, minimal-environment Seatbelt adapter.
+- Removed MCP `env` and `headers` from renderer IPC and all Goal/Plan snapshot
+  writes. Legacy Goal and every Plan read path now rewrites stored payloads
+  without those credentials. Migration and rollback apply the same snapshot.
+- Added scheduler sweep single-flight and made both failed and aborted Kernel
+  settlements suppress `run_end` when durable settlement itself fails.
+- Established the domain authority matrix, Plan bidirectional migration,
+  idempotent source-identity verification, atomic staged rollback with reverse
+  compensation, migration name/ordinal/SHA validation, and atomic Multi-Agent
+  JSON mutation.
+- Added trigram FTS plus indexed bounded short-term candidates for Chat search.
+  Session lists use projection metadata and batched Plan/Goal reads; transcript
+  IPC pages by message sequence and the renderer exposes 80-message progressive
+  windows with one isolated timestamp clock.
+- The first independent architecture acceptance rejected four residual Major
+  gaps: SQLite Plan list rewrites, abort settlement ordering, two-character
+  search, and Goal list N+1. All four were repaired and covered by regressions.
+- A second architecture recheck accepted the first three repairs. A fresh final
+  recheck accepted the batched Goal reconciliation path: `AE-15 PASS / ACCEPT`.
+- Independent final security review result: `CLEAN`; AE-01/02/03/14 were all
+  verified closed with no newly introduced exploitable source-to-sink path.
+- Integrated focused gate: 28 files / 510 tests passed. Strict test TypeScript
+  coverage remains 284/284 files, and program, harness, and whitespace checks
+  pass. Full independent QA remains pending.
+
+## 2026-08-16 - P96 Independent Test Acceptance Completed
+
+- The first independent test engineer rejected the implementation because
+  `chatStorageBoundary.test.ts` expected the canonical rollback projection
+  sensor spelling. It also rejected the performance evidence as an empty
+  sample even though the smoke command itself returned success.
+- Restored the boundary contract and made performance smoke deterministic only
+  inside isolated smoke userData: six sessions, a 480-message primary
+  transcript, archived-session coverage, and an explicit initial-DOM ceiling.
+- A fresh test engineer reran every gate against the final unchanged worktree
+  and returned `ACCEPT`.
+- Final evidence:
+  - strict test type coverage: 284/284;
+  - P96 focused: 28 files / 524 tests;
+  - full verify: 2,910 tests, zero failures; Agent evals 26/26 and Memory evals
+    2/2;
+  - runtime stress: 6/6;
+  - real macOS Seatbelt effects: 10/10;
+  - Electron/SQLite smoke: ABI 137 to 146 to 137, four migrations, WAL and dual
+    evidence, and no JSON fallback;
+  - deterministic performance smoke: 6 sessions, selected transcript 480
+    messages, 12 rendered message nodes, max switch 200.1 ms below the 250 ms
+    budget, and zero long-task duration;
+  - 390 x 844 built smoke passed;
+  - program, harness, audit, and whitespace gates passed; audit reported zero
+    vulnerabilities.
+- Independent final security review was `CLEAN`. Independent final system
+  architecture rechecks accepted every AE-01 through AE-16 repair.
+- Review and closure evidence:
+  `.zerox/reviews/P96-architecture-efficiency-review.md`.

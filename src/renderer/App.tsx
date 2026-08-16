@@ -779,6 +779,7 @@ export function App() {
           <AgentChatPanel
             newChatRequestKey={newChatRequestKey}
             requestedSessionId={selectedChatSessionId}
+            sidebarSessions={chatSessions}
             activeChatSessionTitle={activeChatSessionTitle}
             onActiveSessionChange={setSelectedChatSessionId}
             onChatSessionsChange={handleChatSessionsChange}
@@ -1172,6 +1173,10 @@ function toChatSessionListItem(session: ChatSidebarSession): ChatSessionListItem
       : {}),
     ...(session.tokenUsage ? { tokenUsage: session.tokenUsage } : {}),
     ...(session.context ? { context: session.context } : {}),
+    ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
+    ...(session.workspaceSummary
+      ? { workspaceSummary: session.workspaceSummary }
+      : {}),
     updatedAt: session.updatedAt,
   };
 }

@@ -1,10 +1,9 @@
-import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { AgentToolExecutionResult } from "./dynamicToolRegistry";
+import type { ProcessSandboxProvider } from "./processSandbox";
+import { runReadOnlyNativeProcess } from "./nativeReadOnlyProcess";
 
-const execFileAsync = promisify(execFile);
 const ignoredDirectories = new Set([
   ".git",
   "dist",
@@ -19,6 +18,8 @@ export async function searchCode(args: {
   workspaceRoot: string;
   query: string;
   maxResults?: number;
+  signal?: AbortSignal;
+  processSandbox?: ProcessSandboxProvider;
 }): Promise<AgentToolExecutionResult> {
   const workspaceRoot = String(args.workspaceRoot ?? "");
   const query = String(args.query ?? "").trim();
@@ -30,13 +31,35 @@ export async function searchCode(args: {
   if (!query) {
     return { ok: false, error: "code_search query is required." };
   }
+  if (args.signal?.aborted) {
+    return canceledResult();
+  }
 
-  const rgResult = await tryRipgrep(workspaceRoot, query, maxResults);
+  const rgResult = await tryRipgrep(
+    workspaceRoot,
+    query,
+    maxResults,
+    args.signal,
+    args.processSandbox,
+  );
   if (rgResult) {
     return rgResult;
   }
 
-  const results = await fallbackSearch(workspaceRoot, query, maxResults);
+  let results;
+  try {
+    results = await fallbackSearch(
+      workspaceRoot,
+      query,
+      maxResults,
+      args.signal,
+    );
+  } catch (error) {
+    if (args.signal?.aborted) {
+      return canceledResult();
+    }
+    throw error;
+  }
   return {
     ok: true,
     result: { workspaceRoot, query, results },
@@ -47,11 +70,13 @@ async function tryRipgrep(
   workspaceRoot: string,
   query: string,
   maxResults: number,
+  signal?: AbortSignal,
+  processSandbox?: ProcessSandboxProvider,
 ): Promise<AgentToolExecutionResult | null> {
   try {
-    const { stdout } = await execFileAsync(
-      "rg",
-      [
+    const processResult = await runReadOnlyNativeProcess({
+      argv: [
+        "rg",
         "--line-number",
         "--no-heading",
         "--color",
@@ -64,12 +89,36 @@ async function tryRipgrep(
         "!**/dist-electron/**",
         "--glob",
         "!**/release/**",
+        "-e",
         query,
+        "--",
         workspaceRoot,
       ],
-      { maxBuffer: 1024 * 1024 * 4 },
-    );
-    const results = stdout
+      workspaceRoot,
+      signal,
+      processSandbox,
+    });
+    if (processResult.terminal === "canceled") {
+      return canceledResult();
+    }
+    if (processResult.terminal === "timeout") {
+      return {
+        ok: false,
+        error: "code_search timed out.",
+        errorDetails: { kind: "timeout" },
+      };
+    }
+    if (processResult.terminal === "spawn_error") {
+      return null;
+    }
+    if (processResult.exitCode === 1) {
+      return { ok: true, result: { workspaceRoot, query, results: [] } };
+    }
+    if (processResult.exitCode !== 0) {
+      return null;
+    }
+
+    const results = processResult.stdout
       .split("\n")
       .filter(Boolean)
       .slice(0, maxResults)
@@ -87,12 +136,13 @@ async function tryRipgrep(
       result: { workspaceRoot, query, results },
     };
   } catch (error) {
-    const code = (error as { code?: number | string }).code;
-    if (code === 1) {
-      return { ok: true, result: { workspaceRoot, query, results: [] } };
-    }
-
-    return null;
+    return {
+      ok: false,
+      error: `code_search process failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      errorDetails: { kind: "process_error" },
+    };
   }
 }
 
@@ -100,6 +150,7 @@ async function fallbackSearch(
   workspaceRoot: string,
   query: string,
   maxResults: number,
+  signal?: AbortSignal,
 ) {
   const results: Array<{
     path: string;
@@ -109,12 +160,14 @@ async function fallbackSearch(
   }> = [];
 
   async function visit(directory: string) {
+    signal?.throwIfAborted();
     if (results.length >= maxResults) {
       return;
     }
 
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
+      signal?.throwIfAborted();
       if (results.length >= maxResults) {
         return;
       }
@@ -149,4 +202,12 @@ async function fallbackSearch(
 
   await visit(workspaceRoot);
   return results;
+}
+
+function canceledResult(): AgentToolExecutionResult {
+  return {
+    ok: false,
+    error: "code_search was canceled.",
+    errorDetails: { kind: "canceled" },
+  };
 }

@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import type {
   AgentRole,
@@ -11,6 +17,8 @@ type StoredMultiAgentSessions = {
   schemaVersion: 1;
   sessions: MultiAgentSession[];
 };
+
+const mutationQueues = new Map<string, Promise<void>>();
 
 export type MultiAgentSessionInput = {
   title: string;
@@ -42,6 +50,26 @@ export function createMultiAgentSessionStore(options: {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
 
+  async function awaitPendingMutations(): Promise<void> {
+    await (mutationQueues.get(sessionsPath) ?? Promise.resolve());
+  }
+
+  function serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = mutationQueues.get(sessionsPath) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    mutationQueues.set(sessionsPath, tail);
+    void tail.finally(() => {
+      if (mutationQueues.get(sessionsPath) === tail) {
+        mutationQueues.delete(sessionsPath);
+      }
+    });
+    return result;
+  }
+
   async function readStored(): Promise<StoredMultiAgentSessions> {
     try {
       const raw = await readFile(sessionsPath, "utf8");
@@ -61,41 +89,57 @@ export function createMultiAgentSessionStore(options: {
 
   async function writeStored(stored: StoredMultiAgentSessions) {
     await mkdir(options.configDir, { recursive: true });
-    await writeFile(sessionsPath, `${JSON.stringify(stored, null, 2)}\n`, {
-      encoding: "utf8",
-    });
+    const temporaryPath = `${sessionsPath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(
+        temporaryPath,
+        `${JSON.stringify(stored, null, 2)}\n`,
+        {
+          encoding: "utf8",
+          mode: 0o600,
+        },
+      );
+      await rename(temporaryPath, sessionsPath);
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
   }
 
   async function updateSession(
     sessionId: string,
     update: (session: MultiAgentSession) => MultiAgentSession,
   ): Promise<MultiAgentSession | null> {
-    const stored = await readStored();
-    let updatedSession: MultiAgentSession | null = null;
-    const sessions = stored.sessions.map((session) => {
-      if (session.id !== sessionId) {
-        return session;
+    return serializeMutation(async () => {
+      const stored = await readStored();
+      let updatedSession: MultiAgentSession | null = null;
+      const sessions = stored.sessions.map((session) => {
+        if (session.id !== sessionId) {
+          return session;
+        }
+
+        updatedSession = update(session);
+        return updatedSession;
+      });
+
+      if (!updatedSession) {
+        return null;
       }
 
-      updatedSession = update(session);
+      await writeStored({ schemaVersion: 1, sessions });
       return updatedSession;
     });
-
-    if (!updatedSession) {
-      return null;
-    }
-
-    await writeStored({ schemaVersion: 1, sessions });
-    return updatedSession;
   }
 
   return {
     async get(id) {
+      await awaitPendingMutations();
       const stored = await readStored();
       return stored.sessions.find((session) => session.id === id) ?? null;
     },
 
     async list() {
+      await awaitPendingMutations();
       const stored = await readStored();
       return [...stored.sessions].sort(
         (left, right) =>
@@ -106,24 +150,26 @@ export function createMultiAgentSessionStore(options: {
     },
 
     async create(input) {
-      const timestamp = now().toISOString();
-      const session: MultiAgentSession = {
-        id: createId(),
-        title: input.title,
-        ...(input.rootRunId ? { rootRunId: input.rootRunId } : {}),
-        status: "running",
-        workspaceId: input.workspaceId,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        childRunIds: [],
-        roles: {},
-      };
-      const stored = await readStored();
-      await writeStored({
-        schemaVersion: 1,
-        sessions: [...stored.sessions, session],
+      return serializeMutation(async () => {
+        const timestamp = now().toISOString();
+        const session: MultiAgentSession = {
+          id: createId(),
+          title: input.title,
+          ...(input.rootRunId ? { rootRunId: input.rootRunId } : {}),
+          status: "running",
+          workspaceId: input.workspaceId,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          childRunIds: [],
+          roles: {},
+        };
+        const stored = await readStored();
+        await writeStored({
+          schemaVersion: 1,
+          sessions: [...stored.sessions, session],
+        });
+        return session;
       });
-      return session;
     },
 
     appendChildRun(sessionId, runId, role) {

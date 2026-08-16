@@ -46,6 +46,7 @@ export type SmokeRendererPerformanceResult = {
   alternateSessionId: string | null;
   selectedSessionBytes: number;
   selectedOutputPartBytes: number;
+  selectedMessageCount: number;
   metrics: {
     listSessionsMs: number;
     scanSessionsMs: number;
@@ -562,6 +563,15 @@ export function getSmokeRendererPerformanceScript(
       if (metrics.testedSwitchCount < expectedSwitchCount) {
         failureReasons.push("tested switch count " + metrics.testedSwitchCount + " < expected " + expectedSwitchCount);
       }
+      if (listed.value.length < 6) {
+        failureReasons.push("performance smoke requires at least 6 sessions");
+      }
+      if (selectedMessages.length < 400) {
+        failureReasons.push("performance smoke requires a transcript with at least 400 messages");
+      }
+      if (metrics.renderedMessageCount > 80) {
+        failureReasons.push("initial rendered messages " + metrics.renderedMessageCount + " > 80");
+      }
 
       resolve({
         ok: failureReasons.length === 0,
@@ -574,6 +584,7 @@ export function getSmokeRendererPerformanceScript(
         alternateSessionId: alternate?.session.id ?? null,
         selectedSessionBytes: selected?.bytes ?? 0,
         selectedOutputPartBytes: selected?.outputPartBytes ?? 0,
+        selectedMessageCount: selectedMessages.length,
         metrics,
       });
     })().catch((error) => {
@@ -591,6 +602,7 @@ export function getSmokeRendererPerformanceScript(
         alternateSessionId: null,
         selectedSessionBytes: 0,
         selectedOutputPartBytes: 0,
+        selectedMessageCount: 0,
         metrics: {
           listSessionsMs: 0,
           scanSessionsMs: 0,
@@ -631,6 +643,7 @@ export function isSmokeRendererPerformanceResult(
     typeof result.scannedSessionCount === "number" &&
     typeof result.selectedSessionBytes === "number" &&
     typeof result.selectedOutputPartBytes === "number" &&
+    typeof result.selectedMessageCount === "number" &&
     typeof result.metrics === "object"
   );
 }

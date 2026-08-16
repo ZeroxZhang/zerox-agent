@@ -19,6 +19,7 @@ const MIGRATIONS_TABLE = `
 CREATE TABLE IF NOT EXISTS __zerox_migrations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
+  ordinal INTEGER NOT NULL UNIQUE,
   sha256 TEXT NOT NULL,
   applied_at TEXT NOT NULL
 );
@@ -43,12 +44,83 @@ interface MigrationFile {
 }
 
 function loadMigrations(): MigrationFile[] {
-  return BUNDLED_MIGRATIONS.map((m) => ({
+  const migrations = BUNDLED_MIGRATIONS.map((m) => ({
     name: m.name,
     ordinal: m.ordinal,
     sql: m.sql,
     sha256: createHash("sha256").update(m.sql).digest("hex"),
   })).sort((a, b) => a.ordinal - b.ordinal);
+  migrations.forEach((migration, index) => {
+    const filenameOrdinal = Number.parseInt(
+      migration.name.split("_", 1)[0] ?? "",
+      10,
+    );
+    if (
+      migration.ordinal !== index ||
+      filenameOrdinal !== migration.ordinal
+    ) {
+      throw new Error(
+        `zerox.db: invalid bundled migration ordinal for ${migration.name}; expected ${index}, received ${migration.ordinal}.`,
+      );
+    }
+  });
+  return migrations;
+}
+
+function prepareAndValidateMigrationLedger(
+  db: BetterSqlite3Database,
+  migrations: MigrationFile[],
+): Set<string> {
+  db.exec(MIGRATIONS_TABLE);
+  const columns = db
+    .prepare("PRAGMA table_info('__zerox_migrations')")
+    .all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "ordinal")) {
+    const upgrade = db.transaction(() => {
+      db.exec("ALTER TABLE __zerox_migrations ADD COLUMN ordinal INTEGER");
+      const update = db.prepare(
+        "UPDATE __zerox_migrations SET ordinal = ? WHERE name = ?",
+      );
+      for (const migration of migrations) {
+        update.run(migration.ordinal, migration.name);
+      }
+      db.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_zerox_migrations_ordinal ON __zerox_migrations(ordinal)",
+      );
+    });
+    upgrade();
+  }
+
+  const applied = db
+    .prepare(
+      `SELECT name, ordinal, sha256
+         FROM __zerox_migrations
+        ORDER BY id ASC`,
+    )
+    .all() as Array<{
+      name: string;
+      ordinal: number | null;
+      sha256: string;
+    }>;
+  if (applied.length > migrations.length) {
+    throw new Error(
+      `zerox.db: migration ledger has ${applied.length} rows, but this build knows only ${migrations.length}.`,
+    );
+  }
+  applied.forEach((row, index) => {
+    const expected = migrations[index];
+    if (
+      !expected ||
+      row.name !== expected.name ||
+      row.ordinal !== expected.ordinal ||
+      row.sha256 !== expected.sha256
+    ) {
+      throw new Error(
+        `zerox.db: migration ledger mismatch at ordinal ${index}; expected ${expected?.name ?? "<none>"} (${expected?.sha256 ?? "n/a"}), received ${row.name} ordinal=${String(row.ordinal)} sha256=${row.sha256}.`,
+      );
+    }
+  });
+  return new Set(applied.map((row) => row.name));
 }
 
 export interface CreateStorageOptions {
@@ -79,15 +151,6 @@ export function createStorageImpl(opts: CreateStorageOptions): Storage {
     assertFts5Enabled(db);
   }
 
-  // v3.6.0: Periodic WAL checkpoint to prevent unbounded WAL growth (DATA-03).
-  // Runs every 60s in addition to the per-1000-writes counter and on-close flush.
-  const checkpointTimer = opts.dbPath !== ":memory:"
-    ? setInterval(() => { try { db.pragma("wal_checkpoint(PASSIVE)"); } catch { /* best-effort */ } }, 60_000)
-    : null;
-
-  // Ensure the migrations ledger exists before any migration runs.
-  db.exec(MIGRATIONS_TABLE);
-
   let migrated = false;
   let pendingMigrations: MigrationFile[] | null = null;
 
@@ -95,18 +158,19 @@ export function createStorageImpl(opts: CreateStorageOptions): Storage {
     if (migrated) return;
     const list = pendingMigrations;
     if (!list) return;
-    const applied = new Set(
-      (db.prepare("SELECT name FROM __zerox_migrations").all() as { name: string }[]).map(
-        (r) => r.name,
-      ),
-    );
+    const applied = prepareAndValidateMigrationLedger(db, list);
     const apply = db.transaction(() => {
       for (const migration of list) {
         if (applied.has(migration.name)) continue;
         db.exec(migration.sql);
         db.prepare(
-          "INSERT INTO __zerox_migrations (name, sha256, applied_at) VALUES (?, ?, ?)",
-        ).run(migration.name, migration.sha256, new Date().toISOString());
+          "INSERT INTO __zerox_migrations (name, ordinal, sha256, applied_at) VALUES (?, ?, ?, ?)",
+        ).run(
+          migration.name,
+          migration.ordinal,
+          migration.sha256,
+          new Date().toISOString(),
+        );
       }
     });
     apply();
@@ -118,7 +182,18 @@ export function createStorageImpl(opts: CreateStorageOptions): Storage {
   // race where a dual-write store writes before a fire-and-forget migration
   // completes. `migrate()` remains available (idempotent) for explicit callers.
   pendingMigrations = loadMigrations();
-  runMigrations();
+  try {
+    runMigrations();
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+
+  // v3.6.0: Periodic WAL checkpoint to prevent unbounded WAL growth (DATA-03).
+  // Runs every 60s in addition to the per-1000-writes counter and on-close flush.
+  const checkpointTimer = opts.dbPath !== ":memory:"
+    ? setInterval(() => { try { db.pragma("wal_checkpoint(PASSIVE)"); } catch { /* best-effort */ } }, 60_000)
+    : null;
 
   const storage: Storage = {
     get db(): StorageDatabase {

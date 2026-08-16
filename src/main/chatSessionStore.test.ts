@@ -388,6 +388,58 @@ describe("chat session store", () => {
     await expect(reloaded.get("chat_1")).resolves.toEqual(assistantAppend.session);
   });
 
+  it.each(["json", "sqlite"] as const)(
+    "pages %s transcripts by stable message sequence without hydrating metadata",
+    async (backend) => {
+      const storage =
+        backend === "sqlite" ? await createInMemoryStorage() : undefined;
+      const store = createChatSessionStore({
+        configDir,
+        backend,
+        ...(storage ? { storage } : {}),
+        createId: createSequentialId(`page-${backend}`),
+      });
+      let sessionId = "";
+      for (let index = 1; index <= 165; index += 1) {
+        const appended = await store.appendMessage({
+          ...(sessionId ? { sessionId } : {}),
+          role: index % 2 === 0 ? "assistant" : "user",
+          content: `message ${index}`,
+        });
+        sessionId = appended.session.id;
+      }
+
+      await expect(store.getMetadata(sessionId)).resolves.not.toHaveProperty(
+        "messages",
+      );
+      const latest = await store.getTranscriptPage(sessionId, { limit: 80 });
+      expect(latest?.session.messages).toHaveLength(80);
+      expect(latest?.session.messages[0]?.content).toBe("message 86");
+      expect(latest?.page).toEqual({
+        startSequence: 86,
+        endSequence: 165,
+        totalMessages: 165,
+        hasMoreBefore: true,
+      });
+      const middle = await store.getTranscriptPage(sessionId, {
+        beforeSequence: latest?.page.startSequence,
+        limit: 80,
+      });
+      expect(middle?.session.messages[0]?.content).toBe("message 6");
+      expect(middle?.session.messages.at(-1)?.content).toBe("message 85");
+      expect(middle?.page.hasMoreBefore).toBe(true);
+      const oldest = await store.getTranscriptPage(sessionId, {
+        beforeSequence: middle?.page.startSequence,
+        limit: 80,
+      });
+      expect(oldest?.session.messages.map((message) => message.content)).toEqual(
+        ["message 1", "message 2", "message 3", "message 4", "message 5"],
+      );
+      expect(oldest?.page.hasMoreBefore).toBe(false);
+      storage?.close();
+    },
+  );
+
   it("preserves message content exactly when persisting markdown output", async () => {
     const store = createChatSessionStore({
       configDir,

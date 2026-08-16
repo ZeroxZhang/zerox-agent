@@ -1,10 +1,10 @@
 // MCP transport abstraction (contracts v1.4 §9, Patch 12, P8).
 //
 // `McpTransport` is the transport-agnostic JSON-RPC surface the unified McpClient
-// speaks. Implementations: StdioTransport (extracted from the legacy mcpClient),
-// StreamableHttpTransport (new, with optional OAuth), SseTransport (new). The
-// existing stdio `SKILL.md` mcpServers format is unchanged; http/sse add optional
-// `transport`/`url`/oauth fields (default stdio).
+// speaks. Implementations: StdioTransport (extracted from the legacy mcpClient)
+// and StreamableHttpTransport. SSE remains a recognized configuration kind so
+// unsupported manifests fail with a precise error instead of silently using an
+// incompatible HTTP request path.
 
 import {
   fetchWithTimeout,
@@ -16,6 +16,8 @@ import { assertSafeOutboundUrl, safeOutboundFetch } from "./outboundUrlPolicy";
 export type McpTransportKind = "stdio" | "http" | "sse";
 const MCP_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MCP_MAX_ERROR_BYTES = 64 * 1024;
+export const MCP_SSE_UNSUPPORTED_MESSAGE =
+  'MCP SSE transport is not implemented; use transport "http" or "stdio".';
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -141,59 +143,14 @@ export function createStreamableHttpTransport(
 }
 
 // ---------------------------------------------------------------------------
-// SseTransport (new) — server-sent events for server→client, POST for requests.
+// SseTransport — reserved until the full server event stream protocol exists.
 // ---------------------------------------------------------------------------
 
 export function createSseTransport(
-  config: McpServerTransportConfig,
-  options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null>; resolveHostname?: (hostname: string) => Promise<string[]> },
+  _config: McpServerTransportConfig,
+  _options?: { fetch?: typeof fetch; getAccessToken?: () => Promise<string | null>; resolveHostname?: (hostname: string) => Promise<string[]> },
 ): McpTransport {
-  const fetchImpl = options?.fetch ?? safeOutboundFetch;
-  const url = config.url ?? "";
-  let started = false;
-  let notificationHandler: ((n: JsonRpcNotification) => void) | null = null;
-  const validateUrl = () => assertSafeOutboundUrl(url, {
-    protocols: ["https:"],
-    ...(options?.resolveHostname
-      ? { resolveHostname: options.resolveHostname }
-      : {}),
-  });
-
-  return {
-    async start() {
-      if (!url) throw new Error("SseTransport: url required");
-      await validateUrl();
-      started = true;
-    },
-    async send(req: JsonRpcRequest, sendOptions): Promise<JsonRpcResponse> {
-      if (!started) await this.start();
-      await validateUrl();
-      const headers: Record<string, string> = { "content-type": "application/json", ...(config.headers ?? {}) };
-      const token = await options?.getAccessToken?.();
-      if (token) headers["authorization"] = `Bearer ${token}`;
-      const res = await fetchWithTimeout(fetchImpl, url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(req),
-        redirect: "error",
-      }, 30_000, `MCP ${config.name}`, sendOptions?.signal);
-      if (!res.ok) {
-        throw new Error(
-          `HTTP ${res.status}: ${await readResponseTextWithLimit(res, MCP_MAX_ERROR_BYTES, `MCP ${config.name} error`)}`,
-        );
-      }
-      return readResponseJsonWithLimit<JsonRpcResponse>(
-        res,
-        MCP_MAX_RESPONSE_BYTES,
-        `MCP ${config.name}`,
-      );
-    },
-    onNotification(handler) { notificationHandler = handler; },
-    async close() {
-      started = false;
-      notificationHandler = null;
-    },
-  };
+  throw new Error(MCP_SSE_UNSUPPORTED_MESSAGE);
 }
 
 /** Transport factory dispatched by `transport` kind (stdio falls back to legacy). */

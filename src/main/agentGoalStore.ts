@@ -28,6 +28,7 @@ import {
   deriveLegacyGoalContract,
   goalContractMatchesRef,
 } from "./goalPlanContractService";
+import { createPublicSkillSnapshot } from "../shared/skills";
 
 export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
@@ -43,6 +44,7 @@ export type AgentGoalStore = {
     expectedActivePlanId?: string,
   ): Promise<GoalConditionalSaveResult>;
   get(goalId: string): Promise<Goal | null>;
+  getMany(goalIds: readonly string[]): Promise<Goal[]>;
   listActive(): Promise<Goal[]>;
   listByChatSession(chatSessionId: string): Promise<Goal[]>;
   appendLedger(goalId: string, event: ProgressLedgerEvent): Promise<void>;
@@ -93,7 +95,20 @@ export function createAgentGoalStore(options: {
     try {
       const filePath = goalPath(goalId);
       const raw = await readFile(filePath, "utf8");
-      return normalizeGoal(JSON.parse(raw) as Goal);
+      const parsed = JSON.parse(raw) as Goal;
+      const normalized = normalizeGoal(parsed);
+      if (
+        parsed.selectedSkill &&
+        JSON.stringify(parsed.selectedSkill) !==
+          JSON.stringify(normalized.selectedSkill)
+      ) {
+        await writeJsonFileAtomically(
+          goalsDir,
+          filePath,
+          `${JSON.stringify(normalized, null, 2)}\n`,
+        );
+      }
+      return normalized;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -237,6 +252,12 @@ export function createAgentGoalStore(options: {
       return readGoal(goalId);
     },
 
+    async getMany(goalIds) {
+      const requested = new Set(goalIds);
+      if (requested.size === 0) return [];
+      return (await readAllGoals()).filter((goal) => requested.has(goal.id));
+    },
+
     async listActive() {
       return (await readAllGoals())
         .filter(isActiveGoal)
@@ -370,6 +391,9 @@ function normalizeGoal(goal: Goal): Goal {
     ...(goal.chatSessionId ? { chatSessionId: String(goal.chatSessionId) } : {}),
     ...(goal.originMessageId
       ? { originMessageId: String(goal.originMessageId) }
+      : {}),
+    ...(goal.selectedSkill
+      ? { selectedSkill: createPublicSkillSnapshot(goal.selectedSkill) }
       : {}),
   };
   const goalContractSnapshot =

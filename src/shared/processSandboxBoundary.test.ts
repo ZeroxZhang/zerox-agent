@@ -55,6 +55,56 @@ describe("production process sandbox boundary", () => {
     expect(sandbox).not.toContain('    "/tmp",');
   });
 
+  it("routes native code and Git reads through one owned read-only adapter", () => {
+    const adapter = read("src/main/nativeReadOnlyProcess.ts");
+    const codeTools = read("src/main/nativeCodeTools.ts");
+    const gitTools = read("src/main/nativeGitTools.ts");
+    const executor = read("src/main/agentToolExecutor.ts");
+
+    expect(adapter).toContain("runOwnedProcess({");
+    expect(adapter).toContain("buildMinimalProcessEnv(process.env");
+    expect(adapter).toContain('mode: "read_only"');
+    expect(adapter).toContain('network: "none"');
+    expect(adapter).toContain("signal: args.signal");
+    expect(adapter).toContain("await confined.cleanup()");
+    expect(codeTools).not.toContain("node:child_process");
+    expect(gitTools).not.toContain("node:child_process");
+    expect(codeTools).toMatch(
+      /"-e",\s*query,\s*"--",\s*workspaceRoot/,
+    );
+    expect(gitTools).toContain('"core.hooksPath=/dev/null"');
+    expect(gitTools).toContain('"core.fsmonitor=false"');
+    expect(gitTools).toContain('"core.pager=cat"');
+    expect(gitTools).toContain('"diff.external="');
+    expect(gitTools).toContain('"--no-ext-diff"');
+    expect(gitTools).toContain('"--no-textconv"');
+    expect(executor).toMatch(
+      /searchCode\(\{[\s\S]*?signal: executionOptions\?\.signal,[\s\S]*?processSandbox: options\.processSandbox/,
+    );
+    expect(executor).toMatch(
+      /readGitStatus\(\{[\s\S]*?signal: executionOptions\?\.signal,[\s\S]*?processSandbox: options\.processSandbox/,
+    );
+    expect(executor).toMatch(
+      /readGitDiff\(\{[\s\S]*?signal: executionOptions\?\.signal,[\s\S]*?processSandbox: options\.processSandbox/,
+    );
+  });
+
+  it("keeps scoped tool-result refs behind committed metadata", () => {
+    const offloadStore = read("src/main/toolResultOffloadStore.ts");
+    const metadataCommit = offloadStore.indexOf(
+      "await rename(metadataTempPath, metadataPath(absolutePath));",
+    );
+    const contentCommit = offloadStore.indexOf(
+      "await rename(contentTempPath, absolutePath);",
+    );
+
+    expect(offloadStore).toContain("Promise.allSettled([");
+    expect(offloadStore).toContain("contentSha256: hashContent(input.content)");
+    expect(metadataCommit).toBeGreaterThan(-1);
+    expect(contentCommit).toBeGreaterThan(metadataCommit);
+    expect(offloadStore).toContain("return scope === undefined;");
+  });
+
   it("has no production unconfined feature mode", () => {
     const flags = read("src/shared/featureFlags.ts");
     const decision = read(".zerox/decisions/RC04-os-process-sandbox.md");

@@ -325,6 +325,93 @@ describe("agent runtime engine", () => {
     ]);
   });
 
+  it("durably settles a scheduled persistence failure before Kernel run_end", async () => {
+    const bus = new KernelEventBus();
+    const lifecycle: string[] = [];
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    let appendAttempts = 0;
+    runStore.append = async (run) => {
+      expect(
+        bus.history().some(
+          (event) =>
+            event.runId === run.id && event.type === "run_end",
+        ),
+      ).toBe(false);
+      appendAttempts += 1;
+      lifecycle.push(`persist:${run.status}`);
+      if (appendAttempts === 1) {
+        throw new Error("scheduled run persistence failed");
+      }
+      return appendRun(run);
+    };
+    const unsubscribe = bus.subscribe((event) => {
+      if (event.type === "run_end") {
+        lifecycle.push("run_end");
+      }
+    });
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore,
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      productionKernelDriver: createProductionKernelDriver({
+        bus,
+        now: () => "2026-08-16T10:00:00.000Z",
+      }),
+      async runLoop(_initialMessages, _profile, loopOptions) {
+        return {
+          status: "succeeded",
+          summary: "result awaiting persistence",
+          turns: 1,
+          messages: [],
+          contextSurface: createTestContextSurface(loopOptions.runId!, []),
+          toolCallsExecuted: 0,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("kernel_persistence_failure"),
+      now: createSteppedClock("2026-08-16T10:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+    unsubscribe();
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "kernel_persistence_failure_1",
+        status: "failed",
+        summary: "scheduled run persistence failed",
+      },
+    });
+    expect(lifecycle).toEqual([
+      "persist:succeeded",
+      "persist:failed",
+      "run_end",
+    ]);
+    expect(runStore.runs).toEqual([
+      expect.objectContaining({
+        id: "kernel_persistence_failure_1",
+        status: "failed",
+      }),
+    ]);
+    expect(savedCheckpoints.at(-1)).toMatchObject({
+      runId: "kernel_persistence_failure_1",
+      status: "failed",
+    });
+    expect(bus.history().at(-1)).toMatchObject({
+      type: "run_end",
+      status: "failed",
+      reason: "scheduled run persistence failed",
+    });
+  });
+
   it("passes a persisted context surface into shared-loop resume", async () => {
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const executionStore = createMemoryExecutionStore(savedCheckpoints);

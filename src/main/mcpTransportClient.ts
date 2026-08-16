@@ -1,9 +1,9 @@
 // Transport-backed MCP client (contracts v1.4 §9, P8 activation).
 //
-// A unified McpClient that speaks JSON-RPC over any McpTransport (http/sse).
-// Exposes the same McpClient shape as the stdio mcpClient, so initializeMcpTools
-// can register http/sse MCP servers' tools identically. stdio keeps its existing
-// process-based path; this handles the http/sse transports.
+// A unified McpClient that speaks JSON-RPC over the remote MCP transport
+// boundary. HTTP is active; SSE is rejected by the transport factory until its
+// server event stream protocol is fully implemented. stdio keeps its existing
+// process-based path.
 
 import type { ToolDefinition } from "./openAiCompatibleClient";
 import type {
@@ -12,10 +12,7 @@ import type {
   JsonRpcResponse,
   McpServerTransportConfig,
 } from "./mcpTransport";
-import {
-  createStreamableHttpTransport,
-  createSseTransport,
-} from "./mcpTransport";
+import { createMcpTransport } from "./mcpTransport";
 import type { McpClient, McpToolResult } from "./mcpClient";
 
 export interface McpTransportClientOptions {
@@ -28,10 +25,7 @@ export function createMcpTransportClient(
   config: McpServerTransportConfig,
   options: McpTransportClientOptions = {},
 ): McpClient {
-  const transport: McpTransport =
-    config.transport === "sse"
-      ? createSseTransport(config, options)
-      : createStreamableHttpTransport(config, options);
+  const transport: McpTransport = createMcpTransport(config, options);
 
   let connected = false;
   let nextId = 1;

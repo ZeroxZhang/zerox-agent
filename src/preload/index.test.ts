@@ -67,6 +67,10 @@ describe("preload bridge", () => {
     expect(preloadSource).toContain(
       "ipcRenderer.invoke(CHAT_IPC.respondSkillInput",
     );
+    expect(preloadSource).toContain("getChatSessionTranscriptPage");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("chatSessions:getTranscriptPage"',
+    );
   });
 
   it("exposes app update state, retry, install, and event operations", () => {

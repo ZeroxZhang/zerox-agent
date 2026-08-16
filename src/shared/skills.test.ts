@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parseSkillMarkdown, SkillManifestError } from "./skills";
+import {
+  createPublicSkillSnapshot,
+  parseSkillMarkdown,
+  SkillManifestError,
+} from "./skills";
 
 const validSkillMarkdown = `---
 name: local-file-organizer
@@ -229,6 +233,59 @@ mcpServers:
         url: "https://mcp.example.test/sse",
       },
     ]);
+  });
+
+  it("creates a public and persistent Skill snapshot without MCP credentials", () => {
+    const parsed = parseSkillMarkdown(`---
+name: private-mcp-skill
+description: Exercise credential-safe Skill snapshots.
+execution:
+  mode: agent
+mcpServers:
+  - name: local-private
+    transport: stdio
+    command: node
+    args: ["server.js"]
+    env:
+      PRIVATE_TOKEN: STDIO_SECRET_DO_NOT_PERSIST
+    readRoots: ["./data"]
+    network: false
+  - name: remote-private
+    transport: http
+    url: https://mcp.example.test/rpc
+    headers:
+      authorization: REMOTE_SECRET_DO_NOT_PERSIST
+---
+
+# Private MCP
+`);
+    const runtimeSkill = {
+      ...parsed,
+      rootDir: "/tmp/private-mcp-skill",
+      skillFile: "/tmp/private-mcp-skill/SKILL.md",
+    };
+
+    const snapshot = createPublicSkillSnapshot(runtimeSkill);
+
+    expect(snapshot.manifest.mcpServers).toEqual([
+      {
+        name: "local-private",
+        transport: "stdio",
+        command: "node",
+        args: ["server.js"],
+        readRoots: ["./data"],
+        network: false,
+      },
+      {
+        name: "remote-private",
+        transport: "http",
+        url: "https://mcp.example.test/rpc",
+      },
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain("STDIO_SECRET_DO_NOT_PERSIST");
+    expect(JSON.stringify(snapshot)).not.toContain("REMOTE_SECRET_DO_NOT_PERSIST");
+    expect(JSON.stringify(runtimeSkill)).toContain("STDIO_SECRET_DO_NOT_PERSIST");
+    expect(JSON.stringify(runtimeSkill)).toContain("REMOTE_SECRET_DO_NOT_PERSIST");
   });
 
   it.each([

@@ -17,6 +17,10 @@ export type RuntimeKernelDependencies = {
   beforeAbortedEnd?: (
     ctx: RunContext,
   ) => Promise<{ summary?: string } | void>;
+  beforeFailedEnd?: (
+    ctx: RunContext,
+    error: unknown,
+  ) => Promise<{ reason?: string; summary?: string } | void>;
   now?: () => string;
 };
 
@@ -62,7 +66,7 @@ export async function runRuntimeKernel(
     try {
       lastTurn = await deps.runTurn(ctx);
     } catch (error) {
-      return endRun(ctx, deps.bus, now, "failed", formatError(error), summary);
+      return settleAndEndFailedRun(ctx, deps, now, error, summary);
     }
 
     if (lastTurn.summary) {
@@ -88,7 +92,7 @@ export async function runRuntimeKernel(
     try {
       decision = await ctx.stopPolicy.shouldStop(ctx, lastTurn);
     } catch (error) {
-      return endRun(ctx, deps.bus, now, "failed", formatError(error), summary);
+      return settleAndEndFailedRun(ctx, deps, now, error, summary);
     }
 
     if (ctx.stopPolicy.kind === "evidence_judge") {
@@ -127,7 +131,7 @@ export async function runRuntimeKernel(
           });
         }
       } catch (error) {
-        return endRun(ctx, deps.bus, now, "failed", formatError(error), summary);
+        return settleAndEndFailedRun(ctx, deps, now, error, summary);
       }
     }
   }
@@ -180,24 +184,31 @@ async function settleAndEndAbortedRun(
   now: () => string,
   summary: string,
 ): Promise<RuntimeKernelResult> {
-  try {
-    const settledSummary = await settleAbortedRun(ctx, deps, summary);
-    return endRunForAbortedSignal(
-      ctx,
-      deps.bus,
-      now,
-      settledSummary,
-    );
-  } catch (error) {
-    return endRun(
-      ctx,
-      deps.bus,
-      now,
-      "failed",
-      formatError(error),
-      summary,
-    );
-  }
+  const settledSummary = await settleAbortedRun(ctx, deps, summary);
+  return endRunForAbortedSignal(
+    ctx,
+    deps.bus,
+    now,
+    settledSummary,
+  );
+}
+
+async function settleAndEndFailedRun(
+  ctx: RunContext,
+  deps: RuntimeKernelDependencies,
+  now: () => string,
+  error: unknown,
+  summary: string,
+): Promise<RuntimeKernelResult> {
+  const settlement = await deps.beforeFailedEnd?.(ctx, error);
+  return endRun(
+    ctx,
+    deps.bus,
+    now,
+    "failed",
+    settlement?.reason ?? formatError(error),
+    settlement?.summary ?? summary,
+  );
 }
 
 function endRunForAbortedSignal(

@@ -191,43 +191,41 @@ async function runProductionSegment<
           }
           return segment ? { summary: segment.summary } : undefined;
         },
-        async runTurn(ctx) {
-          activeTurn = ctx.turn;
+        async beforeFailedEnd(ctx, error) {
+          if (!input.settleFailed) {
+            segmentError = error;
+            return { reason: formatError(error) };
+          }
           try {
-            const executed = await input.execute(
-              reporter,
+            const settled = await input.settleFailed(
+              error,
               executionContext(ctx.turn),
             );
-            segment = executed;
+            assertSettlementStatus(settled, "failed", "failed");
+            segment = settled;
+            segmentError = error;
             return {
-              summary: executed.summary,
-              terminalStatus: executed.status,
-              reason: `segment ${executed.status}`,
+              reason: formatError(error),
+              summary: settled.summary,
             };
-          } catch (error) {
-            if (!input.settleFailed) {
-              segmentError = error;
-              throw error;
-            }
-            try {
-              const settled = await input.settleFailed(
-                error,
-                executionContext(ctx.turn),
-              );
-              assertSettlementStatus(settled, "failed", "failed");
-              segment = settled;
-              segmentError = error;
-              return {
-                summary: settled.summary,
-                terminalStatus: settled.status,
-                reason: formatError(error),
-              };
-            } catch (settlementError) {
-              segment = undefined;
-              segmentError = settlementError;
-              throw settlementError;
-            }
+          } catch (settlementError) {
+            segment = undefined;
+            segmentError = settlementError;
+            throw settlementError;
           }
+        },
+        async runTurn(ctx) {
+          activeTurn = ctx.turn;
+          const executed = await input.execute(
+            reporter,
+            executionContext(ctx.turn),
+          );
+          segment = executed;
+          return {
+            summary: executed.summary,
+            terminalStatus: executed.status,
+            reason: `segment ${executed.status}`,
+          };
         },
       },
     );

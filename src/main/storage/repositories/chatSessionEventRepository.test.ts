@@ -5,6 +5,7 @@ import type {
 } from "../../../shared/chat";
 import { createInMemoryStorage } from "../storageDb";
 import {
+  CHAT_SEARCH_MAX_CANDIDATES,
   CHAT_SESSION_PROJECTION_VERSION,
   createChatSessionEventRepository,
 } from "./chatSessionEventRepository";
@@ -175,6 +176,77 @@ describe("ChatSessionEventRepository", () => {
         matchedTerms: ["报告", "markdown"],
       }),
     ]);
+    storage.close();
+  });
+
+  it("uses FTS virtual indexes and keeps large-history search bounded", async () => {
+    const storage = await createInMemoryStorage();
+    const repository = createChatSessionEventRepository(storage);
+    const session = makeSession("session_1", []);
+    repository.importSnapshots([{ eventId: "import_1", session }]);
+    const insert = storage.db.prepare(
+      `INSERT INTO chat_messages
+        (id, session_id, role, content, payload, created_at, seq)
+       VALUES (?, ?, 'assistant', ?, ?, ?, ?)`,
+    );
+    storage.db.exec("BEGIN");
+    try {
+      for (let index = 1; index <= 10_000; index += 1) {
+        const message = makeMessage(
+          `bulk_${index}`,
+          "assistant",
+          `bounded-search-marker 计划 result ${index}`,
+          index,
+        );
+        insert.run(
+          message.id,
+          session.id,
+          message.content,
+          JSON.stringify(message),
+          message.createdAt,
+          index,
+        );
+      }
+      storage.db.exec("COMMIT");
+    } catch (error) {
+      storage.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    const plan = storage.db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT rowid FROM chat_message_fts WHERE chat_message_fts MATCH ? LIMIT ?",
+      )
+      .all<{ detail: string }>("bounded-search-marker", 100);
+    expect(plan.some((row) => row.detail.includes("VIRTUAL TABLE INDEX"))).toBe(
+      true,
+    );
+    const startedAt = performance.now();
+    const results = repository.searchMessages({
+      query: "bounded-search-marker",
+      limit: 25,
+    });
+    expect(results).toHaveLength(25);
+    const shortTermPlan = storage.db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT m.id
+           FROM chat_messages m
+           JOIN chat_session_projections p ON p.session_id = m.session_id
+          ORDER BY m.created_at DESC, m.rowid DESC
+          LIMIT ?`,
+      )
+      .all<{ detail: string }>(100);
+    expect(
+      shortTermPlan.some((row) =>
+        row.detail.includes("idx_chat_messages_created"),
+      ),
+    ).toBe(true);
+    expect(
+      repository.searchMessages({ query: "计划", limit: 25 }),
+    ).toHaveLength(25);
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+    expect(CHAT_SEARCH_MAX_CANDIDATES).toBe(1_000);
     storage.close();
   });
 

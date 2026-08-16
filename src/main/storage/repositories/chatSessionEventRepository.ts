@@ -3,11 +3,14 @@ import type {
   ChatMessageSearchOptions,
   ChatMessageSearchResult,
   ChatSessionRecord,
+  ChatSessionTranscriptPage,
+  ChatSessionTranscriptPageOptions,
 } from "../../../shared/chat";
 import type { Storage } from "../../../shared/storageContract";
 import { jsonify, parseJson } from "../repositoryUtils";
 
 export const CHAT_SESSION_PROJECTION_VERSION = 1;
+export const CHAT_SEARCH_MAX_CANDIDATES = 1_000;
 
 export type ChatSessionMetadata = Omit<ChatSessionRecord, "messages">;
 
@@ -64,6 +67,10 @@ export type ChatSessionEventRepository = {
   getProjection(sessionId: string): ChatSessionProjection | null;
   listProjections(): ChatSessionProjection[];
   getSession(sessionId: string): ChatSessionRecord | null;
+  getTranscriptPage(
+    sessionId: string,
+    options?: ChatSessionTranscriptPageOptions,
+  ): ChatSessionTranscriptPage | null;
   getLastMessage(sessionId: string): ChatMessageRecord | null;
   commit(input: CommitChatSessionMutationInput): {
     sequence: number;
@@ -82,6 +89,16 @@ type ProjectionRow = {
   message_count: number;
   last_assistant_at: string | null;
   payload: string;
+};
+
+type SearchRow = {
+  id: string;
+  session_id: string;
+  role: string;
+  content: string;
+  payload: string;
+  created_at: string;
+  session_title: string;
 };
 
 export function createChatSessionEventRepository(
@@ -212,6 +229,58 @@ export function createChatSessionEventRepository(
       };
     },
 
+    getTranscriptPage(sessionId, options) {
+      const projection = getProjection(sessionId);
+      if (!projection) return null;
+      const limit = normalizeTranscriptPageLimit(options?.limit);
+      const beforeSequence = normalizeBeforeSequence(
+        options?.beforeSequence,
+        projection.messageCount,
+      );
+      const rows = db
+        .prepare(
+          `SELECT seq, payload
+             FROM chat_messages
+            WHERE session_id = ?
+              AND seq < ?
+            ORDER BY seq DESC
+            LIMIT ?`,
+        )
+        .all<{ seq: number; payload: string }>(
+          sessionId,
+          beforeSequence,
+          limit,
+        )
+        .reverse();
+      const messages = rows
+        .map((row) => ({
+          sequence: row.seq,
+          message: parseJson<ChatMessageRecord>(row.payload),
+        }))
+        .filter(
+          (
+            row,
+          ): row is { sequence: number; message: ChatMessageRecord } =>
+            Boolean(row.message),
+        );
+      const startSequence =
+        messages[0]?.sequence ?? Math.min(beforeSequence, 1);
+      const endSequence =
+        messages.at(-1)?.sequence ?? Math.max(0, startSequence - 1);
+      return {
+        session: {
+          ...projection.session,
+          messages: messages.map((row) => row.message),
+        },
+        page: {
+          startSequence,
+          endSequence,
+          totalMessages: projection.messageCount,
+          hasMoreBefore: startSequence > 1,
+        },
+      };
+    },
+
     getLastMessage(sessionId) {
       const row = db
         .prepare(
@@ -290,36 +359,103 @@ export function createChatSessionEventRepository(
     searchMessages(options) {
       const terms = tokenize(options.query);
       if (!terms.length) return [];
-      const clauses = terms.map(
-        () => "(lower(m.content) LIKE ? OR lower(p.title) LIKE ?)",
+      const requestedLimit = Math.max(
+        1,
+        Math.floor(options.limit ?? 20),
       );
-      const params = terms.flatMap((term) => [
-        `%${escapeLike(term)}%`,
-        `%${escapeLike(term)}%`,
-      ]);
-      const sessionClause = options.sessionId ? "AND m.session_id = ?" : "";
-      if (options.sessionId) params.push(options.sessionId);
-      const rows = db
-        .prepare(
-          `SELECT m.id, m.session_id, m.role, m.content, m.payload,
-                  m.created_at, p.title AS session_title
-             FROM chat_messages m
-             JOIN chat_session_projections p
-               ON p.session_id = m.session_id
-            WHERE (${clauses.join(" OR ")})
+      const candidateLimit = Math.min(
+        CHAT_SEARCH_MAX_CANDIDATES,
+        Math.max(100, requestedLimit * 20),
+      );
+      const ftsTerms = terms.filter((term) => [...term].length >= 3);
+      const shortTerms = terms.filter((term) => [...term].length < 3);
+      const sourceCount = (ftsTerms.length ? 2 : 0) +
+        (shortTerms.length ? 1 : 0);
+      const perSourceLimit = Math.ceil(candidateLimit / sourceCount);
+      const candidates = new Map<string, SearchRow>();
+      const addCandidates = (rows: SearchRow[]) => {
+        for (const row of rows) {
+          if (candidates.size >= candidateLimit) break;
+          candidates.set(row.id, row);
+        }
+      };
+
+      if (ftsTerms.length) {
+        const match = ftsTerms.map(quoteFtsTerm).join(" OR ");
+        const contentSessionClause = options.sessionId
+          ? "AND m.session_id = ?"
+          : "";
+        const contentParams: Array<string | number> = [match];
+        if (options.sessionId) contentParams.push(options.sessionId);
+        contentParams.push(perSourceLimit);
+        addCandidates(
+          db.prepare(
+            `SELECT m.id, m.session_id, m.role, m.content, m.payload,
+                    m.created_at, p.title AS session_title
+               FROM chat_message_fts
+               JOIN chat_messages m
+                 ON m.rowid = chat_message_fts.rowid
+               JOIN chat_session_projections p
+                 ON p.session_id = m.session_id
+              WHERE chat_message_fts MATCH ?
+                ${contentSessionClause}
+              ORDER BY bm25(chat_message_fts) ASC,
+                       m.created_at DESC, m.rowid DESC
+              LIMIT ?`,
+          ).all<SearchRow>(...contentParams),
+        );
+
+        const titleSessionClause = options.sessionId
+          ? "AND p.session_id = ?"
+          : "";
+        const titleParams: Array<string | number> = [match];
+        if (options.sessionId) titleParams.push(options.sessionId);
+        titleParams.push(perSourceLimit);
+        addCandidates(
+          db.prepare(
+            `SELECT m.id, m.session_id, m.role, m.content, m.payload,
+                    m.created_at, p.title AS session_title
+               FROM chat_session_title_fts
+               JOIN chat_session_projections p
+                 ON p.rowid = chat_session_title_fts.rowid
+               JOIN chat_messages m
+                 ON m.session_id = p.session_id
+              WHERE chat_session_title_fts MATCH ?
+                ${titleSessionClause}
+              ORDER BY bm25(chat_session_title_fts) ASC,
+                       m.created_at DESC, m.rowid DESC
+              LIMIT ?`,
+          ).all<SearchRow>(...titleParams),
+        );
+      }
+
+      if (shortTerms.length && candidates.size < candidateLimit) {
+        const params: Array<string | number> = [];
+        const sessionClause = options.sessionId
+          ? "WHERE m.session_id = ?"
+          : "";
+        if (options.sessionId) params.push(options.sessionId);
+        params.push(
+          Math.min(
+            perSourceLimit,
+            candidateLimit - candidates.size,
+          ),
+        );
+        addCandidates(
+          db.prepare(
+            `SELECT m.id, m.session_id, m.role, m.content, m.payload,
+                    m.created_at, p.title AS session_title
+               FROM chat_messages m
+               JOIN chat_session_projections p
+                 ON p.session_id = m.session_id
               ${sessionClause}
-            ORDER BY m.created_at DESC, m.rowid DESC`,
-        )
-        .all<{
-          id: string;
-          session_id: string;
-          role: string;
-          content: string;
-          payload: string;
-          created_at: string;
-          session_title: string;
-        }>(...params);
-      return rows
+              ORDER BY m.created_at DESC, m.rowid DESC
+              LIMIT ?`,
+          ).all<SearchRow>(...params),
+        );
+      }
+
+      return [...candidates.values()]
         .map((row) => scoreMessageRow(row, terms))
         .filter((result) => result.score > 0)
         .sort(
@@ -327,7 +463,7 @@ export function createChatSessionEventRepository(
             right.score - left.score ||
             right.createdAt.localeCompare(left.createdAt),
         )
-        .slice(0, options.limit ?? 20);
+        .slice(0, requestedLimit);
     },
 
     listEvents(sessionId) {
@@ -515,8 +651,23 @@ function tokenize(value: string): string[] {
     .filter(Boolean);
 }
 
-function escapeLike(value: string): string {
-  return value.replaceAll("%", "\\%").replaceAll("_", "\\_");
+function quoteFtsTerm(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function normalizeTranscriptPageLimit(value: number | undefined): number {
+  const parsed = Math.floor(Number(value ?? 80));
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 200)) : 80;
+}
+
+function normalizeBeforeSequence(
+  value: number | undefined,
+  messageCount: number,
+): number {
+  const fallback = messageCount + 1;
+  const parsed = Math.floor(Number(value ?? fallback));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(parsed, fallback));
 }
 
 function scoreMessageRow(

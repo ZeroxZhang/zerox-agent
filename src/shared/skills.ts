@@ -95,6 +95,28 @@ export type SkillRecord = ParsedSkillMarkdown & {
   skillFile: string;
 };
 
+export type PublicSkillMcpStdioServerConfig = Omit<
+  SkillMcpStdioServerConfig,
+  "env"
+>;
+
+export type PublicSkillMcpRemoteServerConfig = Omit<
+  SkillMcpRemoteServerConfig,
+  "headers"
+>;
+
+export type PublicSkillMcpServerConfig =
+  | PublicSkillMcpStdioServerConfig
+  | PublicSkillMcpRemoteServerConfig;
+
+export type PublicSkillManifest = Omit<SkillManifest, "mcpServers"> & {
+  mcpServers?: PublicSkillMcpServerConfig[];
+};
+
+export type PublicSkillSnapshot = Omit<SkillRecord, "manifest"> & {
+  manifest: PublicSkillManifest;
+};
+
 export type SkillDiscoveryError = {
   folderName: string;
   message: string;
@@ -104,6 +126,56 @@ export type SkillDiscoveryResult = {
   skills: SkillRecord[];
   errors: SkillDiscoveryError[];
 };
+
+export function createPublicSkillSnapshot(
+  skill: Pick<SkillRecord, "manifest" | "body" | "rootDir" | "skillFile">,
+): PublicSkillSnapshot {
+  const { mcpServers, ...manifest } = skill.manifest;
+  return {
+    rootDir: skill.rootDir,
+    skillFile: skill.skillFile,
+    body: skill.body,
+    manifest: {
+      ...structuredClone(manifest),
+      ...(mcpServers !== undefined
+        ? { mcpServers: mcpServers.map(createPublicMcpServerConfig) }
+        : {}),
+    },
+  };
+}
+
+export function createPublicSkillDiscoveryResult(
+  result: SkillDiscoveryResult,
+): SkillDiscoveryResult {
+  return {
+    skills: result.skills.map(
+      (skill) => createPublicSkillSnapshot(skill) as SkillRecord,
+    ),
+    errors: structuredClone(result.errors),
+  };
+}
+
+function createPublicMcpServerConfig(
+  server: SkillMcpServerConfig,
+): PublicSkillMcpServerConfig {
+  if (server.transport === "stdio") {
+    return {
+      name: server.name,
+      transport: "stdio",
+      command: server.command,
+      ...(server.args !== undefined ? { args: [...server.args] } : {}),
+      ...(server.readRoots !== undefined
+        ? { readRoots: [...server.readRoots] }
+        : {}),
+      ...(server.network !== undefined ? { network: server.network } : {}),
+    };
+  }
+  return {
+    name: server.name,
+    transport: server.transport,
+    url: server.url,
+  };
+}
 
 export class SkillManifestError extends Error {
   constructor(message: string) {

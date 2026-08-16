@@ -12,7 +12,10 @@ import {
   createMcpTransportClient,
   type McpTransportClientOptions,
 } from "./mcpTransportClient";
-import type { McpServerTransportConfig } from "./mcpTransport";
+import {
+  MCP_SSE_UNSUPPORTED_MESSAGE,
+  type McpServerTransportConfig,
+} from "./mcpTransport";
 
 export async function createSkillMcpClient(
   config: McpServerInitConfig,
@@ -26,6 +29,10 @@ export async function createSkillMcpClient(
     ) => McpClient;
   },
 ): Promise<McpClient> {
+  if (config.transport === "sse") {
+    throw new Error(MCP_SSE_UNSUPPORTED_MESSAGE);
+  }
+
   if (config.transport === "stdio") {
     const sandboxRoot = path.join(
       options.configDir,

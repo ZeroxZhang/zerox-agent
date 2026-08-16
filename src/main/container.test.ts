@@ -44,6 +44,10 @@ const toolWorkerMock = vi.hoisted(() => ({
   })),
 }));
 
+const skillMcpClientMock = vi.hoisted(() => ({
+  createSkillMcpClient: vi.fn(),
+}));
+
 const electronState = vi.hoisted(() => ({
   userDataPath: "",
   appPath: "",
@@ -80,6 +84,11 @@ vi.mock("electron", () => ({
 vi.mock("./tools/toolWorker", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./tools/toolWorker")>()),
   createToolWorker: toolWorkerMock.createToolWorker,
+}));
+
+vi.mock("./skillMcpClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./skillMcpClient")>()),
+  createSkillMcpClient: skillMcpClientMock.createSkillMcpClient,
 }));
 
 describe("model profile embedding service", () => {
@@ -258,6 +267,7 @@ describe("app container goal drafts", () => {
   let tempDir: string;
   const originalToolWorkerEnv = process.env.ZEROX_TOOL_WORKER;
   const originalLegacyToolWorkerEnv = process.env.BUILDING_AGENT_TOOL_WORKER;
+  const originalSkillMcpAllowlist = process.env.ZEROX_SKILL_MCP_ALLOWLIST;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-container-"));
@@ -265,8 +275,10 @@ describe("app container goal drafts", () => {
     electronState.appPath = process.cwd();
     electronState.ipcHandlers.clear();
     toolWorkerMock.createToolWorker.mockClear();
+    skillMcpClientMock.createSkillMcpClient.mockReset();
     delete process.env.ZEROX_TOOL_WORKER;
     delete process.env.BUILDING_AGENT_TOOL_WORKER;
+    delete process.env.ZEROX_SKILL_MCP_ALLOWLIST;
   });
 
   afterEach(async () => {
@@ -279,6 +291,11 @@ describe("app container goal drafts", () => {
       delete process.env.BUILDING_AGENT_TOOL_WORKER;
     } else {
       process.env.BUILDING_AGENT_TOOL_WORKER = originalLegacyToolWorkerEnv;
+    }
+    if (originalSkillMcpAllowlist === undefined) {
+      delete process.env.ZEROX_SKILL_MCP_ALLOWLIST;
+    } else {
+      process.env.ZEROX_SKILL_MCP_ALLOWLIST = originalSkillMcpAllowlist;
     }
     await rm(tempDir, {
       force: true,
@@ -425,6 +442,112 @@ describe("app container goal drafts", () => {
     releaseDisconnect();
     await shutdown;
     expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces MCP disconnect failures after completing the remaining shutdown drains", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const runStore = container.agentRunStore();
+    const flush = vi.spyOn(runStore, "flushShadowWrites");
+    container.getActiveMcpClients().push({
+      async connect() {},
+      async disconnect() {
+        throw new Error("MCP disconnect failed");
+      },
+      async listTools() {
+        return [];
+      },
+      async callTool() {
+        return { ok: true, result: {} };
+      },
+      isConnected() {
+        return true;
+      },
+    });
+
+    await expect(container.shutdownRuntime()).rejects.toThrow(
+      "MCP disconnect failed",
+    );
+    expect(flush).toHaveBeenCalledWith({ close: true });
+  });
+
+  it("retries only MCP servers whose first initialization attempt failed", async () => {
+    const appRoot = path.join(tempDir, "mcp-app");
+    const skillDir = path.join(appRoot, "skills", "retry-skill");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      path.join(skillDir, "SKILL.md"),
+      [
+        "---",
+        "name: retry-skill",
+        "description: retry fixture",
+        "execution:",
+        "  mode: agent",
+        "mcpServers:",
+        "  - name: retry-server",
+        "    transport: http",
+        "    url: https://mcp.example.test/rpc",
+        "---",
+        "",
+        "# Retry",
+      ].join("\n"),
+      "utf8",
+    );
+    electronState.appPath = appRoot;
+    process.env.ZEROX_SKILL_MCP_ALLOWLIST = "retry-skill/retry-server";
+    const firstDisconnect = vi.fn(async () => undefined);
+    const secondDisconnect = vi.fn(async () => undefined);
+    skillMcpClientMock.createSkillMcpClient
+      .mockResolvedValueOnce({
+        async connect() {
+          throw new Error("transient MCP startup failure");
+        },
+        disconnect: firstDisconnect,
+        async listTools() {
+          return [];
+        },
+        async callTool() {
+          return { ok: true, result: {} };
+        },
+        isConnected() {
+          return false;
+        },
+      })
+      .mockResolvedValueOnce({
+        async connect() {},
+        disconnect: secondDisconnect,
+        async listTools() {
+          return [];
+        },
+        async callTool() {
+          return { ok: true, result: {} };
+        },
+        isConnected() {
+          return true;
+        },
+      });
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+
+    await container.initializeMcpTools();
+    expect(skillMcpClientMock.createSkillMcpClient).toHaveBeenCalledTimes(1);
+    expect(container.getActiveMcpClients()).toHaveLength(0);
+    expect(firstDisconnect).toHaveBeenCalledTimes(1);
+
+    await container.initializeMcpTools();
+    expect(skillMcpClientMock.createSkillMcpClient).toHaveBeenCalledTimes(2);
+    expect(container.getActiveMcpClients()).toHaveLength(1);
+
+    await container.initializeMcpTools();
+    expect(skillMcpClientMock.createSkillMcpClient).toHaveBeenCalledTimes(2);
+    await container.shutdownRuntime();
+    expect(secondDisconnect).toHaveBeenCalledTimes(1);
   });
 
   it("closes task admission before shutdown can be escaped by a late lookup", async () => {
@@ -1518,6 +1641,65 @@ describe("app container goal drafts", () => {
       id: goal.id,
       status: "achieved",
     });
+  });
+
+  it("lists Chat projections without hydrating transcripts and pages detail IPC data", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const store = container.chatSessionStore();
+    let sessionId = "";
+    for (let index = 1; index <= 95; index += 1) {
+      const appended = await store.appendMessage({
+        ...(sessionId ? { sessionId } : {}),
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `bounded transcript ${index}`,
+      });
+      sessionId = appended.session.id;
+    }
+    const goal = createStoredGoal({
+      id: "goal_list_batch",
+      chatSessionId: sessionId,
+      status: "executing",
+    });
+    await container.agentGoalStore().save(goal);
+    await store.attachGoal(sessionId, {
+      id: goal.id,
+      description: goal.description,
+      status: goal.status,
+    });
+    const fullGet = vi.spyOn(store, "get");
+    const goalStore = container.agentGoalStore();
+    const singleGoalGet = vi.spyOn(goalStore, "get");
+    const batchGoalGet = vi.spyOn(goalStore, "getMany");
+
+    const listed = await container.listChatSessions();
+
+    expect(listed).toEqual([
+      expect.objectContaining({
+        id: sessionId,
+        messageCount: 95,
+        activeGoal: expect.objectContaining({ id: goal.id }),
+      }),
+    ]);
+    expect(fullGet).not.toHaveBeenCalled();
+    expect(singleGoalGet).not.toHaveBeenCalled();
+    expect(batchGoalGet).toHaveBeenCalledTimes(2);
+
+    const page = await container.getChatSessionTranscriptPage(sessionId, {
+      limit: 80,
+    });
+    expect(page?.session.messages).toHaveLength(80);
+    expect(page?.session.messages[0]?.content).toBe("bounded transcript 16");
+    expect(page?.page).toMatchObject({
+      startSequence: 16,
+      endSequence: 95,
+      totalMessages: 95,
+      hasMoreBefore: true,
+    });
+    expect(fullGet).not.toHaveBeenCalled();
   });
 
   it("restores a legacy failed goal as recovery context without marking it active", async () => {

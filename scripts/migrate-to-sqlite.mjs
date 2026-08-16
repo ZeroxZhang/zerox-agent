@@ -1,71 +1,103 @@
 #!/usr/bin/env node
-// P1 one-shot migration: read legacy JSON/JSONL files under a configDir and
-// load them into zerox.db via the P1 repositories. Idempotent (upserts).
+// Import only SQLite-authoritative domains from legacy JSON/JSONL files.
+// Plan is imported because this script performs the JSON -> SQLite cutover.
 //
 //   node scripts/migrate-to-sqlite.mjs --configDir <path> [--dry-run] [--verify]
 //
-// Failures are recorded to <configDir>/migration-errors.jsonl and do not abort
-// the overall migration (per spec T1.7). --dry-run reports planned row counts
-// without writing. --verify compares this invocation's target deltas with the
-// independently counted source records.
+// --verify is idempotent: it verifies source identities in the final target
+// instead of requiring every invocation to increase table counts.
 
-import { readFileSync, readdirSync, existsSync, writeFileSync, appendFileSync, mkdirSync, statSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 const args = parseArgs(process.argv.slice(2));
 const configDir = args.configDir;
 if (!configDir) {
-  console.error("usage: node scripts/migrate-to-sqlite.mjs --configDir <path> [--dry-run] [--verify]");
+  console.error(
+    "usage: node scripts/migrate-to-sqlite.mjs --configDir <path> [--dry-run] [--verify]",
+  );
   process.exit(2);
 }
 
 const root = path.resolve(new URL("..", import.meta.url).pathname);
-// Import the compiled storage layer (built via `npm run build`).
-const {
-  createStorageImpl,
-} = await import(path.join(root, "dist-electron/main/storage/storageDb.js"));
-const runsRepo = await import(path.join(root, "dist-electron/main/storage/repositories/runRepository.js"));
-const repos = await import(path.join(root, "dist-electron/main/storage/repositories/index.js"));
-const ckRepo = await import(path.join(root, "dist-electron/main/storage/repositories/checkpointRepository.js"));
-const goalRepo = await import(path.join(root, "dist-electron/main/storage/repositories/goalRepository.js"));
-const memRepo = await import(path.join(root, "dist-electron/main/storage/repositories/memoryRepository.js"));
-const sessRepo = await import(path.join(root, "dist-electron/main/storage/repositories/sessionRepository.js"));
-const chatRepo = await import(path.join(root, "dist-electron/main/storage/repositories/chatSessionEventRepository.js"));
-const chatStore = await import(path.join(root, "dist-electron/main/chatSessionStore.js"));
+const { createStorageImpl } = await import(
+  path.join(root, "dist-electron/main/storage/storageDb.js")
+);
+const runsRepo = await import(
+  path.join(root, "dist-electron/main/storage/repositories/runRepository.js")
+);
+const repos = await import(
+  path.join(root, "dist-electron/main/storage/repositories/index.js")
+);
+const chatRepo = await import(
+  path.join(
+    root,
+    "dist-electron/main/storage/repositories/chatSessionEventRepository.js",
+  )
+);
+const chatStore = await import(
+  path.join(root, "dist-electron/main/chatSessionStore.js")
+);
+const skillSnapshots = await import(
+  path.join(root, "dist-electron/shared/skills.js")
+);
 
 const errorsPath = path.join(configDir, "migration-errors.jsonl");
 if (existsSync(errorsPath)) writeFileSync(errorsPath, "");
 const counts = {};
 const sourceCounts = {};
+const sourceKeys = new Map();
 const failures = { parse: 0, write: 0 };
-function bump(store, n) { counts[store] = (counts[store] ?? 0) + n; }
-function bumpSource(store, n) {
-  sourceCounts[store] = (sourceCounts[store] ?? 0) + n;
+
+function bump(store, amount = 1) {
+  counts[store] = (counts[store] ?? 0) + amount;
 }
+
+function trackSource(store, key) {
+  sourceCounts[store] = (sourceCounts[store] ?? 0) + 1;
+  const keys = sourceKeys.get(store) ?? new Set();
+  keys.add(String(key));
+  sourceKeys.set(store, keys);
+}
+
 function logError(store, detail, kind) {
   failures[kind] += 1;
   appendFileSync(
     errorsPath,
-    JSON.stringify({ store, kind, detail, at: new Date().toISOString() }) + "\n",
+    `${JSON.stringify({
+      store,
+      kind,
+      detail,
+      at: new Date().toISOString(),
+    })}\n`,
   );
 }
+
 function logParseError(store, detail) {
   logError(store, detail, "parse");
 }
+
 function logWriteError(store, detail) {
   logError(store, detail, "write");
 }
+
 function readJson(file, fallback) {
+  if (!existsSync(file)) return fallback;
   try {
-    if (!existsSync(file)) return fallback;
     return JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
     logParseError(file, `parse failed: ${String(error)}`);
     return fallback;
   }
 }
+
 function readJsonStrict(file, fallback) {
   if (!existsSync(file)) return fallback;
   try {
@@ -75,51 +107,29 @@ function readJsonStrict(file, fallback) {
     throw new Error(`${file} parse failed: ${String(error)}`);
   }
 }
+
 function readJsonl(file, store) {
   if (!existsSync(file)) return [];
   const rows = [];
-  readFileSync(file, "utf8").split("\n").forEach((line, index) => {
-    if (!line.trim()) return;
-    bumpSource(store, 1);
-    try {
-      rows.push(JSON.parse(line));
-    } catch (error) {
-      logParseError(file, `line ${index + 1} parse failed: ${String(error)}`);
-    }
-  });
+  readFileSync(file, "utf8")
+    .split("\n")
+    .forEach((line, index) => {
+      if (!line.trim()) return;
+      try {
+        rows.push(JSON.parse(line));
+      } catch (error) {
+        sourceCounts[store] = (sourceCounts[store] ?? 0) + 1;
+        logParseError(
+          file,
+          `line ${index + 1} parse failed: ${String(error)}`,
+        );
+      }
+    });
   return rows;
 }
 
-function dryRunOnly() { return args["dry-run"] === true; }
-
-const storage = createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
-await storage.migrate();
-const db = storage.db;
-const targetBaselineCounts = {};
-if (args.verify) {
-  for (const table of [
-    "workspaces",
-    "sessions",
-    "chat_messages",
-    "chat_session_events",
-    "tasks",
-    "runs",
-    "trajectory_events",
-    "memory_records",
-    "memory_profile",
-    "goals",
-    "goal_ledger",
-    "tool_audit",
-    "tool_results",
-    "learning_candidates",
-    "eval_candidates",
-    "validation_snapshots",
-    "promoted_eval_fixtures",
-    "artifacts",
-  ]) {
-    targetBaselineCounts[table] =
-      db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n ?? 0;
-  }
+function dryRunOnly() {
+  return args["dry-run"] === true;
 }
 
 function normalizeMigratedTask(task) {
@@ -134,17 +144,13 @@ function normalizeMigratedTask(task) {
   return currentPermissions ? task : { ...task, permissions: undefined };
 }
 
-// 1. workspaces
-{
-  const data = readJson(path.join(configDir, "agent-workspaces.json"), { workspaces: [] });
-  for (const w of data.workspaces ?? []) {
-    bumpSource("workspaces", 1);
-    if (dryRunOnly()) { bump("workspaces", 1); continue; }
-    try { repos.createWorkspaceRepository(storage).save(w); bump("workspaces", 1); } catch (e) { logWriteError("workspaces", String(e)); }
-  }
-}
+const storage = createStorageImpl({
+  dbPath: path.join(configDir, "zerox.db"),
+});
+await storage.migrate();
+const db = storage.db;
 
-// 2. chat sessions + messages
+// Chat sessions, immutable messages, events, and projections.
 {
   try {
     const data = readJsonStrict(
@@ -152,19 +158,25 @@ function normalizeMigratedTask(task) {
       { sessions: [] },
     );
     for (const session of data.sessions ?? []) {
-      bumpSource("sessions", 1);
-      bumpSource("chat_messages", session.messages?.length ?? 0);
-      bumpSource("chat_session_events", 1);
+      trackSource("sessions", session.id);
+      for (const message of session.messages ?? []) {
+        trackSource("chat_messages", message.id);
+      }
+      trackSource("chat_session_events", `chat_import_${session.id}`);
     }
     const sessions = (data.sessions ?? []).map((session) =>
       chatStore.normalizeChatSessionRecord(session),
     );
     if (dryRunOnly()) {
-      for (const session of sessions) {
-        bump("sessions", 1);
-        bump("chat_messages", session.messages?.length ?? 0);
-        bump("chat_session_events", 1);
-      }
+      bump("sessions", sessions.length);
+      bump(
+        "chat_messages",
+        sessions.reduce(
+          (total, session) => total + session.messages.length,
+          0,
+        ),
+      );
+      bump("chat_session_events", sessions.length);
     } else {
       const repository = chatRepo.createChatSessionEventRepository(storage);
       repository.importSnapshots(
@@ -183,96 +195,104 @@ function normalizeMigratedTask(task) {
       bump(
         "chat_messages",
         sessions.reduce(
-          (total, session) => total + (session.messages?.length ?? 0),
+          (total, session) => total + session.messages.length,
           0,
         ),
       );
       bump("chat_session_events", sessions.length);
     }
-  } catch (e) {
-    if (!String(e).includes(" parse failed:")) {
-      logWriteError("sessions", String(e));
+  } catch (error) {
+    if (!String(error).includes(" parse failed:")) {
+      logWriteError("sessions", String(error));
     }
   }
 }
 
-// 3. multi-agent sessions + actors
+// Scheduled Tasks.
 {
-  const data = readJson(path.join(configDir, "multi-agent-sessions.json"), { sessions: [] });
-  for (const s of data.sessions ?? []) {
-    bumpSource("sessions_multi", 1);
-    if (dryRunOnly()) { bump("sessions_multi", 1); continue; }
-    try {
-      sessRepo.createSessionRepository(storage).createSession({
-        id: s.id, kind: "multi_agent", title: s.title, status: s.status,
-        rootRunId: s.rootRunId, workspaceId: s.workspaceId, payload: s,
-        createdAt: s.createdAt, updatedAt: s.updatedAt,
-      });
-      bump("sessions_multi", 1);
-    } catch (e) { logWriteError("sessions_multi", String(e)); }
-  }
-}
-// 4. tasks
-{
-  const data = readJson(path.join(configDir, "scheduled-tasks.json"), { tasks: [] });
-  for (const t of data.tasks ?? []) {
-    bumpSource("tasks", 1);
-    if (dryRunOnly()) { bump("tasks", 1); continue; }
+  const data = readJson(path.join(configDir, "scheduled-tasks.json"), {
+    tasks: [],
+  });
+  for (const task of data.tasks ?? []) {
+    trackSource("tasks", task.id);
+    if (dryRunOnly()) {
+      bump("tasks");
+      continue;
+    }
     try {
       repos.createTaskRepository(storage).create({
-        ...normalizeMigratedTask(t),
-        id: t.id,
+        ...normalizeMigratedTask(task),
+        id: task.id,
       });
-      bump("tasks", 1);
-    } catch (e) { logWriteError("tasks", String(e)); }
+      bump("tasks");
+    } catch (error) {
+      logWriteError("tasks", String(error));
+    }
   }
 }
 
-// 5. runs
+// Runs.
 {
-  const runs = readJsonl(path.join(configDir, "agent-runs.jsonl"), "runs");
-  for (const r of runs) {
-    if (dryRunOnly()) { bump("runs", 1); continue; }
-    try { runsRepo.createRunRepository(storage).create(r); bump("runs", 1); } catch (e) { logWriteError("runs", String(e)); }
+  const rows = readJsonl(path.join(configDir, "agent-runs.jsonl"), "runs");
+  for (const run of rows) {
+    trackSource("runs", run.id);
+    if (dryRunOnly()) {
+      bump("runs");
+      continue;
+    }
+    try {
+      runsRepo.createRunRepository(storage).create(run);
+      bump("runs");
+    } catch (error) {
+      logWriteError("runs", String(error));
+    }
   }
 }
 
-// 6. trajectory_events
+// Trajectory events, including orphan run groups.
 {
   const dir = path.join(configDir, "agent-trajectories");
   if (existsSync(dir)) {
-    for (const f of readdirSync(dir).filter((f) => f.endsWith(".jsonl"))) {
-      const runId = f.replace(/\.jsonl$/, "");
-      for (const e of readJsonl(path.join(dir, f), "trajectory_events")) {
-        if (dryRunOnly()) { bump("trajectory_events", 1); continue; }
-        try { runsRepo.createRunRepository(storage).appendTrajectory(e.runId ?? runId, e); bump("trajectory_events", 1); } catch (err) { logWriteError("trajectory_events", String(err)); }
+    for (const filename of readdirSync(dir).filter((name) =>
+      name.endsWith(".jsonl")
+    )) {
+      const runId = filename.replace(/\.jsonl$/, "");
+      const rows = readJsonl(
+        path.join(dir, filename),
+        "trajectory_events",
+      );
+      for (const event of rows) {
+        trackSource("trajectory_events", event.id);
+        if (dryRunOnly()) {
+          bump("trajectory_events");
+          continue;
+        }
+        try {
+          runsRepo
+            .createRunRepository(storage)
+            .appendTrajectory(event.runId ?? runId, event);
+          bump("trajectory_events");
+        } catch (error) {
+          logWriteError("trajectory_events", String(error));
+        }
       }
     }
   }
 }
 
-// 7. memory_records
-{
-  const data = readJson(path.join(configDir, "memory-records.json"), { records: [] });
-  for (const m of data.records ?? []) {
-    bumpSource("memory_records", 1);
-    if (dryRunOnly()) { bump("memory_records", 1); continue; }
-    try { memRepo.createMemoryRepository(storage).write(m); bump("memory_records", 1); } catch (e) { logWriteError("memory_records", String(e)); }
-  }
-}
-
-// 8. memory_profile
+// Memory Profile.
 {
   const file = path.join(configDir, "memory-persona.md");
   if (existsSync(file)) {
-    bumpSource("memory_profile", 1);
-    const content = readFileSync(file, "utf8");
+    trackSource("memory_profile", "singleton");
     if (dryRunOnly()) {
-      bump("memory_profile", 1);
+      bump("memory_profile");
     } else {
       try {
-        repos.createMemoryProfileRepository(storage).save(content);
-        bump("memory_profile", 1);
+        repos
+          .createMemoryProfileRepository(storage)
+          .save(readFileSync(file, "utf8"));
+        bump("memory_profile");
       } catch (error) {
         logWriteError("memory_profile", String(error));
       }
@@ -280,77 +300,40 @@ function normalizeMigratedTask(task) {
   }
 }
 
-// 9. goals + ledger
+// Tool authorization audit.
 {
-  const dir = path.join(configDir, "agent-goals");
-  if (existsSync(dir)) {
-    for (const f of readdirSync(dir).filter((f) => f.endsWith(".json") && !f.endsWith(".ledger.jsonl"))) {
-      const g = readJson(path.join(dir, f), null);
-      if (g) { bumpSource("goals", 1); if (dryRunOnly()) { bump("goals", 1); continue; } try { goalRepo.createGoalRepository(storage).save(g); bump("goals", 1); } catch (e) { logWriteError("goals", String(e)); } }
-    }
-    for (const f of readdirSync(dir).filter((f) => f.endsWith(".ledger.jsonl"))) {
-      const goalId = f.replace(/\.ledger\.jsonl$/, "");
-      for (const ev of readJsonl(path.join(dir, f), "goal_ledger")) {
-        if (dryRunOnly()) { bump("goal_ledger", 1); continue; }
-        try { goalRepo.createGoalRepository(storage).appendLedger(goalId, ev); bump("goal_ledger", 1); } catch (e) { logWriteError("goal_ledger", String(e)); }
-      }
-    }
-  }
-}
-
-// 10. tool_audit
-{
-  for (const e of readJsonl(path.join(configDir, "tool-audit.jsonl"), "tool_audit")) {
-    if (dryRunOnly()) { bump("tool_audit", 1); continue; }
-    try { repos.createToolAuditRepository(storage).append(e); bump("tool_audit", 1); } catch (err) { logWriteError("tool_audit", String(err)); }
-  }
-}
-
-// 11. tool_results (raw string content)
-{
-  const dir = path.join(configDir, "tool-result-refs");
-  if (existsSync(dir)) {
-    for (const f of readdirSync(dir).filter((f) => f.endsWith(".json"))) {
-      bumpSource("tool_results", 1);
-      const refId = f.replace(/\.json$/, "");
-      const content = readFileSync(path.join(dir, f), "utf8");
-      if (dryRunOnly()) { bump("tool_results", 1); continue; }
-      try { repos.createToolResultRepository(storage).write({ refId, content }); bump("tool_results", 1); } catch (e) { logWriteError("tool_results", String(e)); }
-    }
-  }
-}
-
-// 12. learning_candidates
-{
-  const data = readJson(path.join(configDir, "agent-learning-candidates.json"), { candidates: [] });
-  for (const c of data.candidates ?? []) {
-    bumpSource("learning_candidates", 1);
-    if (dryRunOnly()) { bump("learning_candidates", 1); continue; }
-    try { repos.createLearningRepository(storage).create(c); bump("learning_candidates", 1); } catch (e) { logWriteError("learning_candidates", String(e)); }
-  }
-}
-
-// 13. eval_candidates
-{
-  const data = readJson(path.join(configDir, "agent-eval-candidates.json"), { candidates: [] });
-  for (const c of data.candidates ?? []) {
-    bumpSource("eval_candidates", 1);
-    if (dryRunOnly()) { bump("eval_candidates", 1); continue; }
-    try { repos.createEvalCandidateRepository(storage).create(c); bump("eval_candidates", 1); } catch (e) { logWriteError("eval_candidates", String(e)); }
-  }
-}
-
-// 14. validation_snapshots
-{
-  const data = readJson(path.join(configDir, "agent-validation.json"), { latest: null });
-  if (data.latest) {
-    bumpSource("validation_snapshots", 1);
+  const rows = readJsonl(
+    path.join(configDir, "tool-audit.jsonl"),
+    "tool_audit",
+  );
+  for (const event of rows) {
+    trackSource("tool_audit", event.id);
     if (dryRunOnly()) {
-      bump("validation_snapshots", 1);
+      bump("tool_audit");
+      continue;
+    }
+    try {
+      repos.createToolAuditRepository(storage).append(event);
+      bump("tool_audit");
+    } catch (error) {
+      logWriteError("tool_audit", String(error));
+    }
+  }
+}
+
+// Validation snapshot.
+{
+  const data = readJson(path.join(configDir, "agent-validation.json"), {
+    latest: null,
+  });
+  if (data.latest) {
+    trackSource("validation_snapshots", "latest");
+    if (dryRunOnly()) {
+      bump("validation_snapshots");
     } else {
       try {
         repos.createValidationRepository(storage).save(data.latest);
-        bump("validation_snapshots", 1);
+        bump("validation_snapshots");
       } catch (error) {
         logWriteError("validation_snapshots", String(error));
       }
@@ -358,99 +341,174 @@ function normalizeMigratedTask(task) {
   }
 }
 
-// 15. promoted_eval_fixtures
+// SQLite-mode Plan records and append-only events.
 {
-  const data = readJson(path.join(configDir, "agent-promoted-eval-fixtures.json"), { fixtures: [] });
-  for (const f of data.fixtures ?? []) {
-    bumpSource("promoted_eval_fixtures", 1);
-    if (dryRunOnly()) { bump("promoted_eval_fixtures", 1); continue; }
-    try { repos.createPromotedEvalFixtureRepository(storage).upsert(f); bump("promoted_eval_fixtures", 1); } catch (e) { logWriteError("promoted_eval_fixtures", String(e)); }
-  }
-}
-
-// 16. artifacts (provenance sidecars)
-{
-  function walk(dir) {
-    if (!existsSync(dir)) return [];
-    const out = [];
-    for (const f of readdirSync(dir)) {
-      const full = path.join(dir, f);
-      const stat = statSync(full);
-      if (stat.isDirectory()) out.push(...walk(full));
-      else if (f.endsWith(".provenance.json")) out.push(full);
+  const dir = path.join(configDir, "plans");
+  if (existsSync(dir)) {
+    for (const filename of readdirSync(dir).filter(
+      (name) =>
+        name.endsWith(".json") &&
+        name !== "session-index.json",
+    )) {
+      const plan = readJson(path.join(dir, filename), null);
+      if (!plan) continue;
+      const persistedPlan = plan.selectedSkill
+        ? {
+            ...plan,
+            selectedSkill: skillSnapshots.createPublicSkillSnapshot(
+              plan.selectedSkill,
+            ),
+          }
+        : plan;
+      trackSource("plan_records", plan.id);
+      if (dryRunOnly()) {
+        bump("plan_records");
+        continue;
+      }
+      try {
+        db.prepare(
+          `INSERT INTO plan_records
+            (id, session_id, mode, status, action_gate, revision, payload,
+             created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             session_id=excluded.session_id,
+             mode=excluded.mode,
+             status=excluded.status,
+             action_gate=excluded.action_gate,
+             revision=excluded.revision,
+             payload=excluded.payload,
+             updated_at=excluded.updated_at`,
+        ).run(
+          persistedPlan.id,
+          persistedPlan.sessionId,
+          persistedPlan.mode,
+          persistedPlan.status,
+          persistedPlan.actionGate,
+          persistedPlan.revision,
+          JSON.stringify(persistedPlan),
+          persistedPlan.createdAt,
+          persistedPlan.updatedAt,
+        );
+        bump("plan_records");
+      } catch (error) {
+        logWriteError("plan_records", String(error));
+      }
     }
-    return out;
-  }
-  for (const file of walk(configDir)) {
-    const manifest = readJson(file, null);
-    if (!manifest || !manifest.artifactId) continue;
-    bumpSource("artifacts", 1);
-    if (dryRunOnly()) { bump("artifacts", 1); continue; }
-    try {
-      db.prepare(
-        `INSERT OR REPLACE INTO artifacts (id, run_id, goal_id, milestone_id, path, sha256, source, payload, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        manifest.artifactId, manifest.runId ?? null, manifest.goalId ?? null,
-        manifest.milestoneId ?? null, manifest.destination?.path ?? null,
-        manifest.destination?.sha256 ?? null, JSON.stringify(manifest.source ?? null),
-        JSON.stringify(manifest), manifest.generatedAt ?? new Date().toISOString(),
-      );
-      bump("artifacts", 1);
-    } catch (e) { logWriteError("artifacts", String(e)); }
+
+    for (const filename of readdirSync(dir).filter((name) =>
+      name.endsWith(".events.jsonl")
+    )) {
+      const rows = readJsonl(path.join(dir, filename), "plan_events");
+      for (const event of rows) {
+        trackSource("plan_events", event.id);
+        if (dryRunOnly()) {
+          bump("plan_events");
+          continue;
+        }
+        try {
+          db.prepare(
+            `INSERT INTO plan_events
+              (id, plan_id, type, revision, payload, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               plan_id=excluded.plan_id,
+               type=excluded.type,
+               revision=excluded.revision,
+               payload=excluded.payload,
+               created_at=excluded.created_at`,
+          ).run(
+            event.id,
+            event.planId,
+            event.type,
+            event.revision,
+            event.payload ? JSON.stringify(event.payload) : null,
+            event.createdAt,
+          );
+          bump("plan_events");
+        } catch (error) {
+          logWriteError("plan_events", String(error));
+        }
+      }
+    }
   }
 }
 
 storage.close();
 
 const targetCounts = {};
-const targetTotalCounts = {};
 const mismatches = [];
 if (args.verify) {
-  const storage2 = createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
+  const storage2 = createStorageImpl({
+    dbPath: path.join(configDir, "zerox.db"),
+  });
   await storage2.migrate();
-  const db2 = storage2.db;
-  const expectedTargets = {};
-  for (const [store, count] of Object.entries(sourceCounts)) {
-    const table = store === "sessions_multi" ? "sessions" : store;
-    expectedTargets[table] = (expectedTargets[table] ?? 0) + count;
-  }
-  for (const [table, expected] of Object.entries(expectedTargets)) {
-    const row = db2.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get();
-    const total = row?.n ?? 0;
-    const baseline = targetBaselineCounts[table] ?? 0;
-    const migrated = total - baseline;
-    targetCounts[table] = migrated;
-    targetTotalCounts[table] = total;
+  const keyColumns = {
+    sessions: "id",
+    chat_messages: "id",
+    chat_session_events: "id",
+    tasks: "id",
+    runs: "id",
+    trajectory_events: "id",
+    memory_profile: "id",
+    tool_audit: "id",
+    validation_snapshots: "id",
+    plan_records: "id",
+    plan_events: "id",
+  };
+  for (const [table, keys] of sourceKeys) {
+    const keyColumn = keyColumns[table];
+    const targetKeys = new Set(
+      storage2.db
+        .prepare(`SELECT ${keyColumn} AS key FROM ${table}`)
+        .all()
+        .map((row) => String(row.key)),
+    );
+    const present = [...keys].filter((key) => targetKeys.has(key)).length;
+    const source = sourceCounts[table] ?? 0;
+    targetCounts[table] = present;
     const status =
-      migrated === expected ? "OK" : `MISMATCH (expected delta ${expected})`;
-    if (migrated !== expected) {
+      present === keys.size && source === keys.size
+        ? "OK"
+        : `MISMATCH (source=${source}, unique=${keys.size}, present=${present})`;
+    if (status !== "OK") {
       mismatches.push({
         table,
-        source: expected,
-        target: migrated,
-        baseline,
-        total,
+        source,
+        uniqueSourceKeys: keys.size,
+        target: present,
       });
     }
-    console.log(
-      `  verify ${table}: before=${baseline} after=${total} delta=${migrated} ${status}`,
-    );
+    console.log(`  verify ${table}: ${status}`);
   }
   storage2.close();
 }
 
-console.log(JSON.stringify({
-  dryRun: dryRunOnly(),
-  sourceCounts,
-  counts,
-  targetBaselineCounts,
-  targetCounts,
-  targetTotalCounts,
-  failures,
-  mismatches,
-  errors: existsSync(errorsPath) ? errorsPath : null,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      dryRun: dryRunOnly(),
+      authority: [
+        "chat",
+        "run",
+        "trajectory",
+        "task",
+        "validation",
+        "memory_profile",
+        "tool_audit",
+        "plan_sqlite_mode",
+      ],
+      sourceCounts,
+      counts,
+      targetCounts,
+      failures,
+      mismatches,
+      errors: existsSync(errorsPath) ? errorsPath : null,
+    },
+    null,
+    2,
+  ),
+);
 
 if (
   args.verify &&
@@ -461,12 +519,14 @@ if (
 
 function parseArgs(argv) {
   const out = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a.startsWith("--")) {
-      const key = a.slice(2);
-      if (argv[i + 1] && !argv[i + 1].startsWith("--")) { out[key] = argv[++i]; }
-      else out[key] = true;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (!argument.startsWith("--")) continue;
+    const key = argument.slice(2);
+    if (argv[index + 1] && !argv[index + 1].startsWith("--")) {
+      out[key] = argv[++index];
+    } else {
+      out[key] = true;
     }
   }
   return out;

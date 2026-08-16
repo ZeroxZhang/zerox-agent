@@ -63,38 +63,61 @@ describe("Skill MCP client activation", () => {
     ).toBe(0o700);
   });
 
-  it.each(["http", "sse"] as const)(
-    "routes trusted %s manifests to the remote transport client",
-    async (transport) => {
-      const configDir = await tempDir();
-      const createRemoteClient = vi.fn(
-        (_config: McpServerTransportConfig) => client(),
-      );
+  it("routes trusted HTTP manifests to the remote transport client", async () => {
+    const configDir = await tempDir();
+    const createRemoteClient = vi.fn(
+      (_config: McpServerTransportConfig) => client(),
+    );
 
-      await createSkillMcpClient(
+    await createSkillMcpClient(
+      {
+        sourceSkill: "research",
+        name: "remote-http",
+        transport: "http",
+        url: "https://mcp.example.test/http",
+        headers: { "x-client": "zerox" },
+      },
+      {
+        configDir,
+        processSandbox: sandbox(),
+        createRemoteClient,
+      },
+    );
+
+    expect(createRemoteClient).toHaveBeenCalledWith({
+      name: "remote-http",
+      transport: "http",
+      url: "https://mcp.example.test/http",
+      headers: { "x-client": "zerox" },
+    });
+    expect(await readdir(configDir)).toEqual([]);
+  });
+
+  it("rejects SSE manifests before creating a remote client", async () => {
+    const configDir = await tempDir();
+    const createRemoteClient = vi.fn(
+      (_config: McpServerTransportConfig) => client(),
+    );
+
+    await expect(
+      createSkillMcpClient(
         {
           sourceSkill: "research",
-          name: `remote-${transport}`,
-          transport,
-          url: `https://mcp.example.test/${transport}`,
-          headers: { "x-client": "zerox" },
+          name: "remote-sse",
+          transport: "sse",
+          url: "https://mcp.example.test/sse",
         },
         {
           configDir,
           processSandbox: sandbox(),
           createRemoteClient,
         },
-      );
+      ),
+    ).rejects.toThrow(/MCP SSE transport is not implemented/);
 
-      expect(createRemoteClient).toHaveBeenCalledWith({
-        name: `remote-${transport}`,
-        transport,
-        url: `https://mcp.example.test/${transport}`,
-        headers: { "x-client": "zerox" },
-      });
-      expect(await readdir(configDir)).toEqual([]);
-    },
-  );
+    expect(createRemoteClient).not.toHaveBeenCalled();
+    expect(await readdir(configDir)).toEqual([]);
+  });
 });
 
 async function tempDir(): Promise<string> {

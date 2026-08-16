@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
 import { createInMemoryStorage, createStorageImpl, createTempFileStorage } from "./storageDb";
 import { BUNDLED_MIGRATIONS } from "./migrationBundle";
 import { readFileSync, readdirSync } from "node:fs";
@@ -13,6 +14,8 @@ const ALL_TABLES = [
   "chat_session_events",
   "chat_session_projections",
   "chat_store_metadata",
+  "chat_message_fts",
+  "chat_session_title_fts",
   "runs",
   "trajectory_events",
   "checkpoints",
@@ -80,7 +83,44 @@ describe("storageDb", () => {
       .prepare("SELECT COUNT(*) AS n FROM __zerox_migrations")
       .get() as { n: number };
     expect(rows.n).toBe(BUNDLED_MIGRATIONS.length);
+    expect(
+      storage.db
+        .prepare(
+          "SELECT name, ordinal FROM __zerox_migrations ORDER BY ordinal ASC",
+        )
+        .all(),
+    ).toEqual(
+      BUNDLED_MIGRATIONS.map(({ name, ordinal }) => ({ name, ordinal })),
+    );
     storage.close();
+  });
+
+  it.each([
+    {
+      label: "name",
+      sql: "UPDATE __zerox_migrations SET name = '9999_unknown.sql' WHERE ordinal = 0",
+    },
+    {
+      label: "ordinal",
+      sql: "UPDATE __zerox_migrations SET ordinal = 99 WHERE ordinal = 0",
+    },
+    {
+      label: "SHA",
+      sql: "UPDATE __zerox_migrations SET sha256 = 'tampered' WHERE ordinal = 0",
+    },
+  ])("fails closed when migration ledger $label drifts", async ({ sql }) => {
+    const dir = join(tmpdir(), `zerox-ledger-${randomUUID()}`);
+    const dbPath = join(dir, "zerox.db");
+    const storage = createStorageImpl({ dbPath });
+    storage.close();
+    const raw = new Database(dbPath);
+    raw.exec(sql);
+    raw.close();
+
+    expect(() => createStorageImpl({ dbPath })).toThrow(
+      /migration ledger mismatch/,
+    );
+    await rm(dir, { recursive: true, force: true });
   });
 
   it("creates required indexes", async () => {

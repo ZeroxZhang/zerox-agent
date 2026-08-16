@@ -18,6 +18,7 @@ import {
   ensurePlanGoalContract,
   goalContractMatchesRef,
 } from "./goalPlanContractService";
+import { createPublicSkillSnapshot } from "../shared/skills";
 
 export type PlanStoreEvent = {
   id: string;
@@ -86,27 +87,42 @@ export function createPlanStore(options: {
     return path.join(plansDir, SESSION_INDEX_FILENAME);
   }
 
+  function readSqlitePlanPayload(payload: string): PlanRecord {
+    const parsed = JSON.parse(payload) as PlanRecord;
+    const validated = validatePlanRecord(parsed);
+    if (
+      options.storage &&
+      parsed.selectedSkill &&
+      JSON.stringify(parsed.selectedSkill) !==
+        JSON.stringify(validated.selectedSkill)
+    ) {
+      writeSqlitePlan(options.storage, validated);
+    }
+    return recoverInterruptedPlanRecord(validated, activeRunIds);
+  }
+
   async function readPlan(planId: string): Promise<PlanRecord | null> {
     safePlanId(planId);
     if (options.storage) {
       const row = options.storage.db
         .prepare("SELECT payload FROM plan_records WHERE id = ?")
         .get<{ payload: string }>(planId);
-      return row
-        ? recoverInterruptedPlanRecord(
-            validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
-            activeRunIds,
-          )
-        : null;
+      if (!row) return null;
+      return readSqlitePlanPayload(row.payload);
     }
     try {
       const parsed = JSON.parse(
         await readFile(planPath(planId), "utf8"),
       ) as PlanRecord;
-      return recoverInterruptedPlanRecord(
-        validatePlanRecord(parsed),
-        activeRunIds,
-      );
+      const validated = validatePlanRecord(parsed);
+      if (
+        parsed.selectedSkill &&
+        JSON.stringify(parsed.selectedSkill) !==
+          JSON.stringify(validated.selectedSkill)
+      ) {
+        await writePlan(validated);
+      }
+      return recoverInterruptedPlanRecord(validated, activeRunIds);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -289,12 +305,7 @@ export function createPlanStore(options: {
             "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
           )
           .all<{ payload: string }>(sessionId)
-          .map((row) =>
-            recoverInterruptedPlanRecord(
-              validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
-              activeRunIds,
-            ),
-          );
+          .map((row) => readSqlitePlanPayload(row.payload));
       }
       try {
         const names = await readdir(plansDir);
@@ -327,12 +338,7 @@ export function createPlanStore(options: {
         return options.storage.db
           .prepare("SELECT payload FROM plan_records ORDER BY updated_at DESC")
           .all<{ payload: string }>()
-          .map((row) =>
-            recoverInterruptedPlanRecord(
-              validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
-              activeRunIds,
-            ),
-          );
+          .map((row) => readSqlitePlanPayload(row.payload));
       }
       try {
         const names = await readdir(plansDir);
@@ -364,12 +370,7 @@ export function createPlanStore(options: {
             "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1",
           )
           .get<{ payload: string }>(sessionId);
-        return row
-          ? recoverInterruptedPlanRecord(
-              validatePlanRecord(JSON.parse(row.payload) as PlanRecord),
-              activeRunIds,
-            )
-          : null;
+        return row ? readSqlitePlanPayload(row.payload) : null;
       }
       await sessionIndexQueue;
       const entry = (await readSessionIndex()).sessions[sessionId];
@@ -458,6 +459,12 @@ function safePlanId(planId: string): string {
 }
 
 function validatePlanRecord(plan: PlanRecord): PlanRecord {
+  plan = plan.selectedSkill
+    ? {
+        ...plan,
+        selectedSkill: createPublicSkillSnapshot(plan.selectedSkill),
+      }
+    : plan;
   if (!plan.id || !plan.sessionId || !plan.sourceMessage) {
     throw new Error("计划记录缺少必要字段。");
   }

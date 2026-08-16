@@ -3,6 +3,7 @@ import { readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { PlanEvidenceItem, PlanRecord } from "../shared/planMode";
 import { readGitPlanningState } from "./nativeGitTools";
+import type { ProcessSandboxProvider } from "./processSandbox";
 
 export type PlanEvidenceVerification = {
   ok: boolean;
@@ -11,6 +12,7 @@ export type PlanEvidenceVerification = {
 
 export async function verifyPlanEvidence(
   plan: PlanRecord,
+  processSandbox?: ProcessSandboxProvider,
 ): Promise<PlanEvidenceVerification> {
   if (!plan.workspaceRoot) {
     return { ok: false, driftedEvidenceIds: ["workspace"] };
@@ -25,9 +27,11 @@ export async function verifyPlanEvidence(
   for (const evidence of plan.evidence) {
     let drifted = false;
     if (evidence.sha256 && evidence.sourceRef) {
-      const current = await resolveCurrentEvidenceHash(root, evidence).catch(
-        () => null,
-      );
+      const current = await resolveCurrentEvidenceHash(
+        root,
+        evidence,
+        processSandbox,
+      ).catch(() => null);
       drifted = current !== evidence.sha256;
     }
     for (const sourceHash of evidence.sourceHashes ?? []) {
@@ -62,6 +66,7 @@ async function resolveCurrentSourceHash(
 async function resolveCurrentEvidenceHash(
   root: string,
   evidence: PlanEvidenceItem,
+  processSandbox?: ProcessSandboxProvider,
 ): Promise<string> {
   if (evidence.kind === "workspace") {
     const source = await realpath(evidence.sourceRef!);
@@ -81,6 +86,7 @@ async function resolveCurrentEvidenceHash(
       return (
         await readGitPlanningState({
           workspaceRoot: source,
+          processSandbox,
         })
       ).sha256;
     }

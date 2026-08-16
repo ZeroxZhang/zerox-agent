@@ -41,7 +41,11 @@ import type { BoundModelClient, ModelRouter } from "./providers/modelRouter";
 import type { PlanArtifactWriter } from "./planArtifactWriter";
 import { renderPlanMarkdown } from "./planArtifactWriter";
 import type { PlanStore } from "./planStore";
-import type { SkillDiscoveryResult, SkillRecord } from "../shared/skills";
+import {
+  createPublicSkillSnapshot,
+  type SkillDiscoveryResult,
+  type SkillRecord,
+} from "../shared/skills";
 import {
   PlanInvestigationError,
   type PlanInvestigatorService,
@@ -62,6 +66,7 @@ import {
 } from "./plannerKernel";
 import { extractRequestedSkillQuery } from "../shared/skillMentions";
 import { readGitPlanningState } from "./nativeGitTools";
+import type { ProcessSandboxProvider } from "./processSandbox";
 import {
   createGoalContractRef,
   deriveGoalContractFromPlan,
@@ -138,11 +143,14 @@ export function createPlanDebateOrchestrator(options: {
   availableToolNames?: () => string[];
   availableAcceptanceKinds?: () => string[];
   enableDirectReview?: boolean;
+  processSandbox?: ProcessSandboxProvider;
 }): PlanDebateOrchestrator {
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? (() => randomUUID());
   const collectEvidence =
-    options.collectEvidence ?? collectBoundedWorkspaceEvidence;
+    options.collectEvidence ??
+    ((input) =>
+      collectBoundedWorkspaceEvidence(input, options.processSandbox));
 
   async function createPlan(input: CreatePlanInput): Promise<PlanRecord> {
     const createdAt = now();
@@ -197,7 +205,7 @@ export function createPlanDebateOrchestrator(options: {
       clarifications: [],
       ...(requestedSkillName !== undefined ? { requestedSkillName } : {}),
       ...(input.selectedSkill
-        ? { selectedSkill: snapshotSelectedSkill(input.selectedSkill) }
+        ? { selectedSkill: createPublicSkillSnapshot(input.selectedSkill) }
         : {}),
       mode: input.mode,
       ...(input.autonomyMode ? { autonomyMode: input.autonomyMode } : {}),
@@ -541,7 +549,9 @@ export function createPlanDebateOrchestrator(options: {
         skillDecision: routing.decision,
         selectedSkillInputValues: routing.decision.inputValues,
         ...(routing.selectedSkill
-          ? { selectedSkill: routing.selectedSkill }
+          ? {
+              selectedSkill: createPublicSkillSnapshot(routing.selectedSkill),
+            }
           : { selectedSkill: undefined }),
         planningStages: [
           ...(initial.planningStages ?? []),
@@ -1137,7 +1147,7 @@ export function createPlanDebateOrchestrator(options: {
       skillDecision: routing.decision,
       selectedSkillInputValues: routing.decision.inputValues,
       ...(routing.selectedSkill
-        ? { selectedSkill: routing.selectedSkill }
+        ? { selectedSkill: createPublicSkillSnapshot(routing.selectedSkill) }
         : { selectedSkill: undefined }),
     };
   }
@@ -1557,12 +1567,16 @@ export function createPlanDebateOrchestrator(options: {
         sourceMessage,
         ...(requestedSkillName !== undefined ? { requestedSkillName } : {}),
         ...(replacementSkill
-          ? { selectedSkill: snapshotSelectedSkill(replacementSkill) }
+          ? { selectedSkill: createPublicSkillSnapshot(replacementSkill) }
           : !skillDisabled &&
               !replacementSkillName &&
               existing.selectedSkill &&
               existing.skillDecision?.source !== "automatic"
-            ? { selectedSkill: snapshotSelectedSkill(existing.selectedSkill) }
+            ? {
+                selectedSkill: createPublicSkillSnapshot(
+                  existing.selectedSkill,
+                ),
+              }
             : {}),
         mode: existing.mode,
         ...(autonomyMode
@@ -1652,7 +1666,7 @@ export function createPlanDebateOrchestrator(options: {
           skillDecision: undefined,
           selectedSkillInputValues: undefined,
           ...(replacementSkill
-            ? { selectedSkill: snapshotSelectedSkill(replacementSkill) }
+            ? { selectedSkill: createPublicSkillSnapshot(replacementSkill) }
             : skillDisabled ||
                 replacementSkillName ||
                 existing.skillDecision?.source === "automatic"
@@ -2937,19 +2951,9 @@ function formatPlanSource(
   ].join("\n\n");
 }
 
-function snapshotSelectedSkill(
-  skill: NonNullable<CreatePlanInput["selectedSkill"]>,
-): NonNullable<PlanRecord["selectedSkill"]> {
-  return {
-    rootDir: skill.rootDir,
-    skillFile: skill.skillFile,
-    body: skill.body,
-    manifest: structuredClone(skill.manifest),
-  };
-}
-
 async function collectBoundedWorkspaceEvidence(
   input: CreatePlanInput,
+  processSandbox?: ProcessSandboxProvider,
 ): Promise<PlanEvidenceItem[]> {
   const evidence: PlanEvidenceItem[] = [
     {
@@ -3027,7 +3031,10 @@ async function collectBoundedWorkspaceEvidence(
     }
   }
   try {
-    const gitState = await readGitPlanningState({ workspaceRoot: root });
+    const gitState = await readGitPlanningState({
+      workspaceRoot: root,
+      processSandbox,
+    });
     evidence.push({
       id: "evidence_git_state",
       kind: "git",

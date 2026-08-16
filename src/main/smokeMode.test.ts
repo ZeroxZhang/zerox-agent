@@ -278,6 +278,7 @@ describe("smoke mode", () => {
         alternateSessionId: "session_2",
         selectedSessionBytes: 5_000_000,
         selectedOutputPartBytes: 4_800_000,
+        selectedMessageCount: 480,
         metrics: {
           listSessionsMs: 10,
           scanSessionsMs: 20,

@@ -1,4 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -58,5 +64,32 @@ describe("native code tools", () => {
       ok: false,
       error: "code_search query is required.",
     });
+  });
+
+  it("treats option-shaped queries as literal ripgrep patterns", async () => {
+    const markerPath = path.join(workspaceRoot, "injected.txt");
+    const query =
+      `--pre=sh -c 'printf injected > ${JSON.stringify(markerPath)}'`;
+    await writeFile(
+      path.join(workspaceRoot, "src", "literal-option.ts"),
+      `// ${query}\n`,
+      "utf8",
+    );
+
+    await expect(
+      searchCode({ workspaceRoot, query }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        query,
+        results: [
+          {
+            relativePath: "src/literal-option.ts",
+            line: 1,
+          },
+        ],
+      },
+    });
+    await expect(access(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

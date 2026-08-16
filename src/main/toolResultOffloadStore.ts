@@ -1,5 +1,11 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import type { ToolResultRefReadScope } from "../shared/toolResultRefs";
 
@@ -68,8 +74,7 @@ export function createToolResultOffloadStore(options: {
       const refId = createRefId(input, createId());
       const relativePath = path.posix.join(rootName, `${refId}.json`);
       const absolutePath = path.join(options.configDir, relativePath);
-      await writeFile(absolutePath, input.content, "utf8");
-      await writeMetadata(absolutePath, input);
+      await commitRefPair(absolutePath, input);
 
       return {
         refId,
@@ -89,12 +94,23 @@ export function createToolResultOffloadStore(options: {
         return null;
       }
 
-      if (!(await canReadRef(absolutePath, relativePath, scope))) {
+      const metadata = await readMetadata(absolutePath);
+      if (!canReadRef(metadata, relativePath, scope)) {
         return null;
       }
 
       try {
-        return await readFile(absolutePath, "utf8");
+        const content = await readFile(absolutePath, "utf8");
+        if (
+          metadata?.schemaVersion === 1 &&
+          (
+            metadata.bytesWritten !== Buffer.byteLength(content, "utf8") ||
+            metadata.contentSha256 !== hashContent(content)
+          )
+        ) {
+          return null;
+        }
+        return content;
       } catch {
         return null;
       }
@@ -103,6 +119,9 @@ export function createToolResultOffloadStore(options: {
 }
 
 type ToolResultOffloadMetadata = {
+  schemaVersion?: 1;
+  contentSha256?: string;
+  bytesWritten?: number;
   runId?: string;
   sessionId?: string;
   requestId?: string;
@@ -111,11 +130,14 @@ type ToolResultOffloadMetadata = {
   toolName: string;
 };
 
-async function writeMetadata(
+async function commitRefPair(
   absolutePath: string,
   input: ToolResultOffloadWriteInput,
 ): Promise<void> {
   const metadata: ToolResultOffloadMetadata = {
+    schemaVersion: 1,
+    contentSha256: hashContent(input.content),
+    bytesWritten: Buffer.byteLength(input.content, "utf8"),
     ...(input.runId ? { runId: input.runId } : {}),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.requestId ? { requestId: input.requestId } : {}),
@@ -123,18 +145,51 @@ async function writeMetadata(
     ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
     toolName: input.toolName,
   };
+  const transactionId = randomUUID();
+  const contentTempPath = `${absolutePath}.${transactionId}.tmp`;
+  const metadataTempPath = `${metadataPath(absolutePath)}.${transactionId}.tmp`;
+  const writes = await Promise.allSettled([
+    writeFile(contentTempPath, input.content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    }),
+    writeFile(metadataTempPath, JSON.stringify(metadata), {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    }),
+  ]);
+  const writeFailure = writes.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (writeFailure) {
+    await cleanupTempPair(contentTempPath, metadataTempPath);
+    throw writeFailure.reason;
+  }
 
-  await writeFile(metadataPath(absolutePath), JSON.stringify(metadata), "utf8");
+  let metadataCommitted = false;
+  try {
+    await rename(metadataTempPath, metadataPath(absolutePath));
+    metadataCommitted = true;
+    await rename(contentTempPath, absolutePath);
+  } catch (error) {
+    if (metadataCommitted) {
+      await rm(metadataPath(absolutePath), { force: true });
+    }
+    throw error;
+  } finally {
+    await cleanupTempPair(contentTempPath, metadataTempPath);
+  }
 }
 
-async function canReadRef(
-  absolutePath: string,
+function canReadRef(
+  metadata: ToolResultOffloadMetadata | null,
   relativePath: string,
   scope: ToolResultOffloadReadScope | undefined,
-): Promise<boolean> {
-  const metadata = await readMetadata(absolutePath);
+): boolean {
   if (!metadata) {
-    return true;
+    return scope === undefined;
   }
   if (scope?.capability && capabilityAllowsRef(scope.capability, relativePath)) {
     return true;
@@ -147,9 +202,10 @@ async function readMetadata(
   absolutePath: string,
 ): Promise<ToolResultOffloadMetadata | null> {
   try {
-    return JSON.parse(
+    const parsed: unknown = JSON.parse(
       await readFile(metadataPath(absolutePath), "utf8"),
-    ) as ToolResultOffloadMetadata;
+    );
+    return isToolResultOffloadMetadata(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -157,6 +213,68 @@ async function readMetadata(
 
 function metadataPath(absolutePath: string): string {
   return `${absolutePath}.meta.json`;
+}
+
+function isToolResultOffloadMetadata(
+  value: unknown,
+): value is ToolResultOffloadMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.toolName !== "string" ||
+    candidate.toolName.length === 0
+  ) {
+    return false;
+  }
+  for (
+    const key of [
+      "runId",
+      "sessionId",
+      "requestId",
+      "workspaceRunId",
+      "toolCallId",
+    ] as const
+  ) {
+    if (
+      candidate[key] !== undefined &&
+      (
+        typeof candidate[key] !== "string" ||
+        candidate[key].length === 0
+      )
+    ) {
+      return false;
+    }
+  }
+
+  if (candidate.schemaVersion === undefined) {
+    return (
+      candidate.contentSha256 === undefined &&
+      candidate.bytesWritten === undefined
+    );
+  }
+  return (
+    candidate.schemaVersion === 1 &&
+    typeof candidate.contentSha256 === "string" &&
+    /^[a-f0-9]{64}$/.test(candidate.contentSha256) &&
+    Number.isSafeInteger(candidate.bytesWritten) &&
+    Number(candidate.bytesWritten) >= 0
+  );
+}
+
+async function cleanupTempPair(
+  contentTempPath: string,
+  metadataTempPath: string,
+): Promise<void> {
+  await Promise.all([
+    rm(contentTempPath, { force: true }),
+    rm(metadataTempPath, { force: true }),
+  ]);
+}
+
+function hashContent(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 function capabilityAllowsRef(

@@ -22,38 +22,55 @@ export function createTaskSchedulerService(options: {
   now?: () => Date;
 }): TaskSchedulerService {
   const now = options.now ?? (() => new Date());
+  let activeSweep: Promise<TaskSchedulerReport> | null = null;
 
-  return {
-    async runDueTasks() {
-      const currentTime = now();
-      const tasks = await options.taskStore.list();
-      const activeTaskIds =
-        (await options.listActiveTaskIds?.()) ?? new Set<string>();
-      const dueTasks = tasks.filter(
-        (task) =>
-          !activeTaskIds.has(task.id) &&
-          isTaskDue(task, currentTime),
-      );
-      const report: TaskSchedulerReport = {
-        checked: tasks.length,
-        due: dueTasks.length,
-        ran: 0,
-        failed: 0,
-        runIds: [],
-      };
+  async function runDueTaskSweep(): Promise<TaskSchedulerReport> {
+    const currentTime = now();
+    const tasks = await options.taskStore.list();
+    const activeTaskIds =
+      (await options.listActiveTaskIds?.()) ?? new Set<string>();
+    const dueTasks = tasks.filter(
+      (task) =>
+        !activeTaskIds.has(task.id) &&
+        isTaskDue(task, currentTime),
+    );
+    const report: TaskSchedulerReport = {
+      checked: tasks.length,
+      due: dueTasks.length,
+      ran: 0,
+      failed: 0,
+      runIds: [],
+    };
 
-      for (const task of dueTasks) {
-        const result = await options.runScheduledTask(task.id);
-        if (!result.ok) {
-          report.failed += 1;
-          continue;
-        }
-
-        report.ran += 1;
-        report.runIds.push(result.run.id);
+    for (const task of dueTasks) {
+      const result = await options.runScheduledTask(task.id);
+      if (!result.ok) {
+        report.failed += 1;
+        continue;
       }
 
-      return report;
+      report.ran += 1;
+      report.runIds.push(result.run.id);
+    }
+
+    return report;
+  }
+
+  return {
+    runDueTasks() {
+      if (activeSweep) {
+        return activeSweep;
+      }
+
+      const sweep = runDueTaskSweep();
+      activeSweep = sweep;
+      const clearSweep = () => {
+        if (activeSweep === sweep) {
+          activeSweep = null;
+        }
+      };
+      void sweep.then(clearSweep, clearSweep);
+      return sweep;
     },
   };
 }

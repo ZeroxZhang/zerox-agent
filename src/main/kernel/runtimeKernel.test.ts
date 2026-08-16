@@ -160,41 +160,32 @@ describe("runRuntimeKernel", () => {
     ]);
   });
 
-  it("publishes failed when pre-abort settlement fails", async () => {
+  it("does not publish run_end when pre-abort settlement fails", async () => {
     const bus = new KernelEventBus();
     const controller = new AbortController();
     controller.abort("pause");
     let turnRan = false;
 
-    const result = await runRuntimeKernel(createContext({
-      mode: "chat",
-      signal: controller.signal,
-      stopPolicy: turnLimitPolicy(),
-    }), {
-      bus,
-      now: fixedNow,
-      async beforeAbortedEnd() {
-        throw new Error("Chat pause persistence failed.");
-      },
-      async runTurn() {
-        turnRan = true;
-        return {};
-      },
-    });
+    await expect(
+      runRuntimeKernel(createContext({
+        mode: "chat",
+        signal: controller.signal,
+        stopPolicy: turnLimitPolicy(),
+      }), {
+        bus,
+        now: fixedNow,
+        async beforeAbortedEnd() {
+          throw new Error("Chat pause persistence failed.");
+        },
+        async runTurn() {
+          turnRan = true;
+          return {};
+        },
+      }),
+    ).rejects.toThrow("Chat pause persistence failed.");
 
     expect(turnRan).toBe(false);
-    expect(result).toMatchObject({
-      status: "failed",
-      turns: 0,
-      reason: "Chat pause persistence failed.",
-    });
-    expect(bus.history()).toEqual([
-      expect.objectContaining({
-        type: "run_end",
-        status: "failed",
-        reason: "Chat pause persistence failed.",
-      }),
-    ]);
+    expect(bus.history()).toEqual([]);
   });
 
   it.each(["paused", "failed", "canceled"] as const)(
@@ -256,39 +247,33 @@ describe("runRuntimeKernel", () => {
     });
   });
 
-  it("publishes failed when post-turn cancellation settlement fails", async () => {
+  it("does not publish run_end when post-turn cancellation settlement fails", async () => {
     const bus = new KernelEventBus();
     const controller = new AbortController();
 
-    const result = await runRuntimeKernel(createContext({
-      mode: "goal",
-      signal: controller.signal,
-    }), {
-      bus,
-      now: fixedNow,
-      async runTurn() {
-        controller.abort(new Error("user canceled"));
-        return {
-          terminalStatus: "succeeded",
-          summary: "stale success",
-        };
-      },
-      async beforeAbortedEnd() {
-        throw new Error("Goal cancellation persistence failed.");
-      },
-    });
+    await expect(
+      runRuntimeKernel(createContext({
+        mode: "goal",
+        signal: controller.signal,
+      }), {
+        bus,
+        now: fixedNow,
+        async runTurn() {
+          controller.abort(new Error("user canceled"));
+          return {
+            terminalStatus: "succeeded",
+            summary: "stale success",
+          };
+        },
+        async beforeAbortedEnd() {
+          throw new Error("Goal cancellation persistence failed.");
+        },
+      }),
+    ).rejects.toThrow("Goal cancellation persistence failed.");
 
-    expect(result).toMatchObject({
-      status: "failed",
-      turns: 1,
-      reason: "Goal cancellation persistence failed.",
-      summary: "stale success",
-    });
-    expect(bus.history().at(-1)).toMatchObject({
-      type: "run_end",
-      status: "failed",
-      reason: "Goal cancellation persistence failed.",
-    });
+    expect(
+      bus.history().filter((event) => event.type === "run_end"),
+    ).toEqual([]);
   });
 
   it("preserves a pre-aborted pause signal as paused", async () => {

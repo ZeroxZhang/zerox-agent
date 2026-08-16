@@ -18,7 +18,10 @@ import {
 } from "../shared/agentTaskContract";
 import { createTaskContractSuccessCriterion } from "../shared/agentTaskContractAcceptance";
 import type { SkillInputValue } from "../shared/skillExecutionContract";
-import type { SkillRecord } from "../shared/skills";
+import {
+  createPublicSkillSnapshot,
+  type SkillRecord,
+} from "../shared/skills";
 import type { AgentGoalController } from "./agentGoalController";
 import type { AgentGoalPlanner } from "./agentGoalPlanner";
 import type { AgentGoalStore } from "./agentGoalStore";
@@ -393,7 +396,7 @@ export function createGoalChatService(options: {
         description,
         ...(taskContract ? { taskContract } : {}),
         ...(input.selectedSkill
-          ? { selectedSkill: snapshotSelectedSkill(input.selectedSkill) }
+          ? { selectedSkill: createPublicSkillSnapshot(input.selectedSkill) }
           : {}),
         ...(input.selectedSkillInputValues
           ? { selectedSkillInputValues: input.selectedSkillInputValues }
@@ -500,7 +503,11 @@ export function createGoalChatService(options: {
           : {}),
         ...(taskContract ? { taskContract } : {}),
         ...(input.draft.selectedSkill
-          ? { selectedSkill: snapshotSelectedSkill(input.draft.selectedSkill) }
+          ? {
+              selectedSkill: createPublicSkillSnapshot(
+                input.draft.selectedSkill,
+              ),
+            }
           : {}),
         ...(input.draft.selectedSkillInputValues
           ? { selectedSkillInputValues: input.draft.selectedSkillInputValues }
@@ -870,7 +877,9 @@ export function createGoalChatService(options: {
         availableTools: options.getAvailableTools?.() ?? [],
         availableSkills: options.getAvailableSkills?.() ?? [],
         ...(taskContract ? { taskContract } : {}),
-        ...(selectedSkill ? { selectedSkill: snapshotSelectedSkill(selectedSkill) } : {}),
+        ...(selectedSkill
+          ? { selectedSkill: createPublicSkillSnapshot(selectedSkill) }
+          : {}),
       });
     } catch (error) {
       options.onDiagnostic?.({
@@ -891,15 +900,6 @@ export function createGoalChatService(options: {
       ];
     }
   }
-}
-
-function snapshotSelectedSkill(skill: SkillRecord | GoalSelectedSkill): GoalSelectedSkill {
-  return {
-    rootDir: skill.rootDir,
-    skillFile: skill.skillFile,
-    body: skill.body,
-    manifest: JSON.parse(JSON.stringify(skill.manifest)) as SkillRecord["manifest"],
-  };
 }
 
 function rearmGoalMilestonesForRetry(milestones: Milestone[]): Milestone[] {
