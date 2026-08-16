@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T19:52:00.000+08:00",
+  "updatedAt": "2026-08-16T20:11:00.000+08:00",
   "features": [
     {
       "id": "P98-v3.9.0-release",
       "priority": 128,
-      "status": "in_progress",
+      "status": "done",
       "title": "Package, sign, smoke, and publish Zerox Agent v3.9.0",
       "files": [
         "AGENTS.md",

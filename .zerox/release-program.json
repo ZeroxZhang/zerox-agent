@@ -3,10 +3,10 @@
   "programId": "v3.9.0-release-2026-08",
   "version": "3.9.0",
   "tag": "v3.9.0",
-  "status": "active",
-  "updatedAt": "2026-08-16T19:59:30.000+08:00",
-  "activeFeatureId": "P98-v3.9.0-release",
-  "activeWorkstreamId": "R03",
+  "status": "completed",
+  "updatedAt": "2026-08-16T20:11:00.000+08:00",
+  "activeFeatureId": null,
+  "activeWorkstreamId": null,
   "maxActiveFeatures": 1,
   "sourceBaseline": {
     "commit": "fb09f898a18e4346386ff1731b1703d0e0565631",
@@ -48,7 +48,7 @@
     {
       "id": "R03",
       "title": "Release commit push and remote verification",
-      "state": "in_progress",
+      "state": "completed",
       "dependsOn": [
         "R02"
       ],
@@ -61,7 +61,7 @@
     {
       "id": "R04",
       "title": "Clean-tree package, signing, preflight, tag, and Release workflow",
-      "state": "planned",
+      "state": "completed",
       "dependsOn": [
         "R03"
       ],
@@ -78,7 +78,7 @@
     {
       "id": "R05",
       "title": "Published asset, digest, and signature closure",
-      "state": "planned",
+      "state": "completed",
       "dependsOn": [
         "R04"
       ],

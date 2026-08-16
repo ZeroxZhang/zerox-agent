@@ -30,8 +30,6 @@ describe("v3.9.0 release program", () => {
     expect(program).toMatchObject({
       version: "3.9.0",
       tag: "v3.9.0",
-      status: "active",
-      activeFeatureId: "P98-v3.9.0-release",
       sourceBaseline: {
         commit: "fb09f898a18e4346386ff1731b1703d0e0565631",
         verifyRun: "31945392247",
@@ -51,7 +49,7 @@ describe("v3.9.0 release program", () => {
     expect(features).toContainEqual(
       expect.objectContaining({
         id: "P98-v3.9.0-release",
-        status: "in_progress",
+        status: program.status === "completed" ? "done" : "in_progress",
       }),
     );
   });

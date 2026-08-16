@@ -10694,3 +10694,28 @@
   preflight in GitHub Actions.
 - R02 is complete. R03 is active for the release commit, push, and remote
   verify.
+
+## 2026-08-16 - Zerox Agent v3.9.0 Published
+
+- Release commit `e40f5fe` passed remote verify run `31945873850`.
+- Local clean-tree `legacy-adhoc` packaging generated arm64 DMG/ZIP and both
+  blockmaps. The app passed deep/strict codesign, embedded version `3.9.0`,
+  release mode `legacy-adhoc`, and the exact release commit. DMG verification,
+  ZIP extraction, and Node ABI restoration to 137 passed.
+- Created annotated tag `v3.9.0`; tag object `17688ca` resolves to release
+  commit `e40f5fe`.
+- Tag workflow run `31946052404` passed source verification, protected Ed25519
+  key materialization, signed compatibility package/preflight, GitHub
+  publication, and signing-key removal.
+- Published Release is latest, non-draft, and non-prerelease:
+  `https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.0`.
+- Exactly six assets are present. All downloaded SHA-256 digests match GitHub;
+  DMG checksum, ZIP app codesign, manifest SHA-512/file sizes, and blockmaps
+  passed independent verification.
+- Ed25519 manifest signature verified against tracked key
+  `a9e4a8f7350d43543d5b76811548ab54`, tag `v3.9.0`, and monotonic sequence
+  `3009000`.
+- R03, R04, and R05 are complete. P98 and the v3.9.0 Release Program are
+  closed.
+- Release evidence:
+  `.zerox/reviews/P98-v3.9.0-release-review.md`.
