@@ -12,8 +12,8 @@ describe("README", () => {
   it("describes the current product instead of a historical release log", () => {
     const readme = readReadme();
 
-    expect(readme).toContain("当前版本是 **v3.8.2**");
-    expect(readme).toContain("The current release: v3.8.2");
+    expect(readme).toContain("当前版本是 **v3.9.0**");
+    expect(readme).toContain("The current release: v3.9.0");
     expect(readme).toContain("local-first desktop control plane");
     expect(readme).toContain("recoverable agent runs");
     expect(readme).toContain("workspace");
@@ -152,7 +152,7 @@ describe("README", () => {
       expect(readme).toContain(command);
     }
 
-    expect(readme).toContain("Zerox-Agent-3.8.2-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-3.9.0-arm64.dmg");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
     expect(readme).toContain("legacy-adhoc");
     expect(readme).toContain("未经过 Apple Developer ID 签名与公证");

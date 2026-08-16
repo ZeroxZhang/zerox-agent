@@ -10660,3 +10660,37 @@
 - Code, security, architecture, and independent QA verdicts: `ACCEPT`.
 - Review evidence:
   `.zerox/reviews/P97-storage-convergence-review.md`.
+
+## 2026-08-16 - P98 v3.9.0 Release Started
+
+- Activated `P98-v3.9.0-release` only after P97 commit `fb09f89` passed remote
+  verify run `31945392247`.
+- Added the five-workstream machine-readable release Program covering identity,
+  frozen-tree package/sign/preflight, release commit verification, annotated
+  tag workflow, and exact six-asset closure.
+- Updated package and lockfile identity, bilingual README release links,
+  release tests, and `.github/release-notes/v3.9.0.md`.
+- Confirmed no local tag or GitHub Release named `v3.9.0` existed before
+  release preparation.
+- R01 focused release tests passed 6 files / 38 tests; strict test type coverage
+  is 292/292. Program, harness, and whitespace checks passed.
+- R01 is complete. R02 is active for frozen-tree verification, packaging,
+  signing, and release preflight.
+
+## 2026-08-16 - P98 R02 Frozen Source Verification Completed
+
+- Strict test types covered 292/292 files.
+- Full verify passed 2,970 tests with six stress-only tests skipped by design;
+  production build, Agent evals 26/26, and Memory evals 2/2 passed.
+- Runtime stress passed 6/6. Real macOS Seatbelt effects passed 10/10.
+- Electron authority smoke accepted Node ABI 137 to Electron ABI 146 to Node
+  ABI 137, seven migrations, eight authority markers, all eight P97 domain
+  records, no JSON fallback, and no legacy P97 shadows.
+- Program, harness, audit, and whitespace checks passed; audit reported zero
+  vulnerabilities.
+- The local machine has no update-signing private key and no Developer ID
+  identity. The release remains intentionally `legacy-adhoc`; the tag workflow
+  will materialize the protected Ed25519 update key and perform signed manifest
+  preflight in GitHub Actions.
+- R02 is complete. R03 is active for the release commit, push, and remote
+  verify.

@@ -1,7 +1,50 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-16T19:48:03.000+08:00",
+  "updatedAt": "2026-08-16T19:52:00.000+08:00",
   "features": [
+    {
+      "id": "P98-v3.9.0-release",
+      "priority": 128,
+      "status": "in_progress",
+      "title": "Package, sign, smoke, and publish Zerox Agent v3.9.0",
+      "files": [
+        "AGENTS.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        ".zerox/release-program.json",
+        ".zerox/reviews/P98-v3.9.0-release-review.md",
+        ".github/release-notes/v3.9.0.md",
+        "package.json",
+        "package-lock.json",
+        "README.md",
+        "scripts/check-harness-state.mjs",
+        "scripts/check-release-program.mjs",
+        "src/shared/packageScripts.test.ts",
+        "src/shared/readme.test.ts",
+        "src/shared/releaseProgram.test.ts"
+      ],
+      "definitionOfDone": [
+        "v3.9.0 version identity is consistent across package metadata, README links, tests, release notes, tag, update manifest, and packaged application",
+        "P97 SQLite authority convergence is closed and remotely verified before release metadata changes",
+        "full verify, runtime stress, real Seatbelt, Electron SQLite authority smoke, program, harness, audit, and whitespace gates pass on the frozen release tree",
+        "macOS arm64 ZIP and DMG are packaged in legacy-adhoc compatibility mode and latest-mac.yml is signed with the tracked Ed25519 update key",
+        "release preflight verifies the clean tagged commit, app signature, embedded commit, hashes, blockmaps, manifest signature, and exact six-asset allowlist",
+        "GitHub Release v3.9.0 is published from the annotated tag, is non-draft and non-prerelease, and exposes exactly six verified assets"
+      ],
+      "verification": [
+        "npm run typecheck:tests",
+        "npm run verify",
+        "npm run stress:runtime",
+        "npm run smoke:prod",
+        "npm run program:check",
+        "npm run harness:check",
+        "npm audit --audit-level=high",
+        "git diff --check",
+        "npm run release:mac",
+        "remote verify and release workflows",
+        "GitHub Release six-asset digest and signature verification"
+      ]
+    },
     {
       "id": "P97-sqlite-domain-storage-convergence",
       "priority": 127,

@@ -109,7 +109,7 @@ describe("package scripts", () => {
     expect(mainSource).toContain("app.requestSingleInstanceLock()");
   });
 
-  it("sets release metadata to v3.8.2", () => {
+  it("sets release metadata to v3.9.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -118,7 +118,7 @@ describe("package scripts", () => {
     ) as { version?: string; packages?: Record<string, { version?: string }> };
     const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
 
-    expect(packageJson.version).toBe("3.8.2");
+    expect(packageJson.version).toBe("3.9.0");
     expect(packageJson.scripts?.["smoke:providers"]).toContain(
       "smoke-multi-provider.mjs",
     );
@@ -127,10 +127,10 @@ describe("package scripts", () => {
     );
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.8.2");
-    expect(packageLock.packages?.[""]?.version).toBe("3.8.2");
-    expect(readme).toContain("current release: v3.8.2");
-    expect(readme).toContain("当前版本是 **v3.8.2**");
+    expect(packageLock.version).toBe("3.9.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.9.0");
+    expect(readme).toContain("current release: v3.9.0");
+    expect(readme).toContain("当前版本是 **v3.9.0**");
   });
 
   it("publishes an exact-tag arm64 compatibility release from GitHub Actions", () => {
@@ -143,7 +143,7 @@ describe("package scripts", () => {
         process.cwd(),
         ".github",
         "release-notes",
-        "v3.8.2.md",
+        "v3.9.0.md",
       ),
       "utf8",
     );
@@ -159,12 +159,12 @@ describe("package scripts", () => {
     expect(workflow).toContain("npm run eval:memory:built");
     expect(workflow).toContain("npm run release:mac");
     expect(workflow).toContain("npm run release:publish");
-    expect(releaseNotes).toContain("# Zerox Agent v3.8.2");
-    expect(releaseNotes).toContain("Zerox-Agent-3.8.2-arm64.dmg");
+    expect(releaseNotes).toContain("# Zerox Agent v3.9.0");
+    expect(releaseNotes).toContain("Zerox-Agent-3.9.0-arm64.dmg");
     expect(releaseNotes).toContain("xattr -dr com.apple.quarantine");
   });
 
-  it("keeps release gates tracked through v3.8.2", () => {
+  it("keeps release gates tracked through v3.9.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -217,6 +217,15 @@ describe("package scripts", () => {
           process.cwd(),
           ".zerox/storage-convergence-program.json",
         ),
+        "utf8",
+      ),
+    ) as {
+      activeFeatureId: string | null;
+      maxActiveFeatures: number;
+    };
+    const releaseProgram = JSON.parse(
+      readFileSync(
+        path.join(process.cwd(), ".zerox/release-program.json"),
         "utf8",
       ),
     ) as {
@@ -325,25 +334,28 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.8.2");
+    expect(packageJson.version).toBe("3.9.0");
     expect(openFeatureIds.length).toBeLessThanOrEqual(
       Math.min(
         runtimeProgram.maxActiveFeatures,
         kernelMigrationProgram.maxActiveFeatures,
         storageConvergenceProgram.maxActiveFeatures,
+        releaseProgram.maxActiveFeatures,
       ),
     );
     const activeProgramFeatureIds = [
       runtimeProgram.activeFeatureId,
       kernelMigrationProgram.activeFeatureId,
       storageConvergenceProgram.activeFeatureId,
+      releaseProgram.activeFeatureId,
     ].filter((featureId): featureId is string => Boolean(featureId));
     expect(
       openFeatureIds.filter(
         (featureId) =>
           convergenceFeatureIds.has(featureId) ||
           kernelMigrationFeatureIds.has(featureId) ||
-          featureId === storageConvergenceProgram.activeFeatureId,
+          featureId === storageConvergenceProgram.activeFeatureId ||
+          featureId === releaseProgram.activeFeatureId,
       ),
     ).toEqual(
       activeProgramFeatureIds,
@@ -992,7 +1004,7 @@ describe("package scripts", () => {
     expect(packageJson.scripts).toMatchObject({
       "harness:check": "node scripts/check-harness-state.mjs",
       "program:check":
-        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs",
+        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs",
       "harness:score": "npm run build && node scripts/run-harness-score.mjs",
       "episode:export":
         "npm run build && node scripts/export-agent-episode.mjs",

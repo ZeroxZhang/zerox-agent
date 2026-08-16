@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "programId": "v3.9.0-release-2026-08",
+  "version": "3.9.0",
+  "tag": "v3.9.0",
+  "status": "active",
+  "updatedAt": "2026-08-16T19:59:30.000+08:00",
+  "activeFeatureId": "P98-v3.9.0-release",
+  "activeWorkstreamId": "R03",
+  "maxActiveFeatures": 1,
+  "sourceBaseline": {
+    "commit": "fb09f898a18e4346386ff1731b1703d0e0565631",
+    "verifyRun": "31945392247"
+  },
+  "invariants": [
+    "The release tag is created only after the exact release commit passes local and remote verification.",
+    "Package, lockfile, README, release notes, update manifest, packaged app, tag, and GitHub Release use one version identity.",
+    "Release packaging starts from a clean tracked tree and embeds the frozen Git commit.",
+    "The application uses explicit legacy-adhoc compatibility signing while latest-mac.yml uses the tracked Ed25519 update key.",
+    "Publication exposes exactly six allowlisted assets and verifies remote digests before leaving the Release published."
+  ],
+  "workstreams": [
+    {
+      "id": "R01",
+      "title": "Release identity, documentation, and governance",
+      "state": "completed",
+      "dependsOn": [],
+      "verification": [
+        "release program checker",
+        "package and README tests",
+        "release notes identity"
+      ]
+    },
+    {
+      "id": "R02",
+      "title": "Frozen source-tree verification",
+      "state": "completed",
+      "dependsOn": [
+        "R01"
+      ],
+      "verification": [
+        "full verify and runtime stress",
+        "real Seatbelt and Electron authority smoke",
+        "program and harness",
+        "audit and whitespace"
+      ]
+    },
+    {
+      "id": "R03",
+      "title": "Release commit push and remote verification",
+      "state": "in_progress",
+      "dependsOn": [
+        "R02"
+      ],
+      "verification": [
+        "clean release commit",
+        "origin/main exact commit",
+        "remote verify success"
+      ]
+    },
+    {
+      "id": "R04",
+      "title": "Clean-tree package, signing, preflight, tag, and Release workflow",
+      "state": "planned",
+      "dependsOn": [
+        "R03"
+      ],
+      "verification": [
+        "macOS arm64 package",
+        "legacy-adhoc application signature",
+        "Ed25519 update manifest signature",
+        "release preflight",
+        "annotated v3.9.0 tag",
+        "remote tag exact commit",
+        "release workflow success"
+      ]
+    },
+    {
+      "id": "R05",
+      "title": "Published asset, digest, and signature closure",
+      "state": "planned",
+      "dependsOn": [
+        "R04"
+      ],
+      "verification": [
+        "non-draft non-prerelease latest release",
+        "exact six assets",
+        "remote digests match manifest and local release",
+        "signature keyId and tag verified"
+      ]
+    }
+  ]
+}
