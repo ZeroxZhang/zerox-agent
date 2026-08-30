@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 7,
+  "kind": "conversation-disclosure-continuation-review-rejection",
+  "algorithm": "sha256-canonical-json-v1",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "rejectedRound": 6,
+  "recoveryRound": 7,
+  "status": "rejected_after_review",
+  "sourcePolicy": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round6-successor-evolution-policy.json",
+    "byteSha256": "sha256:478d3947760b7c4bc2271dd1437a828705a59c74aaefc62107194f56d5ed7195",
+    "canonicalDigest": "sha256:6d31715387eaf1c817cfc2e4413bb14f78195a673a7e8e98bbb2cb46481c291a"
+  },
+  "sourceSnapshot": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round6-review-snapshot.json",
+    "byteSha256": "sha256:afd369bc83867a447183a02ce92a4e8c5ba3e74f17a66c22c4574464ebab8766",
+    "canonicalDigest": "sha256:531fdde529c12c4f702975a2d7f860c397b03813cfa397a681e81a0a0aad28b7",
+    "frozenFileCount": 154,
+    "transitionPayloadFileCount": 4,
+    "baselineFileCount": 12
+  },
+  "failedReceipts": [
+    {
+      "lane": "governance",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round6-governance-review.json",
+      "byteSha256": "sha256:287c1cf292095cd7cf0f7487e9af6b885d02dd8aadba67ec20969ff5eae803c1",
+      "canonicalDigest": "sha256:fdb2bfbc0f84f3c5bc59b29f3e21557285d2011fb8752ec601dd5af7496773bb",
+      "challenge": "sha256:94cc76c3cc4d511d712ab5530aceff9cfce0cb13d138b38e8567ba5281c4b0cc",
+      "verdict": "failed",
+      "findingCounts": {
+        "critical": 0,
+        "major": 2,
+        "minor": 0
+      }
+    }
+  ],
+  "findingIds": [
+    "R6-GOV-001",
+    "R6-GOV-002"
+  ],
+  "findingSetDigest": "sha256:f21beb87b6e3a209438118adb4ee5c13dfa48d63e73bc09a12c9f69d485e6b57",
+  "aggregateFindingCounts": {
+    "critical": 0,
+    "major": 2,
+    "minor": 0
+  },
+  "repositoryForbiddenOutputs": [
+    ".zerox/verification/conversation-disclosure/CD03A-round6-closure-manifest.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round6-contract-review.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round6-external-attestation.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round6-runtime-review.json"
+  ],
+  "externalAnchorRule": {
+    "policyDigest": "sha256:6d31715387eaf1c817cfc2e4413bb14f78195a673a7e8e98bbb2cb46481c291a",
+    "snapshotDigest": "sha256:531fdde529c12c4f702975a2d7f860c397b03813cfa397a681e81a0a0aad28b7",
+    "admissibility": "forbidden",
+    "externalAbsenceClaim": "not_asserted"
+  },
+  "priorRejections": {
+    "round1CanonicalDigest": "sha256:ec981e92f486ae75a56b3b4b393f95d095f6d684e6af54fe12cc7a9ba0fe1f99",
+    "round2": {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-prefreeze-rejection.json",
+      "byteSha256": "sha256:f677b1fc8cb4113ebb0c69c3b187a8b229156002e7d769764ca4e2d29677e3b9",
+      "canonicalDigest": "sha256:75a01cdef04821f1d1ca447a5b2383d8d47be331bec7777017042bf90fcf6614"
+    }
+  },
+  "digest": "sha256:39c3c2a58c1c3de778ee836270c697be5fbbae50268f6a79fe227824c5376c6c"
+}

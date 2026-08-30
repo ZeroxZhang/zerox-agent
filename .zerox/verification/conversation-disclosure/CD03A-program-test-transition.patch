@@ -1,0 +1,30 @@
+diff --git a/src/shared/conversationDisclosureProgram.test.ts b/src/shared/conversationDisclosureProgram.test.ts
+--- a/src/shared/conversationDisclosureProgram.test.ts
++++ b/src/shared/conversationDisclosureProgram.test.ts
+@@ -2027,4 +2027,16 @@ async function writeCompletedCd03ReviewState(
+   }>;
+   const cd03 = workstreams.find((workstream) => workstream.id === "CD03")!;
+   const contract = cd03.completionContract!;
++  const cd03Index = workstreams.indexOf(cd03);
++  const downstreamFeatureIds = new Set(
++    workstreams.slice(cd03Index + 1).map((workstream) =>
++      (workstream as { featureId?: string }).featureId
++    ).filter((featureId): featureId is string => Boolean(featureId)),
++  );
++  for (const downstream of workstreams.slice(cd03Index + 1)) {
++    downstream.state = "planned";
++  }
++  featureList.features = features.filter(
++    (candidate) => !downstreamFeatureIds.has(candidate.id),
++  );
+   contract.postReviewMutablePaths = [
+@@ -2052,7 +2065,8 @@ async function writeCompletedCd03ReviewState(
+   } else {
+     cd03.state = "completed";
+     program.activeFeatureId = null;
+-    program.nextFeatureId = "P108-conversation-disclosure-evidence-foundation";
++    program.nextFeatureId = (workstreams[cd03Index + 1] as { featureId: string })
++      .featureId;
+     feature.status = "done";
+     artifact.status = "accepted";
+   }

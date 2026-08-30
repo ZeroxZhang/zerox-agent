@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03",
+  "featureId": "P107-conversation-disclosure-domain-adapters",
+  "round": 23,
+  "lane": "governance",
+  "transport": "codex-collaboration",
+  "reviewTaskPath": "/root/p107_r23_evidence_review",
+  "reviewAgentId": "p107_r23_evidence_review",
+  "challenge": "sha256:d9a84df2e13584305ecf33af21bcee73cabc107547a12e4b7eef22d0e90a61d8",
+  "snapshotDigest": "sha256:e1a5300d6015543e0a6a8e8f09f2a13fcb955111b87c08545e0f882bb786796b",
+  "snapshotFileCount": 101,
+  "completionContractDigest": "sha256:f3bb8206c60094de0283daa557898a6e5baaef8ef1dd9359b7d9282429591f8f",
+  "safetyContractDigest": "sha256:dbcaf12ba4e3f5b6280a7c76da6e27345639c7223b2c5db101e3623f01522e7d",
+  "verdict": "passed",
+  "findingCounts": {
+    "critical": 0,
+    "major": 0,
+    "minor": 0
+  },
+  "findings": [],
+  "completedAt": "2026-08-24T06:15:19.000Z"
+}

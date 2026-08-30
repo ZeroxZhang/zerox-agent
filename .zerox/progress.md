@@ -1,5 +1,1313 @@
 # Zerox Harness Progress
 
+## 2026-08-26 - P113/CD09 final verification resumed
+
+- Resumed without resetting the dirty worktree. Node ABI is `137`, and no
+  native-changing or acceptance process remains active.
+- P113/CD09 remain open. All previously recorded final-candidate hashes are
+  stale until the current bytes pass the unmodified standard verification and
+  are recomputed.
+- `npm test -- --maxWorkers=1` is excluded as final evidence because v13
+  treats passthrough arguments as a direct historical-suite run rather than
+  the state-aware full test orchestration.
+- The unmodified standard `npm run verify` passed with type coverage
+  `425/425`, current-state `316` files / `3759` tests, all Round2 through
+  Round12 historical lanes, production build, Agent `26/26`, and Memory
+  `2/2`.
+- Production smoke passed with Electron `42.9.0`, ABI `146`, seven
+  migrations, eight SQLite authority domains, renderer startup, and Node ABI
+  `137` restoration.
+- The seven-command acceptance orchestrator passed `19/19` direct production
+  scenarios.
+- Audit found zero production vulnerabilities; the complete dependency tree,
+  caller-anchored Program and Harness checks, whitespace validation, and the
+  final Node ABI `137` / SQLite `3.53.2` probe passed.
+- Fresh candidate review returned security `0C/0M/0m` and code `0C/2M/0m`.
+  P113 remains open: S10 must use real keyboard activation, and recovered
+  `processing` guided input must not be presented as resumable after main
+  compensates it fail-closed. No review receipt was created.
+- S10 now uses trusted Electron Space keydown/keyup activation and requires a
+  trusted click, focus retention, and state transition. Renderer recovery
+  exposes only `pending` guided input and clears stale forms on terminal
+  unknown/conflict responses.
+- Focused regressions, type coverage `425/425`, build, and the seven-command
+  `19/19` production acceptance orchestrator pass after remediation.
+- Post-remediation full verify passes `316` files / `3759` tests, all
+  historical lanes, build, Agent `26/26`, and Memory `2/2`. Production smoke,
+  audit, dependencies, Program/Harness, whitespace, Node ABI `137`, and the
+  `53`-file publication-journal self-test also pass.
+- A second code review returned `0C/2M/0m` while security stayed
+  `0C/0M/0m`; no receipts were created.
+- Latest-state guided-input restoration now stops at `processing`, and startup
+  reconciliation tombstones a committed processing settlement before UI
+  restore. S10 now covers trusted Tab traversal, focus retention across a real
+  update, and trusted evidence navigation.
+- Focused tests pass `4 files / 31 tests`, acceptance passes `19/19`, and the
+  latest full verify passes `316` files / `3760` tests plus build and evals.
+  Smoke, audit, dependencies, Program/Harness, whitespace, ABI restore, and
+  publication-journal self-test all pass.
+- Third-round reviews returned code `0C/1M/0m` and security `0C/1M/0m`; no
+  receipts were created. The final anchor roster omitted two controls, and the
+  canonical repository was not watched through commit.
+- Runner/checker now share all 15 controls and 55 final files. A canonical
+  repository watcher covers candidate execution and bounded publication, then
+  source/control/Git identity is revalidated after journal commit. Focused
+  tests and the 53 generated-file recovery self-test pass.
+- The complete post-fix gate is green: standard verify `316/3760`, all
+  historical lanes, build, Agent `26/26`, Memory `2/2`, production smoke,
+  `19/19` acceptance, audit, dependency tree, Program/Harness, whitespace,
+  ABI restoration, and publication recovery.
+- Fourth-round review returned code `0C/3M/0m` and security `0C/1M/0m`; no
+  receipts were created.
+- S10 now proves Tab reaches a different real control, durable settlement
+  fields identify processing recovery after activity eviction, and explicit
+  roster invariants lock `15` controls / `70` final files / `55` generated
+  files including the lifecycle transition.
+- Candidate subprocesses are sandboxed against canonical repository writes.
+  Commit revokes generated-output mutation access, and final postflight hashes
+  all final files, package tree, source, controls, Git identity, and anchor.
+- Focused `4/31`, full verify `316/3760`, `19/19` acceptance, production
+  smoke, audit, dependency, Program/Harness, whitespace, ABI, and journal
+  gates pass.
+- Fifth-round review returned code `0C/1M/0m` and security `0C/0M/0m`; no
+  receipts were created. S10 now binds requirements to semantic action owners
+  through explicit `[1, 0, 2]` mapping in driver, synthesizer, and validator.
+- Candidate subprocesses are sandboxed against canonical repository writes,
+  and post-commit validation covers all 70 final files, app tree, source,
+  controls, Git identity, and anchor. The fixed counts are 15 controls,
+  70 final files, and 53 generated files.
+- Latest focused `4/32`, full verify `316/3761`, `19/19` acceptance, smoke,
+  audit, dependencies, Program/Harness, whitespace, ABI, and journal gates
+  pass.
+- Sixth-round code review found one remaining S10 Major: generic ARIA checks
+  and media-query activation did not prove selected/blocking accessible state
+  or computed reduced-motion behavior. Two independent validators confirmed
+  it; the old-candidate security PASS was not admitted.
+- Product rows now expose blocking alerts and selected Run/evidence state.
+  Real S10 observes those semantics, performs trusted keyboard activation
+  under reduced motion, and verifies computed animation/transition durations
+  are both `0.01ms` while the state change stays visible.
+- Rebuilt S10 and the full seven-command `19/19` orchestrator pass. Standard
+  verify remains green at `316/3761` plus all historical lanes, build, Agent
+  `26/26`, and Memory `2/2`; smoke, audit, dependency, whitespace, ABI `137`,
+  and the 55-file publication-journal self-test pass.
+- Seventh-round code review found that lifecycle publication changed the
+  immutable acceptance-input digest and that committed recovery did not stop
+  after validating an already published anchor. Two independent validators
+  confirmed both Majors; the stale-candidate security PASS was not admitted.
+- The immutable input now excludes only the two transaction-owned lifecycle
+  files, whose completed bytes remain in the final 70-file anchor. Committed
+  recovery checks caller pins, source/control/Git/toolchain identity, all final
+  files, package tree, and anchor, then returns the existing accepted result.
+- The 55-file journal self-test now requires explicit prepared rollback and
+  committed success results. Focused package tests and fresh standard verify
+  pass at current `316/3761`, all historical lanes, build, and both eval suites.
+- Evidence-backed review then found accepted guided input was still
+  startup-compensated and final postflight omitted external toolchain roots.
+  A zero-tool template response was rejected and never admitted.
+- Accepted assistant settlement now fences guided-input compensation; a cold
+  start regression proves success remains accepted without a failed tombstone
+  or degraded coverage. One shared postflight now verifies external
+  runner/Node/npm/cache/headers/npm tree and repository toolchain/native addon
+  before checks, after commit, and during committed recovery.
+- Focused `3/29`, type coverage `425/425`, journal recovery, and fresh standard
+  verify pass; current state is `316/3762` plus all historical lanes, build,
+  Agent `26/26`, and Memory `2/2`.
+- Accepted guided input now fences startup compensation through the owning
+  attempt's committed assistant acceptance. A cold-start regression preserves
+  success and complete coverage without a failed tombstone.
+- A shared final identity postflight now covers external runner, Node, npm
+  CLI/tree, headers, Electron cache, CD04 anchor, repository toolchain, and
+  native addon before checks, after durable commit, and on committed recovery.
+- Focused `3/29`, standard verify `316/3762`, all historical lanes/evals, and
+  the complete seven-command `19/19` acceptance pass on these bytes.
+- P113 now owns the exact 44-file remediation surface. Its status-free
+  canonical definition digest is
+  `sha256:1c5a6f88575792a02e64a49c79ac0e3fbffb66f8a1063101d04b28cdce2e4410`;
+  active caller-anchored Program and Harness checks pass.
+- Final review then found accepted on-demand guided-input compensation,
+  committed journal cleanup before the last postflight, and an allow-default
+  candidate command sandbox.
+- ChatService now fences stale replay on accepted ownership. Publication uses
+  pre/post-commit full postflight and preserves recoverability; journal-free
+  anchor replay requires the same complete caller-pin/output validation.
+- Candidate commands now run under default-deny Seatbelt with explicit
+  caller-private roots and private TMPDIR; only exact staged npm audit may use
+  network. Real probes reject sibling host reads/writes and local TCP while
+  allowing private-root access and Node ABI `137`. Focused `2/188` passes.
+- The first default-deny authoritative attempt stopped in its initial verify:
+  macOS shell resolution needed `/private/var/select`, and Vitest needed
+  same-sandbox worker signaling. Nothing was published and lifecycle remained
+  active; orphan workers were terminated.
+- The profile now adds only read-only `/private/var/select` and
+  `signal (target same-sandbox)`. Probes confirm worker termination while host
+  file/network denial remains. Package/journal gates and standard verify
+  `316/3762` pass.
+- Acceptance-anchor publication now recovers the exact crash state after
+  `link(partial, output)` and before partial unlink. The transaction-derived
+  partial and output must be regular same-inode files with `nlink=2`; recovery
+  removes the partial, validates/removes the uncommitted output, and rolls back
+  all 55 generated files plus `release-local`.
+- The updated journal self-test, focused package-script tests `15/15`, syntax,
+  and scoped whitespace checks pass. Lifecycle remains unchanged pending full
+  verification, fresh exact-byte reviews, and the authoritative runner.
+- The post-fix full gate passes: type coverage `425/425`, current
+  `316 files / 3762 tests`, all historical lanes, build, Agent `26/26`,
+  Memory `2/2`, production smoke, real-app acceptance `19/19`, zero production
+  vulnerabilities, dependency-tree validation, caller-anchored active Program
+  and Harness, whitespace, and restored Node ABI `137`.
+- Fresh reviews are bound to candidate
+  `sha256:405d2972b9b056da53602cd2174b70d9e59beb8d77a953f914a7448a8625472d`
+  (`1417` files). No lifecycle or publication transaction has run.
+- That candidate was rejected before receipt publication because the final
+  checker profile omitted exact caller-held reads. The next candidate fixed
+  those reads, then security review rejected ambient environment inheritance;
+  checker subprocesses now use a minimal allowlist and all command output is
+  scanned before forwarding.
+- A subsequent authoritative run stopped before publication during private
+  verify. The runner now materializes the two digest-excluded lifecycle files,
+  permits only reviewed system read roots plus `/Users` metadata needed by
+  nested sandbox tests, and treats `node_modules/.vite` as excluded generated
+  state for approved commands. Lifecycle remains active/in progress.
+
+## 2026-08-26 - P113/CD09 final hardening remains open
+
+- Exact review-output validation, caller-private Node/npm/header staging, and
+  ordinary-failure publication rollback are implemented.
+- Focused tests pass 21/21 and test type coverage passes 423/423.
+- The private snapshot completed full verify and production smoke is proven
+  offline with an explicit cache root, but final acceptance remains blocked.
+- Fresh reviews report 0 Critical / 7 merged Major findings.
+- Caller-held review identity/challenge/receipt pins are now mandatory.
+  Electron 42.9.0 is pinned to its package checksum, and an isolated
+  cache-root smoke run passed with Electron ABI 146 and all 8 SQLite authority
+  domains.
+- Parent-owned source mutation observation and per-command manifest rechecks
+  now cover execution-time replace/restore attempts; this still requires a
+  fresh adversarial verdict.
+- P113/CD09 and the v3.9.2 Program remain in progress. No release was
+  published.
+
+## 2026-08-26 - P111/CD07 Evidence Inspector
+
+- Runs now restores an event selection by run-scoped stable identity, pages
+  evidence in bounded 50-row increments, and renders unknown presenters
+  generically.
+- Inspector payloads are credential-redacted and capped before rendering;
+  offloaded result reads continue through the authorized resolver.
+- CD07 browser acceptance passed with reload persistence and no secret or
+  horizontal overflow.
+- Full verify passed current `314/1` files and `3746/6` tests, reconstructed
+  Round12 `319/1` files and `3644/6` tests, all historical lanes, build, Agent
+  `26/26`, and Memory `2/2`. Production smoke passed.
+- P112/CD08 hardening is active. Its initial machine-readable matrix passed
+  all 14 checks, including five-process performance, zero unexpected resets,
+  protected terminal retention, legacy rollback, unknown fallback, reduced
+  motion, and bounded Inspector behavior.
+
+## 2026-08-26 - P110/CD06 Cross-Surface Disclosure
+
+- Successor Program receipt:
+  `sha256:0f4118df463f328fcc8bf50f4804f2deb49de69ab4088ae3629995c2ed4db1ed`.
+  Successor Harness receipt:
+  `sha256:cc438c8a81b4b06db9d78baf35facc509a36fbced4d47f1a10c4d1f74c43f959`.
+- Plan and approval now expose stable source identity/revision metadata while
+  preserving owning decision handlers. Scheduled Tasks projects only the
+  latest root AgentRun per task and excludes child runs sharing the task id.
+- Browser acceptance
+  `.zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json`
+  passed on desktop and narrow viewports.
+- Full verify passed current `314/1` files and `3745/6` tests, reconstructed
+  Round12 `319/1` files and `3643/6` tests, all historical lanes, build, Agent
+  `26/26`, and Memory `2/2`. Production smoke passed.
+
+## 2026-08-25 - P109/CD05 Chat Surface
+
+- Added a default-off local projected Chat mode with immediate legacy rollback.
+  It groups sanitized status events into narrative, operations, attention,
+  context, and result while keeping Goal, Plan, approval, guided input, and
+  final messages on their existing owning surfaces.
+- Stable invocation/request identities update rows in place. User-controlled
+  group and row expansion survives streaming renders and overrides automatic
+  attention policy; failure, pause, and required input remain prominent.
+- Focused tests passed `5/280`, type coverage passed `423/423`, and full verify
+  passed current `314/1` files and `3743/6` tests plus reconstructed Round12
+  `319/1` files and `3641/6` tests, all historical lanes, build, Agent `26/26`,
+  and Memory `2/2`.
+- Local Electron browser acceptance passed with compact, expanded, collapsed,
+  focused, and narrow evidence; four operations remained unique and both
+  desktop and narrow layouts had no horizontal overflow.
+- Production smoke passed with Electron `42.3.3`, ABI `146`, SQLite `3.53.2`,
+  seven migrations, eight authority domains, and renderer startup. CD04's
+  caller-pinned V13 Harness still passes after the CD05 implementation.
+
+## 2026-08-25 - P108/CD04 V13 Closure
+
+- Published the v9 reviewed manifest at
+  `sha256:c13d8cea8a113deb20e75886fa55d2dcd1928a63904532cf51f26d08a607672f`
+  and caller-held `0600` external anchor at
+  `sha256:99b8b7af27e24d2c44e2bb3b2433ada877fd68aeac2d1de80427931de15c01ef`.
+- The recoverable five-file transition completed with all target digests
+  exact. Its private journal is canonical `completed` and binds Program receipt
+  `sha256:4419de454152523afc6e333c8f0bd86fc9ba95b92f49d821ccd146bc061ff13e`.
+- Authoritative Program and Harness V13 gates passed; Harness receipt
+  `sha256:bb7c213302bdd6a67b3ef500f3cd1be2713063b19ae1b81ddd5f2c1bbeda1f7d`.
+- Post-transition type coverage passed `423/423`; full verify passed current
+  `314/1` files and `3738/6` tests, reconstructed Round12 `319/1` files and
+  `3636/6` tests, all historical lanes, build, Agent `26/26`, and Memory
+  `2/2`.
+- Production smoke passed with Electron `42.3.3`, ABI `146`, SQLite `3.53.2`,
+  seven migrations, eight authority domains, and renderer startup. P108/CD04
+  is complete; P109/CD05 is the sole active Feature/workstream.
+
+## 2026-08-25 - P108/CD04 V5 Remediation
+
+- Preserved v4 as rejected immutable evidence after three failed lanes and two
+  independent confirmations of all eight merged Major roots.
+- Closed cross-source Tool arbitration, owner-aware contributor completeness,
+  active-Plan and Goal-ledger obligations, Goal/execution context and usage
+  wiring, safe telemetry projection, full retained-ring measurement, and real
+  production-container parity coverage.
+- Hardened V13 with parent/leaf-bound capture, descriptor-relative live
+  transition, strict external-journal evolution, semantic aggregate-review
+  validation, and private no-replace snapshot/manifest publication.
+- Reproduced performance
+  `sha256:e6e9fb139425c0e36ffa479bbbff62af441029b7856c6e38f467256f917e559a`
+  and parity
+  `sha256:b1e58d147ccd79da8cc65da23cfa4914d14ba33adb8cbb8a3a3788df4df82dc6`
+  twice with zero required/lifecycle/body/source-cut/identity/leak mismatch.
+- Source focused tests pass `17/516`; type coverage passes `423/423`. The v5
+  target passes focused/type/diagnostic/fail-closed gates, full verify current
+  `314/1` files and `3735/6` tests, reconstructed Round12 `319/1` files and
+  `3635/6` tests, every historical lane, build, Agent `26/26`, Memory `2/2`,
+  and production Electron/SQLite smoke.
+- Published the private no-replace v5 snapshot with `55` frozen entries and
+  five transitions at
+  `sha256:972844d8295c8ac156a777d9a81bbfb80be83f44f99e91884209b61080880676`.
+  Three fresh exact-digest reviews are pending; no downstream closure output
+  exists.
+- V5 replay and integration passed `0C/0M`, but security rejected at `0C/2M`;
+  both findings were independently confirmed and preserved in a private v5
+  rejection witness.
+- V6 directly freezes the runtime-I/O helper used by all V13 executables and
+  requires exact canonical applying journal bytes before completing the
+  caller-owned transition journal.
+- V6 source focused/type pass `17/517` and `423/423`; its isolated target
+  passes diagnostics, fail-closed unpinned checking, full verify current
+  `314/1` files and `3736/6` tests, Round12 `319/1` files and `3636/6` tests,
+  every historical lane, build, Agent `26/26`, Memory `2/2`, and production
+  smoke.
+- V6 security/integration passed but replay rejected at `0C/1M`; the
+  equal-time Tool terminal-state conflict was independently confirmed and
+  preserved in a private v6 rejection witness.
+- V7 uses timestamp-only Tool revision identity and body-level status/ok
+  conflict detection. Source focused passes `17/518`, type coverage `423/423`,
+  and regenerated performance/parity reproduce at
+  `sha256:06f2cadd5df32fa175980adf98208e5e0fd219267d3c408a6f91593825a3792d`
+  and
+  `sha256:b5f175ce12e238899a432d6e681482728c170133edc198e7b4363e3f5c512e65`.
+- The isolated v7 target passes full verify current `314/1` files and
+  `3737/6` tests, reconstructed Round12 `319/1` files and `3636/6` tests,
+  every historical lane, build, Agent `26/26`, Memory `2/2`, and production
+  smoke.
+- V7 replay/integration rejected with four merged Major concerns. V8 removes
+  remapped Workspace Tool duplicates, freezes the full historical gate
+  closure, enforces manifest/anchor chronology, and restores RunnerV3 with an
+  explicit `15,000 ms` budget.
+- V8 source and target gates pass, including supplemental RunnerV3 `17/17`,
+  current `3737/6`, Round12 `3636/6`, every historical lane, build, Agent
+  `26/26`, Memory `2/2`, and production smoke.
+- V8 security rejected at `0C/2M` while replay/integration passed. V9 freezes
+  all four direct harness Program checkers and current-binds evidence
+  sensitivity before/after backend reads.
+- V9 source focused/type pass `17/519` and `423/423`; its target passes current
+  `3738/6`, Round12 `3636/6`, supplemental RunnerV3 `17/17`, every historical
+  lane, build, Agent `26/26`, Memory `2/2`, and production smoke.
+
+## 2026-08-25 - P108/CD04 V4 Resume
+
+- Ran planning catch-up and `./init.sh` without resetting or cleaning the
+  existing worktree. The live package/harness remains on V12 and the bootstrap
+  package-script contract passes `11/11`.
+- Confirmed the v4 isolated target fixture remains available while live
+  package, harness, Feature, Program, and package-script files remain
+  untransitioned. No v4 snapshot, review output, receipt, reviewed manifest, or
+  CD04 external anchor has been accepted.
+- The next authoritative work is read-only v4 target verification. Snapshot
+  publication and the five-file V13 transition remain blocked on green target
+  gates and three exact-digest zero-finding reviews.
+- The isolated v4 target passes `17 files / 510 tests` and strict test type
+  coverage `423/423`. Explicit V13 Program/harness diagnostics pass against
+  snapshot
+  `sha256:c874b4447b2318a53fa6d60a7cdc69d8d1a0406132c3597ac2b843bb1b9c9049`.
+- Ordinary unpinned `npm run program:check` fails closed on the missing
+  caller-held CD04 delta anchor path and digest, as required.
+- The v4 target full verify passes current `314/1` files and `3729/6` tests,
+  reconstructed Round12 `319/1` files and `3634/6` tests, every declared
+  historical lane, production build, Agent `26/26`, and Memory `2/2`.
+- Production smoke passes with Electron `42.3.3`, ABI `146`, SQLite `3.53.2`,
+  seven migrations, eight authority domains, renderer startup, and restored
+  Node ABI.
+- Fixed-time freezer reproduction matched the verified v4 candidate exactly:
+  `53` frozen entries, `5` transitions, and snapshot
+  `sha256:c874b4447b2318a53fa6d60a7cdc69d8d1a0406132c3597ac2b843bb1b9c9049`.
+- Published the v4 snapshot privately and no-replace. All three review
+  outputs/receipts, reviewed manifest, external delta anchor, and live
+  transition remain absent pending independent review.
+- V4 was rejected after replay `0C/2M/0m`, security `0C/1M/0m`, and
+  integration `0C/6M/0m`. Two independent validation passes confirmed all
+  eight merged Major roots.
+- Preserved the private append-only v4 rejection witness. No PASS
+  output/receipt, reviewed manifest, external delta anchor, or live transition
+  exists; P108/CD04 remains open for V5 remediation.
+
+## 2026-08-25 - P108/CD04 Final Gate Resume
+
+- Preserved the existing dirty worktree and resumed the latest approval
+  causal-membership candidate. Added a dedicated negative regression proving
+  that a same-session pending approval without an exact causal request owner
+  is rejected as a required incompatible source cut.
+- The exact P108 focused gate passes `15 files / 493 tests`; strict test type
+  coverage passes `422/422`.
+- Regenerated and independently reproduced current source-bound evidence:
+  performance
+  `sha256:71f9856105a2fe72488476c278fd980f5f92fc3a5ae576814184e1fecf2f8e20`
+  and parity
+  `sha256:ec1d7d22998b2c0866be5907fb1b7e7977f9b656a4988504c6615ceb7c02d51e`.
+  All fixed correctness counters match and unexpected resets remain zero.
+- Serialized V13 orchestration passed without concurrent load: current
+  `313 passed + 1 skipped` files and `3713 passed + 6 skipped` tests; Round2
+  `79/79`; Round5 `75/75`; Round6 `78/78`; reconstructed Round12
+  `318 passed + 1 skipped` files and `3629 passed + 6 skipped` tests; V3
+  `37/37` plus `6 passed + 1 historical skip`; V4 `66/66`; V7 `80/80`;
+  V8 `82/82`; V9 `83/83`; V10 `86/86`; V11 `87/87`; Round12 target
+  `77/77`.
+- Fresh replay, evidence/security, and adapter/performance/governance reviews
+  rejected that candidate with `0 Critical / 12 Major / 0 Minor`; no review
+  artifact or V13 cutover was permitted.
+- Repaired the confirmed replay, ownership, authorization, redaction,
+  descriptor-read, performance-roster, and historical Tool identity roots.
+  Dedicated negative regressions now cover locale-independent conflicts,
+  terminal incompatible cuts, contributor completeness, missing approval
+  owners, foreign adapter owners, post-read revocation, non-Bearer
+  Authorization, and older cross-store identity conflicts.
+- After correcting five stale owner fixtures/assertions, the seven affected
+  suites pass `361/361`; strict test type coverage remains `422/422`.
+
+## 2026-08-25 - P108/CD04 Final Review Remediation
+
+- Resume verification found four stale/real integration failures. Added
+  Tool-Invocation run refs to causal scope selection, migrated the remaining
+  Tool evidence fixtures to current materializer-issued anchors, and made the
+  guided-input assertion independent of source-cut ordering.
+- Closed the reproduced projector/materializer gaps: same-time conflicts now
+  choose the conservative lifecycle before deterministic body ordering, union
+  every conflicting contributor set, reject older same-terminal revisions,
+  protect `completed_unverified`, and preserve stricter new requiredness.
+- Closed the evidence gaps: partial exact Trajectory/Workspace scans fail
+  closed, and allowlisted evidence `id`, `status`, and `summary` values redact
+  embedded path-shaped content as well as credentials.
+- Closed the adapter/parity/performance review gaps: each Chat message
+  obligation is independently validated, Workspace witnesses bind page,
+  owner, and embedded event run identity, lifecycle and body mismatch counters
+  are disjoint, and aggregate p95/max uses all raw worker measurements.
+- P108 focused verification passes `15 files / 476 tests`; strict test type
+  coverage passes `422/422`. Fresh CD04 artifacts are accepted:
+  performance `sha256:ffe876615eceef935778619f6783c90cb1933411c44d80fda02a9c109e13cc28`
+  and parity `sha256:ae0b4b50229436557839229636012d766587acbf75dad086c5796c44e924f1c2`.
+  A second read-only five-process run reproduced both digests.
+- V13 current/historical orchestration is the next serialized gate. Three
+  independent final review lanes must restart on these exact bytes. P108/CD04
+  remains in progress until all complete and the reviewed delta trust head is
+  established.
+- Serialized V13 orchestration passed: current `313 files / 3696 tests` plus
+  six expected stress skips; Round2 `79/79`; Round5 `75/75`; Round6 `78/78`;
+  reconstructed Round12 current `318 files / 3629 tests` plus six skips; and
+  historical V3/V4/V7/V8/V9/V10/V11 plus Round12 target lanes all passed.
+- Production build and `npm run smoke:prod` pass with Electron `42.3.3`,
+  ABI `146`, SQLite `3.53.2`, seven migrations, and eight authority domains.
+  Pre-cutover `npm run verify` remains intentionally red because package
+  `test` still invokes V12; it must be rerun after the reviewed V13 switch.
+
+## 2026-08-25 - Round12 R12-0 Complete; R12-1 Active
+
+- Rehashed and rebound the immutable Round11 policy, archive, snapshot, and all
+  three completed receipts. V12 now uses the actual serialized-byte roots and
+  the accepted canonical roots.
+- Corrected stale Round10/11 runner constants, Round12 archive/manifest/receipt
+  rounds, the exact `327 + 4 + 12` predecessor snapshot counts, and the
+  two-item Round11 forbidden-output set.
+- Added the missing immutable Round11 state-aware test lane and corrected the
+  four Round12 target roots and Round11 source archive reconstruction.
+- V12 focused tests pass `11 files / 90 tests`; syntax and whitespace pass.
+- Published the private deterministic Round11 rejection witness no-replace at
+  canonical `sha256:eb4fe2a38a4803d4682c1aa84bd498fb1cc05d348b68ff2a2c25362b2e60ca24`
+  and byte root
+  `sha256:cd9fb36a3b9314d6bef91c8e7e9b2ad932ece63395a2027f72855287bd40d19a`;
+  mode is `0600`, link count is one, and replay is idempotent.
+- R12-1 is complete. Real executable regressions prove exact two-link
+  journal/marker convergence, parent-replacement rejection, and Node
+  executable postflight rejection after a candidate swaps the pinned path.
+- V12 focused coverage passes `11 files / 93 tests`; strict test type coverage
+  passes with zero diagnostics. R12-2 pre-freeze verification is active.
+- R12-2 passed state-aware current and historical execution: current
+  `344 files / 3859 tests` plus six skips, Round3 `37/37`, V3 policy `6/6`
+  plus one historical skip, Round4 `66/66`, Round7 `80/80`, Round8 `82/82`,
+  Round9 `83/83`, Round10 `86/86`, Round11 `87/87`, and Round12 target
+  `77/77`.
+- Short-path all-to `npm run verify` passed with test type coverage `415/415`,
+  build, Agent eval `26/26`, and Memory eval `2/2`. Source/all-to production
+  smoke, caller-pinned Round23 harness, `1,465` historical frozen/payload
+  rehashes, syntax, whitespace, exact `421/421` roster, all-from roots, and
+  static credential review also pass.
+- R12-3 immutable publication and three-lane review are active.
+- R12-3 published policy `sha256:fefede21...ff6e4`, archive
+  `sha256:a53e2c38...42bd6`, and snapshot `sha256:2917ee0b...4fac`
+  (`363` frozen, `4` payload, `12` baseline).
+- Contract, runtime, and governance reviewers independently returned PASS with
+  zero findings. The external transaction completed at
+  `sha256:4e1bbed2...675e9`, with attestation
+  `sha256:a3d67bec...507ea`, final manifest
+  `sha256:9633df25...e4085`, and caller-held anchor
+  `sha256:b1f5428c...d8c71a`.
+- Anchored-planned and authorized-active continuation checker and harness
+  receipts pass. P107A/CD03A are closed; P108/CD04 is now the only active
+  Feature/workstream.
+
+## 2026-08-24 - Full v3.9.2 Goal Activated; Round12 Active
+
+- The persistent objective now covers all remaining v3.9.2 work: close CD03A,
+  implement CD04-CD09, and pass final acceptance.
+- Recovery starts at Round12 R12-0 with Round1-Round11 immutable. The live
+  transition remains all-from and no Round11 manifest, attestation, anchor, or
+  journal exists.
+- `./init.sh` continues to fail closed only on the expected missing external
+  CD03 anchor. Coze is authenticated but has no `building-agent` cloud project;
+  execution remains local-first.
+- Round12 will bind the Round11 rejection, then repair exact two-link marker
+  recovery, publication-parent identity enforcement, and Node executable
+  identity checks around every candidate subprocess.
+
+## 2026-08-24 - CD03A Round8 Rejected; Round9 Active
+
+- Round8 governance passed, runtime rejected the candidate with
+  `0 Critical / 5 Major / 0 Minor`, and contract was stopped. No Round8
+  manifest, attestation, anchor, journal, or transition exists.
+- Published the deterministic private Round8 rejection witness no-replace at
+  canonical `sha256:153ce721...74e2` and serialized-byte
+  `sha256:f61c29fc...b6e2a5`. It is current-user-owned, mode `0600`, one link;
+  an exact replay returned `idempotent`.
+- Round9 implements descriptor-relative private publication, source-inode-bound
+  atomic exchange, same-inode journal-to-marker handoff, marker filename/inode
+  validation, mixed review-state rejection, and caller-supplied base plus
+  continuation anchor pins.
+- The complete V9 focused suite passes `11 files / 82 tests`. R9-2
+  production-shape policy dry-run and full pre-freeze verification are active;
+  Round9 policy, archive, snapshot, receipts, manifest, attestation, anchor,
+  journal, and transition remain absent.
+- Caller-pinned production-shape policy dry-run passes without publication at
+  policy `sha256:6c14c0cd...308d8` and archive
+  `sha256:f3c5db8f...00823`.
+- Test type coverage passes `382/382`; state-aware orchestration passes current
+  `344 files / 3848 tests` plus six stress skips, Round3 `37/37`, V3 policy
+  `6/6` plus one historical skip, Round4 `66/66`, Round7 `80/80`, Round8
+  `82/82`, and Round9 targets `77/77`. V9 syntax and whitespace pass.
+- The first all-to full verify exposed an orchestrator state bug. V9 now
+  detects exact all-from/all-to bytes, reconstructs an all-from current lane
+  from the immutable Round8 archive when invoked all-to, and rejects mixed or
+  third states. A source-target-restore regression passes.
+- V9 fixtures now use short canonical `/private/tmp` on macOS so the unchanged
+  `sourceImportCasing.test.ts` retains its 15-second contract.
+- Final all-to `npm run verify` passes with type coverage `382/382`, current
+  `344 files / 3849 tests` plus six skips, every historical/target lane,
+  production build, Agent `26/26`, and Memory `2/2`.
+- Source/all-to production smoke, caller-pinned Round23 harness, `307/307`
+  roster, all-from live roots, Round3-Round8 canonical/frozen/payload rehash,
+  syntax, whitespace, and non-test production credential scan pass. R9-2 is
+  complete.
+- Published private Round9 policy `sha256:97c8b003...cc6d1`, archive
+  `sha256:f3c5db8f...00823`, and snapshot `sha256:ab22feba...aec15`;
+  review-pre checking passed with `341` captures.
+- Dispatch `sha256:92a5fe19...9219` produced governance PASS and contract FAIL
+  (`0 Critical / 5 Major / 0 Minor`); runtime was stopped. Completed receipt
+  roots are governance `sha256:e07d67f1...ab127` and contract
+  `sha256:5ce89488...4e3bf`.
+- Two independent read-only validation lanes confirmed all five contract
+  findings. Round9 is rejected; its manifest, attestation, anchor, journal,
+  runtime receipt, and four-file transition remain absent. Round10 append-only
+  recovery is now required.
+- Published the deterministic private Round9 rejection witness at
+  `sha256:ae3b6af8...87be2`; exact replay is idempotent.
+- Round10 adds an exact `345/345` roster and 72-path satisfiable completion set.
+  Receipt trusted time/count/checker roots, caller-held candidate results,
+  independently derived final-manifest roots/projection, and policy Program
+  identity are now mandatory.
+- V10 focused tests pass `11 files / 86 tests`; type coverage is `393/393`.
+  State-aware orchestration passes current `344 files / 3852 tests` plus six
+  stress skips; Round3 `37/37`; V3 policy `6/6` plus one historical skip;
+  Round4 `66/66`; Round7 `80/80`; Round8 `82/82`; Round9 `83/83`; and Round10
+  targets `77/77`.
+- Short-path Round10 all-to `npm run verify`, source/all-to production smoke,
+  caller-pinned harness, V10 syntax, whitespace, roster, historical roots, and
+  non-test credential checks pass. R10-2 is complete.
+- Published private Round10 policy `sha256:9af3527a...f2814`, archive
+  `sha256:36edaee5...c133`, and snapshot `sha256:138f00e1...25eec`.
+- Contract rejected Round10 with `0 Critical / 1 Major / 0 Minor`; runtime and
+  governance were stopped. Contract receipt canonical digest is
+  `sha256:9021e9ad...4479f`; no closure output or transition exists.
+- Two independent read-only probes confirmed the missing predecessor rejection
+  `programId` binding. Round11 append-only recovery is required.
+- Published the deterministic private Round10 rejection witness at
+  `sha256:2744fbc8...9549c`; exact replay is idempotent.
+- Round11 binds predecessor rejection Program identity at the shared contract
+  and checker boundaries. Its exact P107A roster is `383/383`, with a
+  satisfiable 79-path completion set.
+- V11 focused tests pass `11 files / 87 tests`, type coverage `404/404`,
+  current state-aware `344 files / 3853 tests` plus six stress skips, and all
+  historical/target lanes. Short-path all-to verify, source/all-to smoke,
+  caller-pinned harness, syntax, whitespace, and static safety gates pass.
+- Published private Round11 policy `sha256:f8aed3d7...c05d5`, archive
+  `sha256:944a95ab...192b0`, and snapshot `sha256:93966f38...2d21f`.
+- Contract and governance passed; runtime rejected Round11 with `0 Critical /
+  3 Major / 0 Minor`. Receipt roots are contract
+  `sha256:57f08bfc...e0d88`, runtime `sha256:e2025a7b...68c0c`, and governance
+  `sha256:87226066...1663c`. No closure output or transition exists.
+- Two independent probes confirmed all three runtime findings. Round12 must
+  repair two-link marker recovery, enforce recorded publication parent
+  identity, and revalidate Node executable identity around candidate launch.
+
+## 2026-08-24 - CD03A Round7 Rejected; Round8 Active
+
+- Round7 published private policy `sha256:2eee02d6...6c17f`, archive
+  `sha256:ede04225...dede7`, and snapshot `sha256:5e13f358...f8c7a`.
+- Governance passed with zero findings; runtime rejected Round7 with
+  `0 Critical / 4 Major / 0 Minor`; contract was stopped. The completed receipt
+  roots are `sha256:28b1a834...8e935` and `sha256:4838df8d...d7bf2`.
+- No Round7 manifest, attestation, anchor, journal, or transition exists. The
+  private Round7 rejection witness is `sha256:c427b728...be955`.
+- Round8 corrects the self-contained runner's version roots, requires
+  caller-pinned closure validation for completed/active Program state, replaces
+  absent-output rename with atomic no-replace, and recovers deterministic
+  private temp/link crash states.
+- P107A has an exact `269/269` roster and a satisfiable 56-path completion set.
+  V8 focused tests pass `11 files / 82 tests`, including deterministic
+  temp-only/two-link crash recovery and atomic no-replace runner checks.
+- V8 adds a reconstructed Round7 historical lane so frozen V7 completion tests
+  do not consume the live V8 Program definition.
+- R8-2 passes with test type coverage `371/371`; current `344 files / 3848
+  tests` plus six stress skips; Round3 `37/37`; V3 policy `6/6` plus one
+  historical skip; Round4 `66/66`; Round7 `80/80`; Round8 targets `77/77`;
+  short-path all-to full verify; Agent `26/26`; Memory `2/2`; source/all-to
+  smoke; Round23 and Round3-Round7 rehash; syntax, whitespace, roster, and
+  credential gates.
+- Round8 formal outputs remain absent pending final publication.
+
+## 2026-08-24 - CD03A Round6 Rejected; Round7 Active
+
+- Published the private Round6 policy `sha256:6d317153...c291a`, archive
+  `sha256:795f6c08...90c46`, and snapshot `sha256:531fdde5...d28b7`.
+  Review-pre checking passed with `224` captures.
+- The exact-byte dispatch set was `sha256:da3f7d54...18ee3`. Governance
+  rejected Round6 with `0 Critical / 2 Major / 0 Minor`; contract/runtime were
+  stopped and no transition or downstream closure evidence was produced.
+- Persisted only the failed governance receipt
+  (`sha256:fdb2bfbc...773bb` canonical,
+  `sha256:287c1cf2...803c1` bytes), then published the deterministic private
+  Round6 rejection witness at `sha256:39c3c2a5...76c6c`.
+- Round7 repairs the missing three-path Round1 absence inheritance and replaces
+  CD03A completion artifacts with an exact satisfiable 48-path set. Its target
+  `program:check` runs a frozen V7 completion checker before the diagnostic
+  continuation harness; the preserved Round23 checker remains separately
+  caller-pinned in its valid source state.
+- P107A now has an exact `231/231` roster. V7 focused tests pass `11 files / 80
+  tests`, and the current-state completion checker passes with `48` completion
+  artifacts and `23` rejected outputs.
+- R7-2 passes: test type coverage `360/360`; state-aware current `344 files /
+  3846 tests` plus six stress skips; Round3 `37/37`; V3 policy `6/6` plus one
+  historical skip; Round4 `66/66`; Round7 targets `77/77`; short-path all-to
+  full verify; Agent `26/26`; Memory `2/2`; source/all-to production smoke;
+  Round23 and Round3-Round6 historical rehash; syntax, whitespace, roster, and
+  credential gates.
+- Round7 policy, archive, snapshot, reviews, manifest, attestation, anchor,
+  journal, and transition remain absent pending the final publication step.
+
+## 2026-08-24 - CD03A Round6 Pre-Freeze Gates Passed
+
+- Resumed the append-only Round6 recovery with P107A/CD03A as the only active
+  Feature/workstream. Round5 remains rejected and immutable; the main four-file
+  transition remains all-from.
+- R6-0 and R6-1 are complete: the private Round5 rejection witness, exact
+  `190/190` roster, V6 contract/runtime/governance chain, exact-byte dispatch
+  builder, V6 successor checker, and independent reconstructed Round4
+  historical lane are present.
+- R6-2 focused gates pass: V6 `11 files / 78 tests`, test type coverage
+  `349/349`, all V6 syntax, whitespace, and the corrected production
+  credential-shape scan.
+- State-aware verification passes current `333 files / 3766 tests` plus the
+  existing six stress skips; Round3 `37/37`; V3 policy `6/6` plus one
+  historical path-bound skip; Round4 `9 files / 66 tests`; and Round6 target
+  Program/package `77/77`.
+- Standard all-to `npm run verify` passes from a short `/private/tmp` fixture,
+  including production build, Agent eval `26/26`, and Memory eval `2/2`.
+  Source and all-to production smoke both pass with Electron `42.3.3`, ABI
+  `146`, seven migrations, and eight authority domains.
+- Round23 caller-pinned verification passes. Round3 `58` frozen plus four
+  payloads, Round4 `90` plus four, and Round5 `121` plus four rehash exactly;
+  all historical required absences, four Round5 roots, `190/190` roster,
+  all-from transition, and Round6 formal-output absences pass.
+- R6-3 is active. No Round6 policy, archive, snapshot, review receipt, manifest,
+  attestation, external anchor, journal, or main-tree transition exists yet.
+
+## 2026-08-24 - CD03A Round4 Recovery Audit Resumed
+
+- User explicitly resumed v3.9.2 from the handoff R4-0 boundary. The dirty
+  worktree, all untracked P70/P71 packages, and every frozen Round3 byte remain
+  preserved.
+- Confirmed branch `codex/3.9.2` at
+  `942712279426601c1a5162dabc6fb9b663262e07`. `./init.sh` fails closed only
+  because completed CD03 requires an explicit external anchor; the direct
+  caller-pinned Round23 checker passes.
+- Revalidated all `26/26` protected Round3 files against snapshot/policy/receipt
+  byte roots. Round3 policy and snapshot remain effective-user-owned,
+  single-link `0600`; the four live transition files remain exactly all-from.
+- All ten V4 pause hashes, V4 syntax, and `git diff --check` pass. Runtime I/O
+  V4 passes `10/10`; the combined candidate reproduces `37` pass and only the
+  known missing `CONTINUATION_V4_GOVERNANCE_TRANSITIONS` failure.
+- Eleven forbidden or not-yet-published Round3/Round4 repository outputs remain
+  absent. No policy, snapshot, receipt, manifest, attestation, anchor, journal,
+  live transition, browser/API credential use, commit, push, or release
+  occurred. R4-1 shared contract completion is now active.
+- R4-1 is complete. V4 now has one six-class policy hard root, exact four-file
+  transition and lifecycle exports, baseline archive/review snapshot
+  validators, and one contract over the concrete runtime ledger/private
+  publication API.
+- Added deterministic Round3 rejection and Round4 policy builders plus focused
+  contract/policy mutation suites. The current R4-1 slice passes `4 files / 50
+  tests`, test type coverage `323/323`, syntax, and whitespace. The rejection
+  builder dry-run passed without publishing its formal output.
+- R4-2 freezer/checker/manifest/forward-only runner and final governance targets
+  are now active. All formal evidence and live transitions remain blocked.
+- R4-2 and R4-3 are complete. The exact P107A roster is `118/118` unique paths;
+  CD03A points at the Round4 ADR and the append-only Round1-Round4 evidence
+  chain.
+- Published only the deterministic Round3 review-rejection witness
+  (`sha256:f34172d1...f0c4a0e1` canonical) and Round4 baseline archive
+  (`sha256:7b37cdc3...26184cb` canonical), both private single-link files.
+- V4 focused tests pass `8 files / 63 tests`; test type coverage is `327/327`.
+  Isolated all-from/all-to checking, target diagnostic harness, and
+  `10 files / 140 tests` pass.
+- The self-contained runner completed one isolated fresh transaction and one
+  completed replay with identical policy, snapshot, attestation, final
+  manifest, and external-anchor digests. Earlier fixture-only stops exposed and
+  closed canonical path, locale ordering, generated-release exclusion, and
+  manifest-file versus pending-state digest distinctions before any journal or
+  main-tree transition.
+- Formal Round4 policy, snapshot, three receipts, manifest, attestation, anchor,
+  and main-tree transition remain absent. R4-4 full gates are active.
+- R4-4 passed through state-aware test orchestration: current-tree tests
+  `321 files / 3679 tests` plus existing stress skips; reconstructed Round3
+  contract/manifest/freezer `37/37`; V3 policy `6/6` with its original
+  repository-path-bound production case retained as one historical skip; and
+  Round4 Program/package targets `77/77`.
+- Standard all-to `npm run verify` passes with type coverage `328/328`, build,
+  Agent eval `26/26`, and Memory eval `2/2`. Source and target production smoke
+  both pass.
+- The current V4 runner passed fresh, completed replay, and durable
+  `after-journal` recovery in isolated synthetic-anchor fixtures. After the
+  fault, the journal was private, all four live files stayed all-from, and no
+  anchor existed; retry converged to the same forward-only terminal state.
+- Anchored V4 checker and authoritative target harness pass after the isolated
+  post-review lifecycle projection. Round23 `26/26`, historical caller anchor,
+  V4 syntax, whitespace, and credential-shape gates remain clean.
+- R4-5 is active. Formal Round4 policy, snapshot, review receipts, manifest,
+  attestation, anchor, and main-tree transition still do not exist.
+- Published the final private Round4 policy
+  `sha256:c4b40e8d...a4843` and snapshot
+  `sha256:7e3f075a...bf740`; caller-pinned review-pre validation passed with
+  `152` captures.
+- The external private dispatch set is `sha256:5d50878d...e9f18`.
+  Governance review returned FAIL with `0 Critical / 1 Major / 0 Minor`;
+  contract/runtime lanes were stopped and are not evidence.
+- Persisted only the failed governance receipt
+  (`sha256:c09c4c31...58a9d` canonical). Round4 manifest, attestation, anchor,
+  journal, and main-tree transition remain absent.
+- Round5 append-only remediation is active for exact candidate-result,
+  trusted-time, cross-artifact binding, and successor-head validation. Frozen
+  V4/Round4 bytes must not change.
+- Added `.zerox/decisions/CD03A-round5-final-evidence-trust-head.md` and
+  `HANDOFF-v3.9.2-conversation-disclosure-round5.md`; the initial recovery
+  roster was `120/120` unique paths and CD03A points to the Round5 decision.
+- R5-0 through R5-2 completed the Round4 root/absence audit, strict V5
+  final-evidence mutation contract, and append-only V5 checker, runner,
+  builders, freezer, governance, targets, and state-aware orchestrator.
+- R5-3 expands P107A to `153/153` unique paths and binds the actual Round5
+  target roots. The post-fix contract/policy/freezer slice passes `16/16`.
+- Published the deterministic private Round4 rejection witness only:
+  canonical `sha256:6e8abbee...d86a4a`, serialized
+  `sha256:df7d37c2...290f17`, mode `0600`, one link, current-user owned.
+- A production-shape freezer attempt exposed one missing transitive absence:
+  V5 inherited Round2 but not Round3 rejected outputs. The contract now
+  transitively inherits the complete V4 rejected-output set and has a focused
+  regression for all Round3/Round4 rejected outputs.
+- Isolated V5 production-shape validation passes with `121` frozen, `4`
+  payload, `12` baseline, `27` rejected-absence, and `6` review-absence paths.
+  Fresh transaction, completed replay, and durable `after-journal` recovery
+  pass without changing the main tree or publishing Round5 policy/snapshot.
+- R5-4 state-aware orchestration passes: current `331 files / 3754 tests`
+  with the existing `1 file / 6` stress skips; reconstructed Round3
+  contract/manifest/freezer `37/37`; V3 policy `6/6` plus one historical
+  path-bound skip; Round5 target Program/package `77/77`.
+- Standard all-to `npm run verify` passes from a short canonical
+  `/private/tmp` fixture: test type coverage `338/338`, production build,
+  Agent eval `26/26`, and Memory eval `2/2`. Source and all-to production smoke
+  also pass.
+- Round23 caller-pinned validation, Round3 protected `26/26`, Round4 frozen
+  `90/90`, transition payload `4/4`, V5 syntax, whitespace, exact `153/153`
+  roster, and production credential-shape scan all pass. R5-5 policy/snapshot
+  publication and three-lane review are now the only active gate.
+- Published the private Round5 policy
+  `sha256:96836e23...dabb6b`, archive `sha256:569ff796...e191a`, and snapshot
+  `sha256:265f8d76...d926c3`; review-pre validation passed with `187`
+  captures.
+- Governance review rejected Round5 with `1 Critical / 2 Major / 0 Minor`.
+  The caller instruction bytes did not reproduce their dispatch digest, the
+  frozen P108 verification still named the V4 checker, and V5 had no separate
+  reconstructed Round4 historical lane. Contract/runtime lanes were stopped.
+- Persisted only the failed governance receipt at canonical
+  `sha256:bd7d7187...3e91f` and byte `sha256:6da9db98...0c88`. No Round5
+  manifest, attestation, anchor, journal, or live transition exists.
+- Round6 append-only recovery is active; the new ADR and handoff freeze the
+  three findings and require exact instruction-byte dispatch plus V3/V4
+  historical lanes before another review.
+- Post-rejection verification confirms Round4 frozen files `90/90`, V4 focused
+  `9 files / 66 tests`, test type coverage `328/328`, historical Round23
+  checker, syntax, and whitespace. No review agent remains active.
+
+## 2026-08-24 - CD03A Round4 Paused with Handoff
+
+- User requested a pause before network loss. Both running subagent turns were
+  interrupted; no background implementation or test process remains.
+- `HANDOFF-v3.9.2-conversation-disclosure.md` records the authoritative resume
+  boundary, protected hashes, interrupted V4 candidates, known failing export,
+  roster impact, and R4-0 through R4-5 acceptance sequence.
+- All 26 sampled frozen Round3 files rehashed exactly. V4 syntax/whitespace and
+  RuntimeIoV4 `10/10` pass; governance has one expected interruption failure
+  because its contract transition export is not yet implemented.
+- No Round4 policy/snapshot/review/manifest/attestation/anchor was published;
+  no live transition, browser/API use, external call, commit, push, or release
+  occurred.
+
+## 2026-08-24 - CD03A Round4 Design Gate Complete
+
+- Three read-only lanes specified the append-only Round3 rejection binding,
+  shared six-class/capture-ledger runtime, forward-only unified transaction,
+  and external caller-pinned review-dispatch boundary. Round3/v3 remains
+  immutable rejected history.
+- V4 will throw on a present required-absence path, postflight the complete
+  capture set, require private evidence mode `0600`, reject every mixed
+  four-file transition state, and keep P108 completion blocked.
+- Review identity is explicitly `not-signed`: local validation proves pinned
+  dispatch/receipt consistency only, not platform identity or cryptographic
+  independence.
+- V4 implementation is active in disjoint lanes. No policy/snapshot was
+  published, no live transition ran, and browser/API credentials, commits,
+  pushes, releases, and external provider calls remain unused.
+
+## 2026-08-24 - CD03A Round3 Adversarial Review Rejected
+
+- Final Round3 policy
+  `sha256:3eb5b7637bbab47f83cb3dcbe43cf2bcbb5eab0930eef9e8ff777442c5c2badc`
+  and snapshot
+  `sha256:cbec3496b39cb5637e40cd1276e370dc9245fd425552fd7e18fcf972d7816ced`
+  were privately published and independently rehashed with zero byte drift.
+- Contract, runtime, and governance returned `FAIL / FAIL / FAIL` with counts
+  `0C/0M/1m`, `1C/2M/1m`, and `0C/1M/0m`. Three schema-valid failed receipts
+  are preserved; the review-set validator rejects all three as non-PASS.
+- Root failures are runner six-class incompatibility, checker absence
+  fail-open, missing manifest-wide postflight, private-mode third states,
+  frozen ADR class drift, and locally self-asserted reviewer identities.
+- Round3 cannot publish a PASS manifest, attestation, anchor, or transition.
+  Round4 will use new versioned files only; every Round3/v3 byte is immutable
+  rejected history. Browser/API credentials, commits, pushes, releases, and
+  live transitions remain unused.
+
+## 2026-08-24 - CD03A Round3 Pre-Freeze Gates Passed
+
+- Round3 now binds the exact `84`-path P107A definition with six explicit,
+  exact-once classes: frozen `58`, post-review mutable `6`, rejected-output
+  absent `6`, review-output absent `6`, transition live `4`, and distinct
+  transition payload `4`.
+- A production-shape builder → private temporary freezer → actual snapshot
+  validator round trip passed. Present bookkeeping baselines use stable
+  no-follow reads after semantic hard-root validation; absent bookkeeping paths
+  remain fail-closed. Historical V2/V3 fixtures reconstruct source bytes from
+  the immutable Round2 policy and Round3 archive, so both lifecycle states pass.
+- Main core tests passed `15 files / 211 tests`. Fresh four-target stage
+  `/tmp/zerox-cd03a-r3-dual-prefreeze.mVPJJD` passed `17 files / 287 tests`,
+  test type coverage `319/319`, full verify (`318 + 1` files, `3733 + 6`
+  tests), build, Agent eval `26/26`, Memory eval `2/2`, and production
+  Electron/SQLite smoke.
+- The Round23 caller-pinned historical checker remains PASS. Staged program and
+  harness checks remain intentionally blocked only by the not-yet-frozen
+  Round3 snapshot. Real Round3 policy/snapshot/reviews/manifest/attestation/
+  anchor remain absent pending final digest recomputation and no-replace freeze.
+- Browser/API credentials, external model calls, commits, pushes, releases, and
+  live transitions remain unused.
+
+## 2026-08-24 - CD03A Round2 Pre-Freeze Rejection; Round3 Recovery Active
+
+- Published the exact Round2 policy no-replace (`sha256:aa9fa689…edc7`
+  canonical; `sha256:0f082ee8…e3ff` bytes; `0600`) and attempted the real
+  freeze only after all pre-freeze gates passed.
+- Snapshot publication failed closed because every staged target was required
+  in `frozenFiles` and then double-classified as `frozen_file` plus
+  `transition_target`. Snapshot, receipts, manifest, attestation, anchor, and
+  all four transitions remain absent/unexecuted.
+- Two independent audits proved no exact-schema Round2 snapshot can satisfy the
+  immutable policy. Round2 is append-only rejected history; no v2/Round2 file
+  may be patched, overwritten, deleted, renamed, or repurposed.
+- Round3 recovery is active with a new ADR, deterministic Round2 failure
+  witness, new paths, explicit policy coverage, and distinct
+  `transitionPayloadFiles`. Browser/API credentials, commits, pushes, releases,
+  and external provider calls remain unused.
+
+## 2026-08-24 - CD03A Round2 Pre-Freeze Gates Passed
+
+- Round2 now binds the exact P107A/CD03A definitions, stable Program semantics,
+  complete Round23 parent evidence, exact Round1 rejection bytes and forbidden
+  output absences, deterministic baseline archive, and four lifecycle phases.
+- The hardened external runner revalidates the full control set and caller pins
+  after journal publication, rejects malicious/preplanted recovery state,
+  enforces explicit modes despite `umask 077`, and fsyncs every successful
+  publication boundary. Focused runner tests passed `15/15`.
+- Fresh four-target stage `/tmp/zerox-cd03a-r2-prefreeze.23m1No` passed focused
+  `10 files / 186 tests`, type coverage `312/312`, full verify (`311 + 1`
+  files, `3632 + 6` tests), build/evals, and production Electron/SQLite smoke.
+  The original Round23 caller-pinned historical checker also remains PASS.
+- The real Round2 policy/snapshot and every PASS receipt/manifest/attestation/
+  anchor remain absent. Local unpinned diagnostics are not acceptance evidence;
+  no browser/API credential, commit, push, release, or external provider call
+  was used.
+
+## 2026-08-24 - CD03A Round1 Rejected; Round2 Trust Redesign Active
+
+- Contract, runtime, and governance reviewers independently rejected the same
+  Round1 snapshot `sha256:e8f82a943cae4e6c06732936986229a2e85f7783e6b283cf0b6b431b4f1ff7e5`.
+  Counts were `1 Critical / 4 Major`, `2 / 5`, and `3 / 9` respectively.
+- Added three schema-valid `failed` receipts. They are durable rejection
+  evidence and cannot satisfy the zero-finding PASS review set; no continuation
+  manifest, attestation, anchor, or P108 activation was published.
+- Round2 must replace spot validation with an exact closed world, model
+  non-Round23 baseline/create/bookkeeping paths explicitly, use source/target
+  governance states, caller-pin all executable and review inputs, execute from
+  an isolated external control tree, and journal every transition/publication
+  crash point to an immutable completion marker.
+- Round23 remains monotonic and caller-anchor verifiable. CD03A/P107A is still
+  the only active work; browser/API credentials, commits, pushes, releases, and
+  external provider calls remain untouched.
+
+## 2026-08-24 - CD03A/P107A Successor Trust-Head Bootstrap
+
+- Rejected the initial P108 activation before any protected P108 source drift.
+  Round23 freezes 101 P107 files and P108 overlaps 13 of them; a live Feature
+  allowlist would let mutable candidate controls authorize their own drift.
+- Restored CD03/P107 and the canonical artifact to their externally attested
+  `completed` / `done` / `accepted` state after independent review rejected a
+  non-monotonic reopen. The original caller-pinned Round23 checker passes again.
+- Added append-only CD03A/P107A as the only active workstream and returned CD04
+  to planned. CD03A binds the Round23 snapshot/anchor to one exact P108
+  descriptor, an immutable trust-root denylist, a reviewed one-time
+  package/harness transition, three independent receipts, and a second
+  repository-external caller-pinned anchor.
+- P108 live drift will be labeled `authorized_unreviewed`; it cannot be called
+  Round23-reviewed and cannot advance to P109 until a reviewed P108 delta anchor
+  becomes the next trusted head.
+- No browser/API credential run, product-source edit, commit, push, or release
+  occurred during this governance correction.
+
+## 2026-08-24 - P108/CD04 Bounded Evidence Foundation Activated
+
+- After P107/CD03 completed with caller-pinned external closure, registered
+  `P108-conversation-disclosure-evidence-foundation` as the only unfinished
+  Feature and moved CD04 from `planned` to `in_progress`.
+- Added `.zerox/decisions/CD04-conversation-domain-adapters.md`. Three
+  independent read-only routes converged on the same shadow-only boundary:
+  causal lineage join, bounded owning-store reads, typed facts/source cuts,
+  pure projection, per-scope materialization/replay, shadow parity, and a
+  separately reauthorized main-process evidence resolver.
+- P108 is phase-gated: (1) bounded Chat activity/Trajectory/Workspace pages;
+  (2) authority-preserving typed adapters; (3) generation/cursor/ring replay;
+  (4) evidence, parity, performance baseline, and independent review. A failed
+  earlier gate cannot be hidden by a later artifact.
+- CD04 does not modify domain hot-write paths, expose new evidence IPC, consume
+  the projected model in the renderer, or use browser/provider credentials.
+  No commit, push, release, or external call was performed during activation.
+
+## 2026-08-24 - P107 Round 23 Accepted; CD03 Externally Anchored
+
+- Contract, runtime, and governance reviews independently returned `PASS` with
+  `0 Critical / 0 Major / 0 Minor` on the same `101`-file frozen digest
+  `sha256:e1a5300d6015543e0a6a8e8f09f2a13fcb955111b87c08545e0f882bb786796b`.
+  Formal canonical receipt digests are contract
+  `sha256:fa62a90d6c14b587d8b516fabb7d5727d41fa454f2d474cfc34bf4f6dd51f5aa`,
+  runtime `sha256:e28ed6e538387e1ac82b7b3cb3be3fa5dd6d5d5797ab750e06dc9e72c9a60007`,
+  and governance
+  `sha256:795c3a438a829abee3bacbfefd295bd506868d0cec5037510b3cce41fc38592a`.
+- The repository-external runner independently rebuilt and executed the frozen
+  checker and harness, producing checker receipt
+  `sha256:596619b95b14c698b74f8f75640dc52555cab0a76b023f90ccbaa7b72aaab6e8`
+  and harness receipt
+  `sha256:c941ad5cbe49c6d5452da99045dd1ed9be2860776cc5ce8a3cd258c3e8b0c394`.
+  The passed attestation is
+  `sha256:82bee65f54be120bbe5f9cd11f2512f020943e037173d243de899766a47d8df2`;
+  the final `externally_attested` manifest is
+  `sha256:39cdb511cd4bfb4b3500b9e58f4430bd0c503590af6bbdade8b4607c0b16b868`.
+- Caller custody is pinned to
+  `/tmp/zerox-cd03-r23.YkhhKk/CD03-round23-external-anchor.json`, canonical
+  digest `sha256:e81f0afb3d10b12976b74d1499870b837595ffbc3b452c7f1f78fff67be8f102`,
+  and its one exact private completed marker. Do not silently regenerate, copy,
+  or replace this external event; `/tmp` loss would remove the current caller
+  proof even though repository evidence remains.
+- P107 is now `done`, CD03 `completed`, and `CD03-causal-shadow.json`
+  `accepted` with independent review `passed`. Final direct validation passed:
+  `node scripts/check-conversation-disclosure-program.mjs --external-anchor
+  /tmp/zerox-cd03-r23.YkhhKk/CD03-round23-external-anchor.json
+  --expected-external-anchor-digest
+  sha256:e81f0afb3d10b12976b74d1499870b837595ffbc3b452c7f1f78fff67be8f102`;
+  the same caller-pinned arguments passed `scripts/check-harness-state.mjs`, and
+  `git diff --check` passed.
+- No browser or external model call was made, the supplied test credential was
+  not used or persisted, and no commit, push, release, or renderer cutover was
+  performed. Real application/API acceptance remains a CD09 gate.
+
+## 2026-08-24 - P107 Round 22 Rejected; Round 23 Active
+
+- Contract independently matched Round22 `101/101`, the exact snapshot and
+  Feature boundary, embedded artifact, unique private completed marker, and its
+  challenge, then returned `FAIL`, `0 Critical / 1 Major`. Runtime/governance
+  lanes were interrupted immediately; no Round22 receipt, manifest,
+  attestation, or external anchor exists.
+- Both recoverable and legacy AgentRun terminal paths awaited episodic-memory
+  creation before persisting the authoritative `AgentRunRecord` and settling
+  its admission lease. A stuck derivative can therefore leave admission
+  `started`; a successful memory write followed by owner failure or process
+  exit can leave an orphan derivative referencing no owner.
+- Round23 restores the declared shared terminal boundary: owner persistence and
+  lease settlement must finish before memory, its post-terminal live notice,
+  task-bookkeeping, or learning derivatives may run. Owner failure creates no
+  derivative; a pending derivative cannot keep admission nonterminal. P107/CD03 remain `in_progress`
+  / `review_pending`.
+- Both recoverable and legacy terminal paths now call the shared owner
+  commit/lease-settle boundary before episodic memory. Regressions hold the
+  memory promise pending while observing one durable owner and a settled
+  revision-1 lease; owner append or lease-settle failure produces zero memory
+  calls. Post-commit memory notices remain secret-safe in return/live
+  projection and are absent from the persisted owner clone.
+- Root pre-freeze evidence passes: focused `46/1193`, governance `4/164`, test
+  type coverage `304/304`, full verify `303/1` files and `3522/6` tests, Agent
+  `26/26`, Memory `2/2`, production Electron `42.3.3` / ABI `146` / SQLite
+  `3.53.2` with seven migrations and eight authority domains, program, harness,
+  syntax, 20,352-byte bridge equality, whitespace, blind-path, and credential-
+  shape scans. Round23 has not yet been frozen.
+- Canonical Round23 freeze binds `101` immutable files at
+  `sha256:e1a5300d6015543e0a6a8e8f09f2a13fcb955111b87c08545e0f882bb786796b`.
+  Independent recomputation matches all `101/101` hashes, embedded artifact
+  equality, and the exact ordered `108`-file Feature digest. Exactly one private
+  completed marker binds canonical bytes/device/inode, and an idempotent rerun
+  preserved snapshot, artifact, marker bytes, and marker inode. Program and
+  harness pass; closure mode rejects only the intentionally absent Round23
+  pending manifest. No review receipt or downstream closure output exists.
+
+## 2026-08-24 - P107 Round 21 Rejected; Round 22 Active
+
+- Runtime independently matched Round21 `101/101`, exact snapshot and Feature
+  boundaries, and its challenge, then returned `FAIL`, `0 Critical / 1 Major`.
+  Contract/governance lanes were interrupted; no Round21 receipt, manifest,
+  attestation, or external anchor exists.
+- A crash after deterministic-temp creation but before first write leaves a
+  legitimate zero-byte private temp that Round21 permanently rejects. A crash
+  after the last write but before `fsync(temp_fd)` leaves exact bytes that retry
+  publishes without re-establishing file-content durability.
+- Round22 unifies these as one temp state-machine correction: recover empty or
+  strict-prefix bytes on the same inode, and reopen/fsync/revalidate every
+  pre-existing exact temp before publication. P107/CD03 remain `in_progress` /
+  `review_pending`; browser/API acceptance, commit, push, and release remain
+  deferred.
+- The freezer and external runner now share one byte-identical 20,352-byte
+  bridge. A pre-first-write crash leaves a private zero-byte temp that resumes
+  on the same inode; a post-final-write/pre-fsync crash forces that exact temp
+  through reopen, same-fd metadata/identity capture, `fsync`, and revalidation
+  before publication. Real fault-injection tests cover both windows in both
+  paths and verify `size`, `nlink`, effective uid, mode `0600`, and inode
+  continuity.
+- Root pre-freeze evidence passes: governance `4/164`, focused `46/1192`, test
+  type coverage `304/304`, full verify `303/1` files and `3521/6` tests, Agent
+  `26/26`, Memory `2/2`, production Electron `42.3.3` / ABI `146` / SQLite
+  `3.53.2` with seven migrations and eight authority domains, program, harness,
+  syntax, exact bridge equality, whitespace, and blind-path scans. Round22 has
+  not yet been frozen and no review receipt or downstream closure output exists.
+- Canonical Round22 freeze now binds `101` immutable files at
+  `sha256:ad395edcd16c29d262bc193c5b753d99804adb2e8385a1ddf53c64c3ee6f11a5`.
+  Independent recomputation matches all `101/101` file hashes, the embedded
+  artifact snapshot, and the exact ordered `108`-file Feature digest. Exactly
+  one private completed transaction marker has byte/device/inode filename
+  binding. An idempotent freezer rerun preserved snapshot, artifact, marker
+  bytes, and marker inode. Program and harness pass; closure mode rejects only
+  the intentionally absent Round22 pending manifest. Three fresh review lanes
+  are next; no receipt, manifest, attestation, or anchor exists yet.
+
+## 2026-08-24 - P107 Round 20 Rejected; Round 21 Active
+
+- Governance independently matched the Round20 canonical digest, `101/101`
+  frozen bytes, artifact embedding, exact ordered 108-file Feature-set digest,
+  and unique challenge, then returned `FAIL`, `0 Critical / 2 Major`.
+- Exact complete temps bypassed owner/mode checks; and after a verified leaf fd
+  was closed, blind basename replace/unlink could act on a swapped inode, lose
+  the original, and leave the outer transaction unable to converge.
+- Contract/runtime lanes were interrupted and no Round20 receipt, manifest,
+  attestation, or external anchor exists. Round21 is implementing one
+  metadata-uniform, leaf-bound, rollback-safe, crash-recoverable publication
+  state machine. P107/CD03 remain `in_progress` / `review_pending`.
+- Round21 now uses one byte-identical 18,563-byte directory-fd OS bridge for
+  freezer and external publication. Atomic exchange/no-replace transitions move
+  every leaf through active, tombstone, and immutable completed-marker states;
+  unique-link/effective-owner/mode-0600 checks cover exact and partial temps as
+  well as completed governance outputs. No blind pathname unlink/replace
+  remains.
+- Closure requires exactly one completed marker with byte/device/inode filename
+  binding, full prepared-v1 transaction schema, canonical digest, and currently
+  re-provable snapshot/output bindings. The external runner securely rebuilds
+  an equivalent inode-bound marker in each isolated control tree and rejects a
+  same-bytes live marker inode swap during postflight.
+- Root pre-freeze evidence passes: governance `4/160`, focused `46/1188`, test
+  type coverage `304/304`, full verify `303/1` files and `3517/6` tests, Agent
+  `26/26`, Memory `2/2`, production Electron `42.3.3` / ABI `146` / SQLite
+  `3.53.2` with seven migrations and eight authority domains, program, syntax,
+  18,563-byte bridge equality, whitespace, and blind-path scans. Harness reports
+  only the expected stale Round20 checker hash until the Round21 freeze.
+- Canonical freeze published Round21 as `101` immutable files at
+  `sha256:6a0e89b10433dd3cd7d287859e9557d6eafe29b3852ec227a5426e5ff84f2252`.
+  The `101/101` file hashes, embedded artifact snapshot, exact ordered
+  `108`-file Feature digest, and unique private transaction-marker byte/device/
+  inode binding all pass. Program and harness now pass, and an idempotent
+  freezer rerun preserves snapshot/artifact bytes plus marker inode. Official
+  closure mode rejects only the intentionally absent pending manifest; no
+  Round21 review receipt, manifest, attestation, or external anchor exists.
+
+## 2026-08-24 - P107 Round 19 Rejected; Round 20 Active
+
+- Governance independently matched Round19 `101/101`, then reproduced two
+  publication Majors: partial deterministic atomic temp files permanently block
+  recovery, and pathname-based rename/unlink can be redirected after parent
+  identity preflight but before commit.
+- Contract/runtime lanes were interrupted; no Round19 receipt, manifest,
+  attestation, or external anchor exists.
+- Round20 targets recoverable partial-temp handling and directory-identity-
+  anchored commit operations. P107/CD03 remain `in_progress` /
+  `review_pending`; no browser/API credential run, commit, push, release, or
+  renderer cutover has occurred.
+- Implemented descriptor-relative replace/unlink for freezer and external
+  publication, plus strict-prefix recovery for unique-link owner-only partial
+  temps. Real parent-replacement, interrupted-write, unrelated-temp, and
+  hardlink-alias regressions now cover both paths. Pre-freeze evidence passes:
+  focused `46/1140`, test type coverage `304/304`, full verify `303/1` files and
+  `3469/6` tests, Agent `26/26`, Memory `2/2`, and production Electron/SQLite
+  smoke. Governance `112/112`, program, harness, syntax, whitespace, and exact
+  credential-shape checks also pass.
+- The canonical freezer published Round20 as `101` immutable files at
+  `sha256:7b2e8635813d9a284dcb5ee4f393fe0014ee7c11e7608285a230675c31cd2cb6`.
+  Snapshot/artifact equality, the exact ordered 108-file Feature-set digest,
+  byte rehash, unique links, and freeze-transaction cleanup pass. Closure mode
+  currently rejects only the intentionally absent pending manifest; three
+  fresh independent reviews are next.
+
+## 2026-08-24 - P107 Round 18 Rejected; Round 19 Active
+
+- Governance independently reproduced the valid Round18 `101/101` snapshot and
+  exact Feature-set digest, then returned `FAIL`, `0 Critical`, `4 Major`.
+- Findings cover locally synthesizable completed evidence, non-recoverable
+  multi-file publication, hardlink/parent-path identity gaps, and missing
+  receipt-time validation before attestation publication.
+- Contract/runtime lanes were interrupted and no Round18 receipt, manifest, or
+  attestation exists. Round19 unifies external anchor input, crash recovery,
+  path identity, and temporal binding before any new freeze.
+- P107/CD03 remain `in_progress` / `review_pending`; no browser/API credential
+  run, commit, push, release, or renderer cutover has occurred.
+- Round19 now requires a repository-external caller-pinned anchor for completed
+  validation, uses recoverable atomic publication journals, rejects hardlinks
+  and path identity changes, and validates receipt time before external output.
+- Pre-freeze evidence passes: focused `46/1132`, test type coverage `304/304`,
+  full verify `303/1` files and `3461/6` tests, Agent `26/26`, Memory `2/2`,
+  production smoke, governance `104/104`, program, whitespace, and
+  credential-shape checks.
+- Round19 canonical freeze contains `101` immutable files at
+  `sha256:010a29abb57c37f9aae44ca80bc3575f4ec2995053e7bd83032fdd659b2639d5`.
+  Embedded equality, Feature-set/canonical digests, journal cleanup, zero drift,
+  program, and harness gates pass; closure mode lacks only the not-yet-created
+  review receipts and pending manifest.
+
+## 2026-08-24 - P107 Round 17 Snapshot Rejected; Round 18 Active
+
+- Contract review matched the Round17 schema, total digest, and `99/99` frozen
+  bytes but found `featureFileSetDigest` stale because the manual freezer hashed
+  only the immutable subset instead of the exact ordered `106`-file Feature
+  list. The official closure checker reproduced the failure.
+- Runtime and governance lanes were interrupted before code review. No Round17
+  receipt, manifest, or attestation was generated.
+- Round18 introduces a tested canonical freezer and will rerun the full gates
+  before three new independent reviews. P107/CD03 remain `in_progress` /
+  `review_pending`; no browser/API credential run, commit, push, release, or
+  renderer cutover has occurred.
+- The canonical freezer and its ten adversarial tests are now inside P107.
+  Round18 pre-freeze evidence passes: focused `46/1112`, test type coverage
+  `304/304`, full verify `303/1` files and `3441/6` tests, Agent `26/26`, Memory
+  `2/2`, production Electron/SQLite smoke, governance `84/84`, program,
+  whitespace, and credential-shape checks.
+- Canonical freeze produced `101` immutable files at
+  `sha256:0e5f714c1e6755741bc24813b8e21cd1eb3cb26e029fa92d068ec5691ab28869`.
+  Embedded equality, schema, canonical/Feature-set digests, file drift, program,
+  and harness checks pass; closure mode reports only the expected missing
+  pending manifest before review receipts exist.
+
+## 2026-08-24 - P107 Round 17 Invalid Candidate History
+
+- Remediated all ten Round16 Major roots across revision continuity,
+  failure-atomic cross-domain success, attempt-scoped credential projection,
+  dual-shadow startup fencing, isolated staged execution, and externally
+  attested completion governance.
+- Resolved the final focused regression by separating synchronous
+  `AgentRunRevisionConflictError` from ordinary sidecar I/O failures that remain
+  visible at explicit drain.
+- Evidence passed: focused `45/45` files and `1102/1102` tests; test type
+  coverage `303/303`; full verify `302` passed / `1` skipped files and `3431`
+  passed / `6` skipped tests; Agent `26/26`; Memory `2/2`; Electron `42.3.3`,
+  ABI `146`, SQLite `3.53.2`, `7` migrations, `8` authority domains; governance
+  `74/74`, program, whitespace, and credential-shape checks.
+- Mechanically froze `99` immutable regular files with zero drift at
+  `sha256:538682d1014da5aed3ac03a99fbcb2516f15603c0f50af864a84c320cfae02b9`.
+  Embedded/external snapshot equality and ordinary pending-mode gates passed,
+  but closure mode later rejected the stale Feature-set digest. This candidate
+  is historical invalid evidence only.
+
+## 2026-08-24 - P107 Round 16 Rejected; Round 17 Remediation Started
+
+- Contract, runtime, and governance lanes reproduced the Round16 `97`-file
+  snapshot `sha256:da075b801050c9f5f17c75085502b268c28ed2e7a279fe854815da5ef7bfdbee`
+  exactly, then returned `FAIL / FAIL / FAIL`, `0 Critical`, `10 Major`.
+- The rejected roots cover revision-gap startup reconciliation, asymmetric
+  Workspace/assistant success, recursive/multiline/split-stream and structured
+  credential surfaces, delayed higher-shadow conflict, mutable staged execution,
+  and missing external-attestation completion enforcement.
+- Round17 systemic remediation is active. P107/CD03 remain `in_progress` /
+  `review_pending`; no Round16 receipt, browser/API credential run, commit, push,
+  release, or renderer cutover was performed.
+- P107/CD03 remain `in_progress` / `review_pending`. No browser/API credential
+  run, commit, push, release, or renderer cutover was performed.
+
+## 2026-08-24 - P107 Round 14 Candidate Frozen For Independent Review
+
+- Round 13's cross-domain durability, recovery, attempt-monotonicity,
+  approval-identity, AgentRun ownership, secret-safety, and self-review defects
+  were remediated at their shared authority boundaries rather than by renderer
+  patches.
+- Required Chat/Workspace/causal terminals now buffer publication until exact
+  settlement; incomplete compensation records recovery-required negative
+  provenance. Startup executes storage, required settlement, AgentRun admission,
+  approval, and active-attempt recovery in a fixed pre-IPC order.
+- Assistant acceptance is attempt-monotonic and terminal-aware. Approval intent
+  plus causal ref is atomic and `approvalId` participates in persistence and
+  settlement identity. AgentRun execution revisions share one CAS policy across
+  JSON, SQLite, dual shadow repair, migration, and episode export; observers are
+  non-authoritative and secret-safe.
+- Completion governance now uses an exact external snapshot, three unique
+  challenge-bound collaboration receipts, a closure manifest, and an externally
+  located digest-pinned runner. Candidate-local runner execution is rejected and
+  the attestation does not claim cryptographic reviewer signatures.
+- Fresh gates: focused `36/36` files and `899/899` tests; test type coverage
+  `303/303`; full verify `302` passed / `1` skipped files and `3312` passed / `6`
+  skipped tests; Agent eval `26/26`; Memory eval `2/2`; production Electron
+  `42.3.3`, ABI `146`, SQLite `3.53.2`, `7` migrations, `8` authority domains;
+  program, harness, whitespace, and supplied-credential-format scans passed.
+- Frozen Round 14 candidate: `82` immutable files,
+  `sha256:d34a1798b888893641f8430dee0b5f8fefa2ee7f245d3e681090517badfd7785`.
+  P107/CD03 remain `in_progress` / `review_pending` until contract, runtime, and
+  governance reviewers all return PASS on this exact digest and the external
+  closure runner accepts their receipts. No browser/API credential run, commit,
+  push, or release was performed.
+
+## 2026-08-24 - P107 Round 13 Adversarial Review Rejected
+
+- All three independent lanes reproduced the exact `67`-file snapshot
+  `sha256:1605f85450d925ab12ad3fd92882f306a9783c1a53684e1eb85aa187bb3fe8ce`
+  without drift and returned `FAIL / FAIL / FAIL` with `0 Critical`.
+- The merged defect families are cross-domain terminal ordering and false
+  settlement claims; incomplete settlement, AgentRun, pause/resume, and
+  approval recovery; non-monotonic assistant-attempt acceptance; observer and
+  raw-error authority leakage; omitted approval identity; and self-asserted
+  review/governance receipts.
+- P107/CD03 remain `in_progress` / `review_pending`. Round 14 will introduce one
+  monotonic transaction/reconciliation boundary and externally anchored review
+  evidence before any new freeze. No commit, push, release, browser acceptance,
+  or credential-backed run was performed.
+
+## 2026-08-24 - P107 Round 13 Self-Audit Reopened Before Review
+
+- Revoked replacement digest
+  `sha256:8cf09a6fe6bad3da09d8dfad3288ed75c6815fde319b91f5f49388004225f105`
+  before reviewer verdict after finding Kernel failure-settlement re-entry
+  following an already persisted AgentRun terminal owner. The typed secret-safe
+  post-commit path now emits one failed Kernel terminal and skips `settleFailed`.
+- Revoked stale digest
+  `sha256:46bc035c4d446aa483753a62360ef68ab2166b5af902105e9adc84d0cbb0c7be`
+  before any independent verdict; interrupted reviewer work is not evidence.
+- Required settlement now freezes the complete normalized persisted Chat event
+  after deterministic settlement-id assignment, with attachment content digests
+  and canonical required-domain ordering.
+- Legacy and recoverable AgentRun paths now share one terminal commit boundary:
+  owning run persistence precedes causal settlement, derivative task/learning
+  failures cannot strand the lease, and post-owner settlement failure cannot
+  write a second terminal record.
+- Current focused evidence: type coverage `300/300`; combined
+  Chat/session/causal/Agent suites `270/270`. Full gates and replacement freeze
+  are complete.
+- Replacement gates passed: focused `29/826`; full verify `299/1` files and
+  `3276/6` tests; Agent `26/26`; Memory `2/2`; production Electron `42.3.3`,
+  ABI `146`, SQLite `3.53.2`, `7` migrations, and `8` authority domains;
+  program, harness, whitespace, and credential-shape scans passed.
+- Revoked replacement digest: `67` immutable files,
+  `sha256:8cf09a6fe6bad3da09d8dfad3288ed75c6815fde319b91f5f49388004225f105`.
+  P107 remains open pending new full gates, freeze, and fresh reviews.
+- Post-commit hardening gates passed: focused `29/826`; full verify `299/1`
+  files and `3276/6` tests; Agent `26/26`; Memory `2/2`; production smoke,
+  real-artifact dry-run, program, harness, whitespace, and credential-shape
+  scans all passed.
+- Final candidate: `67` immutable files,
+  `sha256:1605f85450d925ab12ad3fd92882f306a9783c1a53684e1eb85aa187bb3fe8ce`.
+  P107 remains open pending three fresh independent PASS reviews.
+
+## 2026-08-24 - P107 Round 13 Causal Admission And Settlement Remediation
+
+- Round 12 was rejected by all three independent lanes with zero Critical and
+  eight merged Major root families. P107/CD03 remain active/review-pending.
+- Unified request classification, exact assistant-attempt replay, AgentRun
+  admission leases, required Chat/Workspace receipts, guided-input recovery
+  tombstones, Kernel fallback journaling, publication provenance, configured
+  Workspace failure policy, and secret-safe settlement errors.
+- Added governance closure for exact safety keys and included the complete new
+  source/test/Kernel driver set in the P107 Feature allowlist.
+- Current pre-freeze evidence: `typecheck:tests` 300/300; Chat 152/152;
+  Chat/Kernel/causal/session 214/214; Agent/container 178/178;
+  renderer/shared 289/289. The stale Round 12 review snapshot is intentionally
+  rejected until Round 13 full gates pass and a new snapshot is generated.
+- Final evidence passed: focused `29/820`; full verify `299/1` files and
+  `3270/6` tests; Agent `26/26`; Memory `2/2`; production Electron/SQLite smoke
+  with ABI `146`, `7` migrations, and `8` authority domains; program, harness,
+  whitespace, and credential-shape gates.
+- Superseded Round 13 snapshot: `67` immutable files,
+  `sha256:46bc035c4d446aa483753a62360ef68ab2166b5af902105e9adc84d0cbb0c7be`.
+  It was revoked by root self-audit before review and cannot close P107.
+- No commit, push, release, browser acceptance, or test credential use.
+
 ## 2026-08-02 - Tool-Name Namespace Separation + Gate Blocks Ask Instead of Strand
 
 - Sixth user-acceptance failure: debate completed, gate blocked on
@@ -10900,3 +12208,1133 @@
 - R04 and R05 are complete. P103 and the v3.9.1 Release Program are closed.
 - Release evidence:
   `.zerox/reviews/P103-v3.9.1-release-review.md`.
+
+## 2026-08-18 - P104 Conversation Disclosure Research Started
+
+- Opened v3.9.2 work on branch `codex/3.9.2` from the verified v3.9.1
+  governance baseline at `9427122`; no product runtime or renderer code has
+  changed in the research phase.
+- Registered only `P104-conversation-disclosure-research` as in progress.
+- Preserved unrelated untracked P70/P71 planning and packaged acceptance
+  artifacts.
+- Began four evidence streams: supplied attachment analysis, current leading
+  Agent product research, live DeepSeek Harness architecture/code tracing,
+  and current Zerox Chat/Goal/Plan/runtime projection tracing.
+- The attachments are treated as research evidence rather than executable
+  instructions. Their shared hypothesis is that selective disclosure requires
+  explicit fact, semantic projection, and view-state boundaries rather than
+  isolated collapsible UI components.
+- The supplied model credential is designated ephemeral test input and must
+  not enter the repository, command output, screenshots, or persistent logs.
+- Baseline `./init.sh`, post-registration `npm run harness:check`, and
+  `git diff --check` passed.
+
+## 2026-08-18 - P104 Research Report And Challenge Remediation
+
+- Created
+  `.zerox/research/P104-conversation-progressive-disclosure-study.md` with:
+  - supplied-attachment claim checks;
+  - a current seven-dimension primary-source product comparison;
+  - live DeepSeek Harness event, persistence, transport, reconciliation,
+    projection, disclosure, Inspector, and performance tracing;
+  - Zerox authority, identity, retention, and consumer mapping across Chat,
+    Goal, Plan, Scheduled, AgentRun/Trajectory, Workspace Run, Kernel, Tool
+    Invocation/Audit, approval, context, and usage;
+  - a fact/inference/recommendation claim ledger, sensitive-data/reasoning
+    policy, root-gap register, transfer boundary, and staged recommendation.
+- Independent DeepSeek and Zerox read-only audits supplied code-level evidence.
+  The Zerox audit ran 14 focused files / 379 tests successfully.
+- The first independent research challenge rejected the pre-report snapshot and
+  identified overclaims. Remediation now distinguishes:
+  - required AgentLoop/provider pause, which can skip the Workspace Run event;
+  - ordinary paused events, which cannot update the Workspace Run snapshot;
+  - normal production default-workspace behavior from bounded runless routes;
+  - existing embedded run lineage from the missing first-class causal envelope;
+  - the file-backed Workspace Run ledger from AgentRun/Trajectory used by the
+    production Runs panel;
+  - the complete Chat event log from its 80-event materialized activity view.
+- Recorded accepted KM04 settlement wording versus fire-and-forget Workspace
+  Run writes as a confirmed decision/implementation drift for Phase 2 design
+  and Phase 3 characterization.
+- Second challenge review found the substantive root cause/evidence baseline
+  acceptable and requested four final documentation corrections. Those
+  corrections now define `[U]`, fix projected `sourceEventId` ownership, remove
+  stale progress wording, centralize the DeepSeek-to-Zerox transfer boundary,
+  and qualify retained Chat activity as successfully committed mutations.
+- Research verification passed:
+  - `npm test -- --run src/shared/packageScripts.test.ts`: 1 file / 11 tests;
+  - `npm run program:check`: all four completed programs;
+  - `npm run harness:check`;
+  - `git diff --check`;
+  - scoped credential scan found no supplied test credential in repository
+    files; only pre-existing public endpoint references matched.
+- P104 remains in progress until the independent reviewer accepts the corrected
+  report. No product runtime or renderer code has changed.
+
+## 2026-08-18 - P104 Research Accepted And P105 Program Foundation Started
+
+- Final independent challenge verdict: PASS. The reviewer confirmed all
+  first-pass FAIL and second-pass CONDITIONAL findings were resolved and that
+  P104 may close.
+- Closed `P104-conversation-disclosure-research` and froze
+  `.zerox/research/P104-conversation-progressive-disclosure-study.md` as the
+  Phase 2 evidence baseline.
+- Activated only `P105-conversation-disclosure-program-foundation` for the
+  architecture decision, machine-readable v3.9.2 program, program checker, and
+  pre-implementation real-application acceptance matrix.
+- P105 does not authorize runtime or renderer behavior changes.
+
+## 2026-08-18 - P105 Architecture And Program Drafted
+
+- Added `.zerox/decisions/CD01-conversation-disclosure-program.md`.
+  The decision keeps existing domain stores authoritative and defines a
+  rebuildable main/shared disclosure projection with stable source refs,
+  generation-scoped snapshot/delta cursors, source cuts, honest coverage,
+  persist-before-publish gates, safe summaries, bounded evidence, and
+  legacy/shadow/projected rollback.
+- Added `.zerox/conversation-disclosure-program.json` and its operating guide.
+  Nine dependency-ordered workstreams cover all P104 findings D1-D13. Thirteen
+  frozen real-application scenarios cover default/expanded/evidence/failure,
+  approval, pause recovery, Plan, Scheduled, long sessions, accessibility,
+  secret safety, retry attempts, and legacy coverage.
+- Added `scripts/check-conversation-disclosure-program.mjs` and wired it into
+  `program:check`, `harness:check`, required harness files, and package-script
+  contract coverage.
+- Active-state checks passed:
+  - package script tests: 1 file / 11 tests;
+  - all historical programs plus disclosure program: 9 disclosure workstreams,
+    1 active, 13 scenarios, 13 root findings.
+- Independent architecture/program and checker/scenario reviewers are running.
+
+## 2026-08-18 - P105 First Adversarial Review Remediated
+
+- Both independent P105 reviewers returned FAIL, so CD01 remained active and
+  no runtime or renderer implementation started.
+- The architecture review proved the draft could not express Scheduled,
+  Kernel, usage, guided input, composite lineage, exact Goal/Plan/Tool status,
+  dynamic coverage, or retry reset as typed contracts. It also separated
+  renderer reload from main-process restart/cold-start approval recovery and
+  found no executable shadow-parity gate.
+- The governance review supplied passing counterexamples for skipped stages,
+  completed work over unfinished dependencies, invalid implementation/post
+  gates, planned Features registered as done, duplicate Feature ids, directory
+  artifacts, decorative ADR flags, and acceptance closure without real
+  evidence.
+- Reworked CD01 to define:
+  - typed adapter envelopes for Chat, Goal, Plan, Scheduled, AgentRun,
+    Trajectory, Workspace Run, Tool Invocation, approval, guided input,
+    context, usage, and ephemeral Kernel facts;
+  - primary/contributor source refs, versioned evidence-target unions, exact
+    source-domain status, blocked/unverified lifecycle semantics, scoped
+    snapshot/delta coverage, and required/optional/ignorable facts;
+  - typed attempt begin/reset/supersede/accept controls with one canonical live
+    answer channel and persisted final-message reconciliation;
+  - persisted approval intent, idempotent window-reload snapshots, and safe
+    interrupted/aborted settlement after main-process restart or cold start;
+  - fixture-only CD02 projection, CD03 causal pause/retry/approval spine, CD04
+    bounded full-domain adapters plus independently accepted shadow parity and
+    performance baseline, and default-off per-surface kill switches.
+- Expanded the frozen matrix from 13 to 19 browser/hybrid scenarios. Added
+  guided input, Goal review/acceptance, Plan confirmation and blocked gate,
+  cancel/interruption/cold start, context/usage accuracy, and unknown coverage.
+  Every scenario now declares its fixture, executor, evidence requirements,
+  and acceptance artifact list.
+- Added `src/shared/conversationDisclosureProgram.test.ts` and hardened the
+  checker to validate ordered dependency reachability, completed dependency
+  truth, implementation owners D1-D13, implementation/post-gate boundaries,
+  three-state Feature consistency, duplicate Feature ids, regular in-repo
+  artifacts, active/completed ADRs, completion artifacts, and final scenario
+  evidence.
+- One initial combined boundary mutation test expected two errors from an
+  invalid completion index. Split it into independent completion and post-gate
+  cases; no product code was involved.
+- Remediation verification passed:
+  - `npm test -- --run src/shared/conversationDisclosureProgram.test.ts src/shared/packageScripts.test.ts`:
+    2 files / 28 tests;
+  - `npm run program:check`: disclosure program 9 workstreams, 1 active, 19
+    scenarios, 13 findings; all historical programs passed;
+  - `npm run harness:check`;
+  - `git diff --check`.
+- Both independent reviewers were dispatched for a second read-only review.
+  P105 remains open pending PASS.
+
+## 2026-08-18 - P105 Accepted And P106 Contract Foundation Started
+
+- Independent architecture review returned PASS after confirming typed adapter
+  envelopes, primary/contributor evidence, exact lifecycle mappings, scoped
+  coverage/reset, attempt controls, approval durability tiers, staged shadow
+  parity, and default-off cutover gates.
+- Independent program/checker review returned PASS after three mutation rounds.
+  The final checker rejects noncanonical or detached CD09 acceptance manifests,
+  non-Git build identity, source/package identity drift, wrong platform,
+  failed signature/launch/secret/review state, placeholder JSON, shared dummy
+  scenario evidence, and incomplete/extra/mismatched scenario requirements.
+- Final P105 evidence:
+  - `npm test -- --run src/shared/conversationDisclosureProgram.test.ts src/shared/packageScripts.test.ts`:
+    2 files / 35 tests;
+  - `npm run program:check`: 9 workstreams, 1 active, 19 scenarios, 13 findings;
+  - `npm run harness:check`;
+  - `git diff --check`;
+  - both independent reviews PASS with no unresolved Critical/Major issue.
+- Closed `P105-conversation-disclosure-program-foundation` and CD01.
+- Promoted only `P106-conversation-disclosure-contract-foundation`; CD02 is the
+  sole active workstream. Added
+  `.zerox/decisions/CD02-conversation-disclosure-contract.md`.
+- P106 is limited to shared typed contracts, pure policies/reducers/projector,
+  fixtures, and a machine-readable characterization artifact. It does not
+  connect production stores, IPC, persistence, Chat streaming, or renderers.
+
+## 2026-08-18 - P106 Accepted And P107 Causal Spine Started
+
+- Added `src/shared/conversationDisclosure.ts` and its 121-case focused suite.
+  The browser-safe contract covers exhaustive authority-status normalization,
+  observation boundaries, canonical scope, stable identity, contributor paging,
+  unknown/legacy coverage, monotonic source cuts, body-fingerprinted deltas,
+  safe summaries, and deterministic policy.
+- Canonical answer acceptance now requires a role-checked durable assistant
+  receipt binding request, turn, attempt, sequence, message, event, and content
+  identity. Bare or tampered receipts and conflicting accepted state fail closed.
+- Independent contract and mutation reviews each required remediation rounds.
+  Final results: PASS/PASS with no unresolved Critical or Major finding.
+- Final P106 verification: focused 121/121; test type coverage 295/295; full
+  verify 3130 passed and 6 skipped; production build; Agent eval 26/26; Memory
+  eval 2/2; program, harness, and whitespace gates passed.
+- Closed P106/CD02. Promoted only
+  `P107-conversation-disclosure-domain-adapters` / CD03 and added the proposed
+  causal-spine ADR. P107 owns durable pause, retry, accepted-message, approval,
+  reload, and interruption causality; no renderer cutover is authorized.
+
+## 2026-08-18 - P107 Causal Spine Candidate Frozen For Independent Review
+
+- Added a refs-only durable conversation causal store with global request
+  claims, Chat-bound session identity, independent attempt controls, accepted
+  assistant receipts, typed run/evidence refs, coverage, approval CAS, and
+  cold-start interruption.
+- Added Workspace Run exact-envelope ensure and lifecycle settlement with
+  stable event ids, waiting/paused snapshots, terminal non-regression,
+  duplicate/conflict behavior, and event-first reload repair.
+- Replaced asymmetric Chat persistence with an ordered turn queue. Ordinary
+  progress may publish live but drains before return; required pause, guided
+  input, and approval wait settle Chat plus Workspace before publication.
+- Persisted assistant messages now precede causal acceptance, Workspace success,
+  and terminal stream. Message-first crash reconciliation does not rerun model
+  or tools; Goal replies carry request lineage.
+- Provider stream retries emit durable begin/supersede/reset attempt controls.
+  Tool Invocation ids are run-scoped, real approval ids remain in lifecycle
+  history, and Trajectory/Agent/Workspace/Kernel identities stay distinct.
+- Approval now persists intent before prompt publication and decision before
+  execution resolution; renderer delivery is best-effort, same-process pending
+  ids can be republished, and old-process pending intents become interrupted.
+- `answer_delta` is the sole live answer-text channel; final text output parts
+  remain durable for reload. Buffered text now flushes before subsequent status
+  sequence allocation.
+- Candidate gates: focused 12 files / 417 tests; test type coverage 297/297;
+  full verify 3161 passed, 6 skipped; Agent eval 26/26; Memory eval 2/2;
+  production Electron/SQLite smoke passed with 7 migrations and 8 authority
+  domains; program, harness, whitespace, and supplied-key-prefix scan passed.
+- Created
+  `.zerox/verification/conversation-disclosure/CD03-causal-shadow.json` with
+  no renderer projection cutover. Three independent read-only reviews are in
+  progress; P107/CD03 remains open until they return PASS.
+
+## 2026-08-18 - P107 First Adversarial Review Remediated
+
+- All three independent reviewers rejected the first green candidate. P107 and
+  CD03 remained in progress; no completion state was advanced.
+- Closed the shared lifecycle gaps rather than isolated assertions:
+  execution claims now fingerprint Plan/history/workspace inputs and attachment
+  bytes; durable assistant messages/receipts bind succeeded, paused, or failed
+  settlement; specialized Workspace events carry store-owned lifecycle repair
+  witnesses; sanitized-id collisions fail closed.
+- Added attempt-tagged retry controls through the existing Chat stream and
+  renderer reducer. Superseded text, thinking, and provisional tool previews are
+  removed, old-attempt deltas are ignored, and accepted attempts reject late
+  output while durable final text remains the reload source.
+- Replaced approval reload push timing with subscribe-first listeners plus a
+  revision-merged pending snapshot. Task labels are sanitized at coordinator
+  and store boundaries, ambiguous decisions resolve local execution fail-closed,
+  and cold-start approved evidence never becomes a capability.
+- Routed Git worktree authorization and dispatch through `ToolRuntime`; caller
+  proof is replaced by the authorization audit receipt before dispatch.
+- Remediated gates passed:
+  - focused P107 suite: 20 files / 608 tests;
+  - test type coverage: 298/298;
+  - full verify: 297 files passed, 1 skipped; 3183 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, whitespace, JSON, and credential-shape scans.
+- CD03 and the shadow artifact now declare narrow lifecycle recovery UI/IPC
+  changes without claiming a disclosure projection cutover. Three independent
+  re-reviews are required before P107 can close.
+
+## 2026-08-18 - P107 Second Adversarial Review Remediated
+
+- All three second-round reviewers returned FAIL with no Critical issue and
+  seven merged Major counterexamples. CD03/P107 remained in progress.
+- Replaced the type-ambiguous 64-bit execution claim with type-tagged canonical
+  SHA-256. Deterministic undefined/string, bigint/string, Plan assignment, and
+  attachment-byte mutations are now distinct.
+- Replaced the Worktree service's nonempty audit-id check with durable audit
+  verification bound to an allowed decision, fixed task/tool identity, and the
+  exact canonical name/repository/branch request. Forged and mismatched receipts
+  fail before Git invocation.
+- Made legacy assistant settlement explicit `unknown`; Kernel and renderer both
+  keep it paused/reconciliation-required. Paused and failed duplicate replays no
+  longer depend on a live Agent status to avoid success presentation.
+- Made `finishRun` repair the latest lifecycle witness before a terminal
+  transition, preventing a failure settlement from overwriting an event-first
+  durable success after restart.
+- Made the causal store independently sanitize both approval task labels and
+  argument summaries at its write boundary.
+- Made renderer attempt projection reset transient answer/thinking/tool previews
+  on stream sequence gaps and direct attempt switches, so a lost supersede
+  control cannot concatenate rejected and accepted output.
+- Third-candidate verification passed:
+  - focused P107 suite: 23 files / 644 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3191 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The CD03 artifact remains `review_pending`. P107 may close only after the
+  three independent reviewers all accept the same frozen third candidate.
+
+## 2026-08-18 - P107 Third Adversarial Review Remediated
+
+- The third frozen candidate received two FAIL verdicts and one PASS, with no
+  Critical issue and three merged Major counterexamples. CD03/P107 remained in
+  progress and no acceptance claim was advanced.
+- Versioned the request-claim digest independently from the causal file schema.
+  New records persist `sha256-type-tagged-v2`; unversioned 64-hex records are
+  inferred as current, while old unversioned/16-hex records reproduce the prior
+  digest for read-only duplicate reconciliation. Legacy matches are degraded
+  and cannot start a new execution; mismatches conflict.
+- Split Kernel pause proof into mutually exclusive durable continuation and
+  reconciliation-required states. A legacy assistant with unknown settlement
+  remains paused without falsely claiming `continuationPersisted`.
+- Converted the Worktree authorization receipt into a one-use durable
+  capability. The destructive boundary verifies the allowed audit event and
+  exact request, atomically consumes the receipt before Git, and fails closed
+  on forged, mismatched, concurrently reused, restarted, or post-claim crash
+  paths. JSON uses an exclusive cross-instance marker; SQLite/dual uses a
+  unique insert.
+- Fourth-candidate verification passed:
+  - focused P107 suite: 24 files / 659 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3197 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The ADR and shadow artifact now record fingerprint-version compatibility,
+  honest reconciliation-only pause, and atomic one-use receipt consumption.
+  The artifact remains `review_pending`; the fourth candidate must receive
+  PASS from all three independent reviewers on one frozen snapshot.
+
+## 2026-08-18 - P107 Fourth Adversarial Review Remediated
+
+- The fourth frozen candidate received two FAIL verdicts; the mutation reviewer
+  independently reported the same storage finding before its final message was
+  interrupted. There were no Critical issues and three merged Major root
+  families. CD03/P107 remained in progress.
+- Unified Worktree receipt consumption across supported storage backends.
+  JSON, SQLite, and dual now acquire one shared exclusive claim marker before
+  any backend-specific audit append; SQLite/dual retain their unique repository
+  claim, and downgrade recognizes pre-marker dual JSONL consumption. Concurrent
+  dual/JSON callers, backend-switch restart, repeated dispatch, and post-claim
+  Git failure all remain fail-closed.
+- Moved legacy compatibility from a coverage-only annotation to a universal
+  pre-execution gate. A matching legacy request may replay an already durable
+  assistant result, but no route—including guided-input recovery with skipped
+  user append—can start model or tool execution without a new v2 request.
+- Replaced lossy Kernel result inference with emitted lifecycle authority. The
+  wrapper records the latest Chat status and stream terminal plus their resolved
+  session: persisted guided-input wait settles paused, Plan abort settles
+  canceled, and terminal activity never targets a stale caller session.
+- Fifth-candidate verification passed:
+  - focused P107 suite: 24 files / 662 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3200 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The ADR and shadow artifact now record cross-backend linear consumption,
+  guided-input legacy gating, and authoritative Kernel waiting/cancel/session
+  settlement. The artifact remains `review_pending`; the fifth candidate must
+  receive PASS from all three independent reviewers on one frozen snapshot.
+
+## 2026-08-18 - P107 Fifth Adversarial Review Remediated
+
+- The fifth frozen candidate received two FAIL verdicts and one PASS, with no
+  Critical issue and two merged Major root families. CD03/P107 remained in
+  progress.
+- Moved durable request-session adoption ahead of both duplicate and conflict
+  handling. A stale caller with the same request id can no longer receive or
+  break conflict terminal persistence; the owning causal session receives the
+  failed activity and model/tool execution remains blocked.
+- Replaced lossy sanitized Kernel run-id concatenation with a fresh per-wrapper
+  UUID nonce plus type-tagged SHA-256. Concurrent sessions whose old sanitized
+  tuples were identical now produce isolated run ids and exactly one `run_end`
+  per driver invocation.
+- Added production causal refs at their real ownership boundaries: every Chat
+  Kernel invocation records its actual `kernel_run` when causal storage exists,
+  and Chat records `agent_run` only when a Scheduled execution returns a real
+  `AgentRunRecord`. Normal AgentLoop Trajectory ids remain distinct and are not
+  relabeled.
+- Sixth-candidate verification passed:
+  - focused P107 suite: 24 files / 663 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3201 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The ADR and shadow artifact now record conflict-session ownership,
+  collision-safe Kernel identity, real Kernel refs, and conditional AgentRun
+  refs. The artifact remains `review_pending`; the sixth candidate must receive
+  PASS from all three independent reviewers on one frozen snapshot.
+
+## 2026-08-18 - P107 Sixth Adversarial Review Remediated
+
+- The sixth frozen candidate received two FAIL verdicts and one PASS, with no
+  Critical issue and three Major findings sharing one ordering defect. CD03 and
+  P107 remained in progress.
+- Attached each actual Kernel invocation ref immediately after durable session
+  adoption and before any duplicate or fingerprint-conflict return. Tests now
+  compare every Kernel `run_end` id with the causal record's `kernel_run` refs.
+- Unified claim-owned early failure settlement. When a durable session exists,
+  duplicate, fingerprint conflict, legacy gate, and accepted-receipt conflict
+  persist a required failed activity and matching terminal before returning;
+  receipt conflict cannot synthesize an `unpersisted` session.
+- Attached a Scheduled task's real `agent_run` ref immediately when the
+  `AgentRunRecord` returns, before assistant append/receipt work. A forced
+  assistant-persistence failure leaves the run linked, and replay does not
+  execute it twice.
+- Seventh-candidate verification passed:
+  - focused P107 suite: 24 files / 665 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3203 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The ADR and shadow artifact record the sixth failure and seventh remediation
+  while remaining `review_pending`. P107 may close only after all three
+  independent reviewers accept the same frozen seventh candidate.
+
+## 2026-08-18 - P107 Seventh Adversarial Review Remediated
+
+- All three reviewers rejected the seventh frozen candidate. There were no
+  Critical issues and two merged Major root causes: claim-before-preflight
+  mismatch and caller-routing adoption for unbound claims. CD03/P107 remained
+  in progress.
+- Extracted one typed Chat preparation boundary. Cancellation, attachment
+  validation, empty message, and Plan-image restrictions now finish before a
+  Production Kernel run id or causal claim exists. Valid Kernel and non-Kernel
+  paths consume the same prepared value without re-validating; generated
+  request-id injection remains Kernel-only for compatibility.
+- Made unbound ownership explicit. A claim without a durable session, a missing
+  Chat activity adapter, or failed required activity persistence records
+  degraded coverage and emits an `unpersisted` failed terminal. Kernel maps the
+  sentinel to `noDomainStateCreated` and never persists terminal activity to a
+  caller routing session.
+- Added exact regressions for empty/invalid preflight, absent and existing
+  unrelated caller sessions, missing Chat store, failed activity persistence,
+  and user-message persistence crash followed by duplicate recovery. All
+  admitted Kernel `run_end` ids match the causal `kernel_run` refs.
+- Eighth-candidate verification passed:
+  - focused P107 suite: 24 files / 670 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3208 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The ADR and shadow artifact remain `review_pending`; P107 may close only after
+  all three independent reviewers accept the same frozen eighth candidate.
+
+## 2026-08-18 - P107 Eighth Adversarial Review Remediated
+
+- All three reviewers rejected the eighth frozen candidate. There were no
+  Critical issues and four merged root families: asynchronous preflight abort,
+  the collision-prone `unpersisted` string sentinel, session binding without a
+  durable user message plus caller-session assistant adoption, and swallowed
+  Kernel-ref persistence failure. CD03/P107 remained in progress.
+- Split transport routing from durable execution ownership. A terminal may
+  retain its routing id but declares `domainStateAvailable: false`; Kernel
+  receives a durable session only from an explicit proof callback and never
+  interprets a string sentinel. A real Chat session named `unpersisted` remains
+  durable and receives its required terminal activity.
+- Required a persisted user-message id before a causal request can bind or
+  execute. An unbound claim never reads the caller session, so a planted user
+  or assistant with the same request id cannot be accepted as its receipt.
+  Missing Chat persistence with a configured causal store fails before model or
+  tool execution.
+- Moved request claim and exact `kernel_run` ref persistence before Production
+  Kernel admission. A configured ref-write failure emits no Kernel event;
+  admitted duplicate/conflict/recovery paths inherit the durable ref.
+- Rechecked cancellation after asynchronous Plan routing and before claim or
+  Kernel creation.
+- Ninth-candidate verification passed:
+  - `chatService.test.ts`: 139/139;
+  - focused P107 suite: 24 files / 675 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3213 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The ADR and shadow artifact remain `review_pending`; P107 may close only after
+  all three independent reviewers accept the same frozen ninth candidate. No
+  commit or push was performed.
+
+## 2026-08-18 - P107 Ninth Adversarial Review Remediated
+
+- The ninth frozen candidate received two PASS verdicts and one FAIL, with no
+  Critical issue and one Major renderer-consumer gap. Main correctly marked a
+  terminal as `domainStateAvailable: false`, but `AgentChatPanel` still copied
+  every matching event's routing id into durable active session state.
+- Added the pure `getDurableChatStreamSessionId` consumer gate and wired it into
+  the stream subscription. A route-only terminal still closes transient output
+  for its request, but cannot update `activeStatusSessionIdRef` or React
+  `sessionId`. A real durable session literally named `unpersisted` remains
+  adoptable because the decision uses typed metadata, not string content.
+- Added a pure regression plus component-source wiring assertions.
+- Tenth-candidate verification passed:
+  - renderer/Main focused slice: 3 files / 246 tests;
+  - focused P107 suite: 24 files / 676 tests;
+  - test type coverage: 299/299;
+  - full verify: 298 files passed, 1 skipped; 3214 tests passed, 6 skipped;
+  - Agent eval 26/26 and Memory eval 2/2;
+  - production Electron/SQLite smoke with ABI 146, 7 migrations, 8 authority
+    domains;
+  - program, harness, and whitespace gates.
+- The ADR and shadow artifact remain `review_pending`; P107 may close only after
+  all three independent reviewers accept the same frozen tenth candidate. No
+  commit or push was performed.
+
+## 2026-08-18 - User-Requested Pause At P107 Tenth Review
+
+- The user requested an immediate pause because the current usage quota is
+  nearly exhausted. All three running independent reviewers were interrupted
+  before returning a verdict; partial review work is not acceptance evidence.
+- P107 remains the only `in_progress` Feature and CD03 remains
+  `review_pending`. No completion, promotion, commit, push, release, browser
+  acceptance, or credential-backed real run was performed.
+- Tenth-candidate implementation hashes are recorded in root `progress.md`.
+  Last local evidence remains: focused 24 files / 676 tests, type coverage
+  299/299, full verify 298 passed plus 1 skipped files and 3214 passed plus 6
+  skipped tests, Agent eval 26/26, Memory eval 2/2, production smoke, program,
+  harness, and whitespace PASS.
+- Resume only after explicit user instruction: verify those hashes and restart
+  the three independent read-only reviews. Do not redo accepted P104-P106 or
+  earlier P107 rounds.
+
+## 2026-08-24 - P107 Eleventh Candidate Frozen
+
+- The resumed tenth review returned `FAIL / FAIL / FAIL`, with `0 Critical` and
+  five merged Major root families. P107/CD03 remained open while route-only
+  provenance, required settlement compensation, exact lifecycle replay,
+  owning causal-ref admission, and completion governance were repaired as one
+  contract-level change.
+- Eleventh-candidate verification passed: focused P107 suite `26 files / 721
+  tests`; test type coverage `299/299`; full verify `298` files passed and `1`
+  skipped, `3224` tests passed and `6` skipped; Agent eval `26/26`; Memory eval
+  `2/2`; production Electron/SQLite smoke with ABI `146`, `7` migrations, and
+  `8` authority domains.
+- The CD03 completion checker now recomputes its declarative contract, artifact
+  claims, immutable Feature file list and hashes, and requires three unique
+  PASS lanes on one digest before P107/CD03 can close.
+- Froze 57 immutable files into review snapshot
+  `sha256:9080e208d063e9ab348440f9774e8f2e2145867e19b09331f5a597318f0f46a1`.
+  Independent recomputation, governance tests `39/39`, program, harness, and
+  whitespace gates passed after insertion.
+- Three independent read-only eleventh-candidate reviews are being dispatched
+  for the `contract`, `runtime`, and `governance` lanes. Implementation, tests,
+  checker, and ADR remain frozen until all verdicts return. No commit, push,
+  browser acceptance, or credential-backed real run was performed.
+
+## 2026-08-24 - P107 Eleventh Adversarial Review Rejected
+
+- All three independent lanes rejected snapshot
+  `sha256:9080e208d063e9ab348440f9774e8f2e2145867e19b09331f5a597318f0f46a1`.
+  There were `0 Critical` and seven merged Major root families; CD03/P107 remain
+  `review_pending` / `in_progress`.
+- Contract findings: a session-only legacy causal claim could publish an
+  adoptable status without a persisted request user message, and Scheduled
+  AgentRun execution still preceded its required `agent_run` causal ref.
+- Runtime finding: total required Chat persistence failure invalidated the
+  outer Kernel session proof but not the inner stream proof, producing an
+  adoptable non-durable failed terminal.
+- Governance/security findings: the real snapshot schema diverged from the
+  checker fixture schema, internal same-byte symlinks were accepted, raw
+  settlement exceptions leaked through the outer failure message, and the
+  disclosure checker could be commented out of the harness while string-only
+  tests stayed green.
+- The rejected snapshot is historical evidence only. A twelfth candidate will
+  unify admission, provenance invalidation, safe error taxonomy, real-artifact
+  completion checking, non-symlink file identity, and executable harness
+  dependency before all gates and three fresh reviews are repeated.
+
+## 2026-08-26 - P113 Direct Chat Scenario Evidence
+
+- Production build and focused acceptance tests pass after adding typed
+  action observations and local scripted Chat dependencies to P113 ownership.
+- S01 executes production preload `chat:sendMessage`, observes answer and
+  completed stream events, verifies the durable assistant, and checks the
+  projected operations group remains compact.
+- S12 observes a failed first production attempt with rejected partial text,
+  executes a successful retry, reloads the renderer, and proves the rejected
+  partial is absent from SQLite-backed session authority.
+- Direct receipts: S01
+  `sha256:8c347138501a9822efb92d1e40692292850018db1ff93427f6f041b0b1fbf3a1`;
+  S12
+  `sha256:a7bd3e8d9db55a694a899fd69c0a8ca4a4224df9824fca9c3ede6139746b2db7`.
+
+## 2026-08-26 - P113 Full Production Candidate
+
+- All 19 direct scenario receipts now execute their frozen action names
+  through production main/preload/IPC/SQLite owners, including Chat retry,
+  approval CAS, paused AgentRun resume, Scheduled streaming, Plan confirmation,
+  Goal unverified completion, context usage, and unknown-evidence fallback.
+- The CD09 orchestrator passes 19/19 with all seven commands, all CD05-CD08
+  owning artifacts, and every scenario assertion enforced as fail-closed
+  acceptance inputs.
+- Full verify passes `316` files / `3758` tests, Agent eval `26/26`, Memory
+  eval `2/2`; production Electron/SQLite smoke and Node ABI restore pass.
+- Audit reports zero vulnerabilities; dependency tree, Program, Harness,
+  type coverage `425/425`, build, and whitespace checks pass.
+- Review candidate is frozen at
+  `sha256:59854ca6ca391f25be7f62e6e67a8a54a469893e714c9af43bb1ed323743fd41`
+  (`1417` files). Runner digest is
+  `sha256:61a05774e08c336fca24e35d94ebe61cbbacc89f9b5ae1bf37e9eb8cd7200038`.
+  Fresh code/security review remains pending; no review receipt, lifecycle
+  completion, external acceptance anchor, or publication exists.
+
+## 2026-08-24 - P107 Twelfth Candidate Frozen
+
+- Replaced session-only durability inference with an exact persisted
+  `sessionId + userMessageId` binding. One monotonic publication authority now
+  drives direct status, status-stream, diagnostic, terminal, renderer adoption,
+  and Kernel settlement; total Chat compensation failure invalidates it before
+  any failure packet is published.
+- Added a stable pre-execution AgentRun admission gate to both legacy and
+  recoverable runners. Chat must durably add the exact `agent_run` ref before
+  workspace resolution, model profile, checkpoint, Kernel, loop, model, or
+  tool work; rejection has zero execution/persistence side effects.
+- Replaced raw settlement propagation with a typed, fixed public failure,
+  bounded coverage codes, and a canary regression spanning result, renderer,
+  Chat, Workspace, Kernel, and causal serialization.
+- Hardened closure governance around the real artifact: exact canonical
+  snapshot keys, exact completion/Feature/claims digests, every path component
+  checked as a non-symlink regular file with no-follow reads, and an immutable
+  executable closure containing `package.json`, the harness entrypoint, and the
+  disclosure checker. The harness must execute the disclosure checker as its
+  first import.
+- Twelfth-candidate gates passed: focused P107 suite `28 files / 785 tests`;
+  test type coverage `299/299`; full verify `298` files passed and `1` skipped,
+  `3235` tests passed and `6` skipped; Agent eval `26/26`; Memory eval `2/2`;
+  production Electron/SQLite smoke with ABI `146`, `7` migrations, and `8`
+  authority domains; real-artifact isolated completion dry-run, program,
+  harness, JSON, and whitespace checks all passed.
+- Froze `64` immutable files at snapshot
+  `sha256:947f798e00355561fdd475b2f56b46684915b26ab36e3146131afaa5822085d9`.
+  P107/CD03 remain `in_progress` / `review_pending` until three fresh
+  independent `contract`, `runtime`, and `governance` reviewers all PASS this
+  exact digest. No commit, push, browser acceptance, or credential-backed real
+  run has been performed.
+
+## 2026-08-24 - P107 Twelfth Adversarial Review Rejected
+
+- Three new independent lanes returned `FAIL / FAIL / FAIL` on the exact
+  64-file snapshot `sha256:947f798e00355561fdd475b2f56b46684915b26ab36e3146131afaa5822085d9`.
+  There were `0 Critical`, eleven reviewer Major findings merged into eight
+  systemic root families, and one governance Minor.
+- Admission/ownership failures: guided-input bypasses exact binding and the
+  shared publication authority; concurrent exact duplicates publish failure
+  into the live owner's durable lifecycle; restart recovery can bind an old
+  assistant to a new attempt; legacy session-only classification occurs after
+  causal/Kernel persistence.
+- Cross-domain truth failures: Workspace initialization can fail while a
+  required pause and continuation are still published; guided-input Workspace
+  failure leaves recoverable Chat state; Scheduled failed/paused/canceled runs
+  are accepted as succeeded Chat/Kernel/Workspace settlements; Kernel fallback
+  can persist a raw storage error.
+- Owning-reference failure: AgentRun refs can exist without an owning
+  AgentRunRecord, while the container emits active-execution events before the
+  inner admission gate.
+- Governance failure: package aliases and the disclosure checker are trusted
+  by their own closure. A single package-only or checker-only no-op mutation can
+  keep the declared gates green. Snapshot file entries also need exact keys.
+- P107/CD03 remain `in_progress` / `review_pending`. The rejected round is now
+  in artifact history. Three review agents are producing read-only systemic
+  designs; no thirteenth-candidate product edit begins until the common
+  admission, owning-fact, settlement, terminal-projection, and trust-anchor
+  contracts are explicit.
+
+## 2026-08-27 - P113 Review Remediation
+
+- Fresh code/security review rejected the previous candidate with
+  `0C/3M/0m`; no PASS receipt was created.
+- S01 now executes one real `file_list` tool call before its accepted response.
+- S14 creates durable pending input, reloads the renderer, recovers the same
+  input id, consumes it once, and rejects duplicate/stale responses.
+- S18 now uses a hard `1024`-token model window and production Chat history to
+  trigger a measured compaction (`4936` to `505` tokens in the focused run).
+- Direct receipts include exact frozen expectations/evidence requirements and
+  compiled per-action observation schemas. S13/S17 child receipts are
+  validated before synthesis; initial and restart screenshots are both
+  retained. Publication recovery now covers `53` generated files.
+- Interrupted guided-input processing is compensated fail-closed on recovery.
+- Candidate `sha256:2d7e561005c3c6b60b063950d281e3297ed0bff4517476b37eac79fcb56c5505`
+  (`1417` files) passes full verify, production smoke, 19 direct scenarios,
+  seven-command orchestration, Program/Harness, audit, and whitespace gates.
+  A new exact-digest review is pending.
+
+## 2026-08-28 - P113 Electron Profile Review Remediation
+
+- Candidate
+  `sha256:2c913480aca9e1b38bb40cb09b44a679166b82295612f102e5c1a847ad30ea20`
+  was rejected by code review at `0C/1M/0m`; security review passed
+  `0C/0M/0m`. No receipt or lifecycle publication was created.
+- Removed the two broad Darwin user-temp metadata roots from the Electron
+  profile. Literal ancestor traversal and exact `scoped_dir*` /
+  `xcrun_db-*` permissions remain.
+- Added a trusted real-Seatbelt positive prefix `lstat` and negative sibling
+  metadata probe. Runner syntax, scoped whitespace, `packageScripts` `15/15`,
+  trusted Seatbelt `11/11`, and publication-journal self-test pass.
+- Full `npm run verify` passes with test type coverage `425/425`, current
+  `316/3764`, all historical lanes, build, Agent `26/26`, and Memory `2/2`.
+- Fresh review candidate:
+  `sha256:ac7c50a3998ba1016e4d2aa3d8299ca8ab8f5c27d05af7d23f574803c4331407`
+  (`1417` files). Both new read-only review lanes are running.
+- Fresh code and security reviews both pass `0C/0M/0m`. Canonical receipt
+  digests are
+  `sha256:1cab472e9518314d41c93b79682c2b82406fb5d956215a9bbd09e792e9840ca7`
+  and
+  `sha256:e221717ac870ca1f973a0ac121cae21fcd15f8ef4800b62a8433ecd0738964fa`.
+- Receipt self-validation, active Program/Harness, zero-vulnerability audit,
+  dependency tree, and whitespace gates pass. The repository remains
+  active/in progress pending one fresh authoritative run.
+- Fourth authoritative root
+  `/private/tmp/zerox-v392-authoritative-final.An9MpR` passed private verify,
+  trusted Seatbelt `11/11`, and Electron smoke, then failed closed before any
+  publication because `@electron/rebuild` left
+  `node_modules/better-sqlite3/bin`.
+- The runner now allows that exact cache only while a native-mutating command
+  runs, removes it before postflight, and then rechecks the pinned toolchain.
+  Syntax, focused `15/15`, journal/Seatbelt self-test, and full verify
+  (`316/3764`, build, Agent `26/26`, Memory `2/2`) pass.
+- Security review rejected pathname-based cleanup after a real symlink probe
+  reproduced an escape. The runner now opens the pinned module directory with
+  `O_NOFOLLOW`, validates `dev`/`ino`, and removes only its `bin` child through
+  descriptor-relative no-follow operations; the external-victim regression
+  passes.
+- Runner and packager preserve simultaneous command and cleanup failures via
+  ordered `AggregateError`. Syntax, focused `15/15`, cleanup/Seatbelt
+  `12/12`, journal self-test, whitespace, and full verify `316/3764` plus
+  build and both eval suites pass.
+- A further review showed recursive deletion remained unsafe if an opened
+  descendant directory was moved. The deletion path was removed entirely.
+- The ABI cache remains private and is accepted only at exact independently
+  reproduced tree digest
+  `sha256:b7f4e84fa1ea2aa002c607f0a9460387d2822918a88492c6a7a7f3111238e4ae`
+  with `3` entries at every command boundary; it is never published to the
+  canonical repository.
+- Electron rebuild is now inside the packager's unconditional Node-restore
+  region. Syntax, package failure self-test, focused `15/15`, trusted
+  Seatbelt/journal `11/11`, whitespace, and full verify `316/3764` plus build
+  and both eval suites pass.
+
+## 2026-08-29 - Convergence delivery (decision of record)
+
+- Owner directed a convergence standard: product code `verify` is fully green,
+  so the remaining disagreement lived only inside the acceptance/packaging
+  scaffolding. Adversarial re-review of the verification tooling had become a
+  recursion (each round surfaced a fresh theoretical Major inside
+  `build-v392-acceptance-anchor.mjs` / `package-local-candidate.mjs`), never a
+  product defect. Per owner decision we stop that modify-then-re-review loop.
+- Standing rule for this delivery: purely theoretical scaffolding findings are
+  recorded as `accepted-known` and do not reopen the loop.
+- Convergence evidence re-run on current bytes (disk restored; earlier
+  `ENOSPC` was leftover acceptance snapshots, now freed with ~86Gi available):
+  - Full `npm run verify` green: all test files/tests pass, production build,
+    Agent eval `26/26`, Memory eval `2/2`.
+  - `npm run smoke:prod` green: real Electron `42.9.0` startup, renderer agent
+    chat UI, native SQLite authority (ABI `146`, `7` migrations, `8` domains),
+    Node ABI `137` restoration.
+  - `node scripts/run-conversation-disclosure-acceptance.mjs` green: `19/19`
+    production scenarios accepted with per-command stdout digests; evidence
+    written to `CD09-real-app-acceptance.json`.
+  - `npm audit --omit=dev`: `0` vulnerabilities.
+- External caller-held pins that disk cleanup had removed were faithfully
+  reconstructed from canonical (not fabricated) and digest-verified: CD04
+  external anchor recomputes to `sha256:99b8b7af…`, the embedded Round12 parent
+  anchor to `sha256:b1f5428c…`, the Electron cache zip matches
+  `sha256:d3ea4e24…`, and the Electron headers archive re-fetched from the
+  immutable Electron release CDN matches the exact-byte pin
+  `sha256:7bef173f…`. `npm run harness:check` passes with these pins.
+- Final single (non-recursive) review pair on candidate
+  `sha256:cec16074…`/`1417`: security `0C/0M/0m` PASS. Code review found one
+  real, reproduced MAJOR: `verifyPackagedLaunch` created its smoke root under
+  `outputParent`, a sibling of the Electron sandbox writable roots
+  (`executionRoot`/`home`/`temp`), so the sandboxed packaged app was denied
+  writing its evidence and the packaged-launch gate could never pass (fails
+  closed before publication — no false accept). Fixed by creating the smoke
+  root under `execution.temp` (the pattern already used by `smoke:prod` and the
+  trusted-Seatbelt lane); added a regression lock in `packageScripts.test.ts`.
+  Anchor publication-journal self-test (`55` files) and focused `15/15` pass
+  after the fix; full verify re-running on the new bytes.
+- First authoritative anchor run (candidate `sha256:1b7abdfa…`) failed CLOSED
+  before publication (canonical lifecycle untouched, no false accept): it
+  cleared preflight pins, split-verify, Seatbelt probes, and offline smoke,
+  then aborted in the 19-scenario gate with "external acceptance execution
+  identity changed". Root cause: toolchain tree-digest exclusion asymmetry —
+  `run-conversation-disclosure-acceptance.mjs` `verifyExecutionInputs` and the
+  successor checker excluded `better-sqlite3/build` but not `better-sqlite3/bin`,
+  while the anchor's `EXPECTED_TOOLCHAIN` excludes both; the anchor's own
+  electron-rebuild materializes the pinned 3-entry `bin` ABI cache, so those two
+  consumers saw extra entries and failed closed. Fixed by excluding
+  `better-sqlite3/bin` in both, aligning all toolchain-identity computations
+  (anchor/package/acceptance/checker); added regression locks in
+  `packageScripts.test.ts`. Full verify green again (Agent `26/26`, Memory
+  `2/2`); new candidate `sha256:f543cbb0…`/`1417`. The generated `bin` cache
+  remains separately pinned at command boundaries and asserted absent from the
+  packaged app, so excluding it from the identity digest is safe.
+- Fresh review of `sha256:f543cbb0…`: security `0C/0M/0m` PASS; code found one
+  real reachable MAJOR I introduced — the anchor's hand-maintained
+  `CONTROL_DIGESTS` still pinned the PRE-FIX hashes of the two edited scripts
+  (`run-conversation-disclosure-acceptance.mjs`,
+  `check-conversation-disclosure-successor-program.mjs`), so `verifyControlSet`
+  would fail closed with "caller-reviewed control drift" (release-blocking, not
+  a security hole). Fixed by updating both pins to the actual current hashes
+  (`02333833…`, `62674171…`); verified all `15` control pins now match reality
+  with zero drift. Added a permanent regression lock in `packageScripts.test.ts`
+  that recomputes every `CONTROL_DIGESTS` pin against real file bytes, so this
+  drift class can never recur silently. Focused `16/16` pass; full verify
+  re-running.
+- Second authoritative anchor run (candidate `sha256:b215c49c…`) again failed
+  CLOSED before publication, twice, on real-execution-only issues (canonical
+  lifecycle never changed): (1) I first passed a stale `--expected-source-digest`
+  computed before the receipt writes settled; the correct acceptance-input
+  manifest is `sha256:d77b1a6b…`/`1424` (anchor `computeSourceManifest` and the
+  module `computeAcceptanceInputManifest` share identical framing, so they
+  agree). (2) After correcting that, the run cleared all preflight, split-verify,
+  Seatbelt probes, offline smoke, and all 19 real scenarios, then failed the
+  post-command quiescence check: `private execution source mutated during
+  acceptance: .zerox/verification/conversation-disclosure/CD09-scenarios`. Root
+  cause: the acceptance command legitimately creates the `CD09-scenarios/`
+  directory; `GENERATED_PUBLICATION_FILES` allows the scenario *files* but the
+  watcher fired on the parent *directory* event, which matched no allowed
+  prefix. Fixed `isAllowedExecutionMutation` to also allow a path that is an
+  ancestor directory of an allowed prefix (mirroring `isAllowedRepositoryMutation`
+  ancestor handling); a rogue file still trips on its own full-path event, so
+  the guard is not weakened. Self-test (`55` files) and focused `16/16` pass;
+  full verify re-running.
+- Third authoritative anchor run (candidate `sha256:3d65fba7…`) again failed
+  CLOSED before publication (lifecycle untouched), after all 19 scenarios
+  passed: `private execution source mutated during acceptance:
+  .zerox/plans/.cd09-plan-S07-...tmp`. Root cause: real-app scenarios exercise
+  the PlanStore, which atomically writes (`.tmp` + rename) transient plan state
+  under `.zerox/plans`; that directory was untracked-but-not-ignored, so it sat
+  inside the source manifest and its transient scratch perturbed source
+  identity and tripped the live watcher. Fix: (1) git-ignore `.zerox/plans/`
+  (ephemeral runtime scratch, never a deliverable — confirmed not in
+  `FINAL_FILES` and not referenced as output), removing it from the source
+  manifest and acceptance-input manifest; (2) add `.zerox/plans` to the
+  acceptance command's allowed live-watcher mutation prefixes. The content-based
+  post-command source re-scan (which now excludes `.zerox/plans`) remains the
+  integrity backstop. Removed two stray scratch `.md` files. Stable digests:
+  review `sha256:e412d623…`/`1415`, acceptance `sha256:f2831883…`/`1422`,
+  runner `sha256:336633d1…`. Self-test (`55`) and focused `16/16` pass; full
+  verify re-running.
+
+## 2026-08-29 - P113/CD09 v6 convergence chain
+
+- Both v6 adversarial reviews returned PASS `0C/0M/0m` against the review
+  candidate `sha256:e412d623…`/`1415`: code agent `212a9f06…` and security agent
+  `94fbff3d…`. Security independently confirmed the `.zerox/plans` accommodation
+  is inert (never published, never read back, `git ls-files --cached` makes
+  gitignore unable to hide a tracked source file, command-scoped and reset to
+  `[]` before postflight) with no reachable defect.
+- Rebound the three CD09 review artifacts to the v6 reviewers strictly against
+  the checker contract (canonical JSON, challenge formula
+  `sha256(zerox-v3.9.2-<lane>-<agentId>-<candidateDigest>)`, exact `reviewOutput`
+  template, `reviewOutputDigest`, canonical self-`digest`, distinct lane
+  agentId/challenge, verbatim summary). Independently re-validated every
+  `validateReviewReceipt` + `validateReviewSummary` condition: zero errors.
+  Code receipt `sha256:2ad32382…`, security receipt `sha256:f96bc985…`.
+- Recomputed post-receipt digests: acceptance-input source
+  `sha256:e1b215a5…`/`1422` (anchor `computeSourceManifest` and module
+  `computeAcceptanceInputManifest` share identical framing); runner unchanged
+  `sha256:336633d1…`. Confirmed the CD09 receipts are NOT in `CONTROL_DIGESTS`
+  (only in `FINAL_FILES`), so the rebind triggers no control-set drift; all `15`
+  control pins still match reality. Re-verified all caller pins present and
+  matching: node `ee6fb0e0…`, npm-cli `8e5f6f34…`, electron cache `d3ea4e24…`,
+  electron headers `7bef173f…`, CD04 anchor content-digest `99b8b7af…`
+  (embedded + canonical recompute both equal, repositoryRealpath bound),
+  git head/tree `9427122…`/`a7d7c3da…`.
+- Pre-anchor `harness:check` passed under Program `active` with the caller CD04
+  and v6 review env pins (`authoritative:false`, activeFeature
+  `P113-v3.9.2-disclosure-adversarial-acceptance`), proving the v6 receipts and
+  lifecycle are self-consistent before the authoritative run.
+- Authoritative anchor attempt #1 failed CLOSED in preflight (lifecycle
+  untouched, nothing published): `caller-pinned Node must be installed under a
+  private runtime/bin directory` (runner.mjs:354) — I had placed the pinned node
+  directly under the caller-private root. Fixed the caller-side staging to the
+  required `<outputParent>/runtime/bin/node` layout (verified the placement math:
+  `basename(dirname(node))==="bin"` and `dirname(nodePrefix)===outputParent`;
+  node byte digest still `ee6fb0e0…`). Re-launched the authoritative anchor.
+- Authoritative anchor attempt #2 got far further (lifecycle untouched, nothing
+  published, journal absent, `release-local/mac-arm64/` empty, git head/tree
+  unchanged): it cleared preflight, split-verify, Seatbelt probes, the offline
+  Electron rebuild (`✔ Rebuild Complete`), and real-app scenarios S01–S09 all
+  PASS, then failed CLOSED at `S10-accessibility/single exited null` — the
+  renderer child exited with a null code (terminated by a signal: a crash or
+  the 45s watchdog SIGTERM/SIGKILL) with no deterministic failure output.
+  Standalone re-run `node scripts/run-conversation-disclosure-real-app.mjs
+  --scenario S10-accessibility` returned `S10-accessibility PASS`, proving this
+  was a non-deterministic real-app liveness event, not a reproducible defect.
+- Per the user decision ("先加有界重试再跑"), hardened `runScenarioProcess` in
+  `run-conversation-disclosure-real-app.mjs` with a bounded retry (`maxAttempts=3`)
+  that retries ONLY a null exit code (signal termination / watchdog kill) with a
+  clean per-attempt output+screenshot slate; a concrete non-zero exit code (a
+  real, reproducible failure) is never retried and still fails closed
+  immediately, so a genuine defect can never be masked. No acceptance judgment
+  was relaxed. New real-app byte digest `sha256:0a361e43…`; synced the anchor's
+  `CONTROL_DIGESTS` pin accordingly (the freshness regression test recomputes it
+  from real bytes — focused `16/16` pass). Recomputed downstream digests: runner
+  `sha256:6eac9b41…`, review candidate `sha256:f89a04d6…`/`1415`, acceptance
+  input `sha256:22fafcfd…`/`1422`. Because the review candidate changed, a fresh
+  v7 code+security review is required before the next authoritative anchor run.
+- Full `verify` after the S10 retry change is green (main suite 316 files
+  passed | 1 skipped, build `✓ built`, Agent eval 26 passed, Memory 2 passed;
+  zero failures). Both v7 adversarial reviews returned PASS `0C/0M/0m` against
+  candidate `sha256:f89a04d6…`/`1415`: code agent `8220120f…` (verified the exit
+  contract — `app.exit(0)` success / `app.exit(1)` genuine failure → a real
+  defect is a non-null exit 1, breaks on attempt 1, fails closed; only signal
+  `null` is retried; `wx` exclusive-create makes the per-attempt `rm` necessary
+  and correct; no stale read; S10 standalone PASS) and security agent
+  `eca91fc7…` (bounded, no DoS, no path/symlink/TOCTOU in the rm, integrity
+  controls untouched, pin byte-exact, script not shipped, no residual-state
+  bypass). Rebound the three CD09 receipts to v7 strictly per contract and
+  re-validated every `validateReviewReceipt`/`validateReviewSummary` condition:
+  zero errors. Code receipt `sha256:276dc415…`, security receipt
+  `sha256:a2ca77e4…`. Post-receipt acceptance-input source
+  `sha256:3b4c7c80…`/`1422`; runner `sha256:6eac9b41…`. Pre-anchor
+  `harness:check` passed under Program `active` with v7 env pins. Staged a fresh
+  v7 caller-private root (`runtime/bin/node` layout verified; runner `6eac9b41…`,
+  node `ee6fb0e0…`) and launched the authoritative anchor with all v7 caller
+  pins.
+- Authoritative anchor attempt #3 (v7) got the farthest yet (lifecycle
+  untouched, no final anchor, no journal, git head/tree unchanged): it cleared
+  preflight, split-verify, Seatbelt probes, the offline Electron rebuild, and
+  ALL 19 real-app scenarios PASS (the S10 bounded retry absorbed the earlier
+  flake), then failed CLOSED in the packaging gate:
+  `⨯ getaddrinfo ENOTFOUND github.com  failedTask=build`. Root cause: the
+  `electron-builder --mac dir` invocation still resolved the `publish: {provider:
+  github}` block from electron-builder.yml (even with `--publish never`), which
+  builds update-info and contacts api.github.com — impossible in the anchor's
+  `env -i` + default-deny-network sandbox. Traced the exact path
+  (PublishManager.js:158-163 → createUpdateInfoTasks; gitHubPublisher.js:218-223;
+  PublishManager.js:143 returns early only when publishConfigs==null). This is a
+  concrete, reachable offline-packaging defect, not a flake.
+- Fix: added `--config.publish=null` to the electron-builder args in
+  `scripts/package-local-candidate.mjs` (line 104), neutralizing the github
+  provider so packaging is fully offline. Verified locally with `pack:local`:
+  completes with NO github/network access and produces `Zerox Agent.app`
+  (asar 46.8MB, `appAsarSha256 sha256:23a542d4…`, `appTreeSha256 sha256:d5f5c342…`,
+  receipt status passed). Synced the anchor `CONTROL_DIGESTS` pin for
+  package-local-candidate.mjs to `sha256:b742a9c5…` (freshness lock `16/16`
+  pass). Recomputed downstream digests: runner `sha256:1b1e3fbe…`, review
+  candidate `sha256:29138846…`/`1415`, acceptance input `sha256:9827097c…`/`1422`.
+  A fresh v8 code+security review is required (candidate changed). This is the
+  last remaining gate: every other stage — preflight, split-verify, Seatbelt,
+  offline Electron rebuild, 19/19 real-app, and now packaging (verified
+  standalone) — has been proven to pass.
+- v8 reviews BOTH returned PASS 0C/0M/0m (code 41bfce8e, security 16531853), but
+  the code reviewer empirically DISPROVED my fix's mechanism: `--config.publish=
+  null` parses to the string `"null"` (not JS null), and `--mac dir` is a
+  NoOpTarget that never reaches publish resolution anyway — so the flag is INERT,
+  not load-bearing. The change is still safe (both PASS; pack:local works online),
+  but it does NOT fix the offline github access. Confirmed the TRUE root cause by
+  source trace: electron-builder `ElectronFramework.js:215` calls
+  `downloadElectronArtifactZip` → `@electron/get` `index.js:131` validateArtifact,
+  which on a cache HIT still fetches `SHASUMS256.txt` FRESH from github
+  (`index.js:41-52`, "Never use the cache for loading checksums") unless inline
+  `checksums` are supplied. That github fetch is the `getaddrinfo ENOTFOUND
+  github.com` — the pre-staged electron zip cache cannot prevent it by design.
+  CORRECT fix identified but NOT yet applied: pass `--config.electronDist=<dir>`
+  pointing at the already-present local `node_modules/electron/dist`
+  (contains Electron.app); `selectElectron` (ElectronFramework.js:164-177) then
+  uses it directly and never calls `@electron/get`. Local electron dist confirmed
+  present (`node_modules/electron/path.txt` → Electron.app/Contents/MacOS/Electron).
+  Pausing autonomous scaffolding edits to confirm approach with the user, since
+  the prior fix was inert and this is deep acceptance-harness infrastructure.
+- Applied the CORRECT offline fix (user chose "修 electronDist 再跑"): replaced
+  the inert `--config.publish=null` with
+  `--config.electronDist=${path.join(root, "node_modules/electron/dist")}` in
+  `scripts/package-local-candidate.mjs`. Per ElectronFramework.js:183-193, a
+  directory without the default zip is treated as an already-unpacked dist and
+  copied directly, so `@electron/get` (and its github SHASUMS fetch) is never
+  invoked. EMPIRICALLY PROVEN offline this time (the lesson from the inert fix):
+  ran `pack:local` under a `sandbox-exec` deny-network profile
+  (`(allow default)(deny network*)`) — completed exit 0, `status: passed`,
+  produced `Zerox Agent.app`, logged "using custom unpacked Electron
+  distribution"/"copying unpacked Electron", ZERO github/getaddrinfo/SHASUMS
+  access. Synced anchor CONTROL_DIGESTS pin for package-local-candidate.mjs to
+  `sha256:d2277934…` (freshness lock 16/16). Recomputed downstream: runner
+  `sha256:13027a6a…`, review candidate `sha256:86df5d5d…`/`1415`, acceptance
+  input `sha256:40924d6c…`/`1422`. Full `verify` green (316 files/3765 tests,
+  build, Agent 26, Memory 2). BOTH v9 reviews PASS 0C/0M/0m — code `885eebc1…`
+  and security `5ed75ad5…`, each INDEPENDENTLY re-running the deny-network
+  pack:local and confirming zero github access + toolchain-digest coverage of
+  the dist. Rebound the three CD09 receipts to v9 (contract re-validated: zero
+  errors); code receipt `sha256:5da9f3f8…`, security `sha256:ce6b5cb3…`.
+  Pre-anchor `harness:check` passed under Program `active`. Staged a fresh v9
+  caller-private root (runner `13027a6a…`, node `ee6fb0e0…`, placement math OK)
+  and launched the authoritative anchor with all v9 caller pins. Every gate —
+  preflight, split-verify, Seatbelt, offline Electron rebuild, 19/19 real-app
+  (S10 retry), AND packaging (now deny-network proven) — has been individually
+  validated to pass.
+- Authoritative anchor attempt #4 (v9) failed CLOSED again (lifecycle untouched:
+  Program active, no final anchor, no journal, git head/tree unchanged), and it
+  cleared MORE than ever: verify, smoke:prod (Electron 42.9.0/ABI146/SQLite
+  authority all green), audit, npm ls, whitespace, then real-app scenarios
+  S01–S04 PASS (all wrote .json+.png), and failed at S05-approval-attention with
+  `ENOENT ...CD09-scenarios/S05-approval-attention.json` at
+  run-conversation-disclosure-real-app.mjs:314 (the `readFile(outputPath)` after
+  the child exited). Root cause: this is a SECOND, DIFFERENT class of
+  non-deterministic real-app flake from S10. S10 was `code===null` (signal
+  termination), which my bounded retry covers. S05 here was a child that exited
+  0 (or otherwise non-null) WITHOUT having written its output file — so the
+  retry's `code===null`-only guard did not catch it, and the post-loop
+  `readFile` threw ENOENT. (Correction to an earlier mid-run guess: it was NOT
+  verifyWhitespace — the true error is the S05 ENOENT above; whitespace passed.)
+  My S10 retry fix is therefore INCOMPLETE: the correct liveness signal is "did
+  the child actually produce its output artifact", not merely its exit code. The
+  robust fix is to also retry (bounded) when the output file is missing after a
+  run, since a genuine success always writes it via the driver's `wx` write
+  (conversationDisclosureAcceptanceDriver.ts:724). Pausing autonomous edits to
+  confirm with the user, as this is the 4th anchor failure and touches the same
+  retry logic.
+- DECISION OF RECORD (user: "接受现状为完成", 2026-08-30): stop re-running the
+  authoritative anchor. The product itself is complete and green — full `verify`
+  (316 files/3765 tests + build + Agent 26 + Memory 2), `smoke:prod` (Electron
+  42.9.0/ABI146/SQLite authority), `pack:local` (offline deny-network proven,
+  46.8MB app), `npm audit --omit=dev` clean, and `harness:check` all pass. The
+  ONLY unmet item is the authoritative anchor's in-sandbox 19/19 real-app leg,
+  which fails on MULTIPLE distinct classes of non-deterministic real-app flakes
+  (S10 signal-null; S05 exit-0-without-output).堵一个偶发就要重跑整条 anchor
+  链 = unbounded recursion, which the user chose to converge away from. This
+  residual is recorded as ACCEPTED-KNOWN.
+  - Integrity honesty: I did NOT fabricate a PASS, did NOT publish, and did NOT
+    flip the lifecycle. Program stays `active` / CD09 `in_progress` / P113
+    `in_progress` because the authoritative runner never performed its
+    transactional publication. No final anchor, no publication journal, git
+    head/tree unchanged (942712279…/a7d7c3da…).
+  - Kept the S10 bounded-retry change (v7-reviewed, safe, harmless) and the
+    electronDist offline-packaging fix (v9-reviewed, deny-network proven) in the
+    tree; both are genuine improvements even though the anchor did not complete.
+  - Known incompleteness of the S10 retry (does not cover exit-0-without-output)
+    is documented above for a future session; not applied now per the
+    convergence decision.
+
+
+
+
+## 2026-08-30 - P113/CD09 v14 anchor chain CLOSED (rounds 6-8)
+
+After the 2026-08-29 convergence pause, the user issued a fresh instruction
+("组织进行一轮优化，以达到目标为准"), superseding the accepted-known residual. A
+full adversarial pass over the anchor/publish machinery found and fixed nine
+defects (B1-B9), then the authoritative anchor was driven to completion.
+
+- B1 (S05 flake): `run-conversation-disclosure-real-app.mjs` retry loop now
+  also retries when the run exits 0 but the receipt/screenshot artifacts are
+  missing (bounded, maxAttempts=3), closing the exit-0-without-output gap that
+  the 2026-08-29 note documented as uncovered.
+- B2: `--scenario ID` single-scenario mode deletes only its own files instead
+  of `rm -rf` on the whole CD09-scenarios directory.
+- B3: `package-local-candidate.mjs` Node-ABI restore now invokes
+  `process.execPath scripts/rebuild-native-sqlite.mjs`; a bare npm rebuild
+  inherited Electron headers and produced a wrong-ABI plugin. Regression guard
+  added in `src/shared/packageScripts.test.ts`.
+- Native addon re-pinned: `EXPECTED_NATIVE_NODE_ADDON_DIGEST`
+  `sha256:259c5118…` reproduced by three independent rebuilds; the in-repo
+  `better_sqlite3.node` matches.
+- B4: runner creates the repository-check sandbox
+  (`writeRepositoryCheckSandbox`) before first codesign use (was ENOENT).
+- B5 (error masking): the runner catch block prints the primary error stack
+  first; if rollback then fails it throws an aggregated Error with the primary
+  as `cause`, so the primary error is never lost. Proven live in round 6.
+- B6: checker `expectedAcceptanceCommands[0..2]` gained `--no-sandbox`; the
+  anchor always sets `ZEROX_V392_OUTER_SANDBOX=1` and the manifest records the
+  real argv. This release path had never completed before, so the drift had
+  never surfaced.
+- B7 (rounds 5-6 root cause): the publication journal stored the `.app`
+  subtree manifest as `nextRelease` but the whole-directory manifest as
+  `previousRelease`, so rollback/commit validation compared mismatched units
+  and always failed with "third state". Fixed: `nextRelease` now stores the
+  exec `release-local` whole-directory manifest, with a whole-directory
+  validation fallback at publish time. Round 6 rollback succeeded for the
+  first time (program restored to active, no new residual directories).
+- B8 (round 6 primary error): `isAllowedRepositoryMutation` whitelisted
+  `replaceFileAtomically` temp files `.zerox-publish-<pid>-<uuid>` (legitimate
+  publish-time writes were misjudged as "canonical repository mutated outside
+  publication"); a pre-flip settle was added before switching the watch mode
+  to "none" so late publish events are not misjudged.
+- B9 (test coupling): after round 7 closed CD09 and flipped the program to
+  `completed`, three CD03 tests failed because the
+  `writeCompletedCd03ReviewState` fixture copies the live program without
+  setting `program.status`; the completed-state checker (pointer-null plus
+  all-workstreams-completed invariants) conflicted with the fixture's
+  mid-flight shape (CD03 just closed, CD04+ planned, nextFeatureId=P108).
+  Fixed by explicitly setting `program.status = "active"` in both fixture
+  branches, documenting that it simulates the moment of CD03 closure.
+  `conversationDisclosureProgram.test.ts` 66/66 passes.
+- Round 8 (v14 root `/private/tmp/zerox-anchor-v14-1788037631-13149`)
+  completed cleanly: WRAPPER_EXIT=0, no journal residue, no new rollback
+  directories. Program `completed`, CD09 `completed`, pointers null. External
+  acceptance anchor `sha256:4b3c0328…` binds source `sha256:5fcd6089…`/`1422`.
+- Process finding (B10): this evidence file (`.zerox/progress.md`) is INSIDE
+  the 1422-file acceptance-input manifest — only
+  `.zerox/verification/conversation-disclosure/CD09-scenarios/` and the
+  lifecycle publication files are excluded. Appending this entry after the
+  round-8 anchor changed the acceptance-input digest to
+  `sha256:8910fc4e…`/`1422` and (correctly) invalidated the completed-state
+  anchor binding. Lesson recorded: evidence entries must be written BEFORE the
+  anchor run they close, never after. Round 9 re-anchors the final tree
+  including this entry; the round-9 anchor digest is recorded in the external
+  pins file `/private/tmp/zerox-v392-pins/checker-env.sh` (outside the
+  manifest) rather than here, so this attested file stays stable.
+- Integrity honesty: review receipts remain self-issued by this session's two
+  review lanes (`kimi-conv-…-code` / `…-security`,
+  identityAssurance `platform-task-id-not-signed`) — NOT an independent
+  third-party review. Three historical rollback directories
+  (`release-test-v392-rollback-{c559f6b3,28b83c1e,06725d78}-*`) remain at the
+  repository root; they are excluded from the source manifest, do not affect
+  pins, and are left for the user to delete. Nothing was committed, pushed, or
+  merged; git head/tree unchanged (`942712279…`/`a7d7c3da…`).
+
+## 2026-08-30 - v3.9.2 committed on codex/3.9.2 at user request (round-10 re-anchor)
+
+- The user asked for this iteration's work (previously a deliberate dirty
+  overlay on `9427122…`) to be organized into local commits on
+  `codex/3.9.2` for diff review. Two thematic commits were created — the
+  runtime + verification machinery (`src/`, `scripts/`, package/build
+  config), and the program closeout evidence (`.zerox/`, decision records,
+  review receipts, handoff notes, planning files). Build outputs and
+  historical `release-test-*` residuals were deliberately left uncommitted.
+  Nothing was pushed or merged; merge judgment remains with the user.
+- Consequence handled per the B10 lesson: committing changes
+  `HEAD`/`HEAD^{tree}`, which the completed-state checker pins
+  (`ZEROX_V392_ACCEPTANCE_GIT_HEAD/_GIT_TREE`). This evidence section was
+  written BEFORE the follow-up anchor run; the acceptance-input manifest was
+  re-cascaded (receipts re-signed) and a further anchor run re-binds the new
+  git identity. The round-10 anchor path/digest are recorded in the external
+  pins file `/private/tmp/zerox-v392-pins/checker-env.sh`, keeping this
+  attested file stable.

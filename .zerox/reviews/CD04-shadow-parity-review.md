@@ -1,0 +1,14 @@
+# CD04 Shadow Parity Review
+
+Snapshot: sha256:8ffc69be873f30d7ca8c0c4c35fd6139ece6292f6b9277ef52694d3edb626631
+replay: sha256:107dda455c34962fa0daf892ea5ffcde0eb810f42e1f21c1e5eeb02ba2fa8bcb
+challenge: sha256:85a900ca56beb1e4f628b303b18b1ce8b912ab65f8b8c5b24537ceb2c0a19589
+security: sha256:6014148ef1264df43dc68db295e8e30f13ec57800aab9a9cf853b2e0b51a52aa
+challenge: sha256:d3ee9aca013082226f0fd6d61803a60a757210d4b786c25bb8f6af9c8a26a001
+integration: sha256:bef6b4c770026905499b73325ad89c904abaa46c2528d3ae10ae19a8f84a4c7a
+challenge: sha256:a5d20cf124f9796281acb233173f63483af4c44f18654b3d1609b264f6c79e80
+
+All three independent lanes reported no findings.
+
+FINAL_VERDICT: PASS
+FINAL_COUNTS: 0C/0M/0m

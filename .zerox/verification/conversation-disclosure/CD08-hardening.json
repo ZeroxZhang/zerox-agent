@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "kind": "cd08-disclosure-hardening",
+  "status": "passed",
+  "accepted": true,
+  "performanceDigest": "sha256:17f6e5f426e966751e1def422a8639ea863f3e0eae86207a9d5a5a2fc91cdf2c",
+  "parityDigest": "sha256:a4770f91b610ed89a112ee6986bdde6fc55e695adecef32b21e38b5a12f4b6d8",
+  "runtimeStress": [
+    {
+      "scenario": "context-25k",
+      "elapsedMs": 134
+    },
+    {
+      "scenario": "chat-10k",
+      "elapsedMs": 1013
+    },
+    {
+      "scenario": "trajectory-25k",
+      "elapsedMs": 1142
+    },
+    {
+      "scenario": "parallel-5k",
+      "elapsedMs": 29
+    },
+    {
+      "scenario": "cancel-5k",
+      "elapsedMs": 4
+    },
+    {
+      "scenario": "worker-timeout-recovery",
+      "elapsedMs": 254
+    }
+  ],
+  "checks": [
+    {
+      "id": "runtime-stress-6-of-6",
+      "passed": true
+    },
+    {
+      "id": "five-process-performance",
+      "passed": true
+    },
+    {
+      "id": "no-unexpected-reset",
+      "passed": true
+    },
+    {
+      "id": "protected-terminal-retention",
+      "passed": true
+    },
+    {
+      "id": "full-ring-metric",
+      "passed": true
+    },
+    {
+      "id": "production-container-parity",
+      "passed": true
+    },
+    {
+      "id": "legacy-default-off",
+      "passed": true
+    },
+    {
+      "id": "stable-expansion",
+      "passed": true
+    },
+    {
+      "id": "inspector-selection-reload",
+      "passed": true
+    },
+    {
+      "id": "unknown-presenter-fallback",
+      "passed": true
+    },
+    {
+      "id": "secret-redaction",
+      "passed": true
+    },
+    {
+      "id": "bounded-preview",
+      "passed": true
+    },
+    {
+      "id": "bounded-paging",
+      "passed": true
+    },
+    {
+      "id": "reduced-motion-contract",
+      "passed": true
+    },
+    {
+      "id": "historical-reconstruction",
+      "passed": true
+    }
+  ]
+}

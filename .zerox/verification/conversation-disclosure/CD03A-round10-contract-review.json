@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 10,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 10,
+  "lane": "contract",
+  "reviewedPhase": "review_pre_transition",
+  "challenge": "sha256:f6f14d9a5eb522bc0eb4936295d9994becf4fedc89624a98ab7eb419b7ce9660",
+  "callerDispatchEntryDigest": "sha256:a9e2d8b554aa8e6c9ea7fb19923b9d1bdc4a8e8cc0ad377ed584d33cfa04c450",
+  "callerDispatchSetDigest": "sha256:548c39598b64efe4c88d778579e2b30ede6d1e8c1b0bd8d3f4af8faccbc7f58e",
+  "claimedReviewOrigin": {
+    "taskPath": "round10/contract",
+    "agentLabel": "round10-contract-reviewer",
+    "transport": "codex-collaboration"
+  },
+  "identityAssurance": "not-signed",
+  "independenceClaim": "caller-attested-distinct-review-contexts",
+  "completedAt": "2026-08-24T19:28:52.000Z",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 0,
+    "major": 1,
+    "minor": 0
+  },
+  "findings": [
+    {
+      "id": "R10-CONTRACT-001",
+      "severity": "major",
+      "summary": "Round9 rejection witness programId is not bound to the V10 policy and closed-world Program root.",
+      "evidence": [
+        "scripts/conversation-disclosure-continuation-contract-v10.mjs validates the rejection programId only as nonempty and validates the policy Program root separately.",
+        "A mutation changing the embedded rejection programId while rehashing rejection, policy, snapshot, and frozen references passed contract and checker validation.",
+        "The self-contained runner performs this cross-binding, leaving contract/checker and runner semantics inconsistent."
+      ]
+    }
+  ],
+  "snapshotDigest": "sha256:138f00e1e7621cdb6aabb581e8f3c55efbebfe4eeb621689815cf387b7025eec",
+  "snapshotFileCount": 309,
+  "policyDigest": "sha256:9af3527a914ded769665cf7f23240f37782dfb6b6195b94eaccd2163ef9f2814",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:56804e0798abfbaa072a332257e36e9119892dee6857b07d6aaf474233d412fa",
+  "pathAuthorityDigest": "sha256:47c27998b2bc6245d954d323d44f04e37c7ac130d0c3a01e53e8779d9dc9a440",
+  "admissionFeatureDefinitionDigest": "sha256:eec13142ab39f0506d08342135de7b293af01dd4313e0abf4af53ab4208b89c0",
+  "admissionFeatureFileSetDigest": "sha256:a2d3dab0508dc7e83e65b0ebc9faa17236c1e97f59cbb8789103beffcc086944",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:81eb7ed6d5173c55cb4618b94768a2788d22eb3b756f4457e3fee67eb9bb2168",
+  "round9ReviewRejectionDigest": "sha256:ae3b6af80edc4b69d4373e9023f12cb364e9f4259298132dd365cf9e04587be2",
+  "validatorDigest": "sha256:90d9cc612c29b801596807c95f39debe95480b07ce0dbe916002f0576a1d3ee4"
+}

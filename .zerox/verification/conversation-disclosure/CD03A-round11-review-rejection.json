@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 12,
+  "kind": "conversation-disclosure-continuation-review-rejection",
+  "algorithm": "sha256-canonical-json-v1",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "rejectedRound": 11,
+  "recoveryRound": 12,
+  "status": "rejected_after_review",
+  "sourcePolicy": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round11-successor-evolution-policy.json",
+    "byteSha256": "sha256:08b622a0e53f11431b7430f4a955dd8bcc8f1f5db8ddae29f839ec1f10c61920",
+    "canonicalDigest": "sha256:f8aed3d7f31a90f6c51c6e8884f3a71b55b92f350f49b846b91c8ac6a3c05d5e"
+  },
+  "sourceSnapshot": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round11-review-snapshot.json",
+    "byteSha256": "sha256:21b69d5e245667afbdf162ed32c9b15e69306e90b2a083fedf65a6e90d07ecdb",
+    "canonicalDigest": "sha256:93966f3852ede64c87894d71b2722999bbb1da99963073b0526bcada1232d21f",
+    "frozenFileCount": 327,
+    "transitionPayloadFileCount": 4,
+    "baselineFileCount": 12
+  },
+  "completedReceipts": [
+    {
+      "lane": "contract",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round11-contract-review.json",
+      "byteSha256": "sha256:22912a96d5bef4ec8a2df07c1af6947ba5a0a9d3417a5eddf75db1b2224310b1",
+      "canonicalDigest": "sha256:57f08bfcb4ba25d6a025147682fa441e9452a2ca2c164b9c56226d29262e0d88",
+      "challenge": "sha256:4100ec1f6bc737ec41e37b4ba33cfad2c61b9352b56515ae50def300cda80109",
+      "verdict": "passed",
+      "findingCounts": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0
+      }
+    },
+    {
+      "lane": "runtime",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round11-runtime-review.json",
+      "byteSha256": "sha256:c911637686cbd884a49facba75a70cedf1abe0f328befa64c841a2bace356ad4",
+      "canonicalDigest": "sha256:e2025a7bc548c10370de8fa226b1df9eb35e735c142c511563fbe7b7e8c68c0c",
+      "challenge": "sha256:3db0eb48160eeccb6e4a08d2ad3f4fb99a71aa2e5eeae19994d8d52795b88edd",
+      "verdict": "failed",
+      "findingCounts": {
+        "critical": 0,
+        "major": 3,
+        "minor": 0
+      }
+    },
+    {
+      "lane": "governance",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round11-governance-review.json",
+      "byteSha256": "sha256:1d09681129535c1c5389aa4a18e41c2ef09ac0c8e23cbb3711578d38598c1a8a",
+      "canonicalDigest": "sha256:87226066a6318e7a1a7f23cfda91c681f3ebeb3bcba518ec9c383d9753b1663c",
+      "challenge": "sha256:d0cc7a5a3ac0805b466c9d4ec284f6d6ae2aee0adbb397115220f53aeb926caa",
+      "verdict": "passed",
+      "findingCounts": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0
+      }
+    }
+  ],
+  "findingIds": [
+    "R11-RUNTIME-001",
+    "R11-RUNTIME-002",
+    "R11-RUNTIME-003"
+  ],
+  "findingSetDigest": "sha256:d6e3763ba26567881445beef83ad4a8b11081af59e9961d7d6100f530e68a882",
+  "aggregateFindingCounts": {
+    "critical": 0,
+    "major": 3,
+    "minor": 0
+  },
+  "repositoryForbiddenOutputs": [
+    ".zerox/verification/conversation-disclosure/CD03A-round11-closure-manifest.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round11-external-attestation.json"
+  ],
+  "externalAnchorRule": {
+    "policyDigest": "sha256:f8aed3d7f31a90f6c51c6e8884f3a71b55b92f350f49b846b91c8ac6a3c05d5e",
+    "snapshotDigest": "sha256:93966f3852ede64c87894d71b2722999bbb1da99963073b0526bcada1232d21f",
+    "admissibility": "forbidden",
+    "externalAbsenceClaim": "not_asserted"
+  },
+  "priorRejections": {
+    "round1CanonicalDigest": "sha256:ec981e92f486ae75a56b3b4b393f95d095f6d684e6af54fe12cc7a9ba0fe1f99",
+    "round2": {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-prefreeze-rejection.json",
+      "byteSha256": "sha256:f677b1fc8cb4113ebb0c69c3b187a8b229156002e7d769764ca4e2d29677e3b9",
+      "canonicalDigest": "sha256:75a01cdef04821f1d1ca447a5b2383d8d47be331bec7777017042bf90fcf6614"
+    }
+  },
+  "digest": "sha256:eb4fe2a38a4803d4682c1aa84bd498fb1cc05d348b68ff2a2c25362b2e60ca24"
+}

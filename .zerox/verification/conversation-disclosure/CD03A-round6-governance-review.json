@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 6,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 6,
+  "lane": "governance",
+  "reviewedPhase": "review_pre_transition",
+  "challenge": "sha256:94cc76c3cc4d511d712ab5530aceff9cfce0cb13d138b38e8567ba5281c4b0cc",
+  "callerDispatchEntryDigest": "sha256:56def52aa99b42643baee238b78bdb5001af5188dd7735018ef352b4ce96fa4f",
+  "callerDispatchSetDigest": "sha256:da3f7d54a8b7abb43e7da48a826e176b9053f0b9f50a6eb1739a31e31e618ee3",
+  "claimedReviewOrigin": {
+    "taskPath": "round6/governance",
+    "agentLabel": "round6-governance-reviewer",
+    "transport": "codex-collaboration"
+  },
+  "identityAssurance": "not-signed",
+  "independenceClaim": "caller-attested-distinct-review-contexts",
+  "completedAt": "2026-08-24T16:52:59.000Z",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 0,
+    "major": 2,
+    "minor": 0
+  },
+  "findings": [
+    {
+      "id": "R6-GOV-001",
+      "severity": "major",
+      "summary": "Round1 forbidden outputs are omitted from the closed-world absence coverage.",
+      "evidence": [
+        "The policy declares three forbidden Round1 outputs: closure manifest, external anchor, and external attestation.",
+        "The rejected-output union contains 19 paths, but admissionCoverage classifies only 16; all three Round1 paths are missing.",
+        "The snapshot omits these paths, and the checker enforces absence only for snapshot.absentPaths, so planting any of them would not invalidate review_pre_transition."
+      ]
+    },
+    {
+      "id": "R6-GOV-002",
+      "severity": "major",
+      "summary": "P107A can be marked completed while declared completion artifacts remain intentionally absent.",
+      "evidence": [
+        "CD03A completionArtifacts includes rejected Round3, Round4, and Round5 manifests, attestations, and receipts that the same policy classifies as rejected_output_absent.",
+        "The preserved program checker requires every completionArtifact to be a regular file once a workstream is completed.",
+        "V6 governance checks only completionArtifact path syntax and the lifecycle tuple; an in-memory anchored_planned state passed with zero governance errors despite the missing artifacts.",
+        "The staged program:check replaces the preserved program checker with a diagnostic-only harness, leaving no authoritative completion-artifact existence enforcement."
+      ]
+    }
+  ],
+  "snapshotDigest": "sha256:531fdde529c12c4f702975a2d7f860c397b03813cfa397a681e81a0a0aad28b7",
+  "snapshotFileCount": 170,
+  "policyDigest": "sha256:6d31715387eaf1c817cfc2e4413bb14f78195a673a7e8e98bbb2cb46481c291a",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:bfbc77290ee84bb91c063133d46dbd9d76c5f3ad8c5bbdd2f996bcb8dc55ffa7",
+  "pathAuthorityDigest": "sha256:9f9124054f89e5947d2d53412df622daf7b524ee9cc4ffa6c608b2988940bf6f",
+  "admissionFeatureDefinitionDigest": "sha256:c78d675e8d049baa21a1d12454e5e25a3e92e9bcc41dece1ef2fff9f2eaaff43",
+  "admissionFeatureFileSetDigest": "sha256:31a89658973954ad364bada9cfd61bd997be04656faaa197f92688c96ab5e3d7",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:23f37e777d8aed9c382399251563d9609217607a2653d44afea4d58dd7e968ec",
+  "round5ReviewRejectionDigest": "sha256:e4577e10048c18af2640913f21490ff1c379357061b2c2c92184fb111cdbcc1f",
+  "validatorDigest": "sha256:57e00de00d31114f80b62c1073a90f1c19f217edf1d8e088d2cb85ef030e674b"
+}

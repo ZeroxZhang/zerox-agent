@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 5,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 5,
+  "lane": "governance",
+  "reviewedPhase": "review_pre_transition",
+  "challenge": "sha256:cc46af5d4b5754ce34f94f3210792f0d0e09efc07e50831494d914e9b7dc977d",
+  "callerDispatchEntryDigest": "sha256:aeafbdcf30a364a3671b4171ea0ec52557c49b09b5c39700d26d00ea828d3f14",
+  "callerDispatchSetDigest": "sha256:7cb0345e842bcc2643ef64dd25c040cfd0f42bf823aaa2c26ff925d5a2443546",
+  "claimedReviewOrigin": {
+    "taskPath": "round5/governance",
+    "agentLabel": "round5-governance-reviewer",
+    "transport": "codex-collaboration"
+  },
+  "identityAssurance": "not-signed",
+  "independenceClaim": "caller-attested-distinct-review-contexts",
+  "completedAt": "2026-08-24T16:16:26.662Z",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 1,
+    "major": 2,
+    "minor": 0
+  },
+  "findings": [
+    {
+      "id": "R5-GOV-001",
+      "severity": "critical",
+      "summary": "The governance dispatch is not bound to the caller-pinned instruction or policy.",
+      "evidence": [
+        "governance.instruction.txt hashes to sha256:880cbc81f0ceac0b03a27501159a54c379b9d2443053b3a89e288efc77178669, not required sha256:f84872a40284690d473f3d813f1f9834de06ce9af7a94b7caf522e7e49cd56e2.",
+        "dispatch-set.json pins the missing f84872a4 instruction digest.",
+        "The available policy embeds sha256:96836e23520f240e59139aab3d54074c11a53a1ac51b59e614c4cc994bdabb6b, while the reviewer reported a mismatched requested policy pin."
+      ]
+    },
+    {
+      "id": "R5-GOV-002",
+      "severity": "major",
+      "summary": "The frozen P108 verification recipe invokes the rejected V4 checker instead of the Round5 checker.",
+      "evidence": [
+        "CD03A-round5-successor-evolution-policy.json successor.featureDefinition.verification invokes check-conversation-disclosure-continuation-v4.mjs.",
+        "build-conversation-disclosure-continuation-policy-v5.mjs replaces only commands containing the V3 filename, while the Round4 parent already contains V4.",
+        "P108 verification therefore cannot bind completion checks to the accepted Round5 policy, snapshot, and successor anchor."
+      ]
+    },
+    {
+      "id": "R5-GOV-003",
+      "severity": "major",
+      "summary": "State-aware orchestration does not reconstruct immutable Round4 semantics as required.",
+      "evidence": [
+        "feature_list.json requires both Round3 and Round4 historical tests against reconstructed immutable semantics.",
+        "run-conversation-disclosure-tests-v5.mjs reconstructs only V3 tests and state; no Round4 historical fixture exists.",
+        "conversationDisclosureContinuationPolicyV4.test.ts reads the live Feature list, so it can consume the current 153-path P107A roster instead of the frozen Round4 roster."
+      ]
+    }
+  ],
+  "snapshotDigest": "sha256:265f8d761f26c9ea80f2fe3cd60bdf5990fa24a96b087cdac776b2dce9d926c3",
+  "snapshotFileCount": 137,
+  "policyDigest": "sha256:96836e23520f240e59139aab3d54074c11a53a1ac51b59e614c4cc994bdabb6b",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:02f2a88a9fe1f56976c8a3a469030550b0c21a795b476cdaa155e61487a1c05b",
+  "pathAuthorityDigest": "sha256:1861b0b01033b2fc809646fed9110a96c5e24a9fd7e7ac9b0c95d775237077d2",
+  "admissionFeatureDefinitionDigest": "sha256:d7b36d144c97083419a6388121f618c239487f7c124d930ad74153df46471914",
+  "admissionFeatureFileSetDigest": "sha256:6b90bf5dcc380c9ce1013116c965228985309993307b1e1e745d95a0748cdf08",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:3f5acda552d39f94d8bdd8e2c8cfd17ccd80f99c062e241322fbd705109c1107",
+  "round4ReviewRejectionDigest": "sha256:6e8abbee166be8f0b1b95e8fed6f14a7faf167ef0859ad2c3c72d6dcc6d86a4a",
+  "validatorDigest": "sha256:d7a875ed5e53e8432c9bdc744fb2d4b19d3bf6f4bac23d8495dcd80029364292"
+}

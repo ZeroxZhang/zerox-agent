@@ -1,0 +1,537 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-production-scenario",
+  "scenarioId": "S10-accessibility",
+  "scenarioDigest": "sha256:3fdfc7cd9183c89b18b5cb2771543213dfe031e31abcf33f86c2e8d9a4b09065",
+  "executionId": "3de7ef5b-9bb2-4ae9-9516-5dadcd698b25",
+  "processEpochs": [
+    "main_03428725-8cd9-4ed8-a732-c6f24acd54e5"
+  ],
+  "productionMain": true,
+  "productionPreload": true,
+  "demoDataUsed": false,
+  "expected": [
+    "expanded selected and blocking states are announced",
+    "focus survives item updates and evidence navigation",
+    "reduced motion removes nonessential animation without hiding state changes"
+  ],
+  "evidenceRequirements": [
+    "keyboard-only browser recording",
+    "accessibility tree states announcements and reduced-motion evidence"
+  ],
+  "actions": [
+    {
+      "index": 0,
+      "action": "keyboard_expand_and_navigate",
+      "executor": "production_preload_ipc",
+      "ok": true,
+      "evidenceIds": [
+        "41a8e3e9-8fb2-401b-96f7-7b8040c1d9f3",
+        "cd09-run-S10-accessibility",
+        "trajectory-S10-accessibility",
+        "process:main_03428725-8cd9-4ed8-a732-c6f24acd54e5"
+      ],
+      "observations": {
+        "sessionLoaded": true,
+        "sessionListed": true,
+        "runListed": true,
+        "trajectoryLoaded": true,
+        "keyboardFocusRetained": true,
+        "expandedStateChanged": true,
+        "trustedKeyDownObserved": true,
+        "trustedClickObserved": true,
+        "tabReachedDisclosureControl": true,
+        "tabReachedDifferentDisclosureControl": true,
+        "tabNavigationSteps": 1,
+        "trustedFocusedControlKeyDownObserved": true,
+        "trustedFocusedControlClickObserved": true,
+        "rowUpdateSucceeded": true,
+        "focusSurvivedItemUpdate": true,
+        "trustedEvidenceKeyDownObserved": true,
+        "trustedEvidenceClickObserved": true,
+        "evidenceNavigationActivated": true,
+        "focusSurvivedEvidenceNavigation": true
+      }
+    },
+    {
+      "index": 1,
+      "action": "inspect_accessible_state",
+      "executor": "production_renderer_dom",
+      "ok": true,
+      "evidenceIds": [
+        "41a8e3e9-8fb2-401b-96f7-7b8040c1d9f3",
+        "cd09-run-S10-accessibility",
+        "trajectory-S10-accessibility",
+        "process:main_03428725-8cd9-4ed8-a732-c6f24acd54e5"
+      ],
+      "observations": {
+        "sessionLoaded": true,
+        "sessionListed": true,
+        "runListed": true,
+        "trajectoryLoaded": true,
+        "politeLiveRegion": true,
+        "expandedStateExposed": true,
+        "controlRelationshipExposed": true,
+        "blockingStateExposed": true,
+        "selectedRunStateExposed": true,
+        "selectedEvidenceStateExposed": true
+      }
+    },
+    {
+      "index": 2,
+      "action": "enable_reduced_motion",
+      "executor": "production_renderer_reload",
+      "ok": true,
+      "evidenceIds": [
+        "41a8e3e9-8fb2-401b-96f7-7b8040c1d9f3",
+        "cd09-run-S10-accessibility",
+        "trajectory-S10-accessibility",
+        "process:main_03428725-8cd9-4ed8-a732-c6f24acd54e5"
+      ],
+      "observations": {
+        "sessionLoaded": true,
+        "sessionListed": true,
+        "runListed": true,
+        "trajectoryLoaded": true,
+        "reducedMotionEnabled": true,
+        "reducedAnimationDurationMs": 0.01,
+        "reducedTransitionDurationMs": 0.01,
+        "nonessentialMotionSuppressed": true,
+        "stateChangedUnderReducedMotion": true,
+        "stateStillVisible": true,
+        "trustedReducedMotionClickObserved": true
+      }
+    }
+  ],
+  "requirements": [
+    {
+      "index": 0,
+      "requirement": "expanded selected and blocking states are announced",
+      "ok": true,
+      "evidenceIds": [
+        "action:1:sha256:8f0557f59ea5ba72cae59debfacb446c8f4181086e5396e671965fbbc00e5fac",
+        "screenshot:sha256:ae7bc14e17176262d408a9d1ee706e0352ed2d6335258d2b170f99f812ac14c8"
+      ]
+    },
+    {
+      "index": 1,
+      "requirement": "focus survives item updates and evidence navigation",
+      "ok": true,
+      "evidenceIds": [
+        "action:0:sha256:9ba031c97a64af3b6aa74eb80dd5d29918655b633142db81b9afaf880bc6221d",
+        "screenshot:sha256:ae7bc14e17176262d408a9d1ee706e0352ed2d6335258d2b170f99f812ac14c8"
+      ]
+    },
+    {
+      "index": 2,
+      "requirement": "reduced motion removes nonessential animation without hiding state changes",
+      "ok": true,
+      "evidenceIds": [
+        "action:2:sha256:d585182d23b67c8ab06b3ef528d060b858720e75bbd147d7aabf558459e70001",
+        "screenshot:sha256:ae7bc14e17176262d408a9d1ee706e0352ed2d6335258d2b170f99f812ac14c8"
+      ]
+    }
+  ],
+  "ipcInvocations": [
+    {
+      "ordinal": 1,
+      "channel": "toolApproval:listPending",
+      "ok": true
+    },
+    {
+      "ordinal": 2,
+      "channel": "toolApproval:getMode",
+      "ok": true
+    },
+    {
+      "ordinal": 3,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 4,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 5,
+      "channel": "memory:list",
+      "ok": true
+    },
+    {
+      "ordinal": 6,
+      "channel": "agentWorkspaces:list",
+      "ok": true
+    },
+    {
+      "ordinal": 7,
+      "channel": "agentBootstrap:loadValidation",
+      "ok": true
+    },
+    {
+      "ordinal": 8,
+      "channel": "app:getMeta",
+      "ok": true
+    },
+    {
+      "ordinal": 9,
+      "channel": "app:getRuntimeInfo",
+      "ok": true
+    },
+    {
+      "ordinal": 10,
+      "channel": "navigation:list",
+      "ok": true
+    },
+    {
+      "ordinal": 11,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 12,
+      "channel": "app:getUpdateState",
+      "ok": true
+    },
+    {
+      "ordinal": 13,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 14,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
+      "ordinal": 15,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 16,
+      "channel": "skills:list",
+      "ok": true
+    },
+    {
+      "ordinal": 17,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 18,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 19,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 20,
+      "channel": "chat:sendMessage",
+      "ok": true
+    },
+    {
+      "ordinal": 21,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 22,
+      "channel": "agentRuns:listActiveExecutions",
+      "ok": true
+    },
+    {
+      "ordinal": 23,
+      "channel": "agentEvalCandidates:list",
+      "ok": true
+    },
+    {
+      "ordinal": 24,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 25,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 26,
+      "channel": "toolApproval:listPending",
+      "ok": true
+    },
+    {
+      "ordinal": 27,
+      "channel": "toolApproval:getMode",
+      "ok": true
+    },
+    {
+      "ordinal": 28,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 29,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 30,
+      "channel": "memory:list",
+      "ok": true
+    },
+    {
+      "ordinal": 31,
+      "channel": "skills:list",
+      "ok": true
+    },
+    {
+      "ordinal": 32,
+      "channel": "agentWorkspaces:list",
+      "ok": true
+    },
+    {
+      "ordinal": 33,
+      "channel": "agentBootstrap:loadValidation",
+      "ok": true
+    },
+    {
+      "ordinal": 34,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 35,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
+      "ordinal": 36,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 37,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 38,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 39,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 40,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 41,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 42,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 43,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 44,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 45,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 46,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 47,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 48,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 49,
+      "channel": "agentRuns:listActiveExecutions",
+      "ok": true
+    },
+    {
+      "ordinal": 50,
+      "channel": "agentEvalCandidates:list",
+      "ok": true
+    },
+    {
+      "ordinal": 51,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 52,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 53,
+      "channel": "agentRuns:listActiveExecutions",
+      "ok": true
+    },
+    {
+      "ordinal": 54,
+      "channel": "agentEvalCandidates:list",
+      "ok": true
+    },
+    {
+      "ordinal": 55,
+      "channel": "app:getMeta",
+      "ok": true
+    },
+    {
+      "ordinal": 56,
+      "channel": "app:getRuntimeInfo",
+      "ok": true
+    },
+    {
+      "ordinal": 57,
+      "channel": "navigation:list",
+      "ok": true
+    },
+    {
+      "ordinal": 58,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 59,
+      "channel": "app:getUpdateState",
+      "ok": true
+    },
+    {
+      "ordinal": 60,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 61,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 62,
+      "channel": "toolApproval:listPending",
+      "ok": true
+    },
+    {
+      "ordinal": 63,
+      "channel": "toolApproval:getMode",
+      "ok": true
+    },
+    {
+      "ordinal": 64,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 65,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 66,
+      "channel": "memory:list",
+      "ok": true
+    },
+    {
+      "ordinal": 67,
+      "channel": "skills:list",
+      "ok": true
+    },
+    {
+      "ordinal": 68,
+      "channel": "agentWorkspaces:list",
+      "ok": true
+    },
+    {
+      "ordinal": 69,
+      "channel": "agentBootstrap:loadValidation",
+      "ok": true
+    },
+    {
+      "ordinal": 70,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 71,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
+      "ordinal": 72,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 73,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 74,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 75,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 76,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 77,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 78,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 79,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    }
+  ],
+  "screenshotDigests": [
+    "sha256:ae7bc14e17176262d408a9d1ee706e0352ed2d6335258d2b170f99f812ac14c8"
+  ],
+  "status": "passed",
+  "digest": "sha256:666ea46cfbb72b7a7e4b5b733aa61813470eec5d63322d37f92b340c38101f15"
+}

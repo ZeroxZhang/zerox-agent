@@ -1,0 +1,1231 @@
+{
+  "schemaVersion": 1,
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "title": "Zerox Agent v3.9.2 Conversation Progressive Disclosure",
+  "updatedAt": "2026-08-25T17:00:00.000+08:00",
+  "sourceBaseline": {
+    "release": "v3.9.1",
+    "releaseCommit": "8850389",
+    "governanceCommit": "9427122"
+  },
+  "sourceReview": ".zerox/research/P104-conversation-progressive-disclosure-study.md",
+  "operatingGuide": ".zerox/conversation-disclosure-program.md",
+  "architectureDecision": ".zerox/decisions/CD01-conversation-disclosure-program.md",
+  "acceptanceManifest": ".zerox/verification/conversation-disclosure/CD09-real-app-acceptance.json",
+  "status": "active",
+  "activeFeatureId": "P109-chat-progressive-disclosure-surface",
+  "nextFeatureId": "P109-chat-progressive-disclosure-surface",
+  "maxActiveFeatures": 1,
+  "implementationCompletionWorkstreamId": "CD08",
+  "postImplementationGates": [
+    "CD09"
+  ],
+  "rootFindings": [
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13"
+  ],
+  "invariants": [
+    "Goal acceptance and certificate state, Plan lineage, ToolAuthorizationService, Tool Invocation lifecycle, workspace guards, and sandbox enforcement remain authoritative in their existing domains.",
+    "Conversation disclosure is a rebuildable projection with stable source references; it is not a new universal fact store.",
+    "Required gates and terminal state are persisted by their owning domain before the projection publishes a settled item.",
+    "Renderer state may expand, pin, select, or filter an item but may not decide lifecycle, sensitivity, attention, authorization, or evidence identity.",
+    "Every default summary is safe and useful; technical or restricted evidence is bounded, redacted, authorized, and reached by stable identity rather than Chat text parsing.",
+    "Snapshot and delta consumers detect generation or cursor gaps and reload instead of guessing; partial or degraded evidence coverage is explicit.",
+    "Every typed adapter preserves exact domain status requiredness durability and source revision; composite items distinguish one primary source from bounded contributors.",
+    "Window reload may recover process-live gates, while main-process restart or cold start reconciles unresolved privileged work to interrupted and requires a new explicit attempt.",
+    "Legacy v3.9.1 sessions remain readable and rollback never deletes or rewrites authoritative Chat, Goal, Plan, Run, Trajectory, tool, checkpoint, or artifact data.",
+    "Private raw chain of thought and credentials are never product disclosure requirements.",
+    "No production surface cuts over before shadow parity, focused tests, compatibility evidence, and its declared rollback gate pass."
+  ],
+  "nonGoals": [
+    "No cloud worker, external subagent provider, or remote persistence service.",
+    "No replacement of Goal, Plan, ToolAuthorizationService, Tool Invocation, AgentRun, Trajectory, or Chat message authority.",
+    "No direct port of DeepSeek Harness WebSocket Host topology, Cordis fiber slot runtime, or pre-release disk compatibility policy.",
+    "No default persistence or display of complete reasoning, raw tool arguments, file contents, or secrets.",
+    "No turn-local Todo semantics substituted for durable Goal Plan and acceptance contracts.",
+    "No arbitrary Code Mode, permission bypass, unreviewed self-modification, or visual big-bang rewrite."
+  ],
+  "deferrals": [
+    {
+      "id": "raw_private_reasoning",
+      "status": "kept_deferred",
+      "trigger": "A separate approved privacy and product requirement defines provider support, persistence purpose, viewer authorization, export, deletion, and regulatory handling.",
+      "prohibitedCurrentAction": "Do not persist, transmit, or display private raw chain of thought as part of v3.9.2."
+    },
+    {
+      "id": "universal_physical_event_store",
+      "status": "kept_deferred",
+      "trigger": "Measured cross-store transaction or replay failures prove typed adapters and source cuts cannot provide correctness, followed by an independent data migration decision.",
+      "prohibitedCurrentAction": "Do not merge Goal Plan Chat Run Tool or authorization authorities into a new physical log."
+    },
+    {
+      "id": "deepseek_runtime_port",
+      "status": "kept_deferred",
+      "trigger": "A separate plugin-runtime product decision proves third-party hot-loaded definitions are required and compatible with Zerox trust boundaries.",
+      "prohibitedCurrentAction": "Do not port Cordis fiber slot or Host client topology for this disclosure program."
+    },
+    {
+      "id": "remote_or_external_execution",
+      "status": "kept_deferred",
+      "trigger": "A separate approved trust contract covers consent credentials data residency cost cancellation observability and ToolRuntime-equivalent permission enforcement.",
+      "prohibitedCurrentAction": "Do not add cloud workers hidden delegation or external execution providers."
+    }
+  ],
+  "scenarioMatrix": [
+    {
+      "id": "S01-default-narrative",
+      "category": "default",
+      "title": "Default Chat stays concise during a real tool-using turn",
+      "surface": "chat",
+      "executor": "browser",
+      "fixture": "clean real-app session with a safe multi-operation workspace task",
+      "evidenceRequirements": [
+        "browser recording or screenshots",
+        "persisted projection and source-reference inspection"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A clean session uses an approved test model and a safe workspace task that performs multiple read-only operations.",
+      "actions": [
+        "send the task",
+        "observe running and completed states without expanding details"
+      ],
+      "expected": [
+        "goal or user request current phase blocker and final result remain readable",
+        "completed low-risk operations group into safe compact summaries",
+        "no raw tool arguments credentials or private reasoning appear"
+      ]
+    },
+    {
+      "id": "S02-inline-expansion",
+      "category": "expanded",
+      "title": "User expansion survives streaming updates",
+      "surface": "chat",
+      "executor": "browser",
+      "fixture": "real-app streaming session with at least four stable operation items",
+      "evidenceRequirements": [
+        "before and after browser screenshots",
+        "stable item id and expansion-state trace"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A running session has at least four operation items and one item with inline detail.",
+      "actions": [
+        "expand the process group and one item",
+        "allow additional events to arrive",
+        "collapse the group manually"
+      ],
+      "expected": [
+        "stable item identity preserves the user-open item",
+        "automatic policy does not override explicit user state",
+        "new items do not re-key or duplicate older items"
+      ]
+    },
+    {
+      "id": "S03-evidence-handoff",
+      "category": "evidence",
+      "title": "Chat operation navigates to exact evidence",
+      "surface": "chat_runs",
+      "executor": "browser",
+      "fixture": "real-app completed operation linked to AgentRun Trajectory and Tool Invocation records",
+      "evidenceRequirements": [
+        "browser navigation recording",
+        "matching source and evidence identifiers before and after reload"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A completed tool operation has an AgentRun Trajectory or Tool Invocation evidence target.",
+      "actions": [
+        "select Inspect from the compact operation",
+        "return to Chat and repeat after reload"
+      ],
+      "expected": [
+        "one action opens the exact run event or generic evidence record",
+        "source identity remains the same after reload",
+        "missing specialized presentation falls back without losing the record"
+      ]
+    },
+    {
+      "id": "S04-failure-attention",
+      "category": "failure",
+      "title": "Failure and blocked state override compaction",
+      "surface": "chat",
+      "executor": "hybrid",
+      "fixture": "deterministic safe tool and validation failure fixture exercised in the real app",
+      "evidenceRequirements": [
+        "browser failure and recovery capture",
+        "sanitized technical evidence and terminal source status"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A safe deterministic tool or validation step fails without exposing a secret.",
+      "actions": [
+        "observe the failure",
+        "inspect the recovery action and technical evidence"
+      ],
+      "expected": [
+        "the failed item remains prominent with first useful error and next action",
+        "technical detail is opt-in and sanitized",
+        "final narrative does not claim success"
+      ]
+    },
+    {
+      "id": "S05-approval-attention",
+      "category": "approval",
+      "title": "Pending approval is causal recoverable and idempotent",
+      "surface": "chat",
+      "executor": "hybrid",
+      "fixture": "real-app confirmation-required tool with deterministic approval id and invocation id",
+      "evidenceRequirements": [
+        "window-reload browser recording",
+        "approval intent decision revision and Tool Invocation linkage"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A tool request requires manual approval and exposes its safe target and scope.",
+      "actions": [
+        "leave approval pending",
+        "reload the window",
+        "resolve it once"
+      ],
+      "expected": [
+        "pending attention returns after reload",
+        "approval and Tool Invocation share a stable causal reference",
+        "a duplicate response cannot execute the action twice"
+      ]
+    },
+    {
+      "id": "S06-pause-reload-recovery",
+      "category": "recovery",
+      "title": "Paused continuation and disclosure converge after reload",
+      "surface": "chat",
+      "executor": "hybrid",
+      "fixture": "deterministic AgentLoop or provider pause with durable continuation",
+      "evidenceRequirements": [
+        "browser reload and continuation recording",
+        "Chat and run settlement records with coverage state"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "An AgentLoop or provider pause creates a durable continuation.",
+      "actions": [
+        "reload the application",
+        "inspect paused state",
+        "continue and reach settlement"
+      ],
+      "expected": [
+        "Chat activity projection and contributing run evidence agree",
+        "coverage never claims a missing Workspace Run event is complete",
+        "continuation is consumed once before final success"
+      ]
+    },
+    {
+      "id": "S07-plan-progress",
+      "category": "plan",
+      "title": "Direct or Debate progress is visible from persisted stages",
+      "surface": "chat_plan",
+      "executor": "hybrid",
+      "fixture": "real-app Direct or Debate plan with persisted intermediate stages",
+      "evidenceRequirements": [
+        "browser stage-progress recording",
+        "Plan revision and Goal contract evidence"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A multi-stage plan is generated and persists at least two intermediate stages.",
+      "actions": [
+        "observe live plan progress",
+        "reload before completion",
+        "review the final Plan decision"
+      ],
+      "expected": [
+        "persisted stage progress resumes without fabricated Todo state",
+        "Plan revision model and failure truth remain authoritative",
+        "Goal semantics are unchanged until explicit adoption"
+      ]
+    },
+    {
+      "id": "S08-scheduled-progress",
+      "category": "scheduled",
+      "title": "Scheduled execution uses the shared projection without polling storms",
+      "surface": "scheduled_runs",
+      "executor": "hybrid",
+      "fixture": "safe scheduled task with deterministic multi-event streaming execution",
+      "evidenceRequirements": [
+        "browser cross-surface recording",
+        "run identity and bounded update metrics"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A safe scheduled task emits multiple streaming updates before completion.",
+      "actions": [
+        "run the task manually",
+        "switch between Scheduled and Runs",
+        "review completion"
+      ],
+      "expected": [
+        "progress arrives before the blocking result",
+        "the same run identity appears across surfaces",
+        "snapshot or delta updates remain bounded and do not trigger full refetch per event"
+      ]
+    },
+    {
+      "id": "S09-long-session",
+      "category": "long_session",
+      "title": "Long history keeps projection and DOM work bounded",
+      "surface": "chat_runs",
+      "executor": "hybrid",
+      "fixture": "measured large Chat and Trajectory fixture plus a real-app tail session",
+      "evidenceRequirements": [
+        "CPU heap DOM and delta-buffer measurements",
+        "browser paging and streaming recording"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A fixture contains measured large Chat and trajectory histories with grouped operations.",
+      "actions": [
+        "load the current tail",
+        "page older evidence",
+        "stream updates while measuring CPU heap and rendered rows"
+      ],
+      "expected": [
+        "no duplicate or missing stable items",
+        "DOM and upstream projection measurements stay within the characterized budget",
+        "raw payloads are paged truncated or offloaded"
+      ]
+    },
+    {
+      "id": "S10-accessibility",
+      "category": "accessibility",
+      "title": "Disclosure and attention are keyboard and screen-reader operable",
+      "surface": "chat_runs",
+      "executor": "browser",
+      "fixture": "real-app session with collapsed expanded failed and evidence-selected items",
+      "evidenceRequirements": [
+        "keyboard-only browser recording",
+        "accessibility tree states announcements and reduced-motion evidence"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A session contains collapsed expanded failed and selected-evidence items.",
+      "actions": [
+        "navigate and operate using keyboard only",
+        "inspect accessible names states and live announcements",
+        "enable reduced motion"
+      ],
+      "expected": [
+        "expanded selected and blocking states are announced",
+        "focus survives item updates and evidence navigation",
+        "reduced motion removes nonessential animation without hiding state changes"
+      ]
+    },
+    {
+      "id": "S11-secret-safety",
+      "category": "secret_safety",
+      "title": "Restricted evidence never leaks into default or persisted UI artifacts",
+      "surface": "chat_runs",
+      "executor": "hybrid",
+      "fixture": "synthetic non-secret API-key-shaped payload and restricted tool arguments",
+      "evidenceRequirements": [
+        "browser default and authorized-detail capture",
+        "repository persistence log screenshot export and package secret scan"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A synthetic tool fixture contains API-key-shaped text file content and restricted arguments.",
+      "actions": [
+        "observe default summary",
+        "request authorized technical evidence",
+        "scan repository logs screenshots exports and persisted projection"
+      ],
+      "expected": [
+        "default summary is safe and useful",
+        "technical evidence is bounded and redacted",
+        "no credential or unrestricted file content appears in artifacts"
+      ]
+    },
+    {
+      "id": "S12-retry-attempt",
+      "category": "retry",
+      "title": "Failed stream attempt cannot contaminate the accepted answer",
+      "surface": "chat",
+      "executor": "hybrid",
+      "fixture": "deterministic provider stream that emits partial content fails and succeeds on retry",
+      "evidenceRequirements": [
+        "browser attempt reset recording",
+        "attempt-control and final-message reconciliation trace"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A deterministic provider fixture streams partial content fails then succeeds on retry.",
+      "actions": [
+        "observe the first attempt",
+        "allow retry",
+        "reload after final persistence"
+      ],
+      "expected": [
+        "attempt reset or supersession removes rejected partial content",
+        "only the accepted attempt reconciles to the final assistant message",
+        "status and output-part channels do not duplicate the visible answer"
+      ]
+    },
+    {
+      "id": "S13-legacy-coverage",
+      "category": "legacy",
+      "title": "Legacy sessions remain readable with honest coverage",
+      "surface": "chat_runs",
+      "executor": "hybrid",
+      "fixture": "versioned v3.9.1 Chat Goal Plan and Run fixture opened in the real app",
+      "evidenceRequirements": [
+        "projected and legacy browser captures",
+        "compatibility id source-cut and non-mutation evidence"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A v3.9.1 fixture lacks new projection identity and contains bounded activity history.",
+      "actions": [
+        "open the session in projected mode",
+        "inspect available process and evidence",
+        "switch to legacy mode"
+      ],
+      "expected": [
+        "narrative remains readable without destructive migration",
+        "compatibility ids are deterministic and coverage is partial where evidence is absent",
+        "legacy rollback preserves all authoritative data"
+      ]
+    },
+    {
+      "id": "S14-guided-input",
+      "category": "guided_input",
+      "title": "Guided input remains visible durable and causally scoped",
+      "surface": "chat",
+      "executor": "browser",
+      "fixture": "real-app run that pauses on a deterministic guided-input request",
+      "evidenceRequirements": [
+        "browser reload and single-response recording",
+        "guided-input source ref and continuation settlement"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A running task requests one required structured user answer and persists its continuation.",
+      "actions": [
+        "leave input unanswered and reload the window",
+        "submit one answer",
+        "continue to settlement"
+      ],
+      "expected": [
+        "the required prompt remains prominent after window reload",
+        "the response binds to the same request once",
+        "cancellation or stale input cannot resume another turn"
+      ]
+    },
+    {
+      "id": "S15-goal-acceptance",
+      "category": "goal_acceptance",
+      "title": "Goal review acceptance and unverified completion retain authority",
+      "surface": "chat_goal",
+      "executor": "hybrid",
+      "fixture": "real-app Goal fixture reaching review then completed_unverified and final acceptance",
+      "evidenceRequirements": [
+        "browser Goal and Chat state recording",
+        "Goal status certificate and projection mapping evidence"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A Goal reaches review and a deterministic acceptance gate before it can be achieved.",
+      "actions": [
+        "review the Goal",
+        "observe completed_unverified",
+        "resolve acceptance and reload"
+      ],
+      "expected": [
+        "review and acceptance remain explicit required gates",
+        "completed_unverified is never presented as success",
+        "the final narrative matches Goal certificate truth"
+      ]
+    },
+    {
+      "id": "S16-plan-confirmation",
+      "category": "plan_confirmation",
+      "title": "Plan confirmation and blocked action gate cannot be compacted away",
+      "surface": "chat_plan",
+      "executor": "browser",
+      "fixture": "real-app Plan fixture requiring confirmation with a deterministic blocked variant",
+      "evidenceRequirements": [
+        "browser confirmation and blocked-state recording",
+        "Plan status actionGate and revision evidence"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A Plan reaches awaiting_confirmation and a second fixture has actionGate blocked.",
+      "actions": [
+        "reload while awaiting confirmation",
+        "confirm once",
+        "inspect the blocked variant"
+      ],
+      "expected": [
+        "confirmation remains prominent and idempotent",
+        "blocked maps to blocked rather than failed or succeeded",
+        "Plan revision and Goal semantics remain unchanged until adoption"
+      ]
+    },
+    {
+      "id": "S17-cancel-interruption",
+      "category": "cancel",
+      "title": "Cancellation and process interruption settle without privileged replay",
+      "surface": "chat_runs",
+      "executor": "hybrid",
+      "fixture": "real-app active turn plus pending approval interrupted by cancel main restart and cold start",
+      "evidenceRequirements": [
+        "browser cancel restart and cold-start recording",
+        "aborted invocation interrupted approval and recovery evidence"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A running operation and a separate approval-gated operation can be interrupted deterministically.",
+      "actions": [
+        "cancel the running turn",
+        "restart during pending approval",
+        "cold-start and inspect recovery"
+      ],
+      "expected": [
+        "canceled and interrupted states remain distinct and visible",
+        "an unresolved or prior approval never auto-executes after restart",
+        "recovery requires an explicit new safe attempt"
+      ]
+    },
+    {
+      "id": "S18-context-usage",
+      "category": "context_usage",
+      "title": "Context and token usage stay accurate about scope and estimation",
+      "surface": "chat",
+      "executor": "hybrid",
+      "fixture": "real-app multi-turn context compression fixture with known cumulative usage bounds",
+      "evidenceRequirements": [
+        "browser context and usage recording",
+        "source measurement scope durability and reconciliation trace"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "A session crosses one context compression boundary and reports provider usage with a known estimate fallback.",
+      "actions": [
+        "observe pre-compression usage",
+        "trigger compression",
+        "reload and compare cumulative values"
+      ],
+      "expected": [
+        "current context and cumulative usage are not conflated",
+        "estimated or partial values are labeled",
+        "reload never decreases a durable cumulative value without an explicit reset"
+      ]
+    },
+    {
+      "id": "S19-unknown-coverage",
+      "category": "unknown_coverage",
+      "title": "Unknown optional and required facts fail with different semantics",
+      "surface": "chat_runs",
+      "executor": "hybrid",
+      "fixture": "versioned unknown optional presentation and unknown required persistent fact fixtures",
+      "evidenceRequirements": [
+        "browser generic fallback and degraded-state recording",
+        "source-cut requiredness reset and incompatibility trace"
+      ],
+      "acceptanceEvidence": [],
+      "setup": "One fixture adds an optional unknown presenter and another adds an unknown required fact.",
+      "actions": [
+        "open the optional fixture",
+        "open the required fixture",
+        "reload each scope"
+      ],
+      "expected": [
+        "optional presentation falls back to a generic row",
+        "required unknown fact degrades coverage and forces reset",
+        "neither case silently drops a required attention state"
+      ]
+    }
+  ],
+  "workstreams": [
+    {
+      "id": "CD01",
+      "title": "Research closure architecture decision and governed program",
+      "state": "completed",
+      "featureId": "P105-conversation-disclosure-program-foundation",
+      "findings": [
+        "D1",
+        "D3",
+        "D7",
+        "D9",
+        "D10"
+      ],
+      "dependsOn": [],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD01-conversation-disclosure-program.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD01-conversation-disclosure-program.md",
+        ".zerox/conversation-disclosure-program.json",
+        ".zerox/conversation-disclosure-program.md",
+        "src/shared/conversationDisclosureProgram.test.ts"
+      ],
+      "acceptanceScenarioIds": [
+        "S01-default-narrative",
+        "S02-inline-expansion",
+        "S03-evidence-handoff",
+        "S04-failure-attention",
+        "S05-approval-attention",
+        "S06-pause-reload-recovery",
+        "S07-plan-progress",
+        "S08-scheduled-progress",
+        "S09-long-session",
+        "S10-accessibility",
+        "S11-secret-safety",
+        "S12-retry-attempt",
+        "S13-legacy-coverage",
+        "S14-guided-input",
+        "S15-goal-acceptance",
+        "S16-plan-confirmation",
+        "S17-cancel-interruption",
+        "S18-context-usage",
+        "S19-unknown-coverage"
+      ],
+      "rollback": "Remove the independent disclosure program artifacts and restore program and harness checks; no production schema runtime or user data is changed by CD01.",
+      "verification": [
+        "independent architecture and program review",
+        "program checker negative tests and package script contract tests",
+        "npm run program:check",
+        "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "CD02",
+      "title": "Shared disclosure contracts lifecycle policy and fixture-driven projector",
+      "state": "completed",
+      "featureId": "P106-conversation-disclosure-contract-foundation",
+      "findings": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D7",
+        "D10",
+        "D12",
+        "D13"
+      ],
+      "dependsOn": [
+        "CD01"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD02-conversation-disclosure-contract.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD02-conversation-disclosure-contract.md",
+        ".zerox/verification/conversation-disclosure/CD02-contract-characterization.json"
+      ],
+      "acceptanceScenarioIds": [
+        "S06-pause-reload-recovery",
+        "S11-secret-safety",
+        "S12-retry-attempt",
+        "S13-legacy-coverage"
+      ],
+      "rollback": "Keep legacy projection active and remove the unused shadow projector and new shared types without rewriting any authoritative domain records.",
+      "verification": [
+        "stable identity and disclosure policy unit tests",
+        "required pause terminal settlement and KM04 drift characterization",
+        "attempt reset gap duplicate and legacy compatibility tests",
+        "full verify and program gates"
+      ]
+    },
+    {
+      "id": "CD03",
+      "title": "Causal lifecycle spine pause settlement retry and approval recovery",
+      "state": "completed",
+      "featureId": "P107-conversation-disclosure-domain-adapters",
+      "findings": [
+        "D2",
+        "D3",
+        "D5",
+        "D6",
+        "D9",
+        "D10",
+        "D12",
+        "D13"
+      ],
+      "dependsOn": [
+        "CD02"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD03-conversation-causal-spine.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD03-conversation-causal-spine.md",
+        ".zerox/verification/conversation-disclosure/CD03-causal-shadow.json"
+      ],
+      "acceptanceScenarioIds": [
+        "S03-evidence-handoff",
+        "S05-approval-attention",
+        "S06-pause-reload-recovery",
+        "S12-retry-attempt",
+        "S14-guided-input",
+        "S17-cancel-interruption"
+      ],
+      "completionContract": {
+        "schemaVersion": 1,
+        "kind": "reviewed_shadow",
+        "primaryArtifact": ".zerox/verification/conversation-disclosure/CD03-causal-shadow.json",
+        "minimumIndependentPasses": 3,
+        "requiredReviewLanes": [
+          "contract",
+          "runtime",
+          "governance"
+        ],
+        "requiredCharacterizationIds": [
+          "C01-global-request-claim",
+          "C02-attempt-control",
+          "C03-assistant-receipt-order",
+          "C04-message-first-repair",
+          "C05-required-settlement",
+          "C06-ordinary-queue-drain",
+          "C07-workspace-lifecycle",
+          "C08-event-first-repair",
+          "C09-approval-durability",
+          "C10-approval-recovery",
+          "C11-distinct-causal-identities",
+          "C12-single-live-answer",
+          "C13-safe-compatibility"
+        ],
+        "requiredSafety": {
+          "rawPrivateReasoningPersisted": false,
+          "rawToolArgumentsCopiedToCausalStore": false,
+          "credentialFixturePersisted": false,
+          "durableApprovalUsedAsStartupGrant": false,
+          "disclosureRendererCutover": false,
+          "lifecycleRecoveryRendererFixes": true,
+          "rawApprovalTaskNamePersisted": false,
+          "rawApprovalArgsSummaryPersisted": false,
+          "ambiguousApprovalCommitGrantsExecution": false,
+          "callerForgedWorktreeReceiptAccepted": false,
+          "replayedWorktreeReceiptAccepted": false,
+          "crossBackendWorktreeReceiptReplayAccepted": false,
+          "legacyUnknownPromotedToSuccess": false,
+          "legacyUnknownClaimsContinuationPersisted": false,
+          "unversionedLegacyFingerprintStartsExecution": false,
+          "legacyGuidedInputStartsExecution": false,
+          "waitingInputSettledAsKernelFailure": false,
+          "canceledTerminalSettledAsKernelFailure": false,
+          "terminalActivityUsesStaleCallerSession": false,
+          "conflictTerminalUsesStaleCallerSession": false,
+          "lossyKernelRunIdCollisionAccepted": false,
+          "trajectoryRunRelabeledAsAgentRun": false,
+          "kernelRunRefIsTypeOnly": false,
+          "kernelConflictRunRefMissing": false,
+          "receiptConflictSynthesizesUnpersisted": false,
+          "agentRunRefDeferredUntilAssistantPersistence": false,
+          "invalidInputCreatesKernelRun": false,
+          "unboundClaimReadsCallerSession": false,
+          "routingSessionTreatedAsDurableWithoutProof": false,
+          "sessionIdSentinelCollisionAccepted": false,
+          "kernelAdmissionContinuesAfterRefFailure": false,
+          "routeOnlyFailurePacketPromotesSession": false,
+          "requiredSettlementFailurePublishesPause": false,
+          "terminalExactReplayRejected": false,
+          "toolDispatchStartsBeforeCausalRef": false,
+          "agentRunAssistantAcceptedAfterRefFailure": false,
+          "reviewPendingArtifactCompletesWorkstream": false,
+          "sessionOnlyClaimAdoptsDurableStatus": false,
+          "agentRunStartsBeforeCausalRef": false,
+          "requiredChatFailurePromotesRouteSession": false,
+          "rawSettlementErrorPersisted": false,
+          "guidedInputReplaysIncompleteSettlement": false,
+          "guidedInputProcessingReplaysAfterRestart": false,
+          "assistantReplayReassignsAttempt": false,
+          "agentRunEventsPrecedeAdmission": false,
+          "agentRunTerminalStatusCollapsesToSuccess": false,
+          "configuredWorkspaceFailureStartsExecution": false,
+          "successfulDurablePublicationOmitsPositiveProof": false,
+          "kernelFailureBypassesRequiredJournal": false,
+          "concurrentDuplicateCreatesOwnerLifecycle": false,
+          "preparedSettlementFingerprintOmitsPersistedFields": false,
+          "agentRunProjectionFailureLeavesAdmissionStarted": false,
+          "agentRunAdmissionSettlesWithoutOwner": false,
+          "postCommitAgentRunFailureReentersKernelSettlement": false,
+          "reviewSnapshotSchemaDivergesFromChecker": false,
+          "symlinkFrozenFileAccepted": false,
+          "harnessImportBypassAccepted": false,
+          "terminalPublishedBeforeRequiredSettlement": false,
+          "requiredSettlementStartupRecoverySkipped": false,
+          "staleAttemptAssistantAccepted": false,
+          "approvalIntentPersistedWithoutCausalRef": false,
+          "agentRunAdmissionSurvivesWithoutOwner": false,
+          "agentRunResumeStartsWithoutRevisionLease": false,
+          "agentRunObserverFailureChangesOwnerLifecycle": false,
+          "rawAgentRunFailurePersisted": false,
+          "approvalIdOmittedFromSettlementFingerprint": false,
+          "selfAssertedReviewerObjectAccepted": false,
+          "candidateLocalClosureRunnerAccepted": false,
+          "failedRequiredSettlementOmitsFailureCode": false,
+          "runRepositoryBypassesRevisionFence": false,
+          "requiredSettlementCommitsAfterAttemptInvalidation": false,
+          "assistantAcceptanceCoexistsWithCommittedTerminal": false,
+          "agentRunRevisionTwoSnapshotCannotBootstrapMissingReplica": false,
+          "agentRunRevisionChangesExecutionEnvelope": false,
+          "failedSettlementAssistantReconciled": false,
+          "agentRunResumeWithoutOwnerLease": false,
+          "agentRunExecutionUsesMutableEnvelopeBeforeCas": false,
+          "agentRunShadowRevisionGapPersists": false,
+          "rawToolFailurePersistedOrPublished": false,
+          "nestedJsonCredentialPersistedOrPublished": false,
+          "unicodeCredentialSyntaxPersistedOrPublished": false,
+          "legacyAgentRunRawToolErrorPersistedOrPublished": false,
+          "finalAssistantCredentialPersistedOrPublished": false,
+          "externalClosureExecutesUnfrozenBytes": false,
+          "externalClosureReceiptStdoutIgnored": false,
+          "externalClosureSkipsPostflightRehash": false,
+          "externalClosureGovernanceInputsChangeAfterPreflight": false,
+          "agentRunAdmissionRevisionGapReconciled": false,
+          "crossDomainSuccessCommitsAsymmetrically": false,
+          "encodedOrMultilineCredentialPersistedOrPublished": false,
+          "splitStreamCredentialPersistedOrPublished": false,
+          "guidedInputCredentialPersistedOrPublished": false,
+          "rawModelServiceNoticePersistedOrPublished": false,
+          "rawAgentRunIdentityMemoryPersisted": false,
+          "higherAgentRunShadowAllowsStartup": false,
+          "stagedExecutableMutationAccepted": false,
+          "completedWithoutExternalClosureAttestation": false,
+          "handAuthoredReviewSnapshotAccepted": false,
+          "completedWithoutCallerPinnedExternalAnchor": false,
+          "nonRecoverableGovernancePublication": false,
+          "governanceAliasOrParentSwapAccepted": false,
+          "futureReviewReceiptAttested": false,
+          "partialAtomicTempBlocksRecovery": false,
+          "pathnameParentReplacementRedirectsCommit": false,
+          "exactTempMetadataBypassAccepted": false,
+          "leafEntrySwapBreaksPublicationRecovery": false,
+          "missingOrAmbiguousGovernanceCompletionMarkerAccepted": false,
+          "invalidGovernanceCompletionMarkerAccepted": false,
+          "zeroByteGovernanceTempBlocksRecovery": false,
+          "existingExactGovernanceTempSkipsFsync": false,
+          "agentRunDerivativePrecedesOwnerCommit": false
+        },
+        "requiredVerificationIds": [
+          "focused",
+          "test_type_coverage",
+          "full_verify",
+          "production_smoke",
+          "governance"
+        ],
+        "requiredExecutableClosurePaths": [
+          "package.json",
+          "scripts/check-harness-state.mjs",
+          "scripts/check-conversation-disclosure-program.mjs"
+        ],
+        "postReviewMutablePaths": [
+          ".zerox/verification/conversation-disclosure/CD03-causal-shadow.json",
+          ".zerox/conversation-disclosure-program.json",
+          ".zerox/feature_list.json",
+          ".zerox/progress.md",
+          ".zerox/verification/conversation-disclosure/CD03-round23-review-snapshot.json",
+          ".zerox/verification/conversation-disclosure/CD03-round23-closure-manifest.json",
+          ".zerox/verification/conversation-disclosure/CD03-round23-contract-review.json",
+          ".zerox/verification/conversation-disclosure/CD03-round23-runtime-review.json",
+          ".zerox/verification/conversation-disclosure/CD03-round23-governance-review.json",
+          ".zerox/verification/conversation-disclosure/CD03-round23-external-attestation.json",
+          "task_plan.md",
+          "findings.md",
+          "progress.md"
+        ]
+      },
+      "rollback": "Disable the causal shadow adapters and approval snapshot while retaining legacy Chat Tool Invocation Workspace Run and authorization behavior; persisted interruption and lineage metadata remain backwards compatible.",
+      "verification": [
+        "required and ordinary pause settlement characterization and repair tests",
+        "turn run tool approval and evidence causal lineage tests",
+        "attempt reset final-message reconciliation and duplicate-channel tests",
+        "window reload main restart cold start and idempotent pending interaction tests",
+        "causal-spine shadow comparison artifact",
+        "full verify and production smoke"
+      ]
+    },
+    {
+      "id": "CD03A",
+      "title": "Externally anchored successor evolution trust head",
+      "state": "completed",
+      "featureId": "P107A-conversation-disclosure-successor-admission",
+      "findings": [
+        "D1",
+        "D3",
+        "D6",
+        "D7",
+        "D9",
+        "D10",
+        "D11",
+        "D12"
+      ],
+      "dependsOn": [
+        "CD03"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD03A-round12-execution-identity-trust-head.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD03A-successor-evolution-trust-head.md",
+        ".zerox/decisions/CD03A-round3-recovery-trust-head.md",
+        ".zerox/verification/conversation-disclosure/CD03A-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round1-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round1-contract-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round1-runtime-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round1-governance-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round2-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round2-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round2-prefreeze-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-contract-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-runtime-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-governance-review.json",
+        ".zerox/decisions/CD03A-round4-recovery-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round4-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round4-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round4-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round4-governance-review.json",
+        ".zerox/decisions/CD03A-round5-final-evidence-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round5.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round4-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round5-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round5-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round5-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round5-governance-review.json",
+        ".zerox/decisions/CD03A-round6-review-integrity-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round6.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round5-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round6-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round6-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round6-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round6-governance-review.json",
+        ".zerox/decisions/CD03A-round7-closure-authority-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round7.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round6-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round7-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round7-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round7-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round7-runtime-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round7-governance-review.json",
+        ".zerox/decisions/CD03A-round8-runtime-publication-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round8.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round7-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round8-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round8-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round8-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round8-runtime-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round8-governance-review.json",
+        ".zerox/decisions/CD03A-round9-descriptor-transaction-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round9.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round8-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round9-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round9-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round9-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round9-contract-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round9-governance-review.json",
+        ".zerox/decisions/CD03A-round10-final-evidence-binding-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round10.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round9-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round10-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round10-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round10-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round10-contract-review.json",
+        ".zerox/decisions/CD03A-round11-predecessor-identity-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round11.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round10-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round11-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round11-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round11-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round11-contract-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round11-runtime-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round11-governance-review.json",
+        ".zerox/decisions/CD03A-round12-execution-identity-trust-head.md",
+        "HANDOFF-v3.9.2-conversation-disclosure-round12.md",
+        ".zerox/verification/conversation-disclosure/CD03A-round11-review-rejection.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-baseline-archive.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-successor-evolution-policy.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-review-snapshot.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-contract-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-runtime-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-governance-review.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-closure-manifest.json",
+        ".zerox/verification/conversation-disclosure/CD03A-round12-external-attestation.json"
+      ],
+      "acceptanceScenarioIds": [
+        "S03-evidence-handoff",
+        "S09-long-session",
+        "S11-secret-safety",
+        "S13-legacy-coverage",
+        "S19-unknown-coverage"
+      ],
+      "rollback": "Keep Round23 authoritative, preserve every rejected continuation attempt as append-only evidence, and leave CD04 planned; no P108 protected-path drift is admitted.",
+      "verification": [
+        "full Round23 artifact snapshot receipt manifest attestation marker runner and caller-pinned anchor reconstruction",
+        "closed-world P107A and P108 definition roster path authority baseline archive and four-file transition tests",
+        "self-contained external runner crash recovery and staged checker plus harness receipts",
+        "state-aware current Round3 Round4 Round7 Round8 Round9 Round10 and Round11 historical plus Round12 target test orchestration without modifying frozen V3 through V11 bytes",
+        "deterministic Round2 pre-freeze Round3 through Round11 review-rejection witnesses with exact historical bytes canonical roots and downstream absences",
+        "exact-byte external instruction artifacts and three-lane caller-dispatched zero-finding Round12 continuation review with not-signed identity assurance and caller-pinned external anchor",
+        "full verify production smoke program harness and whitespace"
+      ]
+    },
+    {
+      "id": "CD04",
+      "title": "Typed domain adapters snapshot cursor replay and bounded evidence foundation",
+      "state": "completed",
+      "featureId": "P108-conversation-disclosure-evidence-foundation",
+      "findings": [
+        "D1",
+        "D2",
+        "D5",
+        "D6",
+        "D7",
+        "D10",
+        "D11",
+        "D12"
+      ],
+      "dependsOn": [
+        "CD03A"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD04-conversation-domain-adapters.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD04-conversation-domain-adapters.md",
+        ".zerox/verification/conversation-disclosure/CD04-shadow-parity.json",
+        ".zerox/verification/conversation-disclosure/CD04-performance-baseline.json",
+        ".zerox/reviews/CD04-shadow-parity-review.md"
+      ],
+      "acceptanceScenarioIds": [
+        "S02-inline-expansion",
+        "S03-evidence-handoff",
+        "S06-pause-reload-recovery",
+        "S07-plan-progress",
+        "S08-scheduled-progress",
+        "S11-secret-safety",
+        "S13-legacy-coverage",
+        "S18-context-usage",
+        "S19-unknown-coverage"
+      ],
+      "rollback": "Disable bounded domain and evidence adapters while retaining causal spine shadow evidence and every legacy surface; safe lineage metadata remains backwards compatible.",
+      "verification": [
+        "typed Chat Goal Plan Run Trajectory Scheduled context usage and Kernel adapter tests",
+        "snapshot scope cursor gap reset source-cut and requiredness tests",
+        "bounded redaction authorization and generic fallback tests",
+        "zero-required-diff shadow parity and independent acceptance",
+        "machine-readable projection and renderer performance baseline",
+        "full verify audit and smoke"
+      ]
+    },
+    {
+      "id": "CD05",
+      "title": "Chat narrative grouped operations and progressive inline disclosure",
+      "state": "in_progress",
+      "featureId": "P109-chat-progressive-disclosure-surface",
+      "findings": [
+        "D2",
+        "D4",
+        "D6",
+        "D8",
+        "D9",
+        "D13"
+      ],
+      "dependsOn": [
+        "CD04"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD05-chat-disclosure-surface.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD05-chat-disclosure-surface.md",
+        ".zerox/verification/conversation-disclosure/CD05-chat-browser.json"
+      ],
+      "acceptanceScenarioIds": [
+        "S01-default-narrative",
+        "S02-inline-expansion",
+        "S04-failure-attention",
+        "S05-approval-attention",
+        "S10-accessibility",
+        "S12-retry-attempt",
+        "S14-guided-input",
+        "S15-goal-acceptance",
+        "S16-plan-confirmation",
+        "S18-context-usage"
+      ],
+      "rollback": "Keep the local Chat projected-mode kill switch default-off or set it to legacy and retain shadow parity logging; no source facts or user expansion preferences are deleted.",
+      "verification": [
+        "renderer reducer stable key grouping and user override tests",
+        "failure approval Goal Plan and context authority parity tests",
+        "stream publication accessibility and focused browser scenarios",
+        "full verify production smoke and program gates"
+      ]
+    },
+    {
+      "id": "CD06",
+      "title": "Plan Scheduled and cross-surface attention projection",
+      "state": "planned",
+      "featureId": "P110-cross-surface-progressive-disclosure",
+      "findings": [
+        "D1",
+        "D3",
+        "D4",
+        "D9",
+        "D11",
+        "D12"
+      ],
+      "dependsOn": [
+        "CD05"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD06-cross-surface-disclosure.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD06-cross-surface-disclosure.md",
+        ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json"
+      ],
+      "acceptanceScenarioIds": [
+        "S05-approval-attention",
+        "S07-plan-progress",
+        "S08-scheduled-progress",
+        "S10-accessibility",
+        "S15-goal-acceptance",
+        "S16-plan-confirmation",
+        "S17-cancel-interruption",
+        "S18-context-usage"
+      ],
+      "rollback": "Disable Plan Scheduled and approval projection adapters independently and return each surface to its verified legacy query or blocking path.",
+      "verification": [
+        "Plan persisted stage live replay tests",
+        "Scheduled streaming identity and bounded update tests",
+        "approval reload idempotency and Tool Invocation linkage tests",
+        "full verify dual-surface smoke and program gates"
+      ]
+    },
+    {
+      "id": "CD07",
+      "title": "Trajectory and Inspector causal handoff",
+      "state": "planned",
+      "featureId": "P111-conversation-evidence-inspector",
+      "findings": [
+        "D2",
+        "D6",
+        "D7",
+        "D8",
+        "D10"
+      ],
+      "dependsOn": [
+        "CD06"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD07-evidence-inspector.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD07-evidence-inspector.md",
+        ".zerox/verification/conversation-disclosure/CD07-inspector-browser.json"
+      ],
+      "acceptanceScenarioIds": [
+        "S03-evidence-handoff",
+        "S04-failure-attention",
+        "S10-accessibility",
+        "S11-secret-safety",
+        "S19-unknown-coverage"
+      ],
+      "rollback": "Hide the new Inspector entry and retain existing Runs and technical detail surfaces; evidence records and stable lineage metadata remain intact.",
+      "verification": [
+        "one-step target selection and reload tests",
+        "paging generic fallback unknown schema and removed presenter tests",
+        "authorization truncation offload and secret masking tests",
+        "full verify browser smoke and audit"
+      ]
+    },
+    {
+      "id": "CD08",
+      "title": "Recovery performance accessibility compatibility and v3.9.2 integration",
+      "state": "planned",
+      "featureId": "P112-v3.9.2-disclosure-hardening",
+      "findings": [
+        "D3",
+        "D5",
+        "D7",
+        "D8",
+        "D10",
+        "D13"
+      ],
+      "dependsOn": [
+        "CD07"
+      ],
+      "architectureDecisionRequired": false,
+      "completionArtifacts": [
+        ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+        ".zerox/verification/conversation-disclosure/CD08-full-gates.md"
+      ],
+      "acceptanceScenarioIds": [
+        "S06-pause-reload-recovery",
+        "S09-long-session",
+        "S10-accessibility",
+        "S11-secret-safety",
+        "S12-retry-attempt",
+        "S13-legacy-coverage",
+        "S17-cancel-interruption",
+        "S18-context-usage",
+        "S19-unknown-coverage"
+      ],
+      "rollback": "Keep v3.9.2 source compatibility while returning all disclosure surface flags to legacy; do not remove legacy readers until post-implementation acceptance closes.",
+      "verification": [
+        "long Chat trajectory CPU heap DOM and streaming stress",
+        "reload restart compatibility unknown data and rollback matrix",
+        "keyboard screen reader and reduced motion tests",
+        "full serial verify production smoke audit harness and program gates"
+      ]
+    },
+    {
+      "id": "CD09",
+      "title": "Independent adversarial review real application acceptance and local package closure",
+      "state": "planned",
+      "featureId": "P113-v3.9.2-disclosure-adversarial-acceptance",
+      "findings": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5",
+        "D6",
+        "D7",
+        "D8",
+        "D9",
+        "D10",
+        "D11",
+        "D12",
+        "D13"
+      ],
+      "dependsOn": [
+        "CD08"
+      ],
+      "architectureDecisionRequired": false,
+      "completionArtifacts": [
+        ".zerox/verification/conversation-disclosure/CD09-real-app-acceptance.json",
+        ".zerox/reviews/CD09-adversarial-acceptance.md"
+      ],
+      "acceptanceScenarioIds": [
+        "S01-default-narrative",
+        "S02-inline-expansion",
+        "S03-evidence-handoff",
+        "S04-failure-attention",
+        "S05-approval-attention",
+        "S06-pause-reload-recovery",
+        "S07-plan-progress",
+        "S08-scheduled-progress",
+        "S09-long-session",
+        "S10-accessibility",
+        "S11-secret-safety",
+        "S12-retry-attempt",
+        "S13-legacy-coverage",
+        "S14-guided-input",
+        "S15-goal-acceptance",
+        "S16-plan-confirmation",
+        "S17-cancel-interruption",
+        "S18-context-usage",
+        "S19-unknown-coverage"
+      ],
+      "rollback": "Keep the program open and projected mode disabled until every confirmed Critical or Major review issue and real-application failure is repaired and rechecked; do not publish or push without separate authorization.",
+      "verification": [
+        "independent architecture code security and test reviews",
+        "real application browser acceptance with an ephemeral credential",
+        "all frozen scenarios and persisted evidence inspection",
+        "local v3.9.2 package identity signature launch and secret scan",
+        "full verify smoke audit program harness and whitespace closure"
+      ]
+    }
+  ]
+}

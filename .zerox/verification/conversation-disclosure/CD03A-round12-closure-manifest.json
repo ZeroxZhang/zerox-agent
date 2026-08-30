@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 12,
+  "kind": "conversation-disclosure-continuation-closure-manifest",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 12,
+  "status": "externally_attested",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "policy": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round12-successor-evolution-policy.json",
+    "byteSha256": "sha256:abd93f40ecf1b065dcf8cb76405ab3a3a570a996e71be4af5d593a1e382e7ef1",
+    "canonicalDigest": "sha256:fefede21ccf0cefaf222698e1355ddae17992d9dbc974490a0c45f0696fff6e4"
+  },
+  "snapshot": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round12-review-snapshot.json",
+    "byteSha256": "sha256:2ca877263921a7804265ec543f81595084dd3576fe4ab31c6c938edd5f18b355",
+    "canonicalDigest": "sha256:2917ee0bd4e7dfa7862d5625d89458b5087a9e9835d60f5509a99e286be94fac"
+  },
+  "round11ReviewRejection": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round11-review-rejection.json",
+    "byteSha256": "sha256:cd9fb36a3b9314d6bef91c8e7e9b2ad932ece63395a2027f72855287bd40d19a",
+    "canonicalDigest": "sha256:eb4fe2a38a4803d4682c1aa84bd498fb1cc05d348b68ff2a2c25362b2e60ca24"
+  },
+  "reviewReceipts": [
+    {
+      "lane": "contract",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round12-contract-review.json",
+      "challenge": "sha256:0bdf9b5e201c3bdd1bfd914cb8cfb94ecc8200106cd73e6cfb3fb9d762c2a424",
+      "canonicalDigest": "sha256:f78ef8ca5b1375d91cb5d4aca401dcefffffe4c18d221c3ea4af644dd621623d"
+    },
+    {
+      "lane": "runtime",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round12-runtime-review.json",
+      "challenge": "sha256:697b14c482bc2992a8c75d01445f8ee07744c63d32b4d7b0b6b26eb5045969a6",
+      "canonicalDigest": "sha256:16c40f914716f096da46d42f7bea21dd8c48006d4f7a7e9c6a5ffa6dbd5a771c"
+    },
+    {
+      "lane": "governance",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round12-governance-review.json",
+      "challenge": "sha256:819a70db1d41373a3d88d5bd56e64874002bd9f674c0897eedf2706a0ca144c5",
+      "canonicalDigest": "sha256:7eea683e1fc1892e814ef7b8512a0830de3927fc63f3767ab97b1e06dfd28b9f"
+    }
+  ],
+  "callerDispatchSet": [
+    {
+      "lane": "contract",
+      "assurance": "caller-attested-not-signed",
+      "challenge": "sha256:0bdf9b5e201c3bdd1bfd914cb8cfb94ecc8200106cd73e6cfb3fb9d762c2a424",
+      "instructionDigest": "sha256:fda650d8c621e753efa99cb856874ec3b7d51dd3bf9a4258402ab088e8e81b1d",
+      "reviewContextId": "round12-contract-0bdf9b5e201c3bdd",
+      "taskPath": "round12/contract",
+      "agentLabel": "round12-contract-reviewer",
+      "transport": "codex-collaboration"
+    },
+    {
+      "lane": "runtime",
+      "assurance": "caller-attested-not-signed",
+      "challenge": "sha256:697b14c482bc2992a8c75d01445f8ee07744c63d32b4d7b0b6b26eb5045969a6",
+      "instructionDigest": "sha256:d8f4bb39ece47eb29a510ee64fbc84ba6d65837981f1b22212444a592f0126da",
+      "reviewContextId": "round12-runtime-697b14c482bc2992",
+      "taskPath": "round12/runtime",
+      "agentLabel": "round12-runtime-reviewer",
+      "transport": "codex-collaboration"
+    },
+    {
+      "lane": "governance",
+      "assurance": "caller-attested-not-signed",
+      "challenge": "sha256:819a70db1d41373a3d88d5bd56e64874002bd9f674c0897eedf2706a0ca144c5",
+      "instructionDigest": "sha256:6e8e23c638c0738e4af07291e17037f646fc2b274e56ac91a9c60c07d238181b",
+      "reviewContextId": "round12-governance-819a70db1d41373a",
+      "taskPath": "round12/governance",
+      "agentLabel": "round12-governance-reviewer",
+      "transport": "codex-collaboration"
+    }
+  ],
+  "validator": {
+    "path": "scripts/check-conversation-disclosure-continuation-v12.mjs",
+    "sha256": "sha256:30330a66fcacedded8e3afbea863ffe67bb76b28dd68ea0fd263bcc08ac29edc"
+  },
+  "externalRunner": {
+    "path": "scripts/verify-conversation-disclosure-continuation-v12.mjs",
+    "sha256": "sha256:ea458364466b40fe4276dea1d467df01ff8cfd093baf9322fbd1350898224911"
+  },
+  "externalAttestation": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round12-external-attestation.json",
+    "canonicalDigest": "sha256:a3d67bec3bd92a51fd8ed35f8735ceb21289c833bc84b0e8a23d6c17b3a507ea"
+  },
+  "pendingManifestDigest": "sha256:d64456ed6fbc4ece4642710176a6ada73d92472479bdab925e7c0e9b425dafc6",
+  "digest": "sha256:9633df253c3f3f40d212736f12e1565008942453d972a5829fbc3c56e01e4085"
+}

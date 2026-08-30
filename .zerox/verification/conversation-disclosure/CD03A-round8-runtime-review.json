@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 8,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 8,
+  "lane": "runtime",
+  "reviewedPhase": "review_pre_transition",
+  "challenge": "sha256:ea7e859ad169f65179cd903864ae90469be6079d31d03b5670c30a7509d51929",
+  "callerDispatchEntryDigest": "sha256:413e4984c21259a8e9e8fcd9c0811654f6f847108aee38b1c59d83a3c9e9c0a8",
+  "callerDispatchSetDigest": "sha256:2fbec434eb21e59c5cdea524c31814b5ada501795cb02e611ce1f2f029dd83a3",
+  "claimedReviewOrigin": {
+    "taskPath": "round8/runtime",
+    "agentLabel": "round8-runtime-reviewer",
+    "transport": "codex-collaboration"
+  },
+  "identityAssurance": "not-signed",
+  "independenceClaim": "caller-attested-distinct-review-contexts",
+  "completedAt": "2026-08-24T18:04:41.000Z",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 0,
+    "major": 5,
+    "minor": 0
+  },
+  "findings": [
+    {
+      "id": "R8-RUNTIME-001",
+      "severity": "major",
+      "summary": "Private evidence publication remains vulnerable to pathname races.",
+      "evidence": [
+        "V8 opens an anchored parent descriptor but unlinks recovery temporary files and performs link/cleanup through absolute pathnames.",
+        "A parent or leaf swap can redirect publication or delete a replacement before postflight detects drift."
+      ]
+    },
+    {
+      "id": "R8-RUNTIME-002",
+      "severity": "major",
+      "summary": "Existing-file convergence can overwrite a concurrently introduced third state.",
+      "evidence": [
+        "The V8 runner passes only the original digest to its filesystem bridge and discards journal inode identity.",
+        "Two replacing renames and pathname unlink can overwrite a raced target or discard leaf."
+      ]
+    },
+    {
+      "id": "R8-RUNTIME-003",
+      "severity": "major",
+      "summary": "Completed transaction markers do not retain verifiable journal identity.",
+      "evidence": [
+        "The runner creates a new marker inode while encoding the separate journal inode in its filename.",
+        "Marker-only replay does not compare the marker inode with the encoded identity."
+      ]
+    },
+    {
+      "id": "R8-RUNTIME-004",
+      "severity": "major",
+      "summary": "The production program gate can pass an incomplete or mixed transition state.",
+      "evidence": [
+        "The V8 Program wrapper recognizes review state without checking transition digests or transaction outputs.",
+        "It invokes the authoritative continuation checker only after P107A is marked completed."
+      ]
+    },
+    {
+      "id": "R8-RUNTIME-005",
+      "severity": "major",
+      "summary": "Completed-state validation depends on a hard-coded temporary base-anchor location.",
+      "evidence": [
+        "The V8 Program wrapper hard-codes the Round23 anchor under /private/tmp.",
+        "Only continuation-anchor values are caller supplied, so relocation or cleanup of the valid base anchor breaks verification."
+      ]
+    }
+  ],
+  "snapshotDigest": "sha256:68f69243e7097025d2cc0da83736ca565700a66d9f5a14b873bca287b894e41d",
+  "snapshotFileCount": 239,
+  "policyDigest": "sha256:e30c121f1c9a998fbacdb24217caef885accb40f298a40398b0fe8076237bf25",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:b3211d4427275384c1bf4c00b6ca057d3261d6cf82e2d384032506e94d0e36b9",
+  "pathAuthorityDigest": "sha256:6ecc68ea1b04d97c89036277fcdcb1c4c021c4218e75e174ad84fa68df579c8f",
+  "admissionFeatureDefinitionDigest": "sha256:b3987fdfa3e76446f0ba817c2d20485b16be180a03c78fd5c623d37def6c59d7",
+  "admissionFeatureFileSetDigest": "sha256:ed6d2d9bc26bc706fb24f84aaf84bfa87226d6dd5388d120ec22d09c4a1a2f2f",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:18d757fdf1acb81ea88c594ed993f348879cd83eda0c35e42fbf9447cd0c9f3a",
+  "round7ReviewRejectionDigest": "sha256:c427b728922f0a53771ba7c65a917a0217d2f0f388183c64dd3e28a84afbe955",
+  "validatorDigest": "sha256:6326e99514fe7ddcce08a3318cbb453dc61efa0a9344d990c5f50956ed8cab9f"
+}

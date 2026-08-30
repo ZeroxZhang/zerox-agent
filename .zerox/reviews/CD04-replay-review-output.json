@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 13,
+  "kind": "conversation-disclosure-cd04-review-output",
+  "lane": "replay",
+  "challenge": "sha256:85a900ca56beb1e4f628b303b18b1ce8b912ab65f8b8c5b24537ceb2c0a19589",
+  "snapshotDigest": "sha256:8ffc69be873f30d7ca8c0c4c35fd6139ece6292f6b9277ef52694d3edb626631",
+  "verdict": "PASS",
+  "counts": {
+    "critical": 0,
+    "major": 0,
+    "minor": 0
+  },
+  "findings": [],
+  "rawOutput": "Independent replay review completed.\nCanonical snapshot digest: sha256:8ffc69be873f30d7ca8c0c4c35fd6139ece6292f6b9277ef52694d3edb626631\nChallenge: sha256:85a900ca56beb1e4f628b303b18b1ce8b912ab65f8b8c5b24537ceb2c0a19589\nVerified 325/325 frozen entries, five source-state transitions, required absences, Tool remap cleanup, equal-time conflict rejection, cursor/ring/reset semantics, and focused tests.\nNo Critical, Major, or Minor findings.\nFINAL_VERDICT: PASS\nFINAL_COUNTS: 0C/0M/0m",
+  "digest": "sha256:30f806003a262232b273f2d441e2bfdf53d3b6983e4b7f8f72273495d4692d90"
+}

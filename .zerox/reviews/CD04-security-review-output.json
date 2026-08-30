@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 13,
+  "kind": "conversation-disclosure-cd04-review-output",
+  "lane": "security",
+  "challenge": "sha256:d3ee9aca013082226f0fd6d61803a60a757210d4b786c25bb8f6af9c8a26a001",
+  "snapshotDigest": "sha256:8ffc69be873f30d7ca8c0c4c35fd6139ece6292f6b9277ef52694d3edb626631",
+  "verdict": "PASS",
+  "counts": {
+    "critical": 0,
+    "major": 0,
+    "minor": 0
+  },
+  "findings": [],
+  "rawOutput": "Independent security review completed.\nCanonical snapshot digest: sha256:8ffc69be873f30d7ca8c0c4c35fd6139ece6292f6b9277ef52694d3edb626631\nChallenge: sha256:d3ee9aca013082226f0fd6d61803a60a757210d4b786c25bb8f6af9c8a26a001\nVerified 325/325 frozen entries, four direct checker dependencies, sensitivity current binding, exact journal states, descriptor-relative transitions, authorization, and redaction.\nNo Critical, Major, or Minor findings.\nFINAL_VERDICT: PASS\nFINAL_COUNTS: 0C/0M/0m",
+  "digest": "sha256:dcfa74b2784b817e0d3f02495e6ec59ca983db44549c0c3bff278710e40b74d6"
+}

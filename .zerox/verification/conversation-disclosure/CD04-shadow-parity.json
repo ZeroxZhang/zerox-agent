@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 3,
+  "kind": "conversation-disclosure-shadow-parity",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "featureId": "P108-conversation-disclosure-evidence-foundation",
+  "generatedAt": "2026-08-25T13:40:25.767Z",
+  "sourceDigest": "sha256:e4929297967640737b8191bdd38208603541376e7c44af17bb3e8708e068e72e",
+  "fixtureDigest": "sha256:5c1fe8bd3403ebef7d81383f28c0052ba07a6c30bcb3a7bd84f664e334cbb98c",
+  "integrationProof": {
+    "kind": "production-container-vitest",
+    "status": "passed",
+    "command": "vitest run src/main/container.test.ts --maxWorkers=1 -t loads Goal ledger|loads execution checkpoint|rejects an older cross-store",
+    "testFile": "src/main/container.test.ts",
+    "testFileSha256": "sha256:4cf88bf3fc4b322ff58823c6c8c7468304ee73081643603073fa8f3b35611750"
+  },
+  "scopes": [
+    {
+      "scopeKey": "scope:1:1:4:chat:19:session_parity-full:0::0::17:query:parity-full",
+      "sourceCutDigest": "sha256:e2053c692cf905c5a5482028f5477182caa8ada6cb756dfd32d58c0a74b71e97",
+      "expectedCount": 17,
+      "actualCount": 17,
+      "missingRequiredFacts": 0,
+      "requirednessMismatches": 0,
+      "requirednessMismatchIds": [],
+      "lifecycleMismatches": 0,
+      "bodyMismatches": 0,
+      "sourceCutMismatches": 0,
+      "duplicateStableIdConflicts": 0,
+      "sensitiveLeaks": 0,
+      "optionalDifferences": [
+        {
+          "id": "item:1:1:5:usage:0::10:usage_full:16:usage:usage_full",
+          "reasonCode": "unsupported_presenter",
+          "sourceCutWitness": "sha256:e2053c692cf905c5a5482028f5477182caa8ada6cb756dfd32d58c0a74b71e97"
+        },
+        {
+          "id": "item:1:1:7:context:0::12:context_full:20:context:context_full",
+          "reasonCode": "unsupported_presenter",
+          "sourceCutWitness": "sha256:e2053c692cf905c5a5482028f5477182caa8ada6cb756dfd32d58c0a74b71e97"
+        }
+      ]
+    },
+    {
+      "scopeKey": "scope:1:1:4:chat:21:session_parity-legacy:0::0::19:query:parity-legacy",
+      "sourceCutDigest": "sha256:6e64f0c53af07c76b0667d6504671b9c1c37c534952021b5f675ab78a8a9b75a",
+      "expectedCount": 1,
+      "actualCount": 1,
+      "missingRequiredFacts": 0,
+      "requirednessMismatches": 0,
+      "requirednessMismatchIds": [],
+      "lifecycleMismatches": 0,
+      "bodyMismatches": 0,
+      "sourceCutMismatches": 0,
+      "duplicateStableIdConflicts": 0,
+      "sensitiveLeaks": 0,
+      "optionalDifferences": []
+    },
+    {
+      "scopeKey": "scope:1:1:4:chat:22:session_parity-unknown:0::0::20:query:parity-unknown",
+      "sourceCutDigest": "sha256:fd7313af0f84333a8aeebd390fc13bf7bd63b6e67bbf9becbe09c5545ef6c2dc",
+      "expectedCount": 1,
+      "actualCount": 1,
+      "missingRequiredFacts": 0,
+      "requirednessMismatches": 0,
+      "requirednessMismatchIds": [],
+      "lifecycleMismatches": 0,
+      "bodyMismatches": 0,
+      "sourceCutMismatches": 0,
+      "duplicateStableIdConflicts": 0,
+      "sensitiveLeaks": 0,
+      "optionalDifferences": []
+    }
+  ],
+  "totals": {
+    "missingRequiredFacts": 0,
+    "requirednessMismatches": 0,
+    "lifecycleMismatches": 0,
+    "bodyMismatches": 0,
+    "sourceCutMismatches": 0,
+    "duplicateStableIdConflicts": 0,
+    "sensitiveLeaks": 0,
+    "optionalDifferences": 2
+  },
+  "accepted": true,
+  "digest": "sha256:a4770f91b610ed89a112ee6986bdde6fc55e695adecef32b21e38b5a12f4b6d8"
+}

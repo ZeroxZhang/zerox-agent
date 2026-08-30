@@ -1,0 +1,460 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-performance-baseline",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "featureId": "P108-conversation-disclosure-evidence-foundation",
+  "generatedAt": "2026-08-25T13:40:25.767Z",
+  "environment": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v24.18.0",
+    "cpuModel": "Apple M1",
+    "cpuCount": 8,
+    "totalMemoryBytes": 17179869184
+  },
+  "provenance": {
+    "sourceDigest": "sha256:e4929297967640737b8191bdd38208603541376e7c44af17bb3e8708e068e72e",
+    "fixtureDigest": "sha256:5c1fe8bd3403ebef7d81383f28c0052ba07a6c30bcb3a7bd84f664e334cbb98c",
+    "runnerDigest": "sha256:cdb63c468c0307ae0ff0b87d93ffede86d7df63ffe73fb7a75560c4197740652",
+    "sourcePaths": [
+      "src/shared/conversationDisclosure.ts",
+      "src/shared/conversationEvidence.ts",
+      "src/main/jsonlRecovery.ts",
+      "src/main/chatSessionStore.ts",
+      "src/main/storage/repositories/chatSessionEventRepository.ts",
+      "src/main/agentTrajectoryStore.ts",
+      "src/main/storage/repositories/runRepository.ts",
+      "src/main/storage/storageDb.ts",
+      "src/main/storage/migrations/0000_initial.sql",
+      "src/main/storage/migrations/0001_plan_records.sql",
+      "src/main/storage/migrations/0002_chat_session_events.sql",
+      "src/main/storage/migrations/0003_chat_search_fts.sql",
+      "src/main/storage/migrations/0004_goal_execution_authority.sql",
+      "src/main/storage/migrations/0005_reviewed_learning_eval_authority.sql",
+      "src/main/storage/migrations/0006_domain_authority_state.sql",
+      "src/main/workspaceRunStore.ts",
+      "src/main/conversationDisclosureAdapters.ts",
+      "src/main/conversationDisclosureMaterializer.ts",
+      "src/main/conversationEvidenceResolver.ts",
+      "src/main/conversationDisclosureShadowAudit.ts",
+      "src/main/container.ts",
+      "src/main/container.test.ts",
+      "scripts/run-conversation-disclosure-performance.mjs"
+    ],
+    "processSamples": 5,
+    "internalWarmups": 3,
+    "internalSamples": 7
+  },
+  "fixtureSpec": {
+    "schemaVersion": 1,
+    "projectionCardinalities": [
+      80,
+      160,
+      500
+    ],
+    "chatHistoryRecords": 10000,
+    "trajectoryHistoryRecords": 25000,
+    "boundedPageRecords": 200,
+    "ambientBurstUpdates": 20,
+    "longSummaryBytes": 2048,
+    "contributorCount": 500,
+    "contributorPageLimit": 50,
+    "ambientProtectedInterleaved": true,
+    "replayInsideRing": true,
+    "replayOutsideRing": true
+  },
+  "fixtures": [
+    {
+      "id": "ambient_protected_burst",
+      "metrics": {
+        "ambientPublicationMs": {
+          "samples": 100,
+          "p50": 13.005,
+          "p95": 15.282,
+          "max": 16.342,
+          "mad": 0.633
+        },
+        "protectedPublicationMs": {
+          "samples": 35,
+          "p50": 12.701,
+          "p95": 15.278,
+          "max": 17.549,
+          "mad": 0.519
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 245448,
+          "p95": 245576,
+          "max": 245576,
+          "mad": 0
+        },
+        "ringBytes": {
+          "samples": 5,
+          "p50": 41811,
+          "p95": 41811,
+          "max": 41811,
+          "mad": 0
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 167893,
+          "p95": 167893,
+          "max": 167893,
+          "mad": 0
+        },
+        "unexpectedResetRate": {
+          "samples": 5,
+          "p50": 0,
+          "p95": 0,
+          "max": 0,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "chat_history_10000",
+      "metrics": {
+        "boundedReadMs": {
+          "samples": 35,
+          "p50": 1.839,
+          "p95": 1.986,
+          "max": 2.104,
+          "mad": 0.016
+        },
+        "projectionCpuMs": {
+          "samples": 35,
+          "p50": 0.541,
+          "p95": 1.017,
+          "max": 1.207,
+          "mad": 0.005
+        },
+        "projectionWallMs": {
+          "samples": 35,
+          "p50": 0.541,
+          "p95": 0.568,
+          "max": 0.575,
+          "mad": 0.006
+        },
+        "retainedFixtureBytes": {
+          "samples": 5,
+          "p50": 2622239,
+          "p95": 2622239,
+          "max": 2622239,
+          "mad": 0
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 35304,
+          "p95": 35368,
+          "max": 35368,
+          "mad": 0
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 31918,
+          "p95": 31918,
+          "max": 31918,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "contributor_pages",
+      "metrics": {
+        "projectionCpuMs": {
+          "samples": 35,
+          "p50": 1.66,
+          "p95": 2.667,
+          "max": 2.689,
+          "mad": 0.249
+        },
+        "projectionWallMs": {
+          "samples": 35,
+          "p50": 1.477,
+          "p95": 1.622,
+          "max": 1.632,
+          "mad": 0.082
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 121808,
+          "p95": 122192,
+          "max": 122192,
+          "mad": 0
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 1883,
+          "p95": 1883,
+          "max": 1883,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "projection_160",
+      "metrics": {
+        "projectionCpuMs": {
+          "samples": 35,
+          "p50": 6.034,
+          "p95": 8.288,
+          "max": 8.896,
+          "mad": 0.482
+        },
+        "projectionWallMs": {
+          "samples": 35,
+          "p50": 5.364,
+          "p95": 5.805,
+          "max": 5.823,
+          "mad": 0.148
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 226632,
+          "p95": 226632,
+          "max": 226632,
+          "mad": 0
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 168067,
+          "p95": 168067,
+          "max": 168067,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "projection_500",
+      "metrics": {
+        "projectionCpuMs": {
+          "samples": 35,
+          "p50": 18.825,
+          "p95": 28.816,
+          "max": 29.007,
+          "mad": 0.65
+        },
+        "projectionWallMs": {
+          "samples": 35,
+          "p50": 16.962,
+          "p95": 18.268,
+          "max": 18.351,
+          "mad": 0.319
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 768720,
+          "p95": 768720,
+          "max": 768720,
+          "mad": 0
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 525407,
+          "p95": 525407,
+          "max": 525407,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "projection_80",
+      "metrics": {
+        "projectionCpuMs": {
+          "samples": 35,
+          "p50": 5.01,
+          "p95": 9.071,
+          "max": 9.437,
+          "mad": 0.646
+        },
+        "projectionWallMs": {
+          "samples": 35,
+          "p50": 3.124,
+          "p95": 3.781,
+          "max": 3.82,
+          "mad": 0.146
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 121544,
+          "p95": 121544,
+          "max": 121544,
+          "mad": 0
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 83782,
+          "p95": 83782,
+          "max": 83782,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "replay_inside_outside",
+      "metrics": {
+        "insideReplayDelivered": {
+          "samples": 5,
+          "p50": 5,
+          "p95": 5,
+          "max": 5,
+          "mad": 0
+        },
+        "outsideReplayReset": {
+          "samples": 5,
+          "p50": 1,
+          "p95": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "replayMs": {
+          "samples": 35,
+          "p50": 0.036,
+          "p95": 0.048,
+          "max": 0.051,
+          "mad": 0.002
+        },
+        "ringBytes": {
+          "samples": 5,
+          "p50": 41811,
+          "p95": 41811,
+          "max": 41811,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "summary_2kb",
+      "metrics": {
+        "projectionCpuMs": {
+          "samples": 35,
+          "p50": 0.473,
+          "p95": 0.797,
+          "max": 0.811,
+          "mad": 0.042
+        },
+        "projectionWallMs": {
+          "samples": 35,
+          "p50": 0.45,
+          "p95": 0.476,
+          "max": 0.476,
+          "mad": 0.015
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 44552,
+          "p95": 44872,
+          "max": 44872,
+          "mad": 80
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 25573,
+          "p95": 25573,
+          "max": 25573,
+          "mad": 0
+        }
+      }
+    },
+    {
+      "id": "trajectory_history_25000",
+      "metrics": {
+        "boundedReadMs": {
+          "samples": 35,
+          "p50": 1.451,
+          "p95": 1.475,
+          "max": 1.48,
+          "mad": 0.006
+        },
+        "projectionCpuMs": {
+          "samples": 35,
+          "p50": 0.696,
+          "p95": 9.814,
+          "max": 9.847,
+          "mad": 0.273
+        },
+        "projectionWallMs": {
+          "samples": 35,
+          "p50": 0.422,
+          "p95": 2.714,
+          "max": 2.912,
+          "mad": 0.01
+        },
+        "retainedFixtureBytes": {
+          "samples": 5,
+          "p50": 7169455,
+          "p95": 7169455,
+          "max": 7169455,
+          "mad": 0
+        },
+        "retainedHeapBytes": {
+          "samples": 5,
+          "p50": 38296,
+          "p95": 38296,
+          "max": 38296,
+          "mad": 0
+        },
+        "snapshotBytes": {
+          "samples": 5,
+          "p50": 31712,
+          "p95": 31712,
+          "max": 31712,
+          "mad": 0
+        }
+      }
+    }
+  ],
+  "budgets": {
+    "projectionWallP95Ms": 100,
+    "projectionCpuP95Ms": 100,
+    "boundedReadP95Ms": 25,
+    "ambientPublicationP95Ms": 50,
+    "protectedPublicationP95Ms": 50,
+    "replayP95Ms": 10,
+    "retainedHeapBytesMax": 4194304,
+    "snapshotBytesMax": 1310720,
+    "ringBytesMax": 1048576,
+    "unexpectedResetRateMax": 0
+  },
+  "hardSafetyCaps": {
+    "projectionWallP95Ms": 1000,
+    "projectionCpuP95Ms": 1000,
+    "boundedReadP95Ms": 250,
+    "ambientPublicationP95Ms": 250,
+    "protectedPublicationP95Ms": 250,
+    "replayP95Ms": 100,
+    "retainedHeapBytesMax": 268435456,
+    "snapshotBytesMax": 16777216,
+    "ringBytesMax": 8388608,
+    "unexpectedResetRateMax": 0
+  },
+  "correctness": {
+    "deltaPublicationCount": 150,
+    "expectedResetCount": 5,
+    "expectedResetReasonMatched": 5,
+    "listenerGenerationResetObserved": 5,
+    "protectedTerminalCount": 50,
+    "replayInsideContinuous": 5,
+    "replayInsideDeltaCount": 25,
+    "replayOutsideReasonMatched": 5,
+    "replayOutsideReset": 5,
+    "retainedRingEntryCount": 150,
+    "unexpectedResetCount": 0
+  },
+  "domControl": {
+    "status": "legacy_control",
+    "command": "BUILDING_AGENT_PERF_SMOKE=1 npm run smoke:prod:built",
+    "thresholds": {
+      "inputP95FrameMs": 50,
+      "inputMaxFrameMs": 100,
+      "sessionSwitchMs": 250,
+      "getSessionMs": 500,
+      "longTaskMaxMs": 120,
+      "renderedMessageCountMax": 80
+    },
+    "projectedDom": "deferred_to_CD05_CD08"
+  },
+  "accepted": true,
+  "safetyErrors": [],
+  "digest": "sha256:17f6e5f426e966751e1def422a8639ea863f3e0eae86207a9d5a5a2fc91cdf2c"
+}

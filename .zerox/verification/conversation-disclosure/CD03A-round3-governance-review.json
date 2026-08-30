@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 3,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 3,
+  "transport": "codex-collaboration",
+  "completedAt": "2026-08-24T10:39:40.504Z",
+  "snapshotDigest": "sha256:cbec3496b39cb5637e40cd1276e370dc9245fd425552fd7e18fcf972d7816ced",
+  "snapshotFileCount": 74,
+  "policyDigest": "sha256:3eb5b7637bbab47f83cb3dcbe43cf2bcbb5eab0930eef9e8ff777442c5c2badc",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:11aca8e14e437879fdaae9c644d7de9bd9a4e5dd9aa14c7aa17125b9baca852b",
+  "pathAuthorityDigest": "sha256:9b942f950635e9ee11da1bc5dd83e45b984554227a7b7d910322df94b61ab1f6",
+  "admissionFeatureDefinitionDigest": "sha256:3b9bd616bde4b8b87dacd5c37fe29b94be0a5d12e01c18c90dce2c03446b2ec9",
+  "admissionFeatureFileSetDigest": "sha256:8fb3317ca67c5ba1393d73890c436e113f6a366cc921ab80994ee2f94528af0b",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:04ea9280b53baa7fb0b1312357e88273e7cbba3d3844ad828c7835ca926b2b5b",
+  "reviewedPhase": "review_pre_transition",
+  "validatorDigest": "sha256:ce2e58ba76e84d906885812dbf57835ed1c70a605f72634fdd8c7d30ffddd58e",
+  "lane": "governance",
+  "reviewTaskPath": "/root/cd03a_r3_runner_targets",
+  "reviewAgentId": "cd03a-r3-governance-adversary-runner-targets-9c1f30e1",
+  "challenge": "sha256:9c1f30e1d5223fb266c873e27039d4cd72a61e7c64a731b02df7c16f8f2bcbad",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 0,
+    "major": 1,
+    "minor": 0
+  },
+  "findings": [
+    {
+      "id": "R3-GOVERNANCE-001",
+      "severity": "major",
+      "summary": "Review independence is accepted from self-reported task and agent strings without collaboration-system identity proof.",
+      "evidence": [
+        ".zerox/decisions/CD03A-round3-recovery-trust-head.md:96",
+        "scripts/conversation-disclosure-continuation-contract-v3.mjs:959",
+        "scripts/conversation-disclosure-continuation-contract-v3.mjs:1079",
+        "scripts/verify-conversation-disclosure-continuation-v3.mjs:2246"
+      ]
+    }
+  ]
+}

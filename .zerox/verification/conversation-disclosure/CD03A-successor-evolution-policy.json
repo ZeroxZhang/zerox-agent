@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-continuation-policy",
+  "algorithm": "sha256-canonical-json-v1",
+  "policyId": "CD03A-round1-P108-admission",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "status": "frozen",
+  "parent": {
+    "workstreamId": "CD03",
+    "featureId": "P107-conversation-disclosure-domain-adapters",
+    "round": 23,
+    "snapshotPath": ".zerox/verification/conversation-disclosure/CD03-round23-review-snapshot.json",
+    "snapshotDigest": "sha256:e1a5300d6015543e0a6a8e8f09f2a13fcb955111b87c08545e0f882bb786796b",
+    "externalAnchorDigest": "sha256:e81f0afb3d10b12976b74d1499870b837595ffbc3b452c7f1f78fff67be8f102"
+  },
+  "successor": {
+    "workstreamId": "CD04",
+    "featureId": "P108-conversation-disclosure-evidence-foundation",
+    "workstreamDefinition": {
+      "id": "CD04",
+      "title": "Typed domain adapters snapshot cursor replay and bounded evidence foundation",
+      "featureId": "P108-conversation-disclosure-evidence-foundation",
+      "findings": [
+        "D1",
+        "D2",
+        "D5",
+        "D6",
+        "D7",
+        "D10",
+        "D11",
+        "D12"
+      ],
+      "dependsOn": [
+        "CD03A"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": ".zerox/decisions/CD04-conversation-domain-adapters.md",
+      "completionArtifacts": [
+        ".zerox/decisions/CD04-conversation-domain-adapters.md",
+        ".zerox/verification/conversation-disclosure/CD04-shadow-parity.json",
+        ".zerox/verification/conversation-disclosure/CD04-performance-baseline.json",
+        ".zerox/reviews/CD04-shadow-parity-review.md"
+      ],
+      "acceptanceScenarioIds": [
+        "S02-inline-expansion",
+        "S03-evidence-handoff",
+        "S06-pause-reload-recovery",
+        "S07-plan-progress",
+        "S08-scheduled-progress",
+        "S11-secret-safety",
+        "S13-legacy-coverage",
+        "S18-context-usage",
+        "S19-unknown-coverage"
+      ],
+      "rollback": "Disable bounded domain and evidence adapters while retaining causal spine shadow evidence and every legacy surface; safe lineage metadata remains backwards compatible.",
+      "verification": [
+        "typed Chat Goal Plan Run Trajectory Scheduled context usage and Kernel adapter tests",
+        "snapshot scope cursor gap reset source-cut and requiredness tests",
+        "bounded redaction authorization and generic fallback tests",
+        "zero-required-diff shadow parity and independent acceptance",
+        "machine-readable projection and renderer performance baseline",
+        "full verify audit and smoke"
+      ]
+    },
+    "workstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+    "featureDefinition": {
+      "id": "P108-conversation-disclosure-evidence-foundation",
+      "priority": 139,
+      "title": "Build bounded domain adapters replay materialization and authorized evidence foundations",
+      "files": [
+        ".zerox/decisions/CD04-conversation-domain-adapters.md",
+        ".zerox/verification/conversation-disclosure/CD04-shadow-parity.json",
+        ".zerox/verification/conversation-disclosure/CD04-performance-baseline.json",
+        ".zerox/reviews/CD04-shadow-parity-review.md",
+        ".zerox/conversation-disclosure-program.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md",
+        "src/shared/conversationDisclosure.ts",
+        "src/shared/conversationDisclosure.test.ts",
+        "src/shared/conversationEvidence.ts",
+        "src/shared/conversationEvidence.test.ts",
+        "src/shared/storageContract.ts",
+        "src/main/jsonlRecovery.ts",
+        "src/main/jsonlRecovery.test.ts",
+        "src/main/chatSessionStore.ts",
+        "src/main/chatSessionStore.test.ts",
+        "src/main/storage/repositories/chatSessionEventRepository.ts",
+        "src/main/storage/repositories/chatSessionEventRepository.test.ts",
+        "src/main/agentTrajectoryStore.ts",
+        "src/main/agentTrajectoryStore.test.ts",
+        "src/main/storage/repositories/runRepository.ts",
+        "src/main/storage/repositories/runRepository.test.ts",
+        "src/main/workspaceRunStore.ts",
+        "src/main/workspaceRunStore.test.ts",
+        "src/main/conversationDisclosureAdapters.ts",
+        "src/main/conversationDisclosureAdapters.test.ts",
+        "src/main/conversationDisclosureMaterializer.ts",
+        "src/main/conversationDisclosureMaterializer.test.ts",
+        "src/main/conversationEvidenceResolver.ts",
+        "src/main/conversationEvidenceResolver.test.ts",
+        "src/main/conversationDisclosureShadowAudit.ts",
+        "src/main/conversationDisclosureShadowAudit.test.ts",
+        "src/main/container.ts",
+        "src/main/container.test.ts",
+        "scripts/run-conversation-disclosure-performance.mjs",
+        "package.json",
+        "src/shared/conversationDisclosureProgram.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "task_plan.md",
+        "findings.md",
+        "progress.md"
+      ],
+      "definitionOfDone": [
+        "Chat activity Trajectory and Workspace Run expose store-level bounded pages with opaque source-bound cursors and honest complete partial unavailable or incompatible cuts across supported backends",
+        "typed adapters preserve each owning store status revision durability requiredness sensitivity and authority precedence while causal lineage joins identities without copying business payloads",
+        "per-scope materialization serializes atomic snapshots and bounded delta replay with generation rotation gap reset source drift backpressure and protected gate attempt coverage error and terminal retention",
+        "opaque source cursors are never lexicographically ordered requiredness and coverage cannot improve within one generation and recovered coverage rotates generation",
+        "main-process evidence resolution binds target to server-issued projection anchors reauthorizes every page and returns only bounded allowlisted redacted typed outcomes without exposing raw reasoning file content tool arguments paths grants or cached permission",
+        "shadow parity records zero missing required facts lifecycle mismatches sensitive leaks and duplicate stable ids while every optional difference has a bounded reason and source-cut witness",
+        "historical CD03 closure fixtures normalize every downstream workstream and Feature checkpoint before generating review evidence so future active work cannot contaminate predecessor tests",
+        "a reproducible machine-readable baseline freezes absolute projection CPU retained heap snapshot and ring bytes publication latency reset-rate and current legacy DOM controls before any renderer cutover",
+        "focused backend replay security and parity tests test type coverage full verify production smoke continuation program harness whitespace and independent parity review pass with no renderer cutover"
+      ],
+      "verification": [
+        "npm test -- --run src/shared/conversationDisclosure.test.ts src/shared/conversationEvidence.test.ts src/shared/conversationDisclosureProgram.test.ts src/shared/packageScripts.test.ts src/main/jsonlRecovery.test.ts src/main/chatSessionStore.test.ts src/main/storage/repositories/chatSessionEventRepository.test.ts src/main/agentTrajectoryStore.test.ts src/main/storage/repositories/runRepository.test.ts src/main/workspaceRunStore.test.ts src/main/conversationDisclosureAdapters.test.ts src/main/conversationDisclosureMaterializer.test.ts src/main/conversationEvidenceResolver.test.ts src/main/conversationDisclosureShadowAudit.test.ts src/main/container.test.ts",
+        "npm run typecheck:tests",
+        "node scripts/run-conversation-disclosure-performance.mjs",
+        "npm run verify",
+        "npm run smoke:prod",
+        "node scripts/check-conversation-disclosure-continuation.mjs --base-anchor CALLER_SUPPLIED_BASE_PATH --expected-base-anchor-digest sha256:e81f0afb3d10b12976b74d1499870b837595ffbc3b452c7f1f78fff67be8f102 --continuation-anchor CALLER_SUPPLIED_CONTINUATION_PATH --expected-continuation-anchor-digest CALLER_SUPPLIED_CONTINUATION_DIGEST",
+        "node scripts/check-harness-state.mjs --base-anchor CALLER_SUPPLIED_BASE_PATH --expected-base-anchor-digest sha256:e81f0afb3d10b12976b74d1499870b837595ffbc3b452c7f1f78fff67be8f102 --continuation-anchor CALLER_SUPPLIED_CONTINUATION_PATH --expected-continuation-anchor-digest CALLER_SUPPLIED_CONTINUATION_DIGEST",
+        "git diff --check"
+      ]
+    },
+    "featureDefinitionDigest": "sha256:26edeb926d82b1e8ca8ff1e195ce3abdf1b7d8ac7e2e30a1ea513828cd0cee67",
+    "authorizedDriftPaths": [
+      {
+        "path": "src/main/chatSessionStore.test.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:753f406ccc5fc97b9b241c75afe6ad677a32e859cea7a2bb4dc2530b664652be"
+      },
+      {
+        "path": "src/main/chatSessionStore.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:c17c2e0b973dcfa1e661443dd6e9ef9d8a3006faaffd7ed52db5da2001722863"
+      },
+      {
+        "path": "src/main/container.test.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:1e96521b7075b86c7623f19ff8f9f4b6fcdb5bac6e28cf5a4da48aa0640fd3c4"
+      },
+      {
+        "path": "src/main/container.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:9b291d01400a176031deb2aa10efb8d0f30cc9319dc5206754cf4767cfbccd59"
+      },
+      {
+        "path": "src/main/storage/repositories/runRepository.test.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:aa60af0022e032e71a31418f8d491a9206a2a6a41fdf503bd5f867ceb688c95e"
+      },
+      {
+        "path": "src/main/storage/repositories/runRepository.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:82dbc3a483e9b4e07e653bf5c6a184092ca534e6f05750aeaabb319a35a02946"
+      },
+      {
+        "path": "src/main/workspaceRunStore.test.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:a171707d7ddd8ba67f5442368493d473a5351736b5284b12afbf3f751a719841"
+      },
+      {
+        "path": "src/main/workspaceRunStore.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:28a97a69edb3acd0ce50088466fc0a0c1050b3340162bd72b581313dcaaa445c"
+      },
+      {
+        "path": "src/shared/conversationDisclosure.test.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:77b5a90f4f60f984ef2da147fccccfc1f17a21e7f7a824d1166439b899a03e55"
+      },
+      {
+        "path": "src/shared/conversationDisclosure.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:f4506408ae26734eeba5f91879bf1aa78818bb19c3f54441638fe62bbb81237b"
+      },
+      {
+        "path": "src/shared/conversationDisclosureProgram.test.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:087cff0ba7f208464bf62e41f3a10dfbb88f3f2461d46398187c0b4cfa16dd5c"
+      },
+      {
+        "path": "src/shared/packageScripts.test.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:2f30d10ebd5ccc408255813e0d10ca4e8bd145930bdbe263bc2a6e5d2fa61efe"
+      },
+      {
+        "path": "src/shared/storageContract.ts",
+        "operation": "modify",
+        "baseSha256": "sha256:cdb17ed2155c0cc518bafe0d79a0673b5b402c6217471c8164ae9b8f95389b73"
+      }
+    ]
+  },
+  "trustRoots": [
+    {
+      "path": "package.json",
+      "sha256": "sha256:13ba502200bb8201b0c8d2e58314aae36332c554139a1931100c5366a097dcea"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:a51c82a162cde096bb5acdbb0925e2fea8eeaa86abc7e1977ac87371c0bacf33"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-program.mjs",
+      "sha256": "sha256:162c6165d8f831b9a6e4c94fd2627527bc038da79cc8d9bde91bce7852cf754d"
+    },
+    {
+      "path": "scripts/check-harness-state.mjs",
+      "sha256": "sha256:ffb6163d53423651574af45194bcca4f4d86ba89d1aa2e2933e795e9f923f045"
+    },
+    {
+      "path": "scripts/conversation-disclosure-continuation-contract.mjs",
+      "sha256": "sha256:407357d37df48a496701ec6ff66444c6f52b06ad10049d52913a9bb6d21e7461"
+    },
+    {
+      "path": "scripts/conversation-disclosure-review-contract.mjs",
+      "sha256": "sha256:61f6f733cdf7c7a04370c65ae25e77a27c1b8b826ab4df3d22a43f846ff3caf0"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:68006571d50ddfce9a30da2ac6929e916ca7c53ae4efcf068f7e78933a21533f"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-review.mjs",
+      "sha256": "sha256:bc9e398d85a3529739bdce34e1852e44d03e3869ccb1d1bc48b3d8144fda9ccd"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-closure.mjs",
+      "sha256": "sha256:c4ef04e87f3c5b449aa666dfe809d7c478b0d47be0dc05b51d25e4a916bc82a1"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:02f964b4ff37053d4df7260fc176bc36538931c947f6692c815803e482341fc6"
+    }
+  ],
+  "governanceTransitions": [
+    {
+      "path": "package.json",
+      "kind": "package-structure-migration",
+      "fromSha256": "sha256:560fb3e3b2829a32b4ac694c7781fce9e53941a9e20fc4ec1c08602d53c278b9",
+      "toSha256": "sha256:13ba502200bb8201b0c8d2e58314aae36332c554139a1931100c5366a097dcea"
+    },
+    {
+      "path": "scripts/check-harness-state.mjs",
+      "kind": "harness-delegation-migration",
+      "fromSha256": "sha256:231d28280f6891f50f5c714b4161d1b9d93cf171e0b67396de67ce7a36e06339",
+      "toSha256": "sha256:ffb6163d53423651574af45194bcca4f4d86ba89d1aa2e2933e795e9f923f045"
+    }
+  ],
+  "continuationExecutables": [
+    {
+      "kind": "checker",
+      "path": "scripts/check-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:a51c82a162cde096bb5acdbb0925e2fea8eeaa86abc7e1977ac87371c0bacf33"
+    },
+    {
+      "kind": "contract",
+      "path": "scripts/conversation-disclosure-continuation-contract.mjs",
+      "sha256": "sha256:407357d37df48a496701ec6ff66444c6f52b06ad10049d52913a9bb6d21e7461"
+    },
+    {
+      "kind": "freezer",
+      "path": "scripts/freeze-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:68006571d50ddfce9a30da2ac6929e916ca7c53ae4efcf068f7e78933a21533f"
+    },
+    {
+      "kind": "runner",
+      "path": "scripts/verify-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:02f964b4ff37053d4df7260fc176bc36538931c947f6692c815803e482341fc6"
+    }
+  ],
+  "reviewSnapshot": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round1-review-snapshot.json"
+  },
+  "digest": "sha256:e8493e3ad8cb5ce250d6bb7e9d0c9c8cc58fba460bb0f940a25f546a1d18f050"
+}

@@ -1,0 +1,390 @@
+{
+  "schemaVersion": 3,
+  "kind": "conversation-disclosure-continuation-review-snapshot",
+  "algorithm": "sha256-canonical-json-v1",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 3,
+  "frozenAt": "2026-08-24T10:27:58.852Z",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "policyDigest": "sha256:3eb5b7637bbab47f83cb3dcbe43cf2bcbb5eab0930eef9e8ff777442c5c2badc",
+  "closedWorldDigest": "sha256:11aca8e14e437879fdaae9c644d7de9bd9a4e5dd9aa14c7aa17125b9baca852b",
+  "pathAuthorityDigest": "sha256:9b942f950635e9ee11da1bc5dd83e45b984554227a7b7d910322df94b61ab1f6",
+  "admissionFeatureDefinitionDigest": "sha256:3b9bd616bde4b8b87dacd5c37fe29b94be0a5d12e01c18c90dce2c03446b2ec9",
+  "admissionFeatureFileSetDigest": "sha256:8fb3317ca67c5ba1393d73890c436e113f6a366cc921ab80994ee2f94528af0b",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:04ea9280b53baa7fb0b1312357e88273e7cbba3d3844ad828c7835ca926b2b5b",
+  "baselineArchive": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round3-baseline-archive.json",
+    "digest": "sha256:e17ea52582b5b58ec43cf585385517f39d61c32ff8724c59f1e4ccc74676c169",
+    "entrySetDigest": "sha256:c1378e52f4e100cdada35b0e4c80b53d47e99031ddb6f7d076550388fd85383b"
+  },
+  "frozenFiles": [
+    {
+      "path": ".zerox/decisions/CD03A-round3-recovery-trust-head.md",
+      "sha256": "sha256:075212d10fdd893d5a253d7531821f3bbcf19cc11906aceb3b3896c9adc463d2"
+    },
+    {
+      "path": ".zerox/decisions/CD03A-successor-evolution-trust-head.md",
+      "sha256": "sha256:df6b2dec82c27bedbeded07ee61b82177f2da30e7fad7292473dd586574328b2"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-package-scripts-test-transition.patch",
+      "sha256": "sha256:ab67384bf5ea3cf091806ad8e2208605951a27fbf7eda049684ca53fa75031ae"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-package-target.json",
+      "sha256": "sha256:13ba502200bb8201b0c8d2e58314aae36332c554139a1931100c5366a097dcea"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-program-test-transition.patch",
+      "sha256": "sha256:ed18015bd40c6644a239319045ff09fcd55396be581630e1ba6a28b185cbbe7f"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round1-contract-review.json",
+      "sha256": "sha256:702d8c1ae706f3f48253926a268d3f67e7df0c9665f24914ca87d21e601ecf1e"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round1-governance-review.json",
+      "sha256": "sha256:c9265b41cdf58101b0683608cfa4d7765d3a3c55f3a7ece0ccf9eccd51175e87"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round1-review-snapshot.json",
+      "sha256": "sha256:9bf3ae4a69caf816481af725fbf1230769a5247d14112a9991a42a01be779002"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round1-runtime-review.json",
+      "sha256": "sha256:a8f35271528760a90a856c4be6c7491b3cf9b5cccceb583263d855e4f878b847"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-baseline-archive.json",
+      "sha256": "sha256:52aca7ea73e9bd365b7beaa13814b25d618dac4c67bf9230ca9f392b49ab2797"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-harness.target.mjs",
+      "sha256": "sha256:03e72284a7c23612aadcadb437e05c53c60392b2c29096c8eed11c36bdc08797"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-package-scripts-test.target.ts",
+      "sha256": "sha256:56dd4ead037332c8c7ec0b25359d489a0a44deec9e41fe529ca4dbb9a76da947"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-package.target.json",
+      "sha256": "sha256:cf1b85c49d6b3999e15711207dea97732ce3e95a3a8367a98524f55a483ffe9a"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-prefreeze-rejection.json",
+      "sha256": "sha256:f677b1fc8cb4113ebb0c69c3b187a8b229156002e7d769764ca4e2d29677e3b9"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-program-test.target.ts",
+      "sha256": "sha256:18eab102934a3af3da8ea5b9e0687db746ac342c835fa16f848974d752651bd2"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-successor-evolution-policy.json",
+      "sha256": "sha256:0f082ee8000cf58a428073bfcd10151919ddb3eecc46dea6531422b01865e3ff"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round3-baseline-archive.json",
+      "sha256": "sha256:2bf7e1ed3add09b6df051bf4a8b72d46a4eb2cc074c551ea184f467598cc5d7a"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round3-successor-evolution-policy.json",
+      "sha256": "sha256:4e4bb13182ba7b59753a62b98d02d249f7a8fe9dd1ffe924e211b477206c7223"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-successor-evolution-policy.json",
+      "sha256": "sha256:e1701afcd0f8cf0e43924e6d307520e78eb7ce0e995e19f2ed7a795794fd11cf"
+    },
+    {
+      "path": "scripts/build-conversation-disclosure-continuation-manifest-v2.mjs",
+      "sha256": "sha256:ab15fbec90f4369d72c2311ad0fbb25ab35ae7c0e4d0dacc8fd632d25420c41e"
+    },
+    {
+      "path": "scripts/build-conversation-disclosure-continuation-manifest-v3.mjs",
+      "sha256": "sha256:c23c4a7a37e425f710e7920bf3458880892f03b2d6c37bd49582effa0880d6da"
+    },
+    {
+      "path": "scripts/build-conversation-disclosure-continuation-policy-v2.mjs",
+      "sha256": "sha256:8f08b528ff9cd33342324e0c52525cc3cbcb016295c4e81805a2fffb1b315310"
+    },
+    {
+      "path": "scripts/build-conversation-disclosure-continuation-policy-v3.mjs",
+      "sha256": "sha256:c29bc9d0c327fdee407dc8d80b0137ab676ab377fcf851d810e34bf2a8ee0820"
+    },
+    {
+      "path": "scripts/build-conversation-disclosure-prefreeze-rejection-v3.mjs",
+      "sha256": "sha256:e14f4062964131c1d2f0ffbe92dcfbc94fda7748d34117824ab0b47962b8e662"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-continuation-v2.mjs",
+      "sha256": "sha256:3e983796487d4b1b2ab96e17724f85e4970f28f5212b5926b10e8f56c04c241c"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-continuation-v3.mjs",
+      "sha256": "sha256:ce2e58ba76e84d906885812dbf57835ed1c70a605f72634fdd8c7d30ffddd58e"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:a51c82a162cde096bb5acdbb0925e2fea8eeaa86abc7e1977ac87371c0bacf33"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-program.mjs",
+      "sha256": "sha256:162c6165d8f831b9a6e4c94fd2627527bc038da79cc8d9bde91bce7852cf754d"
+    },
+    {
+      "path": "scripts/check-harness-state-continuation.mjs",
+      "sha256": "sha256:ffb6163d53423651574af45194bcca4f4d86ba89d1aa2e2933e795e9f923f045"
+    },
+    {
+      "path": "scripts/conversation-disclosure-continuation-contract-v2.mjs",
+      "sha256": "sha256:4f6f997b9a01dedbcba5865ac0f7d009dfd1f7c380951465e85922e5b29e7bee"
+    },
+    {
+      "path": "scripts/conversation-disclosure-continuation-contract-v3.mjs",
+      "sha256": "sha256:7fbb84f7f7939ca365e60b46e7485ff17b975f077c9faa62badbaf088d757c8c"
+    },
+    {
+      "path": "scripts/conversation-disclosure-continuation-contract.mjs",
+      "sha256": "sha256:407357d37df48a496701ec6ff66444c6f52b06ad10049d52913a9bb6d21e7461"
+    },
+    {
+      "path": "scripts/conversation-disclosure-program-governance-v2.mjs",
+      "sha256": "sha256:501958850caa4f9b9a10440e62d9555ae7aca3565d12d254581157c7d7b88269"
+    },
+    {
+      "path": "scripts/conversation-disclosure-program-governance-v3.mjs",
+      "sha256": "sha256:c21b682ccc520772108b44e179be07f743f2fd2eefe6c719647d9c6a6382e9fb"
+    },
+    {
+      "path": "scripts/conversation-disclosure-review-contract.mjs",
+      "sha256": "sha256:61f6f733cdf7c7a04370c65ae25e77a27c1b8b826ab4df3d22a43f846ff3caf0"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-continuation-v2.mjs",
+      "sha256": "sha256:3fe4a400d5d57d06187520aeda8de32d43b40970fb0ed3cc6b54ccca7f3b4605"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-continuation-v3.mjs",
+      "sha256": "sha256:14f894747c455fa0da3f4236136009e864ab1bcf9ab73e2af26ea94d08d9dc28"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:68006571d50ddfce9a30da2ac6929e916ca7c53ae4efcf068f7e78933a21533f"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-review.mjs",
+      "sha256": "sha256:bc9e398d85a3529739bdce34e1852e44d03e3869ccb1d1bc48b3d8144fda9ccd"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-closure.mjs",
+      "sha256": "sha256:c4ef04e87f3c5b449aa666dfe809d7c478b0d47be0dc05b51d25e4a916bc82a1"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-continuation-v2.mjs",
+      "sha256": "sha256:563a647b70ea53f84948aec0398dce0162153c4fb199597a9d0a242e9824a990"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-continuation-v3.mjs",
+      "sha256": "sha256:9380fb9de11db96f065c4f8ade533692d394a01d5293462517097e0942c60ec5"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:02f964b4ff37053d4df7260fc176bc36538931c947f6692c815803e482341fc6"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuation.test.ts",
+      "sha256": "sha256:e3d58a52c3d0653503c31c2c752e085af0d4256469f234be5af16f5de006a1b6"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationCheckerV2.test.ts",
+      "sha256": "sha256:a3860bcc28a15c01fa6556532ba96053c8068a0f706745455f546b599248febe"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationCheckerV3.test.ts",
+      "sha256": "sha256:a20847205786a61085037d5cb186ea7907a032268df7cf602a39eb447f908915"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationFreezeV2.test.ts",
+      "sha256": "sha256:765b420a8e02838d67833287fbbc5738bfa26b107e865406346924daa25bc98d"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationFreezeV3.test.ts",
+      "sha256": "sha256:9bf06a04fb59d45e371e23ab4150fab5725ccfea7fcc6fde186356d6c20fb834"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationManifestV2.test.ts",
+      "sha256": "sha256:599a0fe0419e78b16153c4d1ce310c5f320777e47ffe0d43a5345095445174a8"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationManifestV3.test.ts",
+      "sha256": "sha256:fc1a127cef714c91e225d4e6b7f60133805ef37c3d3303a0c659738f295a488f"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationPolicyV2.test.ts",
+      "sha256": "sha256:3c8e7f1b19460850074ae21ac88cd19e5d69230783cdcc3a8c0c2ddc6daa048c"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationPolicyV3.test.ts",
+      "sha256": "sha256:5de12ee6377bf020b227f9eddcf38381e8ba99d282881797f181993587e4fbdf"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationRunnerV2.test.ts",
+      "sha256": "sha256:1d019c6e46cca84f30c72cbd244835a91bda6e5d2c54792f25dfa796566750a3"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationRunnerV3.test.ts",
+      "sha256": "sha256:f0a66d7d824025e76de038caeb1a52d2905cf509a18d432178fd9f1a7948e245"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationV2.test.ts",
+      "sha256": "sha256:c18872c0fb71cf81b1af23ad4e148ba14a7a660f74c88ebf12400c899d36800f"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuationV3.test.ts",
+      "sha256": "sha256:8f2c63fb7312294dba2bac2d9a17446ea972e69fc7c10075f2a935e73e26e698"
+    },
+    {
+      "path": "src/shared/conversationDisclosureProgramGovernanceV2.test.ts",
+      "sha256": "sha256:2326dacfdcc922f5347125d973221d6738a319b3945443425dfb98d73185ddfa"
+    },
+    {
+      "path": "src/shared/conversationDisclosureProgramGovernanceV3.test.ts",
+      "sha256": "sha256:6e0eb491f8d95cb16e240b6ff5b6dad69bc9bdef001c3cbc4b1e9511c1e0c91b"
+    }
+  ],
+  "transitionPayloadFiles": [
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round3-harness.target.mjs",
+      "sha256": "sha256:4d78ee6fef889aeba5a66669eab6409bb5ee2ac6ebb245ea751a05b6c2606876"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round3-package-scripts-test.target.ts",
+      "sha256": "sha256:1b22f79fbcdbca9f6e90a2a791c9a140b1edffcb6964cecd0689e2292321d7ae"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round3-package.target.json",
+      "sha256": "sha256:cf1b85c49d6b3999e15711207dea97732ce3e95a3a8367a98524f55a483ffe9a"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round3-program-test.target.ts",
+      "sha256": "sha256:7b7f40e9946c786a472b7ba6d38fd15191cb1eff03de026b0ba0f7415f8b0282"
+    }
+  ],
+  "baselineFiles": [
+    {
+      "path": ".zerox/conversation-disclosure-program.json",
+      "sha256": "sha256:00d9210190abd39f1f1a99412295971b5926f9fb0244cf714fd9174612c8627e"
+    },
+    {
+      "path": ".zerox/decisions/CD04-conversation-domain-adapters.md",
+      "sha256": "sha256:469a61814d15db7f1bea33b4383676921d2e6a1fbb9a641f8a3488b00a3d9f4a"
+    },
+    {
+      "path": ".zerox/feature_list.json",
+      "sha256": "sha256:e0ca3630deb7e0545bd3178a57a7a3268610efe6c1b6f5d6581fb36f93ba930f"
+    },
+    {
+      "path": ".zerox/progress.md",
+      "sha256": "sha256:91fe1ec7cac7bf5b9289121881ae825de2f3e0d67da34cb0674d0e2023817126"
+    },
+    {
+      "path": "findings.md",
+      "sha256": "sha256:dfe305cf6512b01d9953a3018aab540137e099b410efc245038d33c8fe3a1bcd"
+    },
+    {
+      "path": "progress.md",
+      "sha256": "sha256:3fb4ce95d5a9687da3f86c53104db5c25405d7d74c5f680ef0ce349471db1903"
+    },
+    {
+      "path": "src/main/agentTrajectoryStore.test.ts",
+      "sha256": "sha256:7db17934c2882e7415967a84e9267425508ba2b676f1103412b537f06ebaaf45"
+    },
+    {
+      "path": "src/main/agentTrajectoryStore.ts",
+      "sha256": "sha256:5b885c61be9d648208f652a65b3343d5aebca2a265dff4bfd4a6a440f4bf0271"
+    },
+    {
+      "path": "src/main/jsonlRecovery.ts",
+      "sha256": "sha256:6d50370454b840d62c11a9d5b8647b017f9b6a59b01089f42865645a6617fdce"
+    },
+    {
+      "path": "src/main/storage/repositories/chatSessionEventRepository.test.ts",
+      "sha256": "sha256:fb7a0aa19d8069b675a1b55887e76e343df0ae7d6d1b5930b0c9adc20cbe0c13"
+    },
+    {
+      "path": "src/main/storage/repositories/chatSessionEventRepository.ts",
+      "sha256": "sha256:5bd49effffbc214613e2b7750f58de10053c7dc69d623f4efe2825e1c19b7201"
+    },
+    {
+      "path": "task_plan.md",
+      "sha256": "sha256:a909d8c55dcbf5ce614b6a9f5d64aa14dc56b2b49c1173eea98ea010a5ce71c0"
+    }
+  ],
+  "absentPaths": [
+    ".zerox/reviews/CD04-shadow-parity-review.md",
+    ".zerox/verification/conversation-disclosure/CD03A-round1-closure-manifest.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round1-external-anchor.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round1-external-attestation.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-closure-manifest.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-contract-review.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-external-attestation.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-governance-review.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-review-snapshot.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-runtime-review.json",
+    ".zerox/verification/conversation-disclosure/CD04-performance-baseline.json",
+    ".zerox/verification/conversation-disclosure/CD04-shadow-parity.json",
+    "scripts/run-conversation-disclosure-performance.mjs",
+    "src/main/conversationDisclosureAdapters.test.ts",
+    "src/main/conversationDisclosureAdapters.ts",
+    "src/main/conversationDisclosureMaterializer.test.ts",
+    "src/main/conversationDisclosureMaterializer.ts",
+    "src/main/conversationDisclosureShadowAudit.test.ts",
+    "src/main/conversationDisclosureShadowAudit.ts",
+    "src/main/conversationEvidenceResolver.test.ts",
+    "src/main/conversationEvidenceResolver.ts",
+    "src/main/jsonlRecovery.test.ts",
+    "src/shared/conversationEvidence.test.ts",
+    "src/shared/conversationEvidence.ts"
+  ],
+  "reviewOutputAbsentPaths": [
+    ".zerox/verification/conversation-disclosure/CD03A-round3-closure-manifest.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round3-contract-review.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round3-external-attestation.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round3-governance-review.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round3-review-snapshot.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round3-runtime-review.json"
+  ],
+  "governanceTransitions": [
+    {
+      "path": "package.json",
+      "kind": "package-structure-migration",
+      "fromSha256": "sha256:560fb3e3b2829a32b4ac694c7781fce9e53941a9e20fc4ec1c08602d53c278b9",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round3-package.target.json",
+      "toSha256": "sha256:cf1b85c49d6b3999e15711207dea97732ce3e95a3a8367a98524f55a483ffe9a"
+    },
+    {
+      "path": "scripts/check-harness-state.mjs",
+      "kind": "harness-delegation-migration",
+      "fromSha256": "sha256:231d28280f6891f50f5c714b4161d1b9d93cf171e0b67396de67ce7a36e06339",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round3-harness.target.mjs",
+      "toSha256": "sha256:4d78ee6fef889aeba5a66669eab6409bb5ee2ac6ebb245ea751a05b6c2606876"
+    },
+    {
+      "path": "src/shared/conversationDisclosureProgram.test.ts",
+      "kind": "program-test-migration",
+      "fromSha256": "sha256:087cff0ba7f208464bf62e41f3a10dfbb88f3f2461d46398187c0b4cfa16dd5c",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round3-program-test.target.ts",
+      "toSha256": "sha256:7b7f40e9946c786a472b7ba6d38fd15191cb1eff03de026b0ba0f7415f8b0282"
+    },
+    {
+      "path": "src/shared/packageScripts.test.ts",
+      "kind": "package-test-migration",
+      "fromSha256": "sha256:2f30d10ebd5ccc408255813e0d10ca4e8bd145930bdbe263bc2a6e5d2fa61efe",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round3-package-scripts-test.target.ts",
+      "toSha256": "sha256:1b22f79fbcdbca9f6e90a2a791c9a140b1edffcb6964cecd0689e2292321d7ae"
+    }
+  ],
+  "digest": "sha256:cbec3496b39cb5637e40cd1276e370dc9245fd425552fd7e18fcf972d7816ced"
+}

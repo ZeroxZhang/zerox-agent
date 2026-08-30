@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 12,
+  "kind": "conversation-disclosure-continuation-external-attestation",
+  "status": "passed",
+  "governancePhase": "review_post_transition",
+  "identityAssurance": "not-signed",
+  "reviewAssurance": "caller-attested-not-signed",
+  "repositoryRealpath": "/Users/zeorx/Documents/Codex/building-agent",
+  "completedAt": "2026-08-24T20:42:08.893Z",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "pendingManifestDigest": "sha256:d64456ed6fbc4ece4642710176a6ada73d92472479bdab925e7c0e9b425dafc6",
+  "policyDigest": "sha256:fefede21ccf0cefaf222698e1355ddae17992d9dbc974490a0c45f0696fff6e4",
+  "snapshotDigest": "sha256:2917ee0bd4e7dfa7862d5625d89458b5087a9e9835d60f5509a99e286be94fac",
+  "round11ReviewRejectionDigest": "sha256:eb4fe2a38a4803d4682c1aa84bd498fb1cc05d348b68ff2a2c25362b2e60ca24",
+  "validatorDigest": "sha256:30330a66fcacedded8e3afbea863ffe67bb76b28dd68ea0fd263bcc08ac29edc",
+  "runnerDigest": "sha256:ea458364466b40fe4276dea1d467df01ff8cfd093baf9322fbd1350898224911",
+  "callerDispatchSet": [
+    {
+      "lane": "contract",
+      "assurance": "caller-attested-not-signed",
+      "challenge": "sha256:0bdf9b5e201c3bdd1bfd914cb8cfb94ecc8200106cd73e6cfb3fb9d762c2a424",
+      "instructionDigest": "sha256:fda650d8c621e753efa99cb856874ec3b7d51dd3bf9a4258402ab088e8e81b1d",
+      "reviewContextId": "round12-contract-0bdf9b5e201c3bdd",
+      "taskPath": "round12/contract",
+      "agentLabel": "round12-contract-reviewer",
+      "transport": "codex-collaboration"
+    },
+    {
+      "lane": "runtime",
+      "assurance": "caller-attested-not-signed",
+      "challenge": "sha256:697b14c482bc2992a8c75d01445f8ee07744c63d32b4d7b0b6b26eb5045969a6",
+      "instructionDigest": "sha256:d8f4bb39ece47eb29a510ee64fbc84ba6d65837981f1b22212444a592f0126da",
+      "reviewContextId": "round12-runtime-697b14c482bc2992",
+      "taskPath": "round12/runtime",
+      "agentLabel": "round12-runtime-reviewer",
+      "transport": "codex-collaboration"
+    },
+    {
+      "lane": "governance",
+      "assurance": "caller-attested-not-signed",
+      "challenge": "sha256:819a70db1d41373a3d88d5bd56e64874002bd9f674c0897eedf2706a0ca144c5",
+      "instructionDigest": "sha256:6e8e23c638c0738e4af07291e17037f646fc2b274e56ac91a9c60c07d238181b",
+      "reviewContextId": "round12-governance-819a70db1d41373a",
+      "taskPath": "round12/governance",
+      "agentLabel": "round12-governance-reviewer",
+      "transport": "codex-collaboration"
+    }
+  ],
+  "candidateResults": [
+    {
+      "kind": "checker",
+      "path": "scripts/check-conversation-disclosure-continuation-v12.mjs",
+      "status": "passed",
+      "receiptDigest": "sha256:39905eb920e95ed977f3cade97b62c8fef9f5937a268f158e6aa9e7e8d7ac078",
+      "stdoutDigest": "sha256:63adc348568902797725fd378e689e1a1ee4e935432d055f531f852ab20536b3",
+      "stderrDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "harness",
+      "path": "scripts/check-harness-state.mjs",
+      "status": "passed",
+      "receiptDigest": "sha256:c7503af864769f2bf454f010783ff586d15263f372da38972f8d8e0360a37776",
+      "stdoutDigest": "sha256:89bc1fcb1040e12be7ad239440f478e3958d83578500b2925918c3a5d930176d",
+      "stderrDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "digest": "sha256:a3d67bec3bd92a51fd8ed35f8735ceb21289c833bc84b0e8a23d6c17b3a507ea"
+}

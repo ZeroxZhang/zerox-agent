@@ -1,0 +1,53 @@
+diff --git a/src/shared/packageScripts.test.ts b/src/shared/packageScripts.test.ts
+--- a/src/shared/packageScripts.test.ts
++++ b/src/shared/packageScripts.test.ts
+@@ -1026,13 +1026,15 @@ describe("package scripts", () => {
+     expect(packageJson.scripts).toMatchObject({
+       "harness:check": "node scripts/check-harness-state.mjs",
+       "program:check":
+-        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs && node scripts/check-conversation-disclosure-program.mjs",
++        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs && node scripts/check-conversation-disclosure-continuation.mjs",
++      "conversation-disclosure:baseline":
++        "node scripts/run-conversation-disclosure-performance.mjs",
+       "harness:score": "npm run build && node scripts/run-harness-score.mjs",
+       "episode:export":
+         "npm run build && node scripts/export-agent-episode.mjs",
+     });
+     expect(
+       packageJson.scripts?.["program:check"]?.match(
+-        /check-conversation-disclosure-program\.mjs/g,
++        /check-conversation-disclosure-continuation\.mjs/g,
+       ),
+     ).toHaveLength(1);
+@@ -1046,26 +1047,20 @@ describe("package scripts", () => {
+       .map((line) => line.trim())
+       .filter((line) => line.startsWith("await import("));
+     expect(executableImports[0]).toBe(
+-      'await import("./check-conversation-disclosure-program.mjs");',
++      'await import("./check-conversation-disclosure-continuation.mjs");',
+     );
+     expect(
+       harnessSource.match(
+-        /^await import\("\.\/check-conversation-disclosure-program\.mjs"\);$/gm,
++        /^await import\("\.\/check-conversation-disclosure-continuation\.mjs"\);$/gm,
+       ),
+     ).toHaveLength(1);
+-    const disclosurePreflightIndex = harnessSource.indexOf(
+-      "const disclosurePreflight = await validateDisclosureCheckerBeforeImport();",
+-    );
++    const disclosurePreflightIndex = harnessSource.indexOf("historicalCheckerBytes");
+     const disclosureImportIndex = harnessSource.indexOf(
+-      'await import("./check-conversation-disclosure-program.mjs");',
++      'await import("./check-conversation-disclosure-continuation.mjs");',
+     );
+     expect(disclosurePreflightIndex).toBeGreaterThanOrEqual(0);
+     expect(disclosureImportIndex).toBeGreaterThan(disclosurePreflightIndex);
+     expect(harnessSource).toContain("constants.O_RDONLY | constants.O_NOFOLLOW");
+-    expect(harnessSource).toContain("validateReviewSnapshot(snapshot)");
+-    expect(harnessSource).toContain(
+-      'from "./conversation-disclosure-review-contract.mjs"',
+-    );
+     expect(harnessSource).toContain(
+-      "not described as proof when all local closure",
++      "historicalCheckerSha256",
+     );

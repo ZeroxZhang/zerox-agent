@@ -1,0 +1,393 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-production-scenario",
+  "scenarioId": "S12-retry-attempt",
+  "scenarioDigest": "sha256:49d4fb731a204d7b797ede14668b357e45234789b55325523987a21b05d43ef7",
+  "executionId": "c086be4f-a783-44e8-81ad-972ce100ddff",
+  "processEpochs": [
+    "main_5d3baad9-787e-42be-9850-e04899d32912"
+  ],
+  "productionMain": true,
+  "productionPreload": true,
+  "demoDataUsed": false,
+  "expected": [
+    "attempt reset or supersession removes rejected partial content",
+    "only the accepted attempt reconciles to the final assistant message",
+    "status and output-part channels do not duplicate the visible answer"
+  ],
+  "evidenceRequirements": [
+    "browser attempt reset recording",
+    "attempt-control and final-message reconciliation trace"
+  ],
+  "actions": [
+    {
+      "index": 0,
+      "action": "observe_failed_partial_attempt",
+      "executor": "production_preload_ipc",
+      "ok": true,
+      "evidenceIds": [
+        "4ac38c6f-26a8-4f1c-bdec-230ff1fe54d0",
+        "cd09-run-S12-retry-attempt",
+        "trajectory-S12-retry-attempt",
+        "process:main_5d3baad9-787e-42be-9850-e04899d32912"
+      ],
+      "observations": {
+        "sessionLoaded": true,
+        "sessionListed": true,
+        "runListed": true,
+        "trajectoryLoaded": true,
+        "firstAttemptRejected": true,
+        "firstAttemptMessage": "会话失败状态未能完整持久化，请重新加载后重试。",
+        "rejectedPartialObserved": true,
+        "failureTerminalObserved": true,
+        "streamEventTypes": "status,status,status,status,status,status,status,status,status,status,status,status,attempt_control,answer_delta,attempt_control,output_part,status,failed"
+      }
+    },
+    {
+      "index": 1,
+      "action": "execute_retry",
+      "executor": "production_preload_ipc",
+      "ok": true,
+      "evidenceIds": [
+        "4ac38c6f-26a8-4f1c-bdec-230ff1fe54d0",
+        "cd09-run-S12-retry-attempt",
+        "trajectory-S12-retry-attempt",
+        "process:main_5d3baad9-787e-42be-9850-e04899d32912"
+      ],
+      "observations": {
+        "sessionLoaded": true,
+        "sessionListed": true,
+        "runListed": true,
+        "trajectoryLoaded": true,
+        "retrySucceeded": true,
+        "acceptedReply": "Accepted production response for S12-retry-attempt."
+      }
+    },
+    {
+      "index": 2,
+      "action": "reload_accepted_attempt",
+      "executor": "production_renderer_reload",
+      "ok": true,
+      "evidenceIds": [
+        "4ac38c6f-26a8-4f1c-bdec-230ff1fe54d0",
+        "cd09-run-S12-retry-attempt",
+        "trajectory-S12-retry-attempt",
+        "process:main_5d3baad9-787e-42be-9850-e04899d32912"
+      ],
+      "observations": {
+        "sessionLoaded": true,
+        "sessionListed": true,
+        "runListed": true,
+        "trajectoryLoaded": true,
+        "acceptedAttemptPersisted": true,
+        "rejectedPartialPersisted": false
+      }
+    }
+  ],
+  "requirements": [
+    {
+      "index": 0,
+      "requirement": "attempt reset or supersession removes rejected partial content",
+      "ok": true,
+      "evidenceIds": [
+        "action:0:sha256:5cb2bd5c1aa0719064d1cae7e4a5902391fa2ca29bd8d2830185406a3a978688",
+        "screenshot:sha256:9b984dc969bae2cbf9f49b6cacc1cb7b920ff5fc2bcca9dae0d74d8c28dea16a"
+      ]
+    },
+    {
+      "index": 1,
+      "requirement": "only the accepted attempt reconciles to the final assistant message",
+      "ok": true,
+      "evidenceIds": [
+        "action:1:sha256:a1c37cf4b092f17dff3fb80b865cae4e5d8ec1f28d50929f794bfebeec36039a",
+        "screenshot:sha256:9b984dc969bae2cbf9f49b6cacc1cb7b920ff5fc2bcca9dae0d74d8c28dea16a"
+      ]
+    },
+    {
+      "index": 2,
+      "requirement": "status and output-part channels do not duplicate the visible answer",
+      "ok": true,
+      "evidenceIds": [
+        "action:2:sha256:b763fc738a8b416d406fce6fad85cb36c809408c30a557057cb8949d2423f6c6",
+        "screenshot:sha256:9b984dc969bae2cbf9f49b6cacc1cb7b920ff5fc2bcca9dae0d74d8c28dea16a"
+      ]
+    }
+  ],
+  "ipcInvocations": [
+    {
+      "ordinal": 1,
+      "channel": "toolApproval:listPending",
+      "ok": true
+    },
+    {
+      "ordinal": 2,
+      "channel": "toolApproval:getMode",
+      "ok": true
+    },
+    {
+      "ordinal": 3,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 4,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 5,
+      "channel": "memory:list",
+      "ok": true
+    },
+    {
+      "ordinal": 6,
+      "channel": "agentWorkspaces:list",
+      "ok": true
+    },
+    {
+      "ordinal": 7,
+      "channel": "agentBootstrap:loadValidation",
+      "ok": true
+    },
+    {
+      "ordinal": 8,
+      "channel": "app:getMeta",
+      "ok": true
+    },
+    {
+      "ordinal": 9,
+      "channel": "app:getRuntimeInfo",
+      "ok": true
+    },
+    {
+      "ordinal": 10,
+      "channel": "navigation:list",
+      "ok": true
+    },
+    {
+      "ordinal": 11,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 12,
+      "channel": "app:getUpdateState",
+      "ok": true
+    },
+    {
+      "ordinal": 13,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 14,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
+      "ordinal": 15,
+      "channel": "skills:list",
+      "ok": true
+    },
+    {
+      "ordinal": 16,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 17,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 18,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 19,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 20,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 21,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 22,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 23,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 24,
+      "channel": "chat:sendMessage",
+      "ok": true
+    },
+    {
+      "ordinal": 25,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 26,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 27,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 28,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 29,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 30,
+      "channel": "chat:sendMessage",
+      "ok": true
+    },
+    {
+      "ordinal": 31,
+      "channel": "toolApproval:listPending",
+      "ok": true
+    },
+    {
+      "ordinal": 32,
+      "channel": "toolApproval:getMode",
+      "ok": true
+    },
+    {
+      "ordinal": 33,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 34,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 35,
+      "channel": "memory:list",
+      "ok": true
+    },
+    {
+      "ordinal": 36,
+      "channel": "skills:list",
+      "ok": true
+    },
+    {
+      "ordinal": 37,
+      "channel": "agentWorkspaces:list",
+      "ok": true
+    },
+    {
+      "ordinal": 38,
+      "channel": "agentBootstrap:loadValidation",
+      "ok": true
+    },
+    {
+      "ordinal": 39,
+      "channel": "app:getMeta",
+      "ok": true
+    },
+    {
+      "ordinal": 40,
+      "channel": "app:getRuntimeInfo",
+      "ok": true
+    },
+    {
+      "ordinal": 41,
+      "channel": "navigation:list",
+      "ok": true
+    },
+    {
+      "ordinal": 42,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 43,
+      "channel": "app:getUpdateState",
+      "ok": true
+    },
+    {
+      "ordinal": 44,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 45,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
+      "ordinal": 46,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 47,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 48,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 49,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 50,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 51,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 52,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 53,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 54,
+      "channel": "chatSessions:get",
+      "ok": true
+    }
+  ],
+  "screenshotDigests": [
+    "sha256:9b984dc969bae2cbf9f49b6cacc1cb7b920ff5fc2bcca9dae0d74d8c28dea16a"
+  ],
+  "status": "passed",
+  "digest": "sha256:ed0e1124e1600446167570b1bd88b0ff44e6edfa4066d3c6f8ecac72c4d1c41b"
+}

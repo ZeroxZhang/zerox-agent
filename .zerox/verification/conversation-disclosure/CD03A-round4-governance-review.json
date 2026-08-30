@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 4,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 4,
+  "lane": "governance",
+  "reviewedPhase": "review_pre_transition",
+  "challenge": "sha256:3fae6214ea0b5f1b8d0ed4fb4c504925ba8e445ae2c36f3da1c7634b9fd08e9d",
+  "callerDispatchEntryDigest": "sha256:b5061803956d69c834921a7be33909611073e9cab0379bc7800aeb5ae6b69c69",
+  "callerDispatchSetDigest": "sha256:5d50878d211e36dc8355e4ee2de0d8ae304d50f77049befbc22ecd99cbde9f18",
+  "claimedReviewOrigin": {
+    "taskPath": "round4/governance",
+    "agentLabel": "round4-governance-reviewer",
+    "transport": "codex-collaboration"
+  },
+  "identityAssurance": "not-signed",
+  "independenceClaim": "caller-attested-distinct-review-contexts",
+  "completedAt": "2026-08-24T15:02:51.217Z",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 0,
+    "major": 1,
+    "minor": 0
+  },
+  "findings": [
+    {
+      "id": "R4-GOV-001",
+      "severity": "major",
+      "summary": "Final evidence validators omit required semantic bindings for candidate results, trusted time, and exact anchor head state.",
+      "evidence": [
+        "scripts/conversation-disclosure-continuation-contract-v4.mjs:1249-1308",
+        "scripts/check-conversation-disclosure-continuation-v4.mjs:393-446",
+        "attestation with empty candidateResults and future completedAt validates",
+        "anchor with arbitrary completion head validates"
+      ]
+    }
+  ],
+  "snapshotDigest": "sha256:7e3f075ac63abd39ce9e4a9ab6a3780e864c5397ddb40ecaef0d3a541febf740",
+  "snapshotFileCount": 106,
+  "policyDigest": "sha256:c4b40e8dd31554b3bd25ccf1c1d3d1671291e8f52c41286d9cd729ebb8fa4843",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:1d5080c45253393f2f44e2468d4fcdd332450f39a198d6e10deffdd516713629",
+  "pathAuthorityDigest": "sha256:f2631a7f7ef4344324d65b8b396398d6801cc7f9f2f1f01db1f9445fed85e514",
+  "admissionFeatureDefinitionDigest": "sha256:5e4ed3d79f01b06fef220436360ab5268bf27a8ec7e8c44ccf182881312cacf4",
+  "admissionFeatureFileSetDigest": "sha256:473b4edb324b518cdd60bea89127b26274267486830fcd4146819afdea3afd65",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:3f5acda552d39f94d8bdd8e2c8cfd17ccd80f99c062e241322fbd705109c1107",
+  "round3ReviewRejectionDigest": "sha256:f34172d14d329b35862cba792b0c4edbfcc5067561262007134a5e6df0c4a0e1",
+  "validatorDigest": "sha256:2d155ee1a7c198fe2424af3d335dba32db39ad8781aab98441b1cab757b5529c"
+}

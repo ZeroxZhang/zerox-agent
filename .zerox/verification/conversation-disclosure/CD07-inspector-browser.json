@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "kind": "cd07-inspector-browser-acceptance",
+  "status": "passed",
+  "accepted": true,
+  "source": "production-build-electron-capture",
+  "initial": {
+    "runId": "demo_run_2",
+    "eventCount": 2,
+    "labels": [
+      "工具结果#1",
+      "其他证据 · future_optional_presenter#2"
+    ],
+    "selectedLabel": "工具结果#1",
+    "previewContainsSecret": false,
+    "previewContainsRedaction": true,
+    "horizontalOverflow": false
+  },
+  "selected": {
+    "runId": "demo_run_2",
+    "eventCount": 2,
+    "labels": [
+      "工具结果#1",
+      "其他证据 · future_optional_presenter#2"
+    ],
+    "selectedLabel": "其他证据 · future_optional_presenter#2",
+    "previewContainsSecret": false,
+    "previewContainsRedaction": true,
+    "horizontalOverflow": false
+  },
+  "reloaded": {
+    "runId": "demo_run_2",
+    "eventCount": 2,
+    "labels": [
+      "工具结果#1",
+      "其他证据 · future_optional_presenter#2"
+    ],
+    "selectedLabel": "其他证据 · future_optional_presenter#2",
+    "previewContainsSecret": false,
+    "previewContainsRedaction": true,
+    "horizontalOverflow": false
+  },
+  "screenshots": [
+    "CD07-inspector-desktop.png"
+  ]
+}

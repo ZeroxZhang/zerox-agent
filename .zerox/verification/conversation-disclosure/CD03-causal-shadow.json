@@ -1,0 +1,903 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "CD03-causal-shadow",
+  "featureId": "P107-conversation-disclosure-domain-adapters",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "generatedAt": "2026-08-24T14:24:00+08:00",
+  "status": "accepted",
+  "implementationBoundary": {
+    "mode": "durable_causal_spine_and_owning_store_settlement",
+    "disclosureProjectionCutover": false,
+    "disclosureIpcProjectionCutover": false,
+    "rendererLifecycleRecoveryFixes": true,
+    "approvalSnapshotIpc": true,
+    "attemptControlStream": true,
+    "legacyChatReadable": true,
+    "singlePublicationAuthority": true,
+    "agentRunPreExecutionAdmission": true,
+    "requiredSettlementStartupReconciliation": true,
+    "attemptMonotonicAcceptance": true,
+    "approvalIntentCausalRefAtomicity": true,
+    "agentRunExecutionRevisionLease": true,
+    "agentRunRevisionCasAcrossStores": true,
+    "reviewSnapshotExecutableClosure": true,
+    "canonicalReviewSnapshotFreezer": true,
+    "externalReviewReceiptClosure": true,
+    "externallyAnchoredRunnerRequired": true,
+    "callerPinnedExternalAnchorRequired": true,
+    "recoverableGovernancePublication": true,
+    "uniqueLinkGovernanceInputs": true,
+    "descriptorAnchoredGovernanceCommit": true,
+    "recoverablePartialGovernanceTemp": true,
+    "leafBoundGovernancePublication": true,
+    "immutableGovernanceCompletionMarkers": true,
+    "exactGovernanceCompletionMarkerValidation": true,
+    "privateGovernanceOutputs": true,
+    "zeroByteGovernanceTempRecovery": true,
+    "recoveredExactTempDurabilityReestablished": true,
+    "agentRunDerivativesAfterOwnerCommit": true,
+    "owningStoresReplaced": false,
+    "nextAuthorizedWorkstreamAfterAcceptance": "CD04"
+  },
+  "sources": {
+    "decision": ".zerox/decisions/CD03-conversation-causal-spine.md",
+    "causalContract": "src/shared/conversationCausalSpine.ts",
+    "causalStore": "src/main/conversationCausalStore.ts",
+    "chatAdapter": "src/main/chatService.ts",
+    "kernelSettlement": "src/main/kernel/chatKernelSegment.ts",
+    "workspaceAuthority": "src/main/workspaceRunStore.ts",
+    "approvalAuthority": "src/main/toolApprovalCoordinator.ts",
+    "attemptRuntime": "src/main/agentLoop.ts",
+    "chatPersistence": "src/main/chatSessionStore.ts",
+    "approvalSnapshotBridge": "src/preload/index.ts",
+    "retryProjection": "src/renderer/chatStreamReducer.ts",
+    "settlementProjection": "src/renderer/chatResultSettlement.ts",
+    "approvalProjection": "src/renderer/toolApprovalProjection.ts",
+    "toolAuthorityRuntime": "src/main/toolRuntime.ts",
+    "toolAuditAuthority": "src/main/toolAuditLog.ts",
+    "worktreeDispatchBoundary": "src/main/agentWorkspaceService.ts",
+    "agentRunContract": "src/shared/agentRuns.ts",
+    "agentRunAdmission": "src/main/agentRuntimeEngine.ts",
+    "agentRunAdapter": "src/main/agentRunnerService.ts",
+    "agentRunAuthority": "src/main/agentRunStore.ts",
+    "agentRunSqlAuthority": "src/main/storage/repositories/runRepository.ts",
+    "requiredSettlementRecovery": "src/main/conversationSettlementReconciler.ts",
+    "startupRecoveryOrder": "src/main/startupRecoverySequence.ts",
+    "completionChecker": "scripts/check-conversation-disclosure-program.mjs",
+    "harnessEntrypoint": "scripts/check-harness-state.mjs",
+    "reviewContract": "scripts/conversation-disclosure-review-contract.mjs",
+    "reviewSnapshotFreezer": "scripts/freeze-conversation-disclosure-review.mjs",
+    "externalClosureRunner": "scripts/verify-conversation-disclosure-closure.mjs"
+  },
+  "characterizations": [
+    {
+      "id": "C01-global-request-claim",
+      "result": "passed",
+      "evidence": "Cancellation is rechecked after asynchronous Plan routing, and attachment validation, empty-message rejection, and Plan-image restrictions finish in one typed preflight before Kernel or causal fact creation. Valid input then reserves a request id before session binding; only the exact sessionId plus persisted userMessageId pair can bind it. New claim APIs cannot create session-only records; legacy session-only JSON remains readable but is route-only, cannot query or replay matching Chat messages, publishes no durable activity, and performs no model/tool execution. New claims persist the sha256-type-tagged-v2 version and cover normalized message, Plan/autonomy/model inputs, skill, workspace summary, history, attachment metadata, and attachment content; undefined/string, bigint/string, and changed-byte mutations are distinct. Exact v2 replay is idempotent, conflicts are rejected, and concurrent cross-window delivery cannot start a second model execution."
+    },
+    {
+      "id": "C02-attempt-control",
+      "result": "passed",
+      "evidence": "Attempt begin, stream supersede, reset, retry, and accepted settlement persist before matching Chat controls. The renderer removes rejected partial text/thinking/tool previews, ignores late old-attempt deltas, rejects post-accept deltas, and conservatively resets transient output on a wire-sequence gap or direct attempt switch when supersede is lost."
+    },
+    {
+      "id": "C03-assistant-receipt-order",
+      "result": "passed",
+      "evidence": "The assistant ChatMessageRecord is durable with exact turnId, causalAttempt, causalAttemptId, role, lineage, content, and succeeded/paused/failed witnesses before causal acceptance. Acceptance is store-owned, attempt-monotonic, and terminal-aware: exact replay is idempotent, an older or interrupted attempt cannot displace a newer active attempt, and no assistant can supersede an already committed failed or canceled terminal. Successful settlement first prepares and freezes the exact Chat receipt plus Workspace event identity, then commits Workspace idempotently with authority readback, and finally atomically commits assistant acceptance with all causal refs. A failed or unknown final causal commit publishes no decisive terminal and leaves a paused reconciliationRequired owner; cold-start or exact duplicate reconciliation completes only that frozen commit and never reruns the model, tools, Workspace work, or Kernel mutation."
+    },
+    {
+      "id": "C04-message-first-repair",
+      "result": "passed",
+      "evidence": "A message-first receipt-second crash is reconciled from the claim-owned durable assistant record without invoking the model or creating a new attempt. One monotonic publication authority is shared by inner Chat, guided input, status/stream emitters, result settlement, and Kernel; it advances only route_only to exact durable binding to invalidated. Every durable status, stream event, and successful result carries explicit domainStateAvailable:true; route-only or invalidated packets carry false and absence is never positive proof. An unbound or session-only claim never reads a user or assistant from a caller-routed session. Both renderer channels refuse route-only session adoption while still closing transient UI. Only succeeded receipts repair Workspace success; paused and failed replays retain matching Kernel/Workspace/renderer truth. Legacy missing status stays degraded and conservatively paused. Early workspace-resolution and total Chat persistence failure follow the same proof rule. Every string, including unpersisted, remains a valid durable Chat session id."
+    },
+    {
+      "id": "C05-required-settlement",
+      "result": "passed",
+      "evidence": "One required-settlement coordinator owns Agent, provider, Plan, guided-input, approval, checkpoint, paused, failed, canceled, successful cross-domain commit, and Kernel-fallback terminals. Prepare freezes the owning attempt, source sequence, target, guided-input id, exact Chat receipt, Workspace run/event ids, approvalId, canonical required domains, deterministic settlement id, and a SHA-256 fingerprint of the complete normalized Chat event including attachment digests. Idempotent Chat and Workspace sinks return typed receipts; causal commit rejects changed facts, missing domain receipts, stale attempts, terminal conflicts, and failed settlements without a required bounded failureCode. Exact committed duplicates do not rewrite sinks. Incomplete or ambiguous compensation preserves known receipts, records recovery-required domainStateAvailable:false truth, interrupts the attempt, and never claims requiredStatePersisted or noDomainStateCreated. Cold start reconciles every preparing/failed/commit-unknown required settlement before IPC, matching exact sink facts or failing startup on causal-authority errors; user processing is never replayed. Public failures remain fixed and secret-safe."
+    },
+    {
+      "id": "C06-ordinary-queue-drain",
+      "result": "passed",
+      "evidence": "Ordinary progress remains live, but the Chat/Kernel turn cannot return until its ordered Chat and Workspace persistence queue drains."
+    },
+    {
+      "id": "C07-workspace-lifecycle",
+      "result": "passed",
+      "evidence": "Workspace Run ensure and lifecycle settlement are envelope-checked and idempotent; exact event identity is checked before transition legality, so an older exact event remains a no-op after a later terminal settlement while a changed body conflicts. Typed sanitized-id collisions fail closed. A missing optional adapter is explicit partial coverage, while any configured initialization failure is a secret-safe fail-closed admission error that starts no model, tool, Kernel-dependent execution, or AgentRun work. New waiting, paused, or terminal events cannot regress a terminal snapshot, and finishRun repairs the latest lifecycle witness before attempting a terminal transition."
+    },
+    {
+      "id": "C08-event-first-repair",
+      "result": "passed",
+      "evidence": "A reload or settlement repairs a Workspace Run snapshot from the latest store-owned lifecycleStatus witness, including specialized waiting-approval and authorized/running events. A finish-first mutation cannot overwrite a succeeded event-first crash witness with failed."
+    },
+    {
+      "id": "C09-approval-durability",
+      "result": "passed",
+      "evidence": "Manual approval creation uses one authority operation that persists the sanitized intent and its typed causal ref atomically before renderer publication; failure leaves neither an orphan intent nor an unlinked ref. The durable approvalId is carried through normalized Chat persistence and required-settlement fingerprints. Terminal decisions use revision CAS, persistence and ambiguous-commit outcomes deny local execution, and renderer delivery failure cannot strand the waiter. Git worktree dispatch passes through ToolRuntime, verifies the durable allowed audit event against fixed task/tool identity and the exact request fingerprint, and atomically consumes the one-use receipt before Git across JSON, SQLite, dual, restart, and backend-switch paths."
+    },
+    {
+      "id": "C10-approval-recovery",
+      "result": "passed",
+      "evidence": "The renderer subscribes before pulling a live-process pending snapshot and revision-2 terminal tombstones dominate stale revision-1 requests. Startup runs storage convergence, required-settlement reconciliation, AgentRun admission reconciliation, prior-process approval interruption, and active causal-attempt recovery in that exact order before IPC registration. Approval recovery verifies intent/ref pairing, interrupts prior-process intents, and never recreates a privilege grant."
+    },
+    {
+      "id": "C11-distinct-causal-identities",
+      "result": "passed",
+      "evidence": "Trajectory, Workspace, Kernel, evidence, approval, AgentRun, and run-scoped Tool Invocation refs remain typed and distinct. A Chat-launched AgentRun atomically persists its owning admission plus agent_run ref before workspace, model, checkpoint, Kernel, loop, tool, or run-event work. Every execution carries an executionRevision lease: initial execution is revision 1, resume may create only latest-settled-paused revision +1, and stale, gapped, duplicate-changed, nonterminal, or cross-revision terminal writes fail the shared CAS classifier in JSON, SQLite, dual shadow repair, repository migration, and episode export. Startup reconciliation requires exact ownerRevision equal to admissionRevision; missing owners, revision gaps, and conflicts fail before approval or attempt recovery. Missing and strictly stale JSON projections converge from SQLite authority, while higher or same-revision-divergent shadows fail synchronously and ordinary sidecar I/O remains visible at explicit drain. Owning AgentRun persistence precedes lease settlement; only after both boundaries complete may episodic memory, its post-terminal live notice, task-bookkeeping, or learning derivatives run. A pending derivative cannot leave admission started, and owner failure produces no derivative. Post-owner causal failure is typed and secret-safe and cannot append a second conflicting terminal."
+    },
+    {
+      "id": "C12-single-live-answer",
+      "result": "passed",
+      "evidence": "answer_delta is the only live answer-text channel. Answer and thinking sanitization accumulates per attempt across tool and status boundaries, so a credential split between transport batches is never reassembled by the renderer; retry resets the accumulator and rejected partial output. Status publication keeps monotonic wire order after buffered text, and only the redacted final text output parts remain durable for reload."
+    },
+    {
+      "id": "C13-safe-compatibility",
+      "result": "passed",
+      "evidence": "Causal and AgentRun records contain typed refs, fingerprints, bounded redacted summaries, settlement receipts, admissions, revision leases, failure codes, and coverage only. Store authorities independently sanitize direct writes; bounded recursive percent and Unicode normalization plus multiline assignment handling cover damaged JSON, YAML block scalars, append assignment, split streams, guided-input projections, model service notices, legacy/recoverable AgentRun records, and memory identities. Raw prompts, answers, attachment bytes, tool arguments, exceptions, credentials, and observer errors are absent from durable/public failure surfaces. Optional legacy absence is partial or degraded and cannot authorize execution. Completion governance uses one tested canonical freezer: the exact ordered Feature array owns featureFileSetDigest while only the sorted post-review immutable projection owns snapshot file bytes; hand-authored snapshots are rejected by closure mode. Freeze and external publication reject hardlinks and require unique-link, effective-user-owned, mode-0600 governance leaves. A crash-created deterministic temp is recoverable only when those metadata hold and its bytes are empty or a strict prefix of the exact replacement; exact but weak-mode, unrelated, or aliased bytes fail closed. Every recovered exact temp is reopened on the same inode, re-fsynced, and revalidated before publication, including a crash after the final write but before its first fsync. Every leaf transition uses directory-descriptor-bound atomic exchange or no-replace operations; displaced and transaction leaves progress through active, tombstone, and immutable completed-marker states without blind pathname unlink. Completed-marker names bind canonical bytes plus device and inode, and closure requires exactly one private marker with the complete transaction schema, canonical digest, and every currently re-provable output binding. The external runner securely validates the live freeze marker before rebuilding an equivalent inode-bound marker in each isolated control tree. Parent or leaf replacement cannot redirect publication or erase either inode, and platforms lacking the required atomic primitive fail closed. Checker and harness each execute in an independently rebuilt, pre/post-verified control tree. Three unique challenge-bound collaboration receipts can create only a pending manifest; the external runner validates receipt time before publishing attestation, manifest, and an outside-repository anchor through a recoverable transaction. Completed validation requires both that external anchor and a separately caller-pinned canonical digest. The anchor and attestation state that reviewer subjects are not cryptographically signed."
+    }
+  ],
+  "verification": [
+    {
+      "id": "focused",
+      "command": "npm test -- --run src/shared/conversationDisclosure.test.ts src/shared/conversationCausalSpine.test.ts src/shared/conversationDisclosureProgram.test.ts src/shared/packageScripts.test.ts src/shared/toolApproval.test.ts src/shared/toolInvocationLedger.test.ts src/shared/toolRuntimeBoundary.test.ts src/shared/secretSafeFailure.test.ts src/shared/credentialRedaction.test.ts src/shared/modelServiceNotice.test.ts src/shared/agentProtocol.test.ts src/shared/contextSurfaceBoundary.test.ts src/shared/productionKernelBoundary.test.ts src/main/conversationCausalStore.test.ts src/main/conversationSettlementReconciler.test.ts src/main/startupRecoverySequence.test.ts src/main/workspaceRunStore.test.ts src/main/chatAgentEvidence.test.ts src/main/chatSessionStore.test.ts src/main/kernel/chatKernelSegment.test.ts src/main/agentLoop.test.ts src/main/messageIntegrity.test.ts src/main/agentExplorationDedup.test.ts src/main/toolObservationOffload.test.ts src/main/agentRuntimeEngine.test.ts src/main/agentRunnerService.test.ts src/main/toolAuthorizationService.test.ts src/main/toolAuditLog.test.ts src/main/toolApprovalCoordinator.test.ts src/main/chatService.test.ts src/main/chatOutputAssembler.test.ts src/main/container.test.ts src/main/toolRuntime.test.ts src/main/agentWorkspaceService.test.ts src/main/agentRunStore.test.ts src/main/storage/repositories/repositories.test.ts src/main/storage/repositories/runRepository.test.ts src/main/storage/storeProxy.test.ts src/main/storage/migrateRoundTrip.test.ts src/preload/index.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/chatResultSettlement.test.ts src/renderer/toolApprovalProjection.test.ts src/renderer/materialDesign.test.ts src/shared/conversationDisclosureFreeze.test.ts src/shared/conversationDisclosureClosure.test.ts",
+      "result": "passed",
+      "testFiles": 46,
+      "tests": 1193
+    },
+    {
+      "id": "test_type_coverage",
+      "command": "npm run typecheck:tests",
+      "result": "passed",
+      "coveredTestFiles": 304
+    },
+    {
+      "id": "full_verify",
+      "command": "npm run verify",
+      "result": "passed",
+      "testFilesPassed": 303,
+      "testFilesSkipped": 1,
+      "testsPassed": 3522,
+      "testsSkipped": 6,
+      "agentEval": "26/26",
+      "memoryEval": "2/2"
+    },
+    {
+      "id": "production_smoke",
+      "command": "npm run smoke:prod",
+      "result": "passed",
+      "renderer": "agent chat UI rendered",
+      "storageBackend": "sqlite",
+      "electron": "42.3.3",
+      "modulesAbi": 146,
+      "sqlite": "3.53.2",
+      "migrationCount": 7,
+      "authorityDomains": 8
+    },
+    {
+      "id": "governance",
+      "command": "npm run program:check && npm run harness:check && git diff --check",
+      "result": "passed",
+      "focusedTestFiles": 4,
+      "focusedTests": 164,
+      "pythonBridgeBytes": 20352,
+      "blindPathnameMutationScan": "clean"
+    }
+  ],
+  "reviewSnapshot": {
+    "schemaVersion": 1,
+    "kind": "conversation-disclosure-review-snapshot",
+    "algorithm": "sha256-canonical-json-v1",
+    "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+    "workstreamId": "CD03",
+    "featureId": "P107-conversation-disclosure-domain-adapters",
+    "round": 23,
+    "completionContractDigest": "sha256:f3bb8206c60094de0283daa557898a6e5baaef8ef1dd9359b7d9282429591f8f",
+    "safetyContractDigest": "sha256:dbcaf12ba4e3f5b6280a7c76da6e27345639c7223b2c5db101e3623f01522e7d",
+    "featureFileSetDigest": "sha256:82240b73c3deeec792c31081b74bf7c5536775dda6cc282833c86be9010e442b",
+    "claimsDigest": "sha256:351dca317bb0f655eb3c2664935a30d2001a30a0f71b30a229decdb3b17ac978",
+    "files": [
+      {
+        "path": ".zerox/decisions/CD03-conversation-causal-spine.md",
+        "sha256": "sha256:7d7b1bfe030cbd400800886d2844f6b956b9b9d074035af2f86eb1460ec0c519"
+      },
+      {
+        "path": "package.json",
+        "sha256": "sha256:560fb3e3b2829a32b4ac694c7781fce9e53941a9e20fc4ec1c08602d53c278b9"
+      },
+      {
+        "path": "scripts/check-conversation-disclosure-program.mjs",
+        "sha256": "sha256:162c6165d8f831b9a6e4c94fd2627527bc038da79cc8d9bde91bce7852cf754d"
+      },
+      {
+        "path": "scripts/check-harness-state.mjs",
+        "sha256": "sha256:231d28280f6891f50f5c714b4161d1b9d93cf171e0b67396de67ce7a36e06339"
+      },
+      {
+        "path": "scripts/conversation-disclosure-review-contract.mjs",
+        "sha256": "sha256:61f6f733cdf7c7a04370c65ae25e77a27c1b8b826ab4df3d22a43f846ff3caf0"
+      },
+      {
+        "path": "scripts/freeze-conversation-disclosure-review.mjs",
+        "sha256": "sha256:bc9e398d85a3529739bdce34e1852e44d03e3869ccb1d1bc48b3d8144fda9ccd"
+      },
+      {
+        "path": "scripts/migrate-to-sqlite.mjs",
+        "sha256": "sha256:5c2ea105adb903c4b4ea40d5c068024e3cbb0a1c3fe0a2306d8a62f177aae05d"
+      },
+      {
+        "path": "scripts/verify-conversation-disclosure-closure.mjs",
+        "sha256": "sha256:c4ef04e87f3c5b449aa666dfe809d7c478b0d47be0dc05b51d25e4a916bc82a1"
+      },
+      {
+        "path": "src/main/agentEpisodeExportCli.test.ts",
+        "sha256": "sha256:bd880caac927f26a4683fea2c9b71556aea4ae5a6dab9ec30f05e6b2b398f9f5"
+      },
+      {
+        "path": "src/main/agentEpisodeExportCli.ts",
+        "sha256": "sha256:a41ac7102635209ed2aec80ca3670c336bfde46c0f2a0a1241155b7ea1ae5cad"
+      },
+      {
+        "path": "src/main/agentExplorationDedup.test.ts",
+        "sha256": "sha256:1fa86c7205d0f06226e6e4c7c9dc06e870c4c440ce2bf50bc09a466960ce1a32"
+      },
+      {
+        "path": "src/main/agentExplorationDedup.ts",
+        "sha256": "sha256:a80a596d8233298f791bbfc3134904856d37149afc9fde8959de1b2a5c9acecb"
+      },
+      {
+        "path": "src/main/agentLoop.test.ts",
+        "sha256": "sha256:3a8043f4f0694a60454ff7ea2ba5c60c24fdf4d7ca592ab2e252d2e75ba2a509"
+      },
+      {
+        "path": "src/main/agentLoop.ts",
+        "sha256": "sha256:218bee395836e84fd6fe1c1a3c8d0bcc08534c8ade2bcaa4eb731a23851699c5"
+      },
+      {
+        "path": "src/main/agentRunStore.test.ts",
+        "sha256": "sha256:af82a3549b9048ae34db515d689429e36786c5d847f612ff1a22e5555876b28b"
+      },
+      {
+        "path": "src/main/agentRunStore.ts",
+        "sha256": "sha256:d7048836a38d7f28180d673c2dc00818531a9557c570bebd004ea89c616abb48"
+      },
+      {
+        "path": "src/main/agentRunnerService.test.ts",
+        "sha256": "sha256:1fa841eea21a1a028b416273d2068e186df0419b44b5d1e5c19710743bf98420"
+      },
+      {
+        "path": "src/main/agentRunnerService.ts",
+        "sha256": "sha256:817798357c2f6fbc2e568a4620ba6f53b80b9bec1d26cff7f9c2f8f247e6afd4"
+      },
+      {
+        "path": "src/main/agentRuntimeEngine.test.ts",
+        "sha256": "sha256:4193620c121c48762ceabe46bd59f28044f9b1f29926e69d5356d119ce38edfc"
+      },
+      {
+        "path": "src/main/agentRuntimeEngine.ts",
+        "sha256": "sha256:a9845034427af60c9e4125891801df5662f00864fb9615401f8cd6677ce06d82"
+      },
+      {
+        "path": "src/main/agentToolExecutor.ts",
+        "sha256": "sha256:bc1f39fce9fad73981eef88428e951ec68aaa1c28a4aae4a522127545c70cbd1"
+      },
+      {
+        "path": "src/main/agentWorkspaceService.test.ts",
+        "sha256": "sha256:03f45574af113048adf9a2abe10c51a53903b929f9fab4e77ba18dcb76010e79"
+      },
+      {
+        "path": "src/main/agentWorkspaceService.ts",
+        "sha256": "sha256:998012f660212e8731b593219772b1ed53e318510f30f8da10aec745bdb60b31"
+      },
+      {
+        "path": "src/main/chatAgentEvidence.test.ts",
+        "sha256": "sha256:a9f4571b24c75a9bd80b1a79fe990b79f7a5f97acbe8f1a2e5f50a4e8c54920d"
+      },
+      {
+        "path": "src/main/chatAgentEvidence.ts",
+        "sha256": "sha256:3c8dff3594e8feb445df4dc8baf57f8a06205892b8562ff8be407449d51854ce"
+      },
+      {
+        "path": "src/main/chatOutputAssembler.test.ts",
+        "sha256": "sha256:c58c678642d18e2940b8cae14492100422a1565229cee188aab4c127afe19b75"
+      },
+      {
+        "path": "src/main/chatOutputAssembler.ts",
+        "sha256": "sha256:c93fd1cda6322b97d195a6ada987a1ea4e0709dfccb9745164fbadc16bcc6c41"
+      },
+      {
+        "path": "src/main/chatService.test.ts",
+        "sha256": "sha256:42bed0af9ff51b9b37cd527424c311d67d65417705c790b723ac3a635a74364f"
+      },
+      {
+        "path": "src/main/chatService.ts",
+        "sha256": "sha256:83c7d4cfb12c9b6081d1c9c95cf2670e431ef5e252ef5f64489d7a5ca64d8b26"
+      },
+      {
+        "path": "src/main/chatSessionStore.test.ts",
+        "sha256": "sha256:753f406ccc5fc97b9b241c75afe6ad677a32e859cea7a2bb4dc2530b664652be"
+      },
+      {
+        "path": "src/main/chatSessionStore.ts",
+        "sha256": "sha256:c17c2e0b973dcfa1e661443dd6e9ef9d8a3006faaffd7ed52db5da2001722863"
+      },
+      {
+        "path": "src/main/container.test.ts",
+        "sha256": "sha256:1e96521b7075b86c7623f19ff8f9f4b6fcdb5bac6e28cf5a4da48aa0640fd3c4"
+      },
+      {
+        "path": "src/main/container.ts",
+        "sha256": "sha256:9b291d01400a176031deb2aa10efb8d0f30cc9319dc5206754cf4767cfbccd59"
+      },
+      {
+        "path": "src/main/conversationCausalStore.test.ts",
+        "sha256": "sha256:d7b38ea8cebd29ef076f6de4495a346ec943e227d1f3b8bd8bfc29d7e0497027"
+      },
+      {
+        "path": "src/main/conversationCausalStore.ts",
+        "sha256": "sha256:ca2c879832ad03a40ec2695a31e2b65d1f64a422dec121845e8bed1f22563be8"
+      },
+      {
+        "path": "src/main/conversationSettlementReconciler.test.ts",
+        "sha256": "sha256:31d354ba156513766658626acdd6dc14e6c43eeae928622548fd7ac2821bf775"
+      },
+      {
+        "path": "src/main/conversationSettlementReconciler.ts",
+        "sha256": "sha256:78fdc3a96fd8eb2442d8b0ef9d2bf58055455e3ff798abfdd1fc513b8c334bf2"
+      },
+      {
+        "path": "src/main/kernel/chatKernelSegment.test.ts",
+        "sha256": "sha256:693f1786cf108054bfbc40c6b26c2b160f7fd3a206c9666ef9473436f9824c11"
+      },
+      {
+        "path": "src/main/kernel/chatKernelSegment.ts",
+        "sha256": "sha256:efaccbb98a434844d8816e74569ce93dd615f8a21adbb989ff894dcb3ba0c2cc"
+      },
+      {
+        "path": "src/main/kernel/productionKernelDriver.ts",
+        "sha256": "sha256:0ea8b78f801284c595263b209e558c506f0bacf435f99c2d5b867648416ef45b"
+      },
+      {
+        "path": "src/main/main.ts",
+        "sha256": "sha256:6876554593dca953f5483ce0345121ff25c0a9b81225947db7e8fadd4c37a3b5"
+      },
+      {
+        "path": "src/main/messageIntegrity.test.ts",
+        "sha256": "sha256:3d082e0062b98fd1f6129202aca4647b803056ac733c7f29b44c2bc5bdb20d3d"
+      },
+      {
+        "path": "src/main/messageIntegrity.ts",
+        "sha256": "sha256:66bc93d01df73dc5bdb3214ac424bca3bdc070a78fc18922d32a5e9b61435f52"
+      },
+      {
+        "path": "src/main/startupRecoverySequence.test.ts",
+        "sha256": "sha256:1e9661f341ae3e1eba3ade602b94e0239a2e47f28b75d20cec1944fe32366560"
+      },
+      {
+        "path": "src/main/startupRecoverySequence.ts",
+        "sha256": "sha256:a6a3b4fe465acb2f9f787886b3261fdca200fc9342df0eabe21bf5a256b3bf31"
+      },
+      {
+        "path": "src/main/storage/migrateRoundTrip.test.ts",
+        "sha256": "sha256:bd07758cfc9c56cfd5249eb6f93f6c46849251a4737da67836356e51bb199423"
+      },
+      {
+        "path": "src/main/storage/repositories/index.ts",
+        "sha256": "sha256:32142d735148948a096be4dc21926526a074e9dab0640561a69576d4ed959d36"
+      },
+      {
+        "path": "src/main/storage/repositories/repositories.test.ts",
+        "sha256": "sha256:10d60be2dd1da5f48b7e49adae588211ca746658b26c87ca1ac7a8f0094468d0"
+      },
+      {
+        "path": "src/main/storage/repositories/runRepository.test.ts",
+        "sha256": "sha256:aa60af0022e032e71a31418f8d491a9206a2a6a41fdf503bd5f867ceb688c95e"
+      },
+      {
+        "path": "src/main/storage/repositories/runRepository.ts",
+        "sha256": "sha256:82dbc3a483e9b4e07e653bf5c6a184092ca534e6f05750aeaabb319a35a02946"
+      },
+      {
+        "path": "src/main/storage/storeProxy.test.ts",
+        "sha256": "sha256:226f4a5c45cbf000acd4a12a817d73526d7486abc093847bbb5f566581bd3763"
+      },
+      {
+        "path": "src/main/toolApprovalCoordinator.test.ts",
+        "sha256": "sha256:e4105801bfe8fd5779fadf334fbe2e0e58423840bfdaf682f0c8171ced002145"
+      },
+      {
+        "path": "src/main/toolApprovalCoordinator.ts",
+        "sha256": "sha256:28ae8b45f336cca2420fedf58d1fcc6bc5538854f2a65dd005b69914f7f9b072"
+      },
+      {
+        "path": "src/main/toolAuditLog.test.ts",
+        "sha256": "sha256:bbe17b09ceffc6ef7a49e9f5d641412d6e9028a8d993c6f4bf2c57ed305fe97c"
+      },
+      {
+        "path": "src/main/toolAuditLog.ts",
+        "sha256": "sha256:e06a6685e027ee76b8426ba178c743e2e7f123d0bedabaef9f80d2a2668bcbfe"
+      },
+      {
+        "path": "src/main/toolAuthorizationService.test.ts",
+        "sha256": "sha256:7c009d014d75a02ba31c895605ba3cfb59b6c33643e2cd26be0a3b66e3c435ee"
+      },
+      {
+        "path": "src/main/toolAuthorizationService.ts",
+        "sha256": "sha256:a0736cc5087c908c9eef266ece4803703da0ba6b5d18e485457aebf9763ad93b"
+      },
+      {
+        "path": "src/main/toolObservationOffload.test.ts",
+        "sha256": "sha256:60bc1a1e8fdbf22811d07bf677aec4159b1f4dbcb03c5c4ec61a2dc70a8a4be2"
+      },
+      {
+        "path": "src/main/toolObservationOffload.ts",
+        "sha256": "sha256:f47fca929e9185fb0ba735f4a5963c008f6f04d69ee1940162e8395faa09f53e"
+      },
+      {
+        "path": "src/main/toolRuntime.test.ts",
+        "sha256": "sha256:8129547766b1abf27d3d87d2195f4da68c9af357e0b969d7de9be8a872d13824"
+      },
+      {
+        "path": "src/main/toolRuntime.ts",
+        "sha256": "sha256:0134eb5a5db1e0de5bc900b4adf180b5fab76f5eb8d46f53e0cbcb22f560cb7a"
+      },
+      {
+        "path": "src/main/workspaceRunStore.test.ts",
+        "sha256": "sha256:a171707d7ddd8ba67f5442368493d473a5351736b5284b12afbf3f751a719841"
+      },
+      {
+        "path": "src/main/workspaceRunStore.ts",
+        "sha256": "sha256:28a97a69edb3acd0ce50088466fc0a0c1050b3340162bd72b581313dcaaa445c"
+      },
+      {
+        "path": "src/preload/index.test.ts",
+        "sha256": "sha256:7d3a1ee4372352420e08c0c8741d88b93869a217f3af61cf804978373c91a92b"
+      },
+      {
+        "path": "src/preload/index.ts",
+        "sha256": "sha256:44e489f77644756eeda5039757b41655a7d776ade746d1fbced62ef502c438d0"
+      },
+      {
+        "path": "src/renderer/chatResultSettlement.test.ts",
+        "sha256": "sha256:49f4fac9f2303ea79483a0c2a6843d4ea30e007bc4700bd7708c4dbe366e3379"
+      },
+      {
+        "path": "src/renderer/chatResultSettlement.ts",
+        "sha256": "sha256:6feb553b92251456cefd99212e3e1ba92ab3454a3f14f7e3418186f693832834"
+      },
+      {
+        "path": "src/renderer/chatStreamReducer.test.ts",
+        "sha256": "sha256:65a52b3cefe00dcbbbb408fdf5d2fd28b3952267b342190ba7f79b4dce2d3f6d"
+      },
+      {
+        "path": "src/renderer/chatStreamReducer.ts",
+        "sha256": "sha256:6edd1f3299791f63161f5eee5c123bfa0422a7a6e96e54d93e7b373610d84530"
+      },
+      {
+        "path": "src/renderer/components/AgentChatPanel.tsx",
+        "sha256": "sha256:de355e6f3db1c7e2b0dbcddfb62f9b3b0ff838d484f6e3975fd300de665817a8"
+      },
+      {
+        "path": "src/renderer/materialDesign.test.ts",
+        "sha256": "sha256:eb6ca09310dbd5d16dc0d6d66e9a0d9922a56e3934dc471556879cff6e17e5f7"
+      },
+      {
+        "path": "src/renderer/toolApprovalProjection.test.ts",
+        "sha256": "sha256:23684d794b086cf35a9020f72d311e9113f633a0ad840a2729bdc76247a67086"
+      },
+      {
+        "path": "src/renderer/toolApprovalProjection.ts",
+        "sha256": "sha256:2581861099f024b335d72cabf0690fe1bf5db472adaa013fb045190d0778dc6c"
+      },
+      {
+        "path": "src/shared/agentProtocol.test.ts",
+        "sha256": "sha256:ecd1d919214e7eae873106978d1a98f9c36b8184ef3b9db2bbfcf9c5636a125b"
+      },
+      {
+        "path": "src/shared/agentProtocol.ts",
+        "sha256": "sha256:803e687b8d984a8575e3865df66ccb80a4e9c7030476e25ceedf26acc33a1017"
+      },
+      {
+        "path": "src/shared/agentRuns.ts",
+        "sha256": "sha256:f28f70b052e1aeddf8f8fc8b5e2e50553e42bd6a6aae28f1a9fa0395f189a4ae"
+      },
+      {
+        "path": "src/shared/chat.ts",
+        "sha256": "sha256:86224dcbd715fe756b3ff08c008ad31550b6c52b4545dc00f2ef50ccc4a841e1"
+      },
+      {
+        "path": "src/shared/contextSurfaceBoundary.test.ts",
+        "sha256": "sha256:2cfeeb01645ddf08a818e53733c04ec04b03bc480a859151f509f6238eff9430"
+      },
+      {
+        "path": "src/shared/conversationCausalSpine.test.ts",
+        "sha256": "sha256:bbc17d59782ba3a39a28bd10b013eda3b69338fbc9fb16b2744f6447df603926"
+      },
+      {
+        "path": "src/shared/conversationCausalSpine.ts",
+        "sha256": "sha256:a09b0eb070f0196df677366bc5034f9abbb81b15aaac24452c4e567c65a11123"
+      },
+      {
+        "path": "src/shared/conversationDisclosure.test.ts",
+        "sha256": "sha256:77b5a90f4f60f984ef2da147fccccfc1f17a21e7f7a824d1166439b899a03e55"
+      },
+      {
+        "path": "src/shared/conversationDisclosure.ts",
+        "sha256": "sha256:f4506408ae26734eeba5f91879bf1aa78818bb19c3f54441638fe62bbb81237b"
+      },
+      {
+        "path": "src/shared/conversationDisclosureClosure.test.ts",
+        "sha256": "sha256:a40b1ffaa11b6ebc349985cd76d5133f520433db60323250ca5c5155a31b9ece"
+      },
+      {
+        "path": "src/shared/conversationDisclosureFreeze.test.ts",
+        "sha256": "sha256:e0608e5fc39033535c0550ca549021ee0ef2984f7e339fd1c7fc38056efbe6d5"
+      },
+      {
+        "path": "src/shared/conversationDisclosureProgram.test.ts",
+        "sha256": "sha256:087cff0ba7f208464bf62e41f3a10dfbb88f3f2461d46398187c0b4cfa16dd5c"
+      },
+      {
+        "path": "src/shared/credentialRedaction.test.ts",
+        "sha256": "sha256:d18f01463175600b3f9b926aa165a6f6146ceb7c28448ed31ad6819a1f950da5"
+      },
+      {
+        "path": "src/shared/credentialRedaction.ts",
+        "sha256": "sha256:6329f9a0b8fb3a558faf77a54842c7ac24b7c7223f50ea4e4e5c03f91be9a715"
+      },
+      {
+        "path": "src/shared/modelServiceNotice.test.ts",
+        "sha256": "sha256:ee75a7506bbdca8f80ad748c8a37a97e189c14242598e4d8c5e330fbcd6c102c"
+      },
+      {
+        "path": "src/shared/modelServiceNotice.ts",
+        "sha256": "sha256:da1f4f0fef8d47c4fa1d6e2999475ef67f1f457b68d932f2cd8af2f51ba0c811"
+      },
+      {
+        "path": "src/shared/packageScripts.test.ts",
+        "sha256": "sha256:2f30d10ebd5ccc408255813e0d10ca4e8bd145930bdbe263bc2a6e5d2fa61efe"
+      },
+      {
+        "path": "src/shared/productionKernelBoundary.test.ts",
+        "sha256": "sha256:9a417a86c6cd9449b06cd96fff6364ad4de0b2a83539f0a9c130f7ae5d7d99e4"
+      },
+      {
+        "path": "src/shared/secretSafeFailure.test.ts",
+        "sha256": "sha256:659212015404f1fb765d79de32dc05030380ca5f9bd3a5b2a58115f0118dc476"
+      },
+      {
+        "path": "src/shared/secretSafeFailure.ts",
+        "sha256": "sha256:8b6d75de620bf3acf12b7fcd32d56b17b115c2129451bdddff383d00275cef1e"
+      },
+      {
+        "path": "src/shared/storageContract.ts",
+        "sha256": "sha256:cdb17ed2155c0cc518bafe0d79a0673b5b402c6217471c8164ae9b8f95389b73"
+      },
+      {
+        "path": "src/shared/toolApproval.test.ts",
+        "sha256": "sha256:8f6c44a875f883b069754dd6d29a7aca73f3da5470605643f6894b8623fd7d31"
+      },
+      {
+        "path": "src/shared/toolApproval.ts",
+        "sha256": "sha256:04ff64a8a11a18bc6c8c34f5bcf0394dd4ea6012ba92c156cca7ef8e53b79e28"
+      },
+      {
+        "path": "src/shared/toolInvocationLedger.test.ts",
+        "sha256": "sha256:e194eb74d40c31f432264830070f7fa074bbbc9150f53e46bc4a402d43512fa2"
+      },
+      {
+        "path": "src/shared/toolInvocationLedger.ts",
+        "sha256": "sha256:ab97e4b5fd91a73ba77bf4673c312d6c18289229e3a2425c384465826e2bad08"
+      },
+      {
+        "path": "src/shared/toolPermissions.ts",
+        "sha256": "sha256:a035f687368ff609ea74507ae280620353ef2a5d19c5ffd9d89b606b87748775"
+      },
+      {
+        "path": "src/shared/toolRuntimeBoundary.test.ts",
+        "sha256": "sha256:b1e1bbdf45143cb55ac5f9aa989044b90e1138f792020fba3466edbe7fe6f00d"
+      },
+      {
+        "path": "src/shared/workspaceRunLedger.ts",
+        "sha256": "sha256:6cec7e9687bb8db1f06bcfd18e6c88eb15a2ea5b50a1d39675673b6cc550f7e8"
+      }
+    ],
+    "digest": "sha256:e1a5300d6015543e0a6a8e8f09f2a13fcb955111b87c08545e0f882bb786796b"
+  },
+  "independentReview": {
+    "status": "passed",
+    "round": 23,
+    "closureManifestPath": ".zerox/verification/conversation-disclosure/CD03-round23-closure-manifest.json",
+    "history": [
+      {
+        "round": 1,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "rootFamilies": 4
+      },
+      {
+        "round": 2,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 7
+      },
+      {
+        "round": 3,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 3,
+        "reviewVerdicts": "FAIL/FAIL/PASS"
+      },
+      {
+        "round": 4,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 3,
+        "reviewVerdicts": "FAIL/ERROR_AFTER_FINDING/FAIL"
+      },
+      {
+        "round": 5,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 2,
+        "reviewVerdicts": "FAIL/FAIL/PASS"
+      },
+      {
+        "round": 6,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 3,
+        "reviewVerdicts": "FAIL/FAIL/PASS"
+      },
+      {
+        "round": 7,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 2,
+        "reviewVerdicts": "FAIL/FAIL/FAIL"
+      },
+      {
+        "round": 8,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "rootFamilies": 4,
+        "reviewVerdicts": "FAIL/FAIL/FAIL"
+      },
+      {
+        "round": 9,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 1,
+        "reviewVerdicts": "PASS/PASS/FAIL"
+      },
+      {
+        "round": 10,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "rootFamilies": 5,
+        "reviewVerdicts": "FAIL/FAIL/FAIL"
+      },
+      {
+        "round": 11,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "rootFamilies": 7,
+        "reviewVerdicts": "FAIL/FAIL/FAIL",
+        "snapshotDigest": "sha256:9080e208d063e9ab348440f9774e8f2e2145867e19b09331f5a597318f0f46a1"
+      },
+      {
+        "round": 12,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "rootFamilies": 8,
+        "reviewVerdicts": "FAIL/FAIL/FAIL",
+        "snapshotDigest": "sha256:947f798e00355561fdd475b2f56b46684915b26ab36e3146131afaa5822085d9"
+      },
+      {
+        "round": 13,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "rootFamilies": 11,
+        "minorFindings": 1,
+        "reviewVerdicts": "FAIL/FAIL/FAIL",
+        "snapshotDigest": "sha256:1605f85450d925ab12ad3fd92882f306a9783c1a53684e1eb85aa187bb3fe8ce"
+      },
+      {
+        "round": 14,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 7,
+        "reviewVerdicts": "FAIL/FAIL/FAIL",
+        "snapshotDigest": "sha256:d34a1798b888893641f8430dee0b5f8fefa2ee7f245d3e681090517badfd7785"
+      },
+      {
+        "round": 15,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 9,
+        "rootFamilies": 8,
+        "reviewVerdicts": "FAIL/FAIL/FAIL",
+        "snapshotDigest": "sha256:e57abcc1088a2a0ef96a1e24a043f1cbf7d98f9329adaf577308097eec08d964"
+      },
+      {
+        "round": 16,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 10,
+        "rootFamilies": 10,
+        "reviewVerdicts": "FAIL/FAIL/FAIL",
+        "snapshotDigest": "sha256:da075b801050c9f5f17c75085502b268c28ed2e7a279fe854815da5ef7bfdbee"
+      },
+      {
+        "round": 17,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 1,
+        "rootFamilies": 1,
+        "reviewVerdicts": "FAIL/INTERRUPTED/INTERRUPTED",
+        "snapshotDigest": "sha256:538682d1014da5aed3ac03a99fbcb2516f15603c0f50af864a84c320cfae02b9"
+      },
+      {
+        "round": 18,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 4,
+        "rootFamilies": 4,
+        "reviewVerdicts": "INTERRUPTED/INTERRUPTED/FAIL",
+        "snapshotDigest": "sha256:0e5f714c1e6755741bc24813b8e21cd1eb3cb26e029fa92d068ec5691ab28869"
+      },
+      {
+        "round": 19,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 2,
+        "rootFamilies": 2,
+        "reviewVerdicts": "INTERRUPTED/INTERRUPTED/FAIL",
+        "snapshotDigest": "sha256:010a29abb57c37f9aae44ca80bc3575f4ec2995053e7bd83032fdd659b2639d5"
+      },
+      {
+        "round": 20,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 2,
+        "rootFamilies": 2,
+        "reviewVerdicts": "INTERRUPTED/INTERRUPTED/FAIL",
+        "snapshotDigest": "sha256:7b2e8635813d9a284dcb5ee4f393fe0014ee7c11e7608285a230675c31cd2cb6"
+      },
+      {
+        "round": 21,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 1,
+        "rootFamilies": 1,
+        "reviewVerdicts": "INTERRUPTED/FAIL/INTERRUPTED",
+        "snapshotDigest": "sha256:6a0e89b10433dd3cd7d287859e9557d6eafe29b3852ec227a5426e5ff84f2252"
+      },
+      {
+        "round": 22,
+        "status": "failed_then_remediated",
+        "critical": 0,
+        "majorFindings": 1,
+        "rootFamilies": 1,
+        "reviewVerdicts": "FAIL/INTERRUPTED/INTERRUPTED",
+        "snapshotDigest": "sha256:ad395edcd16c29d262bc193c5b753d99804adb2e8385a1ddf53c64c3ee6f11a5"
+      }
+    ]
+  },
+  "safety": {
+    "rawPrivateReasoningPersisted": false,
+    "rawToolArgumentsCopiedToCausalStore": false,
+    "credentialFixturePersisted": false,
+    "durableApprovalUsedAsStartupGrant": false,
+    "disclosureRendererCutover": false,
+    "lifecycleRecoveryRendererFixes": true,
+    "rawApprovalTaskNamePersisted": false,
+    "rawApprovalArgsSummaryPersisted": false,
+    "ambiguousApprovalCommitGrantsExecution": false,
+    "callerForgedWorktreeReceiptAccepted": false,
+    "replayedWorktreeReceiptAccepted": false,
+    "crossBackendWorktreeReceiptReplayAccepted": false,
+    "legacyUnknownPromotedToSuccess": false,
+    "legacyUnknownClaimsContinuationPersisted": false,
+    "unversionedLegacyFingerprintStartsExecution": false,
+    "legacyGuidedInputStartsExecution": false,
+    "waitingInputSettledAsKernelFailure": false,
+    "canceledTerminalSettledAsKernelFailure": false,
+    "terminalActivityUsesStaleCallerSession": false,
+    "conflictTerminalUsesStaleCallerSession": false,
+    "lossyKernelRunIdCollisionAccepted": false,
+    "trajectoryRunRelabeledAsAgentRun": false,
+    "kernelRunRefIsTypeOnly": false,
+    "kernelConflictRunRefMissing": false,
+    "receiptConflictSynthesizesUnpersisted": false,
+    "agentRunRefDeferredUntilAssistantPersistence": false,
+    "invalidInputCreatesKernelRun": false,
+    "unboundClaimReadsCallerSession": false,
+    "routingSessionTreatedAsDurableWithoutProof": false,
+    "sessionIdSentinelCollisionAccepted": false,
+    "kernelAdmissionContinuesAfterRefFailure": false,
+    "routeOnlyFailurePacketPromotesSession": false,
+    "requiredSettlementFailurePublishesPause": false,
+    "terminalExactReplayRejected": false,
+    "toolDispatchStartsBeforeCausalRef": false,
+    "agentRunAssistantAcceptedAfterRefFailure": false,
+    "reviewPendingArtifactCompletesWorkstream": false,
+    "sessionOnlyClaimAdoptsDurableStatus": false,
+    "agentRunStartsBeforeCausalRef": false,
+    "requiredChatFailurePromotesRouteSession": false,
+    "rawSettlementErrorPersisted": false,
+    "guidedInputReplaysIncompleteSettlement": false,
+    "guidedInputProcessingReplaysAfterRestart": false,
+    "assistantReplayReassignsAttempt": false,
+    "agentRunEventsPrecedeAdmission": false,
+    "agentRunTerminalStatusCollapsesToSuccess": false,
+    "configuredWorkspaceFailureStartsExecution": false,
+    "successfulDurablePublicationOmitsPositiveProof": false,
+    "kernelFailureBypassesRequiredJournal": false,
+    "concurrentDuplicateCreatesOwnerLifecycle": false,
+    "preparedSettlementFingerprintOmitsPersistedFields": false,
+    "agentRunProjectionFailureLeavesAdmissionStarted": false,
+    "agentRunAdmissionSettlesWithoutOwner": false,
+    "postCommitAgentRunFailureReentersKernelSettlement": false,
+    "reviewSnapshotSchemaDivergesFromChecker": false,
+    "symlinkFrozenFileAccepted": false,
+    "harnessImportBypassAccepted": false,
+    "terminalPublishedBeforeRequiredSettlement": false,
+    "requiredSettlementStartupRecoverySkipped": false,
+    "staleAttemptAssistantAccepted": false,
+    "approvalIntentPersistedWithoutCausalRef": false,
+    "agentRunAdmissionSurvivesWithoutOwner": false,
+    "agentRunResumeStartsWithoutRevisionLease": false,
+    "agentRunObserverFailureChangesOwnerLifecycle": false,
+    "rawAgentRunFailurePersisted": false,
+    "approvalIdOmittedFromSettlementFingerprint": false,
+    "selfAssertedReviewerObjectAccepted": false,
+    "candidateLocalClosureRunnerAccepted": false,
+    "failedRequiredSettlementOmitsFailureCode": false,
+    "runRepositoryBypassesRevisionFence": false,
+    "requiredSettlementCommitsAfterAttemptInvalidation": false,
+    "assistantAcceptanceCoexistsWithCommittedTerminal": false,
+    "agentRunRevisionTwoSnapshotCannotBootstrapMissingReplica": false,
+    "agentRunRevisionChangesExecutionEnvelope": false,
+    "failedSettlementAssistantReconciled": false,
+    "agentRunResumeWithoutOwnerLease": false,
+    "agentRunExecutionUsesMutableEnvelopeBeforeCas": false,
+    "agentRunShadowRevisionGapPersists": false,
+    "rawToolFailurePersistedOrPublished": false,
+    "nestedJsonCredentialPersistedOrPublished": false,
+    "unicodeCredentialSyntaxPersistedOrPublished": false,
+    "legacyAgentRunRawToolErrorPersistedOrPublished": false,
+    "finalAssistantCredentialPersistedOrPublished": false,
+    "externalClosureExecutesUnfrozenBytes": false,
+    "externalClosureReceiptStdoutIgnored": false,
+    "externalClosureSkipsPostflightRehash": false,
+    "externalClosureGovernanceInputsChangeAfterPreflight": false,
+    "agentRunAdmissionRevisionGapReconciled": false,
+    "crossDomainSuccessCommitsAsymmetrically": false,
+    "encodedOrMultilineCredentialPersistedOrPublished": false,
+    "splitStreamCredentialPersistedOrPublished": false,
+    "guidedInputCredentialPersistedOrPublished": false,
+    "rawModelServiceNoticePersistedOrPublished": false,
+    "rawAgentRunIdentityMemoryPersisted": false,
+    "higherAgentRunShadowAllowsStartup": false,
+    "stagedExecutableMutationAccepted": false,
+    "completedWithoutExternalClosureAttestation": false,
+    "handAuthoredReviewSnapshotAccepted": false,
+    "completedWithoutCallerPinnedExternalAnchor": false,
+    "nonRecoverableGovernancePublication": false,
+    "governanceAliasOrParentSwapAccepted": false,
+    "futureReviewReceiptAttested": false,
+    "partialAtomicTempBlocksRecovery": false,
+    "pathnameParentReplacementRedirectsCommit": false,
+    "exactTempMetadataBypassAccepted": false,
+    "leafEntrySwapBreaksPublicationRecovery": false,
+    "missingOrAmbiguousGovernanceCompletionMarkerAccepted": false,
+    "invalidGovernanceCompletionMarkerAccepted": false,
+    "zeroByteGovernanceTempBlocksRecovery": false,
+    "existingExactGovernanceTempSkipsFsync": false,
+    "agentRunDerivativePrecedesOwnerCommit": false
+  },
+  "rollback": {
+    "safe": true,
+    "strategy": "Disable causal shadow adapters and approval reload recovery while preserving legacy Chat, Workspace Run, Tool Invocation, and authorization data; already-written refs and interrupted metadata remain backward-compatible."
+  }
+}

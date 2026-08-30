@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "kind": "cd05-chat-browser-acceptance",
+  "accepted": true,
+  "mode": "projected",
+  "defaultMode": "legacy",
+  "source": "production-build-electron-capture",
+  "viewportEvidence": {
+    "compact": {
+      "disclosureVisible": true,
+      "operationsExpanded": "false",
+      "operationCount": 4,
+      "rowIds": [
+        "chat-disclosure:narrative:preview-disclosure-request:started",
+        "chat-disclosure:result:preview-settlement"
+      ],
+      "duplicateRowCount": 0,
+      "horizontalOverflow": false,
+      "activeElementLabel": ""
+    },
+    "expanded": {
+      "disclosureVisible": true,
+      "operationsExpanded": "true",
+      "operationCount": 4,
+      "rowIds": [
+        "chat-disclosure:narrative:preview-disclosure-request:started",
+        "chat-disclosure:operations:preview-disclosure-request:workspace",
+        "chat-disclosure:operations:preview-tool-1",
+        "chat-disclosure:operations:preview-tool-2",
+        "chat-disclosure:operations:preview-disclosure-request:model",
+        "chat-disclosure:result:preview-settlement"
+      ],
+      "duplicateRowCount": 0,
+      "horizontalOverflow": false,
+      "activeElementLabel": ""
+    },
+    "collapsedAgain": {
+      "disclosureVisible": true,
+      "operationsExpanded": "false",
+      "operationCount": 4,
+      "rowIds": [
+        "chat-disclosure:narrative:preview-disclosure-request:started",
+        "chat-disclosure:result:preview-settlement"
+      ],
+      "duplicateRowCount": 0,
+      "horizontalOverflow": false,
+      "activeElementLabel": "执行过程4"
+    },
+    "narrow": {
+      "disclosureVisible": true,
+      "operationsExpanded": "false",
+      "operationCount": 4,
+      "rowIds": [
+        "chat-disclosure:narrative:preview-disclosure-request:started",
+        "chat-disclosure:result:preview-settlement"
+      ],
+      "duplicateRowCount": 0,
+      "horizontalOverflow": false,
+      "activeElementLabel": "执行过程4"
+    }
+  },
+  "screenshots": [
+    "CD05-chat-browser-compact.png",
+    "CD05-chat-browser-expanded.png",
+    "CD05-chat-browser-narrow.png"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "kind": "cd06-cross-surface-browser-acceptance",
+  "status": "passed",
+  "accepted": true,
+  "source": "production-build-electron-capture",
+  "desktop": {
+    "taskCards": 2,
+    "disclosureCount": 2,
+    "disclosureIds": [
+      "scheduled-run:demo_run_1",
+      "scheduled-run:demo_run_2"
+    ],
+    "duplicateDisclosureIds": 0,
+    "failedExpanded": true,
+    "failedRoleText": "最近失败工具调用被拒绝：web_fetch 的域名不在允许列表中。2026/6/5 15:30:00Run demo_run_2 · revision 1",
+    "childRunProjected": false,
+    "horizontalOverflow": false
+  },
+  "narrow": {
+    "taskCards": 2,
+    "disclosureCount": 2,
+    "disclosureIds": [
+      "scheduled-run:demo_run_1",
+      "scheduled-run:demo_run_2"
+    ],
+    "duplicateDisclosureIds": 0,
+    "failedExpanded": true,
+    "failedRoleText": "最近失败工具调用被拒绝：web_fetch 的域名不在允许列表中。2026/6/5 15:30:00Run demo_run_2 · revision 1",
+    "childRunProjected": false,
+    "horizontalOverflow": false
+  },
+  "screenshots": [
+    "CD06-cross-surface-desktop.png",
+    "CD06-cross-surface-narrow.png"
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 10,
+  "kind": "conversation-disclosure-continuation-review-rejection",
+  "algorithm": "sha256-canonical-json-v1",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "rejectedRound": 9,
+  "recoveryRound": 10,
+  "status": "rejected_after_review",
+  "sourcePolicy": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round9-successor-evolution-policy.json",
+    "byteSha256": "sha256:89ab2781cf8f31a483aba063f11839f0c2e382478c27684e7da093d84e586bce",
+    "canonicalDigest": "sha256:97c8b003b40d94eb76d0546dc59430d4162ad3618523a6ba2203881adfccc6d1"
+  },
+  "sourceSnapshot": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round9-review-snapshot.json",
+    "byteSha256": "sha256:db56d548fff3302d480123e7e231ed83c308ddfb6ea45660d3b448e25423b5b4",
+    "canonicalDigest": "sha256:ab22feba05bbb2eb4efe8ab58b129e2be3cd7bf203f206babf338b51658aec15",
+    "frozenFileCount": 258,
+    "transitionPayloadFileCount": 4,
+    "baselineFileCount": 12
+  },
+  "completedReceipts": [
+    {
+      "lane": "contract",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round9-contract-review.json",
+      "byteSha256": "sha256:2c016a0a0ee7336be0fa0d8bca59be80c0628dd08ff574ebe23355b249b6cd02",
+      "canonicalDigest": "sha256:5ce894889d0c44db5755dc28d94b7a886a304111ac407eadd5d518d3a304e3bf",
+      "challenge": "sha256:fde0959cf0eccdee4abc4fddc3826df72920222ae9bddbc0bd6d419d7f5de9a0",
+      "verdict": "failed",
+      "findingCounts": {
+        "critical": 0,
+        "major": 5,
+        "minor": 0
+      }
+    },
+    {
+      "lane": "governance",
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round9-governance-review.json",
+      "byteSha256": "sha256:e6831b8f6837b139914c04b04f90b4a6384c1f937709180e83c56f882ddbeab2",
+      "canonicalDigest": "sha256:e07d67f1319d2c00cd4b482b2f92b2cd11511a3d93093111027e931ba52ab127",
+      "challenge": "sha256:2b913b16a55970cfbbf0d223636f14ecf93a80c89f41036dc62a0c8ee0cae8bf",
+      "verdict": "passed",
+      "findingCounts": {
+        "critical": 0,
+        "major": 0,
+        "minor": 0
+      }
+    }
+  ],
+  "findingIds": [
+    "R9-CONTRACT-001",
+    "R9-CONTRACT-002",
+    "R9-CONTRACT-003",
+    "R9-CONTRACT-004",
+    "R9-CONTRACT-005"
+  ],
+  "findingSetDigest": "sha256:49875d7f1bfeaf06c5d46efde519c24b178adf0bf294c88fc77f5fb8859ba5c8",
+  "aggregateFindingCounts": {
+    "critical": 0,
+    "major": 5,
+    "minor": 0
+  },
+  "repositoryForbiddenOutputs": [
+    ".zerox/verification/conversation-disclosure/CD03A-round9-closure-manifest.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round9-external-attestation.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round9-runtime-review.json"
+  ],
+  "externalAnchorRule": {
+    "policyDigest": "sha256:97c8b003b40d94eb76d0546dc59430d4162ad3618523a6ba2203881adfccc6d1",
+    "snapshotDigest": "sha256:ab22feba05bbb2eb4efe8ab58b129e2be3cd7bf203f206babf338b51658aec15",
+    "admissibility": "forbidden",
+    "externalAbsenceClaim": "not_asserted"
+  },
+  "priorRejections": {
+    "round1CanonicalDigest": "sha256:ec981e92f486ae75a56b3b4b393f95d095f6d684e6af54fe12cc7a9ba0fe1f99",
+    "round2": {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-prefreeze-rejection.json",
+      "byteSha256": "sha256:f677b1fc8cb4113ebb0c69c3b187a8b229156002e7d769764ca4e2d29677e3b9",
+      "canonicalDigest": "sha256:75a01cdef04821f1d1ca447a5b2383d8d47be331bec7777017042bf90fcf6614"
+    }
+  },
+  "digest": "sha256:ae3b6af80edc4b69d4373e9023f12cb364e9f4259298132dd365cf9e04587be2"
+}

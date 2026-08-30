@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "CD02-contract-characterization",
+  "featureId": "P106-conversation-disclosure-contract-foundation",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "generatedAt": "2026-08-18T14:23:31+08:00",
+  "status": "passed",
+  "implementationBoundary": {
+    "mode": "shared_contract_and_pure_fixture_projection_only",
+    "productionStoreConnected": false,
+    "ipcConnected": false,
+    "rendererConnected": false,
+    "persistenceSchemaChanged": false,
+    "productionCutover": false,
+    "nextAuthorizedWorkstream": "CD03"
+  },
+  "sources": {
+    "decision": ".zerox/decisions/CD02-conversation-disclosure-contract.md",
+    "implementation": "src/shared/conversationDisclosure.ts",
+    "tests": "src/shared/conversationDisclosure.test.ts",
+    "researchBaseline": ".zerox/research/P104-conversation-progressive-disclosure-study.md"
+  },
+  "characterizations": [
+    {
+      "id": "C01-authoritative-statuses",
+      "result": "passed",
+      "assertions": 74,
+      "evidence": "Every existing Goal, Plan, Agent and Scheduled Run, Workspace Run, Tool Invocation, and Kernel status is mapped through an exhaustive typed record."
+    },
+    {
+      "id": "C02-observation-status-boundary",
+      "result": "passed",
+      "assertions": 4,
+      "evidence": "Approval, guided input, context, usage, Chat message, and Trajectory observations remain adapter statuses and do not invent an owning-domain state machine."
+    },
+    {
+      "id": "C03-trajectory-evidence-not-settlement",
+      "result": "passed",
+      "assertions": 2,
+      "evidence": "Trajectory event names alone normalize to unknown; only a validated embedded Goal or Run status can normalize lifecycle."
+    },
+    {
+      "id": "C04-stable-identity",
+      "result": "passed",
+      "assertions": 5,
+      "evidence": "Length-prefixed tuple identity prevents delimiter collisions and excludes list index or timestamp-only identity."
+    },
+    {
+      "id": "C05-contributor-bounds",
+      "result": "passed",
+      "assertions": 10,
+      "evidence": "Contributor sets are authority-deduplicated, deterministically ordered, capped at 16 refs per page, and cursor-bound to scope, item, and set fingerprint."
+    },
+    {
+      "id": "C06-disclosure-policy",
+      "result": "passed",
+      "assertions": 8,
+      "evidence": "Blocking items remain visible, explicit expansion preference is preserved, and restricted detail never becomes inline."
+    },
+    {
+      "id": "C07-unknown-compatibility",
+      "result": "passed",
+      "assertions": 14,
+      "evidence": "Required unknown data degrades coverage without a fabricated row, optional data yields a typed generic evidence row, and ignorable replay is counted once without a row."
+    },
+    {
+      "id": "C08-coverage-honesty",
+      "result": "passed",
+      "assertions": 7,
+      "evidence": "Ephemeral or partial source cuts cannot claim complete coverage; incompatible cuts require degraded coverage."
+    },
+    {
+      "id": "C09-snapshot-delta-replay",
+      "result": "passed",
+      "assertions": 19,
+      "evidence": "Exact stale delivery is a no-op while scope, query, generation, projection, overlap, gap, conflict, and dishonest coverage request atomic reset with the prior object unchanged."
+    },
+    {
+      "id": "C10-attempt-tombstones",
+      "result": "passed",
+      "assertions": 11,
+      "evidence": "Settlements retain request, turn, attempt, sequence, fingerprint, outcome, and accepted assistant identity/content receipt so reset or accepted attempts cannot be resurrected or overwritten."
+    },
+    {
+      "id": "C11-canonical-live-answer",
+      "result": "passed",
+      "assertions": 31,
+      "evidence": "Begin, answer delta, exact duplicate, conflicting duplicate, gap, reset, supersede, late delta, retry, role-checked accept, durable receipt handoff, conflicting snapshot, and interleaved streams are characterized through one reducer."
+    },
+    {
+      "id": "C12-safe-summary-boundary",
+      "result": "passed",
+      "assertions": 18,
+      "evidence": "Secret-shaped input is redacted before UTF-8 byte and line truncation; output contracts contain no raw reasoning, tool arguments, or unrestricted payload."
+    },
+    {
+      "id": "C13-required-pause-baseline",
+      "result": "characterized_deferred_repair",
+      "assertions": 2,
+      "evidence": "P104 proves required AgentLoop/provider pause can omit the Workspace Run event while ordinary pause can leave its snapshot running. CD02 does not connect to or misrepresent that source; CD03 owns causal settlement repair."
+    },
+    {
+      "id": "C14-km04-drift-baseline",
+      "result": "characterized_deferred_repair",
+      "assertions": 2,
+      "evidence": "P104 records fire-and-forget Workspace Run writes that do not satisfy KM04's awaited-settlement claim. CD02 exposes durability and coverage instead of declaring these writes committed; CD03 owns convergence."
+    }
+  ],
+  "verification": [
+    {
+      "command": "npm test -- --run src/shared/conversationDisclosure.test.ts",
+      "result": "passed",
+      "testFiles": 1,
+      "tests": 121
+    },
+    {
+      "command": "npm run typecheck:tests",
+      "result": "passed",
+      "coveredTestFiles": 295
+    }
+  ],
+  "safety": {
+    "rawPrivateReasoningRequired": false,
+    "credentialFixturePersisted": false,
+    "productionDataRead": false,
+    "authoritativeDataWritten": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "kind": "v3.9.2-local-candidate-package",
+  "status": "passed",
+  "version": "3.9.2",
+  "releaseMode": "local-candidate",
+  "publish": "never",
+  "npmCliSha256": "sha256:8e5f6f3429f8cdbe693cdc29904e9d5a7b127a494bd15c804bd54c7403bfcbe7",
+  "sourceDigest": "sha256:1b94f725344d8f6a7fcd752ff3689df186b63a5481ec5a32cf0ac0029a2be039",
+  "sourceFileCount": 1185,
+  "appPath": "release-local/mac-arm64/Zerox Agent.app",
+  "appAsarBytes": 46809748,
+  "appAsarSha256": "sha256:25efa9e17adbdf3b44801a7a09d8adf7885b8d4d705e8ca01a116f96f6df5abb",
+  "appTreeEntryCount": 617,
+  "appTreeSha256": "sha256:459491c26ee24792029b686949a98cfb4152bc61205ec468d1337051be3a8f50"
+}

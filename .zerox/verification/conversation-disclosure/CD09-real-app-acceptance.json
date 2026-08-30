@@ -1,0 +1,1857 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-real-app-acceptance",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "version": "3.9.2",
+  "status": "passed",
+  "accepted": true,
+  "scenarioCount": 19,
+  "passedScenarioCount": 19,
+  "commandResults": [
+    {
+      "command": "./node_modules/.bin/electron --no-sandbox scripts/capture-cd05-chat-browser.mjs",
+      "status": "passed",
+      "stdoutSha256": "sha256:ef991d6f471ecaa170cbdf395db3a952a32e53b13ea18722a77dcde2444fd58a",
+      "stderrSha256": "sha256:ef4eb218d657ca03af64f6de6651c47ce084060593bff8cbdbb4b5db4b904ce8"
+    },
+    {
+      "command": "./node_modules/.bin/electron --no-sandbox scripts/capture-cd06-cross-surface-browser.mjs",
+      "status": "passed",
+      "stdoutSha256": "sha256:a78273a78e3d80eabab6e0ef29272b6ec524923f1fc3f29fd1af0bf17845ac0f",
+      "stderrSha256": "sha256:d1dc295342777545a3a65cdebf124de5fad5f13e9751b20eef6fcb2a040177bf"
+    },
+    {
+      "command": "./node_modules/.bin/electron --no-sandbox scripts/capture-cd07-inspector-browser.mjs",
+      "status": "passed",
+      "stdoutSha256": "sha256:75bf27b787d3df63184c4dd4d9caab49bd9f90d5b3f0b26140fd030447167a79",
+      "stderrSha256": "sha256:80fdba7a56dc760012f2e3968679b3931af8311c87ab0dbbc596f47ff6a2159e"
+    },
+    {
+      "command": "/private/tmp/zerox-anchor-v15-1788039429-42833/runtime/bin/node scripts/run-conversation-disclosure-hardening.mjs",
+      "status": "passed",
+      "stdoutSha256": "sha256:3b8acd58e73e06bc28822501bd8c5f6cba8f997c636bad59c81fc5bd319bf515",
+      "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "/private/tmp/zerox-anchor-v15-1788039429-42833/runtime/bin/node scripts/run-production-smoke.mjs --skip-build",
+      "status": "passed",
+      "stdoutSha256": "sha256:946831b9c2e4e91ee4c4349c2f7fd5772cd3ccdc350bc39285bfbd5cda0eac79",
+      "stderrSha256": "sha256:e327f3f386d1e62d0832199f0c96042a9fc60b6ecafc41c13b3b5f448c5193d3"
+    },
+    {
+      "command": "/private/tmp/zerox-anchor-v15-1788039429-42833/runtime/bin/node scripts/run-conversation-disclosure-real-app.mjs",
+      "status": "passed",
+      "stdoutSha256": "sha256:7c09a3b819040d17193dea50ea6215e0d4792a77b7c1dc551db5d6a6b1e559bb",
+      "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "/private/tmp/zerox-anchor-v15-1788039429-42833/runtime/bin/node node_modules/vitest/vitest.mjs run --run src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts src/renderer/toolApprovalProjection.test.ts src/renderer/toolApprovalVisibility.test.ts src/renderer/goalAcceptanceInteraction.test.ts src/renderer/goalTerminalTruth.test.ts src/renderer/chatTaskActivityRestore.test.ts src/main/conversationEvidenceResolver.test.ts src/main/planStore.test.ts src/main/chatSessionStore.test.ts src/main/jsonlRecovery.test.ts --maxWorkers=1 --reporter=json",
+      "status": "passed",
+      "stdoutSha256": "sha256:7d1e33f56aa66ddb8c37028f8bf45afe4f514b26f913f7ecb197567d932534f0",
+      "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "testFiles": [
+        "src/renderer/chatStreamReducer.test.ts",
+        "src/renderer/materialDesign.test.ts",
+        "src/renderer/toolApprovalProjection.test.ts",
+        "src/renderer/toolApprovalVisibility.test.ts",
+        "src/renderer/goalAcceptanceInteraction.test.ts",
+        "src/renderer/goalTerminalTruth.test.ts",
+        "src/renderer/chatTaskActivityRestore.test.ts",
+        "src/main/conversationEvidenceResolver.test.ts",
+        "src/main/planStore.test.ts",
+        "src/main/chatSessionStore.test.ts",
+        "src/main/jsonlRecovery.test.ts"
+      ],
+      "passedTests": [
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer groups status events by stable authority identity without duplicating updates"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer keeps failures prominent and honors explicit user expansion state"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer redacts credential-shaped status summaries before projection"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer requires positive provenance before promoting a status route into a durable session"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer requires positive provenance before promoting a terminal route into a durable session"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer does not promote any event from a transport-only failure packet"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer streams answer deltas into one assistant placeholder and finalizes without a duplicate reply"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer removes routine orchestration replies when their state is rendered elsewhere"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer uses an ISO timestamp instead of a hardcoded relative label when finalizing non-streamed replies"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer keeps thinking deltas and tool call previews separate from answer text"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer removes a superseded partial answer and rejects late deltas from the old attempt"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer clears rejected transient output when a missing supersede creates a sequence gap"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer ignores stale stream events for other sessions or requests"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer stores pending guided input requests from the active stream"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer stores live output parts in answer-led order when evidence arrives before text"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer upserts live output parts by id"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer settles a streamed diagnostic failure without appending a duplicate assistant message"
+        },
+        {
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "fullName": "chat stream reducer keeps partial output and appends a diagnostic for a later transport failure"
+        },
+        {
+          "testFile": "src/renderer/chatTaskActivityRestore.test.ts",
+          "fullName": "chat task activity restore rebuilds the right-side activity state from persisted session events"
+        },
+        {
+          "testFile": "src/renderer/chatTaskActivityRestore.test.ts",
+          "fullName": "chat task activity restore restores the latest pending guided skill input after reload"
+        },
+        {
+          "testFile": "src/renderer/chatTaskActivityRestore.test.ts",
+          "fullName": "chat task activity restore restores a failed terminal event as incomplete with usage counters"
+        },
+        {
+          "testFile": "src/renderer/chatTaskActivityRestore.test.ts",
+          "fullName": "chat task activity restore does not present an interrupted processing claim as resumable input"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences binds manual completion confirmation to the exact goal context"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences rejects a stale operation result after the active context changes"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences does not let an old finally clear a newer operation"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences rejects a canonical result for a different goal or an invalid outcome"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences reports continue-acceptance achieved outcomes truthfully"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences reports continue-acceptance waiting_for_acceptance outcomes truthfully"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences reports continue-acceptance waiting_for_model outcomes truthfully"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences reports continue-acceptance canceled outcomes truthfully"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences reports continue-acceptance stopped_blocked outcomes truthfully"
+        },
+        {
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "fullName": "goal acceptance renderer interaction fences only reports manual completion success for an attested completed-unverified result"
+        },
+        {
+          "testFile": "src/renderer/goalTerminalTruth.test.ts",
+          "fullName": "historical Goal terminal truth overlays deterministic rejection truth without rewriting model history"
+        },
+        {
+          "testFile": "src/renderer/goalTerminalTruth.test.ts",
+          "fullName": "historical Goal terminal truth does not overlay achieved or fully accepted Goals"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface defines comprehensive CSS custom property design tokens"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface uses app shell and navigation classes in the app frame"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface renders a command-center chat shell with a workspace sidebar"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface supports @skill selection from the chat composer"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface lets modifier Enter insert composer newlines while bare Enter submits"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces workspace selection in the chat composer"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps workspace menus viewport anchored and internally scrollable"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps runtime process surfaces in a responsive scroll region above a pinned composer"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps transcript history readable during active streaming"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface uses the shared local Icon component for primary controls"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface presents the local icon system in the 2.7.0 design artifact"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces managed chat history with archive, delete, time and token metadata"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface renders chat messages with structured readable metadata and polished markdown blocks"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface renders v2.9.0 structured assistant output through dedicated React components"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps structured output renderer class hooks stable for Task 5 visual polish"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface covers v2.9 output rendering CSS hooks for approved visual styling"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps assistant answers single-column with readable content widths"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps main transcript typography on one content scale"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps context process rows as one-line summaries without expand buttons"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface uses active subagent status as the right context rail primary content"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface commits the v2.9 output rendering design artifact with acceptance states"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps a draggable window strip visible on the chat-first desktop shell"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps navigation icons as rounded non-clipped stroke SVGs"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface renders the sidebar version from runtime metadata instead of a hardcoded value"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces the local harness score in Overview"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces the agent capability score in Overview"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface routes Overview settings shortcuts to precise Settings subsections"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface announces Settings status changes and confirms destructive memory deletes"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces child handoff review gates in Runs"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces runtime recovery and compaction insights in Run trajectories"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces kernel event bridge and long-task timeline cards in Runs"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface refreshes Runs from run lifecycle events instead of relying only on kernel details"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces evidence-backed Run Graph gates in Runs"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces eval candidate generation from terminal Runs"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces layered memory, ingestion review, and raw history as distinct memory surfaces"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces eval candidate review and promotion controls"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface renders technical surfaces as collapsed Settings secondary sections"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps Settings subpage navigation deep-linkable and intent grouped"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface commits the v3.2.2 Soft Blue design system specification"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface commits the v3.4.0 Obsidian design guideline and plan"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface moves Overview diagnostics into the Settings system section"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps the four composer controls as auto, goal, stop, and send"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps Goal Mode inside Chat instead of a standalone page"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface surfaces session-native Goal Mode inside Chat"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface wires blocked acceptance recovery and safe certificate disclosure"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface renders Goal contract, active Plan lineage, and explicit amendment decisions"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface wires recoverable final acceptance without implying certification"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps blocked and certificate surfaces bounded, focusable, and Obsidian-styled"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface maps stopped_blocked exhaustively across renderer goal surfaces"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface uses Obsidian styling for Goal Mode draft and execution surfaces"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps goal progress synced even before the active goal summary refreshes"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface accepts empty desktop chat session lists as real state"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface reloads the active chat transcript when a background goal reaches a terminal state"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface restores the persisted Goal status ahead of stale Plan activity"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface reconciles every successful chat completion from persisted session state"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface projects owning scheduled failures without treating cancellation as success"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface clears session-scoped Goal draft ownership before loading another transcript"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface starts Chat in a goal-mode-ready empty home state"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps Plan Mode context, settings, and input in separate non-overlapping rows"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface uses a blocking Plan decision, role-based model cards, and one technical disclosure"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps the default Plan result focused on outcome and next action"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps Plan clarification typing synchronous and replaces white screens with recovery UI"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface locks all follow-up input to the active pre-confirmation Plan state machine"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface lays provider connections and configuration fields out horizontally before responsive collapse"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps provider verification, credential management, models, and defaults in one connection-first surface"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface uses the v3.4.0 Obsidian root background and accent tokens"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps composer mode enabled states on the Obsidian theme color"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface uses a unified secondary-page list style for settings and task surfaces"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface shows the right context panel only when active work needs it"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface moves active work status into the right context rail instead of a large composer strip"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface contains long chat titles and live status text inside the hero header"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface loads pending eval candidates into the Overview capability score"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps eval candidate review mutations recoverable on preload rejection"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps run eval candidate generation recoverable on preload rejection"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface lets Overview load when pending eval candidate loading fails"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface provides reusable component classes for all screens"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps chatbox actions icon-only and stop available while work is running"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps tool approval inside chat with an auto-authorization toggle and critical risk styling"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps long goal instructions in a scrollable body with a short heading"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface routes run-record chat actions to the run session instead of the chat home"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps scheduled tasks editable from the saved task card"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface projects stable cross-surface attention without replacing owning state"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps Evidence Inspector selection bounded, reloadable, and secret-safe"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps goal execution UI compact when long milestone text is active"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface subscribes to chat stream events and projects public progress into the conversation and status rail"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps the grouped Chat disclosure local, reversible, and accessible"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface shows automatically resolved context windows and provenance without a manual window field"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps tool and raw reasoning previews out of the main interface"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface renders guided skill input in the main chat surface with all required controls"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface provides accessible collapse affordances for long message and process surfaces"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps long transcript rendering isolated from composer input and session switching"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface exposes stable DOM hooks for production transcript performance smoke checks"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps guided input reachable when the right context rail is hidden"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps compact new-chat and session-switch controls reachable on narrow windows"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface serializes modal keyboard ownership and traps rename focus"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface recovers App session mutations from rejected IPC promises"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface clears all active stream refs during new chat reset so stale events cannot repopulate the transcript"
+        },
+        {
+          "testFile": "src/renderer/materialDesign.test.ts",
+          "fullName": "Design System — Obsidian desktop control surface keeps update feedback and pasted attachments compact, labeled, and keyboard operable"
+        },
+        {
+          "testFile": "src/renderer/toolApprovalProjection.test.ts",
+          "fullName": "tool approval projection restores a pending request from a subscribe-first snapshot"
+        },
+        {
+          "testFile": "src/renderer/toolApprovalProjection.test.ts",
+          "fullName": "tool approval projection does not resurrect a decision when a stale snapshot arrives later"
+        },
+        {
+          "testFile": "src/renderer/toolApprovalProjection.test.ts",
+          "fullName": "tool approval projection merges a request published after snapshot capture without dropping it"
+        },
+        {
+          "testFile": "src/renderer/toolApprovalVisibility.test.ts",
+          "fullName": "tool approval visibility shows forced Policy B confirmation even while auto approval is enabled"
+        },
+        {
+          "testFile": "src/renderer/toolApprovalVisibility.test.ts",
+          "fullName": "tool approval visibility hides ordinary approval requests while auto approval is enabled"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store starts empty when no chat session file exists"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists attachment metadata without persisting attachment bytes"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists guided-input attachment payloads for restart recovery"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a processing guided-input claim across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store sanitizes guided-input metadata before durable activity persistence"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a failed guided-input settlement tombstone across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a canceled guided-input settlement tombstone across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a superseded guided-input settlement tombstone across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store reuses the pending user record when the same attachment turn is retried"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store quarantines corrupt chat JSON and exposes a recovery notice to the user"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store handles concurrent corrupt chat session recovery without surfacing rename errors"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store creates a session with a brief generated title and persists messages"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists causal attempt witnesses and canceled settlement with the json backend"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists causal attempt witnesses and canceled settlement with the sqlite backend"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages json transcripts by stable message sequence without hydrating metadata"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages sqlite transcripts by stable message sequence without hydrating metadata"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages bounded json Chat activity with honest source coverage"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages bounded sqlite Chat activity with honest source coverage"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store rejects a stale json Chat activity cursor after a new owner event"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store rejects a stale sqlite Chat activity cursor after a new owner event"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves message content exactly when persisting markdown output"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists workspace identity and summary on chat sessions"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves prior workspace fields on follow-up messages"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store lists sessions with last assistant response time and token usage"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store bounds session summaries used by the sidebar list"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists rebuildable chat activity snapshots with a bounded event history"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists the latest isolated context snapshot on the session and list item"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store archives restores and deletes sessions without touching other sessions"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store renames a session title without changing message timestamps or summary"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store normalizes legacy sessions without archive or token metadata"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store drops malformed persisted workspace summaries"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store normalizes persisted streaming and waiting input activity states"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store serializes concurrent session mutations without dropping messages"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store summarizes long goal-style prompts without keeping project paths in the title"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store searches raw chat messages as conversation evidence"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists active and historical goal ids on chat sessions"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store clears the active goal while preserving goal history"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store stores a stalled goal as recovery context instead of an active goal"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store deduplicates an exact required settlement and rejects conflicting reuse"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store matches message, list, activity, goal, usage, archive, and search behavior"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store serializes concurrent message appends with monotonic event order"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store generates a fresh session id when a requested session does not exist"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store imports legacy JSON once, verifies parity, and leaves the source untouched"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store imports the legacy corrupt-file recovery notice into SQLite"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store deduplicates required settlement ids in SQLite"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver binds target and trusted scope to a server-issued anchor"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver redacts path-shaped values inside allowlisted scalar fields"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver issues contributor targets from server-owned snapshot identity"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver returns an incomplete bounded page without inventing a cursor"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver reauthorizes every page and binds its cursor to authority revision"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver reauthorizes after the backend read before returning evidence"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver rejects an anchor after the current materializer generation rotates"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver advances a byte-truncated page by the entries actually returned"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver returns indistinguishable forbidden responses without backend access"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver rejects caller-downgraded sensitivity before backend access"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver rejects tampered, cross-session, expired, and cross-limit cursors"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver keeps infrastructure failure distinct from missing or forbidden"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages reads forward from byte offsets without hydrating the whole file"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages keeps an original cut stable when later bytes are appended"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages reports malformed and unterminated records without quarantine writes"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages rejects aliases, oversized records, source replacement, and abort"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages stops at the page byte ceiling"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity keeps JSON and SQLite backends behaviorally equivalent"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity persists and returns credential-free Skill snapshots for JSON, SQLite, and legacy Plans"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rejects stale revisions without overwriting the canonical record"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rejects an invalid persisted Plan autonomy mode"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity persists PlanRecord v3 lineage and rejects non-Direct runtime replans"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity uses the durable session index without parsing unrelated Plan files"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity recovers an interrupted v2 planning stage as a retryable failure in a new runtime"
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "S01-default-narrative",
+      "title": "Default Chat stays concise during a real tool-using turn",
+      "scenarioDigest": "sha256:812a9c61836bd4c33b5d8b518cfc3390b8e2db929ad3d78aea5beff68bd4a8d0",
+      "fixture": "clean real-app session with a safe multi-operation workspace task",
+      "evidenceRequirements": [
+        "browser recording or screenshots",
+        "persisted projection and source-reference inspection"
+      ],
+      "expected": [
+        "goal or user request current phase blocker and final result remain readable",
+        "completed low-risk operations group into safe compact summaries",
+        "no raw tool arguments credentials or private reasoning appear"
+      ],
+      "status": "passed",
+      "executor": "browser",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S01-default-narrative.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S01-default-narrative.png",
+        "receiptDigest": "sha256:8d98ec51b46c59719850538821fa11f1b1fa10a01f44c9e86396ce62e3f1e5cc",
+        "executionId": "62eb4400-43d7-4274-92be-ce0e5c2ef2f6",
+        "processEpochs": [
+          "main_9752c3e7-9362-4671-9b60-f7c8ce50d7db"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "compact-default",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S02-inline-expansion",
+      "title": "User expansion survives streaming updates",
+      "scenarioDigest": "sha256:77db761fce99867af81da1cdae159c0fd6ba0106b5253825f4cdbddaf95d365b",
+      "fixture": "real-app streaming session with at least four stable operation items",
+      "evidenceRequirements": [
+        "before and after browser screenshots",
+        "stable item id and expansion-state trace"
+      ],
+      "expected": [
+        "stable item identity preserves the user-open item",
+        "automatic policy does not override explicit user state",
+        "new items do not re-key or duplicate older items"
+      ],
+      "status": "passed",
+      "executor": "browser",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S02-inline-expansion.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S02-inline-expansion.png",
+        "receiptDigest": "sha256:6ca51adb72491e7697bd697ccab8310f0ff5d6001898d74aed3c6955e8d465e0",
+        "executionId": "1f7486df-2c2f-45d7-812b-d6acf4bd37d2",
+        "processEpochs": [
+          "main_2913ae50-9211-493f-92e6-258536ad22da"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "manual-expand",
+          "passed": true
+        },
+        {
+          "id": "manual-collapse",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S03-evidence-handoff",
+      "title": "Chat operation navigates to exact evidence",
+      "scenarioDigest": "sha256:8040007dfb92f72b8b2e3a305cf2e705ce8a7ed80e7fd5c0907c06743cad125c",
+      "fixture": "real-app completed operation linked to AgentRun Trajectory and Tool Invocation records",
+      "evidenceRequirements": [
+        "browser navigation recording",
+        "matching source and evidence identifiers before and after reload"
+      ],
+      "expected": [
+        "one action opens the exact run event or generic evidence record",
+        "source identity remains the same after reload",
+        "missing specialized presentation falls back without losing the record"
+      ],
+      "status": "passed",
+      "executor": "browser",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S03-evidence-handoff.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S03-evidence-handoff.png",
+        "receiptDigest": "sha256:155ae75403d00716c355baeb57add4b2c65ef993593055f02d6ed6a8535d1600",
+        "executionId": "cd764338-b7a6-4e2d-a4e5-d21d6692e8d8",
+        "processEpochs": [
+          "main_482fb9ed-8e0a-4364-a772-f29d75941a19"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD07",
+          "artifact": ".zerox/verification/conversation-disclosure/CD07-inspector-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "exact-run-target",
+          "passed": true
+        },
+        {
+          "id": "stable-selection",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S04-failure-attention",
+      "title": "Failure and blocked state override compaction",
+      "scenarioDigest": "sha256:9c7eb05998e2d24ecc2a53e27d8dfce91df3d7d5f84d54085f0dea50bcd37d00",
+      "fixture": "deterministic safe tool and validation failure fixture exercised in the real app",
+      "evidenceRequirements": [
+        "browser failure and recovery capture",
+        "sanitized technical evidence and terminal source status"
+      ],
+      "expected": [
+        "the failed item remains prominent with first useful error and next action",
+        "technical detail is opt-in and sanitized",
+        "final narrative does not claim success"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S04-failure-attention.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S04-failure-attention.png",
+        "receiptDigest": "sha256:49df879990351ea0199afbbf3e445a45a3d587485ceaee90855ff17a2e5f61ac",
+        "executionId": "beecfa8e-85c6-43de-80ef-2aa0f1579744",
+        "processEpochs": [
+          "main_614a4a01-e567-4cd9-b670-cac6cec8f626"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD07",
+          "artifact": ".zerox/verification/conversation-disclosure/CD07-inspector-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "failure-prominent",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S05-approval-attention",
+      "title": "Pending approval is causal recoverable and idempotent",
+      "scenarioDigest": "sha256:fc382536c2750c9ae7fc17b392e2847dc96f757f9a5da3076dd8766ab405eb33",
+      "fixture": "real-app confirmation-required tool with deterministic approval id and invocation id",
+      "evidenceRequirements": [
+        "window-reload browser recording",
+        "approval intent decision revision and Tool Invocation linkage"
+      ],
+      "expected": [
+        "pending attention returns after reload",
+        "approval and Tool Invocation share a stable causal reference",
+        "a duplicate response cannot execute the action twice"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S05-approval-attention.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S05-approval-attention.png",
+        "receiptDigest": "sha256:131e54f73141a026df410dc0eb35e2a7967b5f10803bda722edb3728a02b4316",
+        "executionId": "dc46a22e-33e2-44c2-a3f2-30a30df29994",
+        "processEpochs": [
+          "main_b16eecbb-b610-451b-90ca-5289cb4eaf07"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "approval-projection-regression",
+          "passed": true,
+          "testFile": "src/renderer/toolApprovalProjection.test.ts",
+          "testName": "restores a pending request from a subscribe-first snapshot"
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S06-pause-reload-recovery",
+      "title": "Paused continuation and disclosure converge after reload",
+      "scenarioDigest": "sha256:735d4a84adf2b87e2081d1a81638aaf9a96d79b5b6328f3c9cf6a6516d9a98ed",
+      "fixture": "deterministic AgentLoop or provider pause with durable continuation",
+      "evidenceRequirements": [
+        "browser reload and continuation recording",
+        "Chat and run settlement records with coverage state"
+      ],
+      "expected": [
+        "Chat activity projection and contributing run evidence agree",
+        "coverage never claims a missing Workspace Run event is complete",
+        "continuation is consumed once before final success"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S06-pause-reload-recovery.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S06-pause-reload-recovery.png",
+        "receiptDigest": "sha256:b2f2e86855c6a7441689b0c2e99a1ee51840372822f353c5f92504eebfc66954",
+        "executionId": "9a83a117-41be-41a0-b2e0-488a8bc54ea4",
+        "processEpochs": [
+          "main_c3601dc9-7ca8-4241-a959-4391b2af004b"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "historical-reconstruction",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S07-plan-progress",
+      "title": "Direct or Debate progress is visible from persisted stages",
+      "scenarioDigest": "sha256:93e611cabbd360e91c44b9ec2a70377013c1a8140c77a2d97e18fbcf3be5b7e0",
+      "fixture": "real-app Direct or Debate plan with persisted intermediate stages",
+      "evidenceRequirements": [
+        "browser stage-progress recording",
+        "Plan revision and Goal contract evidence"
+      ],
+      "expected": [
+        "persisted stage progress resumes without fabricated Todo state",
+        "Plan revision model and failure truth remain authoritative",
+        "Goal semantics are unchanged until explicit adoption"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S07-plan-progress.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S07-plan-progress.png",
+        "receiptDigest": "sha256:8912128089e6fcccbd65800e9678bcb260c4804d6c5549a1247a87f8b1306994",
+        "executionId": "c1f19237-8c85-424e-ad2b-a14f6bf2e5b1",
+        "processEpochs": [
+          "main_bae088a3-fa43-4eb5-8eed-70c1952023ad"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "plan-store-regression",
+          "passed": true,
+          "testFile": "src/main/planStore.test.ts",
+          "testName": "persists PlanRecord v3 lineage and rejects non-Direct runtime replans"
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S08-scheduled-progress",
+      "title": "Scheduled execution uses the shared projection without polling storms",
+      "scenarioDigest": "sha256:d6f3755be71fea9927b72ba5edef0f4a1a7b0e721accf24ac278843d53143bda",
+      "fixture": "safe scheduled task with deterministic multi-event streaming execution",
+      "evidenceRequirements": [
+        "browser cross-surface recording",
+        "run identity and bounded update metrics"
+      ],
+      "expected": [
+        "progress arrives before the blocking result",
+        "the same run identity appears across surfaces",
+        "snapshot or delta updates remain bounded and do not trigger full refetch per event"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S08-scheduled-progress.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S08-scheduled-progress.png",
+        "receiptDigest": "sha256:35e52581d735fdd0b295e23da7c93674155afb99a82e209910c4f091ec36189d",
+        "executionId": "0d8f7339-f6ce-48f0-a65d-9bb81bd8568a",
+        "processEpochs": [
+          "main_f8d67212-93ef-4081-b210-715543cb1b88"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "scheduled-stable-identity",
+          "passed": true
+        },
+        {
+          "id": "child-run-excluded",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S09-long-session",
+      "title": "Long history keeps projection and DOM work bounded",
+      "scenarioDigest": "sha256:391645bd0c600e15825713b417f169204e755588942cde863dd80d527b095ae8",
+      "fixture": "measured large Chat and Trajectory fixture plus a real-app tail session",
+      "evidenceRequirements": [
+        "CPU heap DOM and delta-buffer measurements",
+        "browser paging and streaming recording"
+      ],
+      "expected": [
+        "no duplicate or missing stable items",
+        "DOM and upstream projection measurements stay within the characterized budget",
+        "raw payloads are paged truncated or offloaded"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S09-long-session.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S09-long-session.png",
+        "receiptDigest": "sha256:3f0581f334cd31c18380c89bba75635973609730b92c2ee4e3d32f6c6dbcaa9d",
+        "executionId": "71e12f57-50fd-4b2a-bedb-94d8efb4e1f7",
+        "processEpochs": [
+          "main_7fad6d83-4e2e-4d0c-8b94-b4ca8d7c9730"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "runtime-stress",
+          "passed": true
+        },
+        {
+          "id": "retained-ring",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S10-accessibility",
+      "title": "Disclosure and attention are keyboard and screen-reader operable",
+      "scenarioDigest": "sha256:3fdfc7cd9183c89b18b5cb2771543213dfe031e31abcf33f86c2e8d9a4b09065",
+      "fixture": "real-app session with collapsed expanded failed and evidence-selected items",
+      "evidenceRequirements": [
+        "keyboard-only browser recording",
+        "accessibility tree states announcements and reduced-motion evidence"
+      ],
+      "expected": [
+        "expanded selected and blocking states are announced",
+        "focus survives item updates and evidence navigation",
+        "reduced motion removes nonessential animation without hiding state changes"
+      ],
+      "status": "passed",
+      "executor": "browser",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S10-accessibility.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S10-accessibility.png",
+        "receiptDigest": "sha256:666ea46cfbb72b7a7e4b5b733aa61813470eec5d63322d37f92b340c38101f15",
+        "executionId": "3de7ef5b-9bb2-4ae9-9516-5dadcd698b25",
+        "processEpochs": [
+          "main_03428725-8cd9-4ed8-a732-c6f24acd54e5"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD07",
+          "artifact": ".zerox/verification/conversation-disclosure/CD07-inspector-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "keyboard-state",
+          "passed": true
+        },
+        {
+          "id": "reduced-motion",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S11-secret-safety",
+      "title": "Restricted evidence never leaks into default or persisted UI artifacts",
+      "scenarioDigest": "sha256:fb5a934c402bab785183e9942ecedb507b770458fd42a218f47ea61c0837b233",
+      "fixture": "synthetic non-secret API-key-shaped payload and restricted tool arguments",
+      "evidenceRequirements": [
+        "browser default and authorized-detail capture",
+        "repository persistence log screenshot export and package secret scan"
+      ],
+      "expected": [
+        "default summary is safe and useful",
+        "technical evidence is bounded and redacted",
+        "no credential or unrestricted file content appears in artifacts"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S11-secret-safety.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S11-secret-safety.png",
+        "receiptDigest": "sha256:e95e7e606f52cd350de6e63c9399bdd54f6e86950f090691a53977a05b9dd1c4",
+        "executionId": "c4f1a02a-ab4a-4d78-b884-da2b9ea9e070",
+        "processEpochs": [
+          "main_671d1787-efd1-4206-a43c-3a309fc00581"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD07",
+          "artifact": ".zerox/verification/conversation-disclosure/CD07-inspector-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "secret-absent",
+          "passed": true
+        },
+        {
+          "id": "redaction-visible",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S12-retry-attempt",
+      "title": "Failed stream attempt cannot contaminate the accepted answer",
+      "scenarioDigest": "sha256:49d4fb731a204d7b797ede14668b357e45234789b55325523987a21b05d43ef7",
+      "fixture": "deterministic provider stream that emits partial content fails and succeeds on retry",
+      "evidenceRequirements": [
+        "browser attempt reset recording",
+        "attempt-control and final-message reconciliation trace"
+      ],
+      "expected": [
+        "attempt reset or supersession removes rejected partial content",
+        "only the accepted attempt reconciles to the final assistant message",
+        "status and output-part channels do not duplicate the visible answer"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S12-retry-attempt.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S12-retry-attempt.png",
+        "receiptDigest": "sha256:ed0e1124e1600446167570b1bd88b0ff44e6edfa4066d3c6f8ecac72c4d1c41b",
+        "executionId": "c086be4f-a783-44e8-81ad-972ce100ddff",
+        "processEpochs": [
+          "main_5d3baad9-787e-42be-9850-e04899d32912"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "attempt-reducer-regression",
+          "passed": true,
+          "testFile": "src/renderer/chatStreamReducer.test.ts",
+          "testName": "removes a superseded partial answer and rejects late deltas from the old attempt"
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S13-legacy-coverage",
+      "title": "Legacy sessions remain readable with honest coverage",
+      "scenarioDigest": "sha256:1da0ad6ff0d434ad92845f1cea5d528fd01a1737ad0f443d1c45ef43687cf53f",
+      "fixture": "versioned v3.9.1 Chat Goal Plan and Run fixture opened in the real app",
+      "evidenceRequirements": [
+        "projected and legacy browser captures",
+        "compatibility id source-cut and non-mutation evidence"
+      ],
+      "expected": [
+        "narrative remains readable without destructive migration",
+        "compatibility ids are deterministic and coverage is partial where evidence is absent",
+        "legacy rollback preserves all authoritative data"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S13-legacy-coverage.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S13-legacy-coverage.png",
+        "receiptDigest": "sha256:ead3a7932e92500fc62f2007b1bc668949ff8f65c26ccdb12048402d6f1d8a47",
+        "executionId": "b108d5c2-40a2-4069-8d0a-580d99e1edc3",
+        "processEpochs": [
+          "main_17fb35dc-a24e-4053-aadc-2a89fe1a1fa8",
+          "main_c3153d35-a729-4860-aa52-b44ebbe75f47"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "legacy-default-off",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S14-guided-input",
+      "title": "Guided input remains visible durable and causally scoped",
+      "scenarioDigest": "sha256:3c9874af0ecbbb0423379639f72878eaf8861332e3c49791c79eb05abfc98dfd",
+      "fixture": "real-app run that pauses on a deterministic guided-input request",
+      "evidenceRequirements": [
+        "browser reload and single-response recording",
+        "guided-input source ref and continuation settlement"
+      ],
+      "expected": [
+        "the required prompt remains prominent after window reload",
+        "the response binds to the same request once",
+        "cancellation or stale input cannot resume another turn"
+      ],
+      "status": "passed",
+      "executor": "browser",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S14-guided-input.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S14-guided-input.png",
+        "receiptDigest": "sha256:5b52d7904061711e446c60fd1c9a80b18dc28446e32e14712b667360761e2f9e",
+        "executionId": "746e3b6f-731b-460c-bd64-526e782e48f5",
+        "processEpochs": [
+          "main_f5d639e4-05c9-40c8-9299-41946d530406"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "guided-input-regression",
+          "passed": true,
+          "testFile": "src/renderer/chatTaskActivityRestore.test.ts",
+          "testName": "does not present an interrupted processing claim as resumable input"
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S15-goal-acceptance",
+      "title": "Goal review acceptance and unverified completion retain authority",
+      "scenarioDigest": "sha256:bb3c64effbd049e402244e4e26203a037d7fb43fb4d509cb17077874a0a4e7af",
+      "fixture": "real-app Goal fixture reaching review then completed_unverified and final acceptance",
+      "evidenceRequirements": [
+        "browser Goal and Chat state recording",
+        "Goal status certificate and projection mapping evidence"
+      ],
+      "expected": [
+        "review and acceptance remain explicit required gates",
+        "completed_unverified is never presented as success",
+        "the final narrative matches Goal certificate truth"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S15-goal-acceptance.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S15-goal-acceptance.png",
+        "receiptDigest": "sha256:66e8fcdfd0bfe462fe0880e77dc663a5eec8e271dd1d0d5faabbe1aa46df4b79",
+        "executionId": "813726ff-c2d5-4f9a-a1cc-3f44bd540a84",
+        "processEpochs": [
+          "main_9f0b62f9-99bf-4ab8-bed1-1c14f1f651f5"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "goal-acceptance-regression",
+          "passed": true,
+          "testFile": "src/renderer/goalAcceptanceInteraction.test.ts",
+          "testName": "only reports manual completion success for an attested completed-unverified result"
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S16-plan-confirmation",
+      "title": "Plan confirmation and blocked action gate cannot be compacted away",
+      "scenarioDigest": "sha256:b629d2c39b858f620076e3b26976ba7261d6f4d04db51565df665f1ff1b3c432",
+      "fixture": "real-app Plan fixture requiring confirmation with a deterministic blocked variant",
+      "evidenceRequirements": [
+        "browser confirmation and blocked-state recording",
+        "Plan status actionGate and revision evidence"
+      ],
+      "expected": [
+        "confirmation remains prominent and idempotent",
+        "blocked maps to blocked rather than failed or succeeded",
+        "Plan revision and Goal semantics remain unchanged until adoption"
+      ],
+      "status": "passed",
+      "executor": "browser",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S16-plan-confirmation.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S16-plan-confirmation.png",
+        "receiptDigest": "sha256:c600d512c26e92b129dfa7bfab2183436e767776d3578379ce0fd03c660b5eb1",
+        "executionId": "04314443-9a0d-4b60-a8f8-cc889c5d7b30",
+        "processEpochs": [
+          "main_5568eac2-6f70-448f-a216-dfe8516dab47"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "plan-confirmation-regression",
+          "passed": true,
+          "testFile": "src/main/planStore.test.ts",
+          "testName": "persists PlanRecord v3 lineage and rejects non-Direct runtime replans"
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S17-cancel-interruption",
+      "title": "Cancellation and process interruption settle without privileged replay",
+      "scenarioDigest": "sha256:e06c224ecc01de33bc483eb90f0ef0c4367d475b5a4dd4d86c3d53bb5c92e52f",
+      "fixture": "real-app active turn plus pending approval interrupted by cancel main restart and cold start",
+      "evidenceRequirements": [
+        "browser cancel restart and cold-start recording",
+        "aborted invocation interrupted approval and recovery evidence"
+      ],
+      "expected": [
+        "canceled and interrupted states remain distinct and visible",
+        "an unresolved or prior approval never auto-executes after restart",
+        "recovery requires an explicit new safe attempt"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S17-cancel-interruption.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S17-cancel-interruption.png",
+        "receiptDigest": "sha256:e51b2888f79bfd6c57ceff1fcfc69a24e837a64818faa91519130f7c13f32eee",
+        "executionId": "0554f147-ae0d-45f7-b7c4-f9bf0320e1f9",
+        "processEpochs": [
+          "main_4e0db99a-7755-4a75-a94e-d5ec36989ddf",
+          "main_fd0e5b38-f59a-42b2-8fe5-0b45e8d924e5"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "cancel-stress",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S18-context-usage",
+      "title": "Context and token usage stay accurate about scope and estimation",
+      "scenarioDigest": "sha256:92d314124b29cb75fc76cfde7e01c1f0db84def2db643209a4b9fcfff2112514",
+      "fixture": "real-app multi-turn context compression fixture with known cumulative usage bounds",
+      "evidenceRequirements": [
+        "browser context and usage recording",
+        "source measurement scope durability and reconciliation trace"
+      ],
+      "expected": [
+        "current context and cumulative usage are not conflated",
+        "estimated or partial values are labeled",
+        "reload never decreases a durable cumulative value without an explicit reset"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S18-context-usage.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S18-context-usage.png",
+        "receiptDigest": "sha256:d8919cca482c83eb5109cc9a3222d11ab84b656d08f8fab65aea135b92896e0b",
+        "executionId": "76c87771-66ec-4896-ad92-6d6c1de59167",
+        "processEpochs": [
+          "main_fed2ebcb-dcb3-48af-b6c2-884df4e39e34"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD05",
+          "artifact": ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD06",
+          "artifact": ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "context-stress",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    },
+    {
+      "id": "S19-unknown-coverage",
+      "title": "Unknown optional and required facts fail with different semantics",
+      "scenarioDigest": "sha256:94bc7f1e34826c71a95c5e7b5482b1edfaadf5d3caa8a1487915bb9bdab4cd8b",
+      "fixture": "versioned unknown optional presentation and unknown required persistent fact fixtures",
+      "evidenceRequirements": [
+        "browser generic fallback and degraded-state recording",
+        "source-cut requiredness reset and incompatibility trace"
+      ],
+      "expected": [
+        "optional presentation falls back to a generic row",
+        "required unknown fact degrades coverage and forces reset",
+        "neither case silently drops a required attention state"
+      ],
+      "status": "passed",
+      "executor": "hybrid",
+      "runtimeEvidence": {
+        "kind": "production-electron-main-preload-scenario",
+        "commandIndex": 5,
+        "passed": true,
+        "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S19-unknown-coverage.json",
+        "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S19-unknown-coverage.png",
+        "receiptDigest": "sha256:39b0c462bc0848791721526165f9e7b86addc2ce327c6810f29b18d1eced91b5",
+        "executionId": "e63aec67-e684-4221-9857-89b417f50c8c",
+        "processEpochs": [
+          "main_f0fd89c3-8458-4c28-ac55-f46822c99c6c"
+        ],
+        "validationErrors": []
+      },
+      "evidence": [
+        {
+          "workstreamId": "CD07",
+          "artifact": ".zerox/verification/conversation-disclosure/CD07-inspector-browser.json",
+          "accepted": true
+        },
+        {
+          "workstreamId": "CD08",
+          "artifact": ".zerox/verification/conversation-disclosure/CD08-hardening.json",
+          "accepted": true
+        }
+      ],
+      "assertions": [
+        {
+          "id": "unknown-visible",
+          "passed": true
+        },
+        {
+          "id": "unknown-fallback-contract",
+          "passed": true
+        }
+      ],
+      "owningEvidenceAccepted": true,
+      "assertionsPassed": true
+    }
+  ]
+}

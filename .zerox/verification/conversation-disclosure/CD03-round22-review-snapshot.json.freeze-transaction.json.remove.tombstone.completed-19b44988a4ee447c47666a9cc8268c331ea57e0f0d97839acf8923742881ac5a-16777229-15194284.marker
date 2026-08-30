@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-review-freeze-transaction",
+  "status": "prepared",
+  "round": 22,
+  "mode": "created",
+  "snapshotPath": ".zerox/verification/conversation-disclosure/CD03-round22-review-snapshot.json",
+  "artifactPath": ".zerox/verification/conversation-disclosure/CD03-causal-shadow.json",
+  "originalSnapshotDigest": null,
+  "targetSnapshotDigest": "sha256:181f2b302c96bea484bf441043c1ee8d1a58062418fc72e3c2a660ec24424b3b",
+  "originalArtifactDigest": "sha256:02757f0f5a2cf93a9c61f8bb3eb7f3a4d2c68c8670d0e166038026fbce2709c7",
+  "targetArtifactDigest": "sha256:3a05f013d02ab6f62a031cc5f06fd223909a2369d0f2e96f8ef7ce60260764b8",
+  "digest": "sha256:e640bdfb46644259819e061f8127a9e915eef1c65111b997274a1e15e4810659"
+}

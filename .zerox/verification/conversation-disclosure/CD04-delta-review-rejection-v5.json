@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 13,
+  "kind": "conversation-disclosure-cd04-delta-review-rejection",
+  "status": "rejected_after_review",
+  "snapshotPath": ".zerox/verification/conversation-disclosure/CD04-delta-review-snapshot-v5.json",
+  "snapshotDigest": "sha256:972844d8295c8ac156a777d9a81bbfb80be83f44f99e91884209b61080880676",
+  "reviewCounts": {
+    "replay": {
+      "critical": 0,
+      "major": 0,
+      "minor": 0
+    },
+    "security": {
+      "critical": 0,
+      "major": 2,
+      "minor": 0
+    },
+    "integration": {
+      "critical": 0,
+      "major": 0,
+      "minor": 0
+    }
+  },
+  "findingIds": [
+    "v13_runtime_io_dependency_not_frozen",
+    "transition_journal_subset_validation"
+  ],
+  "identityAssurance": "not-signed"
+}

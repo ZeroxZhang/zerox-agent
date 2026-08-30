@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "kind": "conversation-disclosure-continuation-review-snapshot",
+  "algorithm": "sha256-canonical-json-v1",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 1,
+  "baseSnapshotDigest": "sha256:e1a5300d6015543e0a6a8e8f09f2a13fcb955111b87c08545e0f882bb786796b",
+  "baseExternalAnchorDigest": "sha256:e81f0afb3d10b12976b74d1499870b837595ffbc3b452c7f1f78fff67be8f102",
+  "policyDigest": "sha256:e8493e3ad8cb5ce250d6bb7e9d0c9c8cc58fba460bb0f940a25f546a1d18f050",
+  "featureFileSetDigest": "sha256:771c125bb00a2e52e4645e1d638000f853c70238e84472eff1016def99fa2e59",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:26edeb926d82b1e8ca8ff1e195ce3abdf1b7d8ac7e2e30a1ea513828cd0cee67",
+  "files": [
+    {
+      "path": ".zerox/decisions/CD03A-successor-evolution-trust-head.md",
+      "sha256": "sha256:a01e63700d5d500b875fefe938e3678ea7499b2940909a45c4ebe744f2934b13"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-package-scripts-test-transition.patch",
+      "sha256": "sha256:ab67384bf5ea3cf091806ad8e2208605951a27fbf7eda049684ca53fa75031ae"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-package-target.json",
+      "sha256": "sha256:13ba502200bb8201b0c8d2e58314aae36332c554139a1931100c5366a097dcea"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-program-test-transition.patch",
+      "sha256": "sha256:ed18015bd40c6644a239319045ff09fcd55396be581630e1ba6a28b185cbbe7f"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-successor-evolution-policy.json",
+      "sha256": "sha256:e1701afcd0f8cf0e43924e6d307520e78eb7ce0e995e19f2ed7a795794fd11cf"
+    },
+    {
+      "path": "package.json",
+      "sha256": "sha256:560fb3e3b2829a32b4ac694c7781fce9e53941a9e20fc4ec1c08602d53c278b9"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:a51c82a162cde096bb5acdbb0925e2fea8eeaa86abc7e1977ac87371c0bacf33"
+    },
+    {
+      "path": "scripts/check-conversation-disclosure-program.mjs",
+      "sha256": "sha256:162c6165d8f831b9a6e4c94fd2627527bc038da79cc8d9bde91bce7852cf754d"
+    },
+    {
+      "path": "scripts/check-harness-state-continuation.mjs",
+      "sha256": "sha256:ffb6163d53423651574af45194bcca4f4d86ba89d1aa2e2933e795e9f923f045"
+    },
+    {
+      "path": "scripts/check-harness-state.mjs",
+      "sha256": "sha256:231d28280f6891f50f5c714b4161d1b9d93cf171e0b67396de67ce7a36e06339"
+    },
+    {
+      "path": "scripts/conversation-disclosure-continuation-contract.mjs",
+      "sha256": "sha256:407357d37df48a496701ec6ff66444c6f52b06ad10049d52913a9bb6d21e7461"
+    },
+    {
+      "path": "scripts/conversation-disclosure-review-contract.mjs",
+      "sha256": "sha256:61f6f733cdf7c7a04370c65ae25e77a27c1b8b826ab4df3d22a43f846ff3caf0"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:68006571d50ddfce9a30da2ac6929e916ca7c53ae4efcf068f7e78933a21533f"
+    },
+    {
+      "path": "scripts/freeze-conversation-disclosure-review.mjs",
+      "sha256": "sha256:bc9e398d85a3529739bdce34e1852e44d03e3869ccb1d1bc48b3d8144fda9ccd"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-closure.mjs",
+      "sha256": "sha256:c4ef04e87f3c5b449aa666dfe809d7c478b0d47be0dc05b51d25e4a916bc82a1"
+    },
+    {
+      "path": "scripts/verify-conversation-disclosure-continuation.mjs",
+      "sha256": "sha256:02f964b4ff37053d4df7260fc176bc36538931c947f6692c815803e482341fc6"
+    },
+    {
+      "path": "src/shared/conversationDisclosureContinuation.test.ts",
+      "sha256": "sha256:e3d58a52c3d0653503c31c2c752e085af0d4256469f234be5af16f5de006a1b6"
+    },
+    {
+      "path": "src/shared/conversationDisclosureProgram.test.ts",
+      "sha256": "sha256:087cff0ba7f208464bf62e41f3a10dfbb88f3f2461d46398187c0b4cfa16dd5c"
+    },
+    {
+      "path": "src/shared/packageScripts.test.ts",
+      "sha256": "sha256:2f30d10ebd5ccc408255813e0d10ca4e8bd145930bdbe263bc2a6e5d2fa61efe"
+    }
+  ],
+  "digest": "sha256:e8f82a943cae4e6c06732936986229a2e85f7783e6b283cf0b6b431b4f1ff7e5"
+}

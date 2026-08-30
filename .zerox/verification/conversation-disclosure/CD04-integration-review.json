@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 13,
+  "kind": "conversation-disclosure-cd04-review-receipt",
+  "lane": "integration",
+  "assurance": "caller-attested-not-signed",
+  "challenge": "sha256:a5d20cf124f9796281acb233173f63483af4c44f18654b3d1609b264f6c79e80",
+  "snapshotDigest": "sha256:8ffc69be873f30d7ca8c0c4c35fd6139ece6292f6b9277ef52694d3edb626631",
+  "completedAt": "2026-08-25T17:32:00.000Z",
+  "verdict": "PASS",
+  "counts": {
+    "critical": 0,
+    "major": 0,
+    "minor": 0
+  },
+  "reviewOutputPath": ".zerox/reviews/CD04-integration-review-output.json",
+  "reviewOutputDigest": "sha256:ca844c39d04c3dda2d3a3bd4076903eb0097e357908abc07bef364a2f5d0a0c0",
+  "reviewOutputSha256": "sha256:3f47ab74b024290b8c51b5ff4a020ce4dd7b157447cf5fc45fb2421944fad282",
+  "digest": "sha256:bef6b4c770026905499b73325ad89c904abaa46c2528d3ae10ae19a8f84a4c7a"
+}

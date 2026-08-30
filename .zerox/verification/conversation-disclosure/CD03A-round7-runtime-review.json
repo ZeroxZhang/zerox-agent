@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 7,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 7,
+  "lane": "runtime",
+  "reviewedPhase": "review_pre_transition",
+  "challenge": "sha256:b3f659fb51f93d1e1bf9954663a877cacb32f741c97fcfc44bfe2ac0d0939254",
+  "callerDispatchEntryDigest": "sha256:779d030e0ad0f3ca1913973567b9b3ac1cbb7a3b0b0e67ed599254947fe26af9",
+  "callerDispatchSetDigest": "sha256:b1d1fd00290e09c92dade1245c3adf115b091d9d7ff9c190bbe889d93087fd52",
+  "claimedReviewOrigin": {
+    "taskPath": "round7/runtime",
+    "agentLabel": "round7-runtime-reviewer",
+    "transport": "codex-collaboration"
+  },
+  "identityAssurance": "not-signed",
+  "independenceClaim": "caller-attested-distinct-review-contexts",
+  "completedAt": "2026-08-24T17:31:26.000Z",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 0,
+    "major": 4,
+    "minor": 0
+  },
+  "findings": [
+    {
+      "id": "R7-RUNTIME-001",
+      "severity": "major",
+      "summary": "The V7 external runner retains V6/Round5 constants and cannot process the frozen Round7 evidence.",
+      "evidence": [
+        "scripts/verify-conversation-disclosure-continuation-v7.mjs requires policy, snapshot, manifest, archive, and receipt round values to equal 6 although the frozen Round7 artifacts declare round 7.",
+        "The runner also binds Round6 rejection validation to obsolete Round5 hashes, finding IDs, counts, and rejected/recovery rounds."
+      ]
+    },
+    {
+      "id": "R7-RUNTIME-002",
+      "severity": "major",
+      "summary": "The staged program gate can accept completed or active lifecycle state without validating the authoritative closure chain.",
+      "evidence": [
+        "The Round7 package target invokes the lightweight V7 completion checker followed by a diagnostic-only harness without a caller-pinned Round7 anchor.",
+        "The completion checker validates file shape and lifecycle but does not validate manifest, receipts, attestation, anchor, or transition bindings."
+      ]
+    },
+    {
+      "id": "R7-RUNTIME-003",
+      "severity": "major",
+      "summary": "The final transaction publisher can overwrite an output that races into existence.",
+      "evidence": [
+        "The V7 runner checks absence and then commits with ordinary os.rename.",
+        "POSIX rename can replace a destination created between the check and commit instead of rejecting third-state evidence."
+      ]
+    },
+    {
+      "id": "R7-RUNTIME-004",
+      "severity": "major",
+      "summary": "Private evidence publication is not recoverable from a crash between hard-link creation and temporary-file removal.",
+      "evidence": [
+        "The V7 runtime I/O creates a random temporary file, hard-links it to the output, and only then removes the temporary name.",
+        "A crash after link leaves nlink=2 and no deterministic recovery path, so the next invocation rejects the output permanently."
+      ]
+    }
+  ],
+  "snapshotDigest": "sha256:5e13f358f13a26af31616c82733c1c6e101b4b10fff5cf6e10ec481d8d4f8c7a",
+  "snapshotFileCount": 204,
+  "policyDigest": "sha256:2eee02d62d2836f5e8482256252b273381a855335c5ec9ba9bbd0677d866c17f",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:b4cf47fd3d1ea0fbc1342e728dbae334e6dde3f274deed4e12a04afcec0d4846",
+  "pathAuthorityDigest": "sha256:8d7e3fbd3bafd12d902c864d5590401ab92e998793f7a3561765434f4c1e8091",
+  "admissionFeatureDefinitionDigest": "sha256:69f45b4d899b27453a22dd3bd3b5603542114388a099ddb2a632d6d7594632a4",
+  "admissionFeatureFileSetDigest": "sha256:f3dc397a4055b4264308ad93c5d30c0edff27dffbbc67480997c3b3f0b70e409",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:4f7f83eaa9c11aa1978e01b42b7373c0c0ec799abe435f4216960fdcaa3170bf",
+  "round6ReviewRejectionDigest": "sha256:39c3c2a58c1c3de778ee836270c697be5fbbae50268f6a79fe227824c5376c6c",
+  "validatorDigest": "sha256:bfa980b3469cf4388fb583ffa1ec2a84f6996acb5ea28ae3208b64c665197d96"
+}

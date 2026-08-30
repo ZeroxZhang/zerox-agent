@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 3,
+  "kind": "conversation-disclosure-continuation-review-receipt",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "round": 3,
+  "transport": "codex-collaboration",
+  "completedAt": "2026-08-24T10:39:40.504Z",
+  "snapshotDigest": "sha256:cbec3496b39cb5637e40cd1276e370dc9245fd425552fd7e18fcf972d7816ced",
+  "snapshotFileCount": 74,
+  "policyDigest": "sha256:3eb5b7637bbab47f83cb3dcbe43cf2bcbb5eab0930eef9e8ff777442c5c2badc",
+  "parentEvidenceBundleDigest": "sha256:2723a8dccb47c04969250219470d8a827e66ee963b5042dd163d8faba9b8ad08",
+  "closedWorldDigest": "sha256:11aca8e14e437879fdaae9c644d7de9bd9a4e5dd9aa14c7aa17125b9baca852b",
+  "pathAuthorityDigest": "sha256:9b942f950635e9ee11da1bc5dd83e45b984554227a7b7d910322df94b61ab1f6",
+  "admissionFeatureDefinitionDigest": "sha256:3b9bd616bde4b8b87dacd5c37fe29b94be0a5d12e01c18c90dce2c03446b2ec9",
+  "admissionFeatureFileSetDigest": "sha256:8fb3317ca67c5ba1393d73890c436e113f6a366cc921ab80994ee2f94528af0b",
+  "successorWorkstreamDefinitionDigest": "sha256:32867856bc849c9defcd8a7e22328a01c994ee26012a5e9c668597e739cda2ec",
+  "successorFeatureDefinitionDigest": "sha256:04ea9280b53baa7fb0b1312357e88273e7cbba3d3844ad828c7835ca926b2b5b",
+  "reviewedPhase": "review_pre_transition",
+  "validatorDigest": "sha256:ce2e58ba76e84d906885812dbf57835ed1c70a605f72634fdd8c7d30ffddd58e",
+  "lane": "runtime",
+  "reviewTaskPath": "/root/cd03a_r3_contract_policy",
+  "reviewAgentId": "cd03a-r3-runtime-adversary-20260824-7f2c9a",
+  "challenge": "sha256:61a642ac11f74dcfecb46d5c7a2b2fc002c9d495dcc4ef7c89401607a1df0850",
+  "verdict": "failed",
+  "findingCounts": {
+    "critical": 1,
+    "major": 2,
+    "minor": 1
+  },
+  "findings": [
+    {
+      "id": "R3-RUNTIME-001",
+      "severity": "critical",
+      "summary": "Runner rejects the frozen rejected_output_absent admission class, making the transaction unreachable.",
+      "evidence": [
+        "scripts/verify-conversation-disclosure-continuation-v3.mjs:660",
+        ".zerox/verification/conversation-disclosure/CD03A-round3-successor-evolution-policy.json:12070"
+      ]
+    },
+    {
+      "id": "R3-RUNTIME-002",
+      "severity": "major",
+      "summary": "Checker absence validation returns false for present paths while callers ignore the result.",
+      "evidence": [
+        "scripts/check-conversation-disclosure-continuation-v3.mjs:938"
+      ]
+    },
+    {
+      "id": "R3-RUNTIME-003",
+      "severity": "major",
+      "summary": "Manifest builder lacks a global capture ledger and output-time postflight rehash.",
+      "evidence": [
+        "scripts/build-conversation-disclosure-continuation-manifest-v3.mjs:46",
+        "scripts/build-conversation-disclosure-continuation-manifest-v3.mjs:197"
+      ]
+    },
+    {
+      "id": "R3-RUNTIME-004",
+      "severity": "minor",
+      "summary": "Later checker runner and manifest paths do not reject policy or snapshot private-mode drift.",
+      "evidence": [
+        "scripts/check-conversation-disclosure-continuation-v3.mjs:103",
+        "scripts/verify-conversation-disclosure-continuation-v3.mjs:207"
+      ]
+    }
+  ]
+}

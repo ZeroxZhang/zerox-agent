@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 3,
+  "kind": "conversation-disclosure-continuation-prefreeze-rejection",
+  "algorithm": "sha256-canonical-json-v1",
+  "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
+  "workstreamId": "CD03A",
+  "featureId": "P107A-conversation-disclosure-successor-admission",
+  "rejectedRound": 2,
+  "recoveryRound": 3,
+  "status": "rejected_pre_freeze",
+  "sourcePolicy": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round2-successor-evolution-policy.json",
+    "byteSha256": "sha256:0f082ee8000cf58a428073bfcd10151919ddb3eecc46dea6531422b01865e3ff",
+    "canonicalDigest": "sha256:aa9fa6893b20b16ccab49cbe41af65a46b9719a334691ef6174722ffb1f2edc7"
+  },
+  "baselineArchive": {
+    "path": ".zerox/verification/conversation-disclosure/CD03A-round2-baseline-archive.json",
+    "byteSha256": "sha256:52aca7ea73e9bd365b7beaa13814b25d618dac4c67bf9230ca9f392b49ab2797",
+    "digest": "sha256:eed3ca13a9ed9bc20ee952eaacf3e75a16e55845ac5b27929cb046e8b08b2970",
+    "entrySetDigest": "sha256:c1378e52f4e100cdada35b0e4c80b53d47e99031ddb6f7d076550388fd85383b"
+  },
+  "continuationExecutables": [
+    {
+      "kind": "checker",
+      "path": "scripts/check-conversation-disclosure-continuation-v2.mjs",
+      "sha256": "sha256:3e983796487d4b1b2ab96e17724f85e4970f28f5212b5926b10e8f56c04c241c"
+    },
+    {
+      "kind": "contract",
+      "path": "scripts/conversation-disclosure-continuation-contract-v2.mjs",
+      "sha256": "sha256:4f6f997b9a01dedbcba5865ac0f7d009dfd1f7c380951465e85922e5b29e7bee"
+    },
+    {
+      "kind": "freezer",
+      "path": "scripts/freeze-conversation-disclosure-continuation-v2.mjs",
+      "sha256": "sha256:3fe4a400d5d57d06187520aeda8de32d43b40970fb0ed3cc6b54ccca7f3b4605"
+    },
+    {
+      "kind": "governance",
+      "path": "scripts/conversation-disclosure-program-governance-v2.mjs",
+      "sha256": "sha256:501958850caa4f9b9a10440e62d9555ae7aca3565d12d254581157c7d7b88269"
+    },
+    {
+      "kind": "runner",
+      "path": "scripts/verify-conversation-disclosure-continuation-v2.mjs",
+      "sha256": "sha256:563a647b70ea53f84948aec0398dce0162153c4fb199597a9d0a242e9824a990"
+    }
+  ],
+  "governanceTransitions": [
+    {
+      "path": "package.json",
+      "kind": "package-structure-migration",
+      "fromSha256": "sha256:560fb3e3b2829a32b4ac694c7781fce9e53941a9e20fc4ec1c08602d53c278b9",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round2-package.target.json",
+      "toSha256": "sha256:cf1b85c49d6b3999e15711207dea97732ce3e95a3a8367a98524f55a483ffe9a"
+    },
+    {
+      "path": "scripts/check-harness-state.mjs",
+      "kind": "harness-delegation-migration",
+      "fromSha256": "sha256:231d28280f6891f50f5c714b4161d1b9d93cf171e0b67396de67ce7a36e06339",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round2-harness.target.mjs",
+      "toSha256": "sha256:03e72284a7c23612aadcadb437e05c53c60392b2c29096c8eed11c36bdc08797"
+    },
+    {
+      "path": "src/shared/conversationDisclosureProgram.test.ts",
+      "kind": "program-test-migration",
+      "fromSha256": "sha256:087cff0ba7f208464bf62e41f3a10dfbb88f3f2461d46398187c0b4cfa16dd5c",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round2-program-test.target.ts",
+      "toSha256": "sha256:18eab102934a3af3da8ea5b9e0687db746ac342c835fa16f848974d752651bd2"
+    },
+    {
+      "path": "src/shared/packageScripts.test.ts",
+      "kind": "package-test-migration",
+      "fromSha256": "sha256:2f30d10ebd5ccc408255813e0d10ca4e8bd145930bdbe263bc2a6e5d2fa61efe",
+      "stagedTargetPath": ".zerox/verification/conversation-disclosure/CD03A-round2-package-scripts-test.target.ts",
+      "toSha256": "sha256:56dd4ead037332c8c7ec0b25359d489a0a44deec9e41fe529ca4dbb9a76da947"
+    }
+  ],
+  "liveTransitionFiles": [
+    {
+      "path": "package.json",
+      "sha256": "sha256:560fb3e3b2829a32b4ac694c7781fce9e53941a9e20fc4ec1c08602d53c278b9"
+    },
+    {
+      "path": "scripts/check-harness-state.mjs",
+      "sha256": "sha256:231d28280f6891f50f5c714b4161d1b9d93cf171e0b67396de67ce7a36e06339"
+    },
+    {
+      "path": "src/shared/conversationDisclosureProgram.test.ts",
+      "sha256": "sha256:087cff0ba7f208464bf62e41f3a10dfbb88f3f2461d46398187c0b4cfa16dd5c"
+    },
+    {
+      "path": "src/shared/packageScripts.test.ts",
+      "sha256": "sha256:2f30d10ebd5ccc408255813e0d10ca4e8bd145930bdbe263bc2a6e5d2fa61efe"
+    }
+  ],
+  "transitionPayloadFiles": [
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-harness.target.mjs",
+      "sha256": "sha256:03e72284a7c23612aadcadb437e05c53c60392b2c29096c8eed11c36bdc08797"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-package-scripts-test.target.ts",
+      "sha256": "sha256:56dd4ead037332c8c7ec0b25359d489a0a44deec9e41fe529ca4dbb9a76da947"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-package.target.json",
+      "sha256": "sha256:cf1b85c49d6b3999e15711207dea97732ce3e95a3a8367a98524f55a483ffe9a"
+    },
+    {
+      "path": ".zerox/verification/conversation-disclosure/CD03A-round2-program-test.target.ts",
+      "sha256": "sha256:18eab102934a3af3da8ea5b9e0687db746ac342c835fa16f848974d752651bd2"
+    }
+  ],
+  "verifiedAbsentPaths": [
+    ".zerox/verification/conversation-disclosure/CD03A-round2-closure-manifest.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-contract-review.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-external-attestation.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-governance-review.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-review-snapshot.json",
+    ".zerox/verification/conversation-disclosure/CD03A-round2-runtime-review.json"
+  ],
+  "contradiction": {
+    "code": "round2-transition-target-double-classification",
+    "errors": [
+      "P107A review coverage must classify exactly once: .zerox/verification/conversation-disclosure/CD03A-round2-package.target.json",
+      "P107A review coverage must classify exactly once: .zerox/verification/conversation-disclosure/CD03A-round2-harness.target.mjs",
+      "P107A review coverage must classify exactly once: .zerox/verification/conversation-disclosure/CD03A-round2-program-test.target.ts",
+      "P107A review coverage must classify exactly once: .zerox/verification/conversation-disclosure/CD03A-round2-package-scripts-test.target.ts",
+      "admission reviewCoverageDigest is invalid or stale"
+    ],
+    "targetClassifications": [
+      {
+        "path": ".zerox/verification/conversation-disclosure/CD03A-round2-package.target.json",
+        "classes": [
+          "frozen_file",
+          "transition_target"
+        ]
+      },
+      {
+        "path": ".zerox/verification/conversation-disclosure/CD03A-round2-harness.target.mjs",
+        "classes": [
+          "frozen_file",
+          "transition_target"
+        ]
+      },
+      {
+        "path": ".zerox/verification/conversation-disclosure/CD03A-round2-program-test.target.ts",
+        "classes": [
+          "frozen_file",
+          "transition_target"
+        ]
+      },
+      {
+        "path": ".zerox/verification/conversation-disclosure/CD03A-round2-package-scripts-test.target.ts",
+        "classes": [
+          "frozen_file",
+          "transition_target"
+        ]
+      }
+    ]
+  },
+  "digest": "sha256:75a01cdef04821f1d1ca447a5b2383d8d47be331bec7777017042bf90fcf6614"
+}
