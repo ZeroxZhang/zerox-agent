@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { createAgentRunStore } from "../agentRunStore";
 import { createAgentTrajectoryStore } from "../agentTrajectoryStore";
 import { createStorageImpl } from "./storageDb";
+import { createRunRepository } from "./repositories/runRepository";
 import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import type { StorageBackend } from "../../shared/storageContract";
@@ -100,6 +101,142 @@ describe("dual-write shadows to JSON", () => {
     });
   });
 
+  it("bootstraps a missing JSON shadow from an authoritative revision > 1", async () => {
+    await withStorage("dual", async (dir, storage) => {
+      const authoritative = {
+        ...makeRun("snapshot-v2"),
+        status: "succeeded" as const,
+        executionRevision: 2,
+        summary: "resumed terminal snapshot",
+      };
+      createRunRepository(storage).importSnapshot(authoritative);
+      const store = createAgentRunStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+
+      await expect(store.append(authoritative)).resolves.toEqual(authoritative);
+      await store.flushShadowWrites();
+
+      const jsonOnly = createAgentRunStore({ configDir: dir, backend: "json" });
+      await expect(jsonOnly.get(authoritative.id)).resolves.toEqual(
+        authoritative,
+      );
+    });
+  });
+
+  it.each(["retry", "read", "startup"] as const)(
+    "converges a rev1 JSON shadow to rev3 SQLite authority on %s",
+    async (recoveryBoundary) => {
+      await withStorage("dual", async (dir, storage) => {
+        const store = createAgentRunStore({
+          configDir: dir,
+          backend: "dual",
+          storage,
+        });
+        const revision1 = {
+          ...makeRun(`shadow-gap-${recoveryBoundary}`),
+          status: "paused" as const,
+          executionRevision: 1,
+          summary: "revision 1",
+        };
+        await store.append(revision1);
+        await store.flushShadowWrites();
+
+        const repository = createRunRepository(storage);
+        const revision2 = {
+          ...revision1,
+          executionRevision: 2,
+          summary: "revision 2 skipped by JSON",
+        };
+        const revision3 = {
+          ...revision2,
+          executionRevision: 3,
+          status: "succeeded" as const,
+          summary: "revision 3 authoritative",
+        };
+        repository.create(revision2);
+        repository.create(revision3);
+
+        if (recoveryBoundary === "retry") {
+          await store.append(revision3);
+          await store.flushShadowWrites();
+        } else if (recoveryBoundary === "read") {
+          await expect(store.get(revision3.id)).resolves.toEqual(revision3);
+          await store.flushShadowWrites();
+        } else {
+          const restarted = createAgentRunStore({
+            configDir: dir,
+            backend: "dual",
+            storage,
+          });
+          await restarted.flushShadowWrites();
+        }
+
+        const jsonOnly = createAgentRunStore({ configDir: dir, backend: "json" });
+        await expect(jsonOnly.get(revision3.id)).resolves.toEqual(revision3);
+      });
+    },
+  );
+
+  it("rebuilds a skipped JSON shadow after a fresh storage process boundary", async () => {
+    const dir = join(tmpdir(), `zerox-proxy-restart-${randomUUID()}`);
+    const dbPath = join(dir, "zerox.db");
+    const firstStorage = createStorageImpl({ dbPath });
+    await firstStorage.migrate();
+    const revision1 = {
+      ...makeRun("shadow-process-gap"),
+      status: "paused" as const,
+      executionRevision: 1,
+      summary: "revision 1",
+    };
+    const revision2 = {
+      ...revision1,
+      executionRevision: 2,
+      summary: "revision 2 skipped by JSON",
+    };
+    const revision3 = {
+      ...revision2,
+      executionRevision: 3,
+      status: "succeeded" as const,
+      summary: "revision 3 authoritative",
+    };
+    try {
+      const firstStore = createAgentRunStore({
+        configDir: dir,
+        backend: "dual",
+        storage: firstStorage,
+      });
+      await firstStore.append(revision1);
+      await firstStore.flushShadowWrites({ close: true });
+      const repository = createRunRepository(firstStorage);
+      repository.create(revision2);
+      repository.create(revision3);
+    } finally {
+      firstStorage.close();
+    }
+
+    const restartedStorage = createStorageImpl({ dbPath });
+    await restartedStorage.migrate();
+    try {
+      const restartedStore = createAgentRunStore({
+        configDir: dir,
+        backend: "dual",
+        storage: restartedStorage,
+      });
+      await restartedStore.flushShadowWrites({ close: true });
+      const jsonOnly = createAgentRunStore({ configDir: dir, backend: "json" });
+      await expect(jsonOnly.get(revision3.id)).resolves.toEqual(revision3);
+      expect(createRunRepository(restartedStorage).get(revision3.id)).toEqual(
+        revision3,
+      );
+    } finally {
+      restartedStorage.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("trajectory JSON sidecar receives the same writes after explicit drain", async () => {
     await withStorage("dual", async (dir, storage) => {
       const store = createAgentTrajectoryStore({ configDir: dir, backend: "dual", storage });
@@ -172,8 +309,45 @@ describe("dual-write shadows to JSON", () => {
       await expect(store.get("authority")).resolves.toMatchObject({
         id: "authority",
       });
+      await expect(store.list()).resolves.toEqual([
+        expect.objectContaining({ id: "authority" }),
+      ]);
       await expect(store.flushShadowWrites()).rejects.toMatchObject({
         code: "EISDIR",
+      });
+    });
+  });
+
+  it("repairs a failed run shadow on an exact authoritative retry", async () => {
+    await withStorage("dual", async (dir, storage) => {
+      const shadowPath = join(dir, "agent-runs.jsonl");
+      await mkdir(shadowPath);
+      const store = createAgentRunStore({
+        configDir: dir,
+        backend: "dual",
+        storage,
+      });
+      const run = makeRun("repair-shadow");
+
+      await expect(store.append(run)).resolves.toMatchObject({
+        id: "repair-shadow",
+        executionRevision: 1,
+      });
+      await expect(store.flushShadowWrites()).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+
+      await rm(shadowPath, { recursive: true, force: true });
+      await expect(store.append(run)).resolves.toMatchObject({
+        id: "repair-shadow",
+        executionRevision: 1,
+      });
+      await store.flushShadowWrites();
+
+      const jsonOnly = createAgentRunStore({ configDir: dir, backend: "json" });
+      await expect(jsonOnly.get("repair-shadow")).resolves.toMatchObject({
+        id: "repair-shadow",
+        executionRevision: 1,
       });
     });
   });

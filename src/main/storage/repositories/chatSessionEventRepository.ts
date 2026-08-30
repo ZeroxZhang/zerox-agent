@@ -5,7 +5,18 @@ import type {
   ChatSessionRecord,
   ChatSessionTranscriptPage,
   ChatSessionTranscriptPageOptions,
+  ChatTaskStatusEvent,
 } from "../../../shared/chat";
+import {
+  createConversationSourcePage,
+  createConversationSourceQueryHash,
+  createConversationSourceRevision,
+  normalizeConversationSourcePageLimit,
+  parseConversationSourceCursor,
+  type ConversationChatActivityRecord,
+  type ConversationSourcePage,
+  type ConversationSourcePageOptions,
+} from "../../../shared/conversationEvidence";
 import type { Storage } from "../../../shared/storageContract";
 import { jsonify, parseJson } from "../repositoryUtils";
 
@@ -79,6 +90,10 @@ export type ChatSessionEventRepository = {
   searchMessages(
     options: ChatMessageSearchOptions,
   ): ChatMessageSearchResult[];
+  getActivityPage(
+    sessionId: string,
+    options?: ConversationSourcePageOptions,
+  ): ConversationSourcePage<ConversationChatActivityRecord>;
   listEvents(sessionId: string): ChatSessionEventRecord[];
 };
 
@@ -466,6 +481,117 @@ export function createChatSessionEventRepository(
         .slice(0, requestedLimit);
     },
 
+    getActivityPage(sessionId, options) {
+      throwIfAborted(options?.signal);
+      const queryHash = createConversationSourceQueryHash({
+        source: "chat_activity",
+        sourceId: sessionId,
+        filters: { eventType: "activity_appended" },
+      });
+      const cut = db.prepare(
+        `SELECT COALESCE(MAX(seq), 0) AS max_seq,
+                SUM(CASE WHEN type = 'activity_appended' THEN 1 ELSE 0 END) AS activity_count,
+                SUM(CASE WHEN type = 'session_imported' THEN 1 ELSE 0 END) AS import_count
+           FROM chat_session_events
+          WHERE session_id = ?
+            AND type IN ('session_imported', 'activity_appended')`,
+      ).get<{
+        max_seq: number;
+        activity_count: number | null;
+        import_count: number | null;
+      }>(sessionId) ?? {
+        max_seq: 0,
+        activity_count: 0,
+        import_count: 0,
+      };
+      const sourceRevision = createConversationSourceRevision({
+        source: "chat_activity",
+        sourceId: sessionId,
+        authority: {
+          backend: "sqlite",
+          maxSequence: cut.max_seq,
+          activityCount: cut.activity_count ?? 0,
+          importCount: cut.import_count ?? 0,
+        },
+      });
+      const cursor = parseConversationSourceCursor(options?.cursor, {
+        source: "chat_activity",
+        sourceId: sessionId,
+        queryHash,
+      });
+      if (
+        cursor.kind === "incompatible"
+        || (
+          cursor.kind === "position"
+          && (
+            cursor.sourceRevision !== sourceRevision
+            || cursor.position > cut.max_seq
+          )
+        )
+      ) {
+        return createConversationSourcePage({
+          source: "chat_activity",
+          sourceId: sessionId,
+          queryHash,
+          sourceRevision,
+          status: "incompatible",
+          reasonCode: "source_cursor_mismatch",
+          records: [],
+        });
+      }
+      const limit = normalizeConversationSourcePageLimit(options?.limit);
+      const rows = db.prepare(
+        `SELECT id, seq, payload
+           FROM chat_session_events
+          WHERE session_id = ?
+            AND type = 'activity_appended'
+            AND seq > ?
+            AND seq <= ?
+          ORDER BY seq ASC
+          LIMIT ?`,
+      ).all<{ id: string; seq: number; payload: string }>(
+        sessionId,
+        cursor.position,
+        cut.max_seq,
+        limit + 1,
+      );
+      throwIfAborted(options?.signal);
+      const physical = rows.slice(0, limit);
+      const records: ConversationChatActivityRecord[] = [];
+      let corrupt = false;
+      for (const row of physical) {
+        const payload = parseJson<{ event?: unknown }>(row.payload);
+        if (!isChatTaskStatusEvent(payload?.event)) {
+          corrupt = true;
+          continue;
+        }
+        records.push({
+          eventId: row.id,
+          sequence: row.seq,
+          event: payload.event,
+          legacy: false,
+        });
+      }
+      const imported = (cut.import_count ?? 0) > 0;
+      const reasonCode = corrupt
+        ? "corrupt_record"
+        : imported
+          ? "legacy_chat_activity_tail_unavailable"
+          : undefined;
+      return createConversationSourcePage({
+        source: "chat_activity",
+        sourceId: sessionId,
+        queryHash,
+        sourceRevision,
+        status: reasonCode ? "partial" : "complete",
+        ...(reasonCode ? { reasonCode } : {}),
+        records,
+        ...(rows.length > limit && physical.length > 0
+          ? { nextPosition: physical.at(-1)!.seq }
+          : {}),
+      });
+    },
+
     listEvents(sessionId) {
       return db
         .prepare(
@@ -492,6 +618,22 @@ export function createChatSessionEventRepository(
         }));
     },
   };
+}
+
+function isChatTaskStatusEvent(value: unknown): value is ChatTaskStatusEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Partial<ChatTaskStatusEvent>;
+  return typeof event.sessionId === "string"
+    && typeof event.state === "string"
+    && typeof event.message === "string"
+    && typeof event.createdAt === "string"
+    && typeof event.elapsedMs === "number";
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new DOMException("Chat activity page query was canceled.", "AbortError");
 }
 
 function inImmediateTransaction<T>(

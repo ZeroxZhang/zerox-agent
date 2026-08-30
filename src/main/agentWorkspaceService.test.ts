@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAgentWorkspaceService } from "./agentWorkspaceService";
 import { createAgentWorkspaceStore } from "./agentWorkspaceStore";
+import { createToolAuditLog } from "./toolAuditLog";
 
 describe("agent workspace service", () => {
   let configDir: string;
@@ -156,6 +157,10 @@ describe("agent workspace service", () => {
       execFile: async (command, args, options) => {
         calls.push({ command, args, options });
       },
+      trustedGitWorktreeRepositories: [{
+        id: "trusted-demo-repo",
+        repositoryRoot: "/Users/demo/repo",
+      }],
     });
 
     const workspace = await service.createGitWorktreeWorkspace({
@@ -163,9 +168,8 @@ describe("agent workspace service", () => {
       repositoryRoot: "/Users/demo/repo",
       branch: "codex/feature",
       approval: {
-        kind: "explicit_user_approval",
-        approvedAt: "2026-06-08T00:00:00.000Z",
-        approvedBy: "user",
+        kind: "trusted_repository_policy",
+        policyId: "trusted-demo-repo",
       },
     });
 
@@ -220,5 +224,85 @@ describe("agent workspace service", () => {
 
     expect(calls).toEqual([]);
     await expect(store.list()).resolves.toEqual([]);
+  });
+
+  it("accepts a non-forgeable ToolRuntime authorization receipt", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const store = createAgentWorkspaceStore({
+      configDir,
+      createId: () => "workspace_runtime_receipt",
+      now: () => new Date("2026-08-18T00:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_worktree_1",
+      now: () => new Date("2026-08-18T00:00:00.000Z"),
+    });
+    const authorizedRequest = {
+      toolName: "git_worktree_add",
+      args: {
+        name: "Runtime-authorized worktree",
+        repositoryRoot: path.resolve("/Users/demo/repo"),
+        branch: "codex/runtime-receipt",
+      },
+    };
+    const auditEvent = await auditLog.append({
+      taskId: "agent_workspaces",
+      request: authorizedRequest,
+      decision: { allowed: true, reason: "user approved" },
+    });
+    const service = createAgentWorkspaceService({
+      workspaceStore: store,
+      workspaceRoot,
+      createId: () => "runtime_receipt_branch",
+      execFile: async (command, args) => {
+        calls.push({ command, args });
+      },
+      consumeToolAuthorizationReceipt: (input) =>
+        auditLog.consumeAuthorizationReceipt(input),
+    });
+
+    await expect(service.createGitWorktreeWorkspace({
+      name: "Runtime-authorized worktree",
+      repositoryRoot: "/Users/demo/repo",
+      branch: "codex/runtime-receipt",
+      approval: {
+        kind: "tool_authorization_receipt",
+        auditEventId: auditEvent.id,
+      },
+    })).resolves.toMatchObject({ kind: "git_worktree" });
+    expect(calls).toHaveLength(1);
+
+    await expect(service.createGitWorktreeWorkspace({
+      name: "Runtime-authorized worktree",
+      repositoryRoot: "/Users/demo/repo",
+      branch: "codex/runtime-receipt",
+      approval: {
+        kind: "tool_authorization_receipt",
+        auditEventId: auditEvent.id,
+      },
+    })).rejects.toThrow(/unused ToolRuntime/);
+    expect(calls).toHaveLength(1);
+
+    await expect(service.createGitWorktreeWorkspace({
+      name: "Forged worktree",
+      repositoryRoot: "/Users/demo/repo",
+      branch: "codex/forged-receipt",
+      approval: {
+        kind: "tool_authorization_receipt",
+        auditEventId: "audit_forged_nonempty",
+      },
+    })).rejects.toThrow(/authorization|trusted/i);
+
+    await expect(service.createGitWorktreeWorkspace({
+      name: "Runtime-authorized worktree",
+      repositoryRoot: "/Users/demo/repo",
+      branch: "codex/changed-after-approval",
+      approval: {
+        kind: "tool_authorization_receipt",
+        auditEventId: auditEvent.id,
+      },
+    })).rejects.toThrow(/verified unused ToolRuntime/);
+    expect(calls).toHaveLength(1);
   });
 });

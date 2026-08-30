@@ -13,13 +13,30 @@ export type ChatKernelStreamTerminal = {
 
 export type ChatKernelSettlement<TResult> = ProductionKernelSegment & {
   result: TResult;
-  persistence: {
-    requiredStatePersisted: true;
-    assistantMessageId?: string;
-    continuationPersisted?: true;
-    terminalActivityPersisted?: true;
-    noDomainStateCreated?: true;
-  };
+  persistence:
+    | {
+        requiredStatePersisted: true;
+        assistantMessageId?: string;
+        continuationPersisted?: true;
+        /** Paused only because legacy business settlement cannot be proven. */
+        reconciliationRequired?: true;
+        terminalActivityPersisted?: true;
+        /** Valid only when absence was established before any owning fact existed. */
+        noDomainStateCreated?: true;
+        settlementRecoveryRequired?: never;
+        settlementFailureCode?: never;
+      }
+    | {
+        /** At least one owning domain may exist, but the required receipts did not all commit. */
+        requiredStatePersisted: false;
+        settlementRecoveryRequired: true;
+        settlementFailureCode: string;
+        noDomainStateCreated?: never;
+        terminalActivityPersisted?: never;
+        assistantMessageId?: never;
+        continuationPersisted?: never;
+        reconciliationRequired?: never;
+      };
   streamTerminals: readonly [ChatKernelStreamTerminal];
 };
 
@@ -50,6 +67,7 @@ export async function runChatKernelSegment<TResult>(
   const outcome = await input.driver.run({
     runId: input.runId,
     mode: "chat",
+    failureDisposition: "return_settlement",
     ...(input.signal ? { signal: input.signal } : {}),
     async execute(reporter, context) {
       return validateChatKernelSettlement(
@@ -77,11 +95,6 @@ export async function runChatKernelSegment<TResult>(
 export function validateChatKernelSettlement<TResult>(
   settlement: ChatKernelSettlement<TResult>,
 ): ChatKernelSettlement<TResult> {
-  if (settlement.persistence.requiredStatePersisted !== true) {
-    throw new Error(
-      "Chat Kernel settlement requires durable domain persistence.",
-    );
-  }
   if (settlement.streamTerminals.length !== 1) {
     throw new Error(
       `Chat Kernel settlement requires exactly one stream terminal, received ${settlement.streamTerminals.length}.`,
@@ -111,14 +124,38 @@ export function validateChatKernelSettlement<TResult>(
   }
 
   if (
-    settlement.status === "paused" &&
-    settlement.persistence.continuationPersisted !== true
+    settlement.persistence.requiredStatePersisted === false
+    && (
+      settlement.persistence.settlementRecoveryRequired !== true
+      || !settlement.persistence.settlementFailureCode.trim()
+      || (settlement.status !== "failed" && settlement.status !== "canceled")
+    )
   ) {
     throw new Error(
-      "Paused Chat Kernel settlement requires durable continuation state.",
+      "Incomplete Chat Kernel persistence requires a typed failed or canceled recovery settlement.",
     );
   }
   if (
+    settlement.status === "paused" &&
+    settlement.persistence.requiredStatePersisted === true &&
+    settlement.persistence.continuationPersisted !== true &&
+    settlement.persistence.reconciliationRequired !== true
+  ) {
+    throw new Error(
+      "Paused Chat Kernel settlement requires durable continuation or explicit reconciliation state.",
+    );
+  }
+  if (
+    settlement.persistence.requiredStatePersisted === true &&
+    settlement.persistence.continuationPersisted === true
+    && settlement.persistence.reconciliationRequired === true
+  ) {
+    throw new Error(
+      "Chat Kernel settlement cannot claim both continuation and reconciliation-only state.",
+    );
+  }
+  if (
+    settlement.persistence.requiredStatePersisted === true &&
     (settlement.status === "failed" ||
       settlement.status === "canceled") &&
     settlement.persistence.terminalActivityPersisted !== true &&
@@ -129,14 +166,14 @@ export function validateChatKernelSettlement<TResult>(
     );
   }
   if (
-    (settlement.status === "succeeded" ||
-      settlement.status === "paused") &&
+    settlement.persistence.requiredStatePersisted === true &&
+    settlement.status === "succeeded" &&
     !assistantMessageId &&
     settlement.persistence.terminalActivityPersisted !== true &&
     settlement.persistence.noDomainStateCreated !== true
   ) {
     throw new Error(
-      `${settlement.status} Chat Kernel settlement requires a persisted assistant message or terminal activity.`,
+      "succeeded Chat Kernel settlement requires a persisted assistant message or terminal activity.",
     );
   }
 

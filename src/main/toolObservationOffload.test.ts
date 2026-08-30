@@ -152,6 +152,33 @@ describe("tool observation offload serializer", () => {
     });
     expect(store.writes).toHaveLength(0);
   });
+
+  it("redacts credentials before inline or offloaded observation bytes are built", async () => {
+    const failed = await serializeToolObservationWithOffload({
+      tool: "shell_exec",
+      ok: false,
+      error: "Authorization: Bearer offload-error-canary",
+      errorDetails: { apiKey: "offload-key-canary" },
+    });
+    const store = createRecordingStore();
+    const succeeded = await serializeToolObservationWithOffload({
+      tool: "file_read",
+      ok: true,
+      result: {
+        content: `api_key=offload-result-canary ${"x".repeat(500)}`,
+      },
+    }, {
+      store,
+      thresholdChars: 10,
+      runId: "run_secret_safe",
+    });
+
+    const serialized = JSON.stringify({ failed, succeeded, writes: store.writes });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /offload-error-canary|offload-key-canary|offload-result-canary/,
+    );
+  });
 });
 
 function createRecordingStore(): ToolResultOffloadStore & {

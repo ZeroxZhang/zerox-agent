@@ -126,6 +126,24 @@ describe("agent JSON protocol", () => {
     expect(result).toContain(`</tool_result>`);
   });
 
+  it("redacts credential-bearing tool observations before transcript persistence", () => {
+    const result = serializeToolObservation({
+      tool: "shell_exec",
+      ok: false,
+      error: "Authorization: Bearer observation-bearer-canary",
+      errorDetails: {
+        command: "curl https://example.test?api_key=observation-query-canary",
+        password: "observation-password-canary",
+      },
+      toolCallId: "call_secret_safe",
+    });
+
+    expect(result).toContain("[redacted]");
+    expect(result).not.toMatch(
+      /observation-bearer-canary|observation-query-canary|observation-password-canary/,
+    );
+  });
+
   it("builds a system prompt that names the available tools and working principles", () => {
     const prompt = buildAgentSystemPrompt();
 

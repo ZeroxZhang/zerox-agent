@@ -8,7 +8,11 @@ import type { ChatClient, ChatMessage, ChatCompletionResponse } from "./openAiCo
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
-import type { AgentRunRecord } from "../shared/agentRuns";
+import type {
+  AgentRunAdmissionCandidate,
+  AgentRunEvent,
+  AgentRunRecord,
+} from "../shared/agentRuns";
 
 /** v3.6.0: Extract JSON content from XML-fenced tool result wrapper. */
 function innerToolResultJson(content: string): string {
@@ -50,6 +54,57 @@ function toolCallResponseWithId(
 }
 
 describe("agent runner service", () => {
+  it("redacts denied legacy tool errors from events, persistence, and results", async () => {
+    const canary = "legacy-denied-tool-canary";
+    const observedEvents: unknown[] = [];
+    const runStore = createMemoryRunStore();
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask({ skillName: "" })),
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: {
+        async complete() {
+          return toolCallResponse("file_read", { path: "." });
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: {
+        async authorize(taskId, request) {
+          return {
+            ok: true,
+            decision: {
+              allowed: false,
+              reason: `api_key=${canary}`,
+            },
+            auditEvent: {
+              id: "audit_secret_safe_legacy",
+              taskId,
+              request,
+              decision: {
+                allowed: false,
+                reason: `api_key=${canary}`,
+              },
+              createdAt: "2026-08-24T00:00:00.000Z",
+            },
+          };
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      createId: () => "legacy_secret_safe_run",
+      now: () => new Date("2026-08-24T00:00:00.000Z"),
+    });
+
+    const result = await service.runTask("task_123", {
+      onEvent(event) {
+        observedEvents.push(event);
+      },
+    });
+
+    const serialized = JSON.stringify({ result, observedEvents, runStore });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toContain(canary);
+  });
+
   it("runs a task to a final response and stores the run", async () => {
     const capturedMessages: ChatMessage[][] = [];
     const runStore = createMemoryRunStore();
@@ -89,6 +144,466 @@ describe("agent runner service", () => {
     expect(capturedMessages.some(msgs =>
       msgs.some(m => m.content.includes("Local File Organizer")),
     )).toBe(true);
+  });
+
+  it("gates the legacy runner before model execution and preserves the admitted run id", async () => {
+    let gateAdmitted = false;
+    let executionAdmitted = false;
+    let modelCalls = 0;
+    const settledStatuses: AgentRunRecord["status"][] = [];
+    const runStore = createMemoryRunStore();
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask({ skillName: "" })),
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          expect(executionAdmitted).toBe(true);
+          return finalResponse("admitted run complete");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: () => "legacy_admitted_run",
+      now: () => new Date("2026-08-24T00:00:00.000Z"),
+    });
+
+    const result = await service.runTask("task_123", {
+      sessionId: "legacy_admission_session",
+      async beforeExecution(candidate) {
+        expect(candidate).toEqual({
+          runId: "legacy_admitted_run",
+          taskId: "task_123",
+          sessionId: "legacy_admission_session",
+          executionRevision: 1,
+        });
+        gateAdmitted = true;
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle(status: AgentRunRecord["status"]) {
+            settledStatuses.push(status);
+          },
+        };
+      },
+      onExecutionAdmitted(candidate) {
+        expect(gateAdmitted).toBe(true);
+        expect(candidate.runId).toBe("legacy_admitted_run");
+        executionAdmitted = true;
+      },
+    });
+
+    expect(modelCalls).toBeGreaterThan(0);
+    expect(result).toMatchObject({
+      ok: true,
+      run: { id: "legacy_admitted_run" },
+    });
+    expect(runStore.runs).toEqual([
+      expect.objectContaining({ id: "legacy_admitted_run" }),
+    ]);
+    expect(settledStatuses).toEqual(["succeeded"]);
+  });
+
+  it("settles the legacy admission at the authoritative run commit before best-effort task bookkeeping", async () => {
+    const lifecycle: string[] = [];
+    const liveEvents: AgentRunEvent[] = [];
+    let releaseMemory!: () => void;
+    const memoryPending = new Promise<void>((resolve) => {
+      releaseMemory = resolve;
+    });
+    let notifyMemoryStarted!: () => void;
+    const memoryStarted = new Promise<void>((resolve) => {
+      notifyMemoryStarted = resolve;
+    });
+    const taskStore = createTaskStore(createTask({ skillName: "" }));
+    taskStore.recordRun = async () => {
+      lifecycle.push("task-bookkeeping");
+      throw new Error("task bookkeeping unavailable");
+    };
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    runStore.append = async (run) => {
+      lifecycle.push(`run:${run.status}`);
+      return appendRun(run);
+    };
+    const service = createAgentRunnerService({
+      taskStore,
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("committed"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create(input) {
+          lifecycle.push("memory:start");
+          notifyMemoryStarted();
+          await memoryPending;
+          lifecycle.push("memory:done");
+          return {
+            id: "legacy_commit_memory",
+            ...input,
+            tags: input.tags ?? [],
+            source: input.source ?? { type: "manual" },
+            importance: input.importance ?? 3,
+            createdAt: "2026-08-24T00:00:00.000Z",
+            updatedAt: "2026-08-24T00:00:00.000Z",
+          } as MemoryRecord;
+        },
+      },
+      createId: () => "legacy_commit_boundary",
+    });
+
+    const resultPromise = service.runTask("task_123", {
+      async beforeExecution(candidate) {
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle(status, expectedExecutionRevision) {
+            lifecycle.push(`settle:${expectedExecutionRevision}:${status}`);
+          },
+        };
+      },
+      onEvent(event) {
+        liveEvents.push(structuredClone(event));
+      },
+    });
+
+    await memoryStarted;
+    expect(runStore.runs).toHaveLength(1);
+    expect(lifecycle).toEqual([
+      "run:succeeded",
+      "settle:1:succeeded",
+      "memory:start",
+    ]);
+    expect(runStore.runs[0]?.events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Episodic memory written." }),
+      ]),
+    );
+
+    releaseMemory();
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { id: "legacy_commit_boundary", status: "succeeded" },
+    });
+    expect(runStore.runs).toHaveLength(1);
+    expect(lifecycle).toEqual([
+      "run:succeeded",
+      "settle:1:succeeded",
+      "memory:start",
+      "memory:done",
+      "task-bookkeeping",
+    ]);
+    expect(result.ok ? result.run.events : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Episodic memory written." }),
+      ]),
+    );
+    expect(liveEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Episodic memory written." }),
+      ]),
+    );
+  });
+
+  it("does not settle a legacy admission when its owning run cannot persist", async () => {
+    const settledStatuses: AgentRunRecord["status"][] = [];
+    let memoryCalls = 0;
+    const runStore = createMemoryRunStore();
+    runStore.append = async () => {
+      throw new Error("run persistence unavailable");
+    };
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask({ skillName: "" })),
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("must not settle"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create() {
+          memoryCalls += 1;
+          throw new Error("memory must not run before owner persistence");
+        },
+      },
+      createId: () => "legacy_unpersisted_owner",
+    });
+
+    await expect(service.runTask("task_123", {
+      async beforeExecution(candidate) {
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle(status) {
+            settledStatuses.push(status);
+          },
+        };
+      },
+    })).rejects.toThrow("run persistence unavailable");
+    expect(settledStatuses).toEqual([]);
+    expect(memoryCalls).toBe(0);
+  });
+
+  it("does not create legacy memory when post-owner lease settlement fails", async () => {
+    const privateMarker = "PRIVATE_LEGACY_SETTLEMENT_FAILURE";
+    let memoryCalls = 0;
+    const runStore = createMemoryRunStore();
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask({ skillName: "" })),
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("committed"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create() {
+          memoryCalls += 1;
+          throw new Error("memory must not run before settlement");
+        },
+      },
+      createId: () => "legacy_settlement_failure",
+    });
+
+    await expect(service.runTask("task_123", {
+      async beforeExecution(candidate) {
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle() {
+            throw new Error(privateMarker);
+          },
+        };
+      },
+    })).rejects.toThrow("任务运行失败，已保留可审计的终态记录。");
+
+    expect(runStore.runs).toEqual([
+      expect.objectContaining({
+        id: "legacy_settlement_failure",
+        status: "succeeded",
+      }),
+    ]);
+    expect(memoryCalls).toBe(0);
+    expect(JSON.stringify(runStore.runs)).not.toContain(privateMarker);
+  });
+
+  it("does not start or persist a legacy run when admission rejects", async () => {
+    let modelCalls = 0;
+    let executionAdmittedCalls = 0;
+    const runStore = createMemoryRunStore();
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask({ skillName: "" })),
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return finalResponse("must not run");
+        },
+      },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: () => "legacy_rejected_run",
+    });
+
+    await expect(service.runTask("task_123", {
+      async beforeExecution() {
+        throw new Error("legacy admission rejected");
+      },
+      onExecutionAdmitted() {
+        executionAdmittedCalls += 1;
+      },
+    })).rejects.toThrow("legacy admission rejected");
+    expect(modelCalls).toBe(0);
+    expect(executionAdmittedCalls).toBe(0);
+    expect(runStore.runs).toEqual([]);
+  });
+
+  it("rejects a mismatched legacy admission lease before execution publication", async () => {
+    const runStore = createMemoryRunStore();
+    let executionAdmittedCalls = 0;
+    let profileCalls = 0;
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask({ skillName: "" })),
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("must not run"); } },
+      async getModelProfile() {
+        profileCalls += 1;
+        return createModelProfile();
+      },
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: () => "legacy_candidate_run",
+    });
+
+    await expect(service.runTask("task_123", {
+      async beforeExecution(candidate) {
+        return {
+          runId: "different_run",
+          taskId: candidate.taskId,
+          async settle() {},
+        };
+      },
+      onExecutionAdmitted() {
+        executionAdmittedCalls += 1;
+      },
+    })).rejects.toThrow("任务运行失败，已保留可审计的终态记录。");
+    expect(executionAdmittedCalls).toBe(0);
+    expect(profileCalls).toBe(0);
+    expect(runStore.runs).toEqual([]);
+  });
+
+  it("persists and settles a secret-safe failed legacy run when post-admission profile initialization fails", async () => {
+    const privateMarker = "PRIVATE_LEGACY_PROFILE_CANARY";
+    const settledStatuses: AgentRunRecord["status"][] = [];
+    const runStore = createMemoryRunStore();
+    let modelCalls = 0;
+    let executionAdmitted = false;
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask({ skillName: "" })),
+      runStore,
+      resolveSkill: async () => null,
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return finalResponse("must not run");
+        },
+      },
+      async getModelProfile() {
+        throw new Error(privateMarker);
+      },
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      createId: () => "legacy_profile_failed_run",
+      now: () => new Date("2026-08-24T00:00:00.000Z"),
+    });
+
+    const result = await service.runTask("task_123", {
+      async beforeExecution(candidate) {
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle(status: AgentRunRecord["status"]) {
+            settledStatuses.push(status);
+          },
+        };
+      },
+      onExecutionAdmitted() {
+        executionAdmitted = true;
+      },
+    });
+
+    expect(executionAdmitted).toBe(true);
+    expect(modelCalls).toBe(0);
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "legacy_profile_failed_run",
+        status: "failed",
+        summary: "Agent run initialization failed.",
+        failureMessage: "Agent run initialization failed.",
+      },
+    });
+    expect(JSON.stringify({ result, runs: runStore.runs })).not.toContain(privateMarker);
+    expect(runStore.runs).toHaveLength(1);
+    expect(settledStatuses).toEqual(["failed"]);
+  });
+
+  it("keeps legacy memory and persistent observer failures out of the successful owner", async () => {
+    const privateMemoryCanary = "PRIVATE_LEGACY_MEMORY_CANARY";
+    const privateObserverCanary = "PRIVATE_LEGACY_OBSERVER_CANARY";
+    const lifecycle: string[] = [];
+    const settledStatuses: AgentRunRecord["status"][] = [];
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    runStore.append = async (run) => {
+      lifecycle.push(`persist:${run.status}`);
+      return appendRun(run);
+    };
+    let observerCalls = 0;
+    const observedEvents: AgentRunEvent[] = [];
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(createTask()),
+      runStore,
+      resolveSkill: async () => createSkillRecord(2),
+      chatClient: createChatClient([finalResponse("Report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create() {
+          throw new Error(privateMemoryCanary);
+        },
+      },
+      createId: () => "legacy_observer_memory_run",
+      now: () => new Date("2026-08-24T02:00:00.000Z"),
+    });
+
+    const result = await service.runTask("task_123", {
+      async beforeExecution(candidate) {
+        lifecycle.push("gate");
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle(status) {
+            lifecycle.push(`settle:${status}`);
+            settledStatuses.push(status);
+          },
+        };
+      },
+      onEvent(event) {
+        observerCalls += 1;
+        observedEvents.push(structuredClone(event));
+        throw new Error(privateObserverCanary);
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "legacy_observer_memory_run",
+        status: "succeeded",
+        summary: "Report complete",
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            level: "warn",
+            message: "Unable to write episodic memory.",
+            data: { code: "INTERNAL_FAILURE" },
+          }),
+        ]),
+      },
+    });
+    expect(observerCalls).toBeGreaterThanOrEqual(3);
+    expect(runStore.runs).toHaveLength(1);
+    expect(runStore.runs[0]?.events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Unable to write episodic memory." }),
+      ]),
+    );
+    expect(observedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Unable to write episodic memory.",
+          data: { code: "INTERNAL_FAILURE" },
+        }),
+      ]),
+    );
+    expect(settledStatuses).toEqual(["succeeded"]);
+    expect(lifecycle.indexOf("persist:succeeded")).toBeLessThan(
+      lifecycle.indexOf("settle:succeeded"),
+    );
+    expect(JSON.stringify({ result, runs: runStore.runs, observedEvents }))
+      .not.toContain(privateMemoryCanary);
+    expect(JSON.stringify({ result, runs: runStore.runs, observedEvents }))
+      .not.toContain(privateObserverCanary);
   });
 
   it("uses the model context window instead of max output tokens for legacy compaction", async () => {
@@ -178,9 +693,11 @@ describe("agent runner service", () => {
   });
 
   it("keeps a provider-limited legacy run paused for a user-triggered retry", async () => {
+    const canary = "legacy-provider-notice-canary";
+    const runStore = createMemoryRunStore();
     const service = createAgentRunnerService({
       taskStore: createTaskStore(createTask()),
-      runStore: createMemoryRunStore(),
+      runStore,
       resolveSkill: async () => createSkillRecord(2),
       chatClient: {
         async complete() {
@@ -190,10 +707,10 @@ describe("agent runner service", () => {
             finishReason: "MAX_TOKENS",
             modelServiceNotice: {
               kind: "output_limit",
-              provider: "test-provider",
-              model: "test-model",
-              rawReason: "MAX_TOKENS",
-              message: "模型输出被截断。",
+              provider: `api_key=${canary}`,
+              model: `client_secret=${canary}`,
+              rawReason: `password=${canary}`,
+              message: `api%255fkey=${canary}`,
             },
           };
         },
@@ -205,17 +722,20 @@ describe("agent runner service", () => {
       now: () => new Date("2026-06-05T08:00:00.000Z"),
     });
 
-    await expect(service.runTask("task_123")).resolves.toMatchObject({
+    const result = await service.runTask("task_123");
+    expect(result).toMatchObject({
       ok: true,
       run: {
         status: "paused",
-        summary: "模型输出被截断。",
         modelServiceNotice: {
           kind: "output_limit",
-          rawReason: "MAX_TOKENS",
         },
       },
     });
+    expect(JSON.stringify({ result, runs: runStore.runs }))
+      .toContain("[redacted]");
+    expect(JSON.stringify({ result, runs: runStore.runs }))
+      .not.toContain(canary);
   });
 
   it("writes episodic memory after a successful run", async () => {
@@ -258,6 +778,50 @@ describe("agent runner service", () => {
         importance: 3,
       },
     ]);
+  });
+
+  it("projects legacy run identity into secret-safe durable run and memory inputs", async () => {
+    const canary = "legacy-run-memory-canary";
+    const memoryWrites: MemoryInput[] = [];
+    const runStore = createMemoryRunStore();
+    const task = createTask({
+      name: `API_KEY+=${canary}`,
+      skillName: `client_secret=${canary}`,
+    });
+    const service = createAgentRunnerService({
+      taskStore: createTaskStore(task),
+      runStore,
+      resolveSkill: async () => createSkillRecord(2),
+      chatClient: createChatClient([finalResponse("Report complete")]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create(input) {
+          memoryWrites.push(structuredClone(input));
+          return {
+            id: "legacy_secret_memory",
+            ...input,
+            tags: input.tags ?? [],
+            source: input.source ?? { type: "manual" },
+            importance: input.importance ?? 3,
+            createdAt: "2026-08-24T00:00:00.000Z",
+            updatedAt: "2026-08-24T00:00:00.000Z",
+          } as MemoryRecord;
+        },
+      },
+      createId: () => "legacy_secret_run",
+      now: () => new Date("2026-08-24T00:00:00.000Z"),
+    });
+
+    const result = await service.runTask(task.id);
+    const serialized = JSON.stringify({ result, runs: runStore.runs, memoryWrites });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toContain(canary);
+    expect(memoryWrites[0]).toMatchObject({
+      title: "Run: API_KEY+=[redacted]",
+      tags: ["agent-run", "client_secret=[redacted]"],
+    });
   });
 
   it("includes procedural memory in the planning prompt", async () => {
@@ -704,10 +1268,24 @@ describe("agent runner service", () => {
   it("resumes a checkpoint through the recoverable runtime", async () => {
     const savedCheckpoints: AgentExecutionCheckpoint[] = [];
     const executionStore = createMemoryExecutionStore(savedCheckpoints);
-    await executionStore.save(createCheckpoint("run_resume", "task_123"));
+    const checkpoint = createCheckpoint("run_resume", "task_123");
+    await executionStore.save(checkpoint);
+    const runStore = createMemoryRunStore();
+    runStore.runs.push({
+      id: checkpoint.runId,
+      taskId: checkpoint.taskId,
+      taskName: "Organize Downloads",
+      skillName: "local-file-organizer",
+      status: "paused",
+      executionRevision: 1,
+      summary: "paused",
+      events: [],
+      startedAt: checkpoint.createdAt,
+      finishedAt: checkpoint.updatedAt,
+    });
     const service = createAgentRunnerService({
       taskStore: createTaskStore(createTask()),
-      runStore: createMemoryRunStore(),
+      runStore,
       executionStore,
       resolveSkill: async () => createSkillRecord(4),
       chatClient: createChatClient([finalResponse("Resumed report complete")]),
@@ -718,7 +1296,9 @@ describe("agent runner service", () => {
       now: createSteppedClock("2026-06-07T00:00:00.000Z"),
     });
 
-    const result = await service.resumeRun("run_resume");
+    const result = await service.resumeRun("run_resume", {
+      beforeExecution: admitResumeCandidate,
+    });
 
     expect(result).toMatchObject({
       ok: true,
@@ -826,6 +1406,18 @@ function createMemoryRunStore(): AgentRunStore & { runs: AgentRunRecord[] } {
       return runs;
     },
     async flushShadowWrites() {
+      return;
+    },
+  };
+}
+
+async function admitResumeCandidate(candidate: AgentRunAdmissionCandidate) {
+  return {
+    runId: candidate.runId,
+    taskId: candidate.taskId,
+    executionRevision: candidate.executionRevision,
+    executionEnvelope: candidate.executionEnvelope,
+    async settle() {
       return;
     },
   };

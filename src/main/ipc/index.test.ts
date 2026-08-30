@@ -61,6 +61,35 @@ describe("chat IPC handlers", () => {
     ).toThrow("Rejected untrusted renderer IPC sender for app:getMeta");
   });
 
+  it("observes trusted IPC outcomes without exposing payloads or changing results", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const observations: Array<{ channel: string; ok: boolean }> = [];
+    const container = {
+      appMeta: { productName: "Zerox Agent" },
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      listChatSessions: vi.fn(async () => {
+        throw new Error("fixture failure");
+      }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container, {
+      isTrustedSender: () => true,
+      onTrustedInvocation: (observation) => observations.push(observation),
+    });
+
+    expect(
+      electronState.ipcHandlers.get("app:getMeta")?.({ sender: {} }),
+    ).toEqual({ productName: "Zerox Agent" });
+    await expect(
+      electronState.ipcHandlers.get("chatSessions:list")?.({ sender: {} }),
+    ).rejects.toThrow("fixture failure");
+    expect(observations).toEqual([
+      { channel: "app:getMeta", ok: true },
+      { channel: "chatSessions:list", ok: false },
+    ]);
+  });
+
   it("opens project workspaces through the native directory picker", () => {
     const openProjectSource = getHandlerSource(
       ipcSource,

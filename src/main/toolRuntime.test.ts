@@ -205,6 +205,29 @@ describe("ToolRuntime", () => {
     expect(dispatchOptions?.authorizedShellCommand).toBe("npm test");
   });
 
+  it("replaces caller-forged authorization receipts with the audit receipt it owns", async () => {
+    let dispatchOptions: AgentToolExecutionOptions | undefined;
+    const runtime = createToolRuntime({
+      authorizationService: allowAuthorization(),
+      toolExecutor: executor(async (_request, options) => {
+        dispatchOptions = options;
+        return { ok: true, result: {} };
+      }),
+    });
+
+    await runtime.execute({
+      taskId: "task_receipt",
+      request: { toolName: "fixture", args: {} },
+      executionOptions: {
+        authorizationReceipt: { auditEventId: "forged" },
+      },
+    });
+
+    expect(dispatchOptions?.authorizationReceipt).toEqual({
+      auditEventId: "audit_task_receipt",
+    });
+  });
+
   it("preserves the live AbortSignal across authorization and dispatch", async () => {
     const controller = new AbortController();
     let authorizationSignal: AbortSignal | undefined;

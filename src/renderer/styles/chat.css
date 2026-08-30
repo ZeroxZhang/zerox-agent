@@ -1583,6 +1583,143 @@
   background: color-mix(in srgb, var(--color-action-primary) 5%, var(--color-surface-primary));
 }
 
+.conversation-disclosure {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 6px;
+  border-block: 1px solid var(--border-default);
+  background: var(--bg-surface);
+}
+
+.conversation-disclosure-group + .conversation-disclosure-group {
+  border-top: 1px solid var(--border-default);
+}
+
+.conversation-disclosure-group > header {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 8px 4px;
+}
+
+.conversation-disclosure-group > header > button {
+  display: inline-grid;
+  grid-template-columns: 16px auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: var(--text-sm);
+}
+
+.conversation-disclosure-group > header > button:hover {
+  color: var(--text-primary);
+  background: var(--color-surface-hover);
+}
+
+.conversation-disclosure-group > header > button > span {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.conversation-disclosure-group > header > p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-disclosure-group > ol {
+  display: grid;
+  gap: 0;
+  margin: 0 0 8px;
+  padding: 0 4px 0 32px;
+  list-style: none;
+}
+
+.conversation-disclosure-group > ol > li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 8px;
+  border-left: 1px solid var(--border-default);
+}
+
+.conversation-disclosure-group > ol > li > .task-activity-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: var(--radius-full);
+  background: var(--text-tertiary);
+}
+
+.conversation-disclosure-group > ol > li.is-prominent > .task-activity-dot {
+  background: var(--text-warning);
+}
+
+.conversation-disclosure-group > ol > li.is-blocking > .task-activity-dot {
+  background: var(--status-error-text);
+}
+
+.conversation-disclosure-group > ol > li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.conversation-disclosure-group > ol strong,
+.conversation-disclosure-group > ol p,
+.conversation-disclosure-group > ol small {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-disclosure-group > ol strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.conversation-disclosure-group > ol p,
+.conversation-disclosure-group > ol small {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.conversation-disclosure-group > ol small {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.conversation-disclosure-group > ol > li > button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.conversation-disclosure-group > ol > li > button:hover {
+  color: var(--text-primary);
+  background: var(--color-surface-hover);
+}
+
 .conversation-progress > header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

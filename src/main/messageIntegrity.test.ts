@@ -5,6 +5,7 @@ import {
   inspectChatMessages,
   isInjectedRuntimeSystemMessage,
   isMessageSequenceProviderError,
+  redactChatMessagesCredentials,
   sanitizeChatMessages,
 } from "./messageIntegrity";
 
@@ -40,6 +41,56 @@ describe("sanitizeChatMessages", () => {
     const result = sanitizeChatMessages(messages);
     expect(result.repairs).toEqual([]);
     expect(result.messages).toHaveLength(messages.length);
+  });
+
+  it("redacts legacy transcript content and escaped tool argument keys", () => {
+    const redacted = redactChatMessagesCredentials([
+      {
+        role: "assistant",
+        content: "Authorization: Bearer transcript-content-canary",
+        tool_calls: [{
+          id: "legacy_secret_call",
+          type: "function",
+          function: {
+            name: "shell_exec",
+            arguments:
+              '{"api\\u005fkey":"transcript-key-canary","command":"client_secret\\u003dtranscript-command-canary"}',
+          },
+        }],
+      },
+      {
+        role: "tool",
+        tool_call_id: "legacy_secret_call",
+        content:
+          '<tool_result tool="shell_exec" ok="false">\n{"error_details":{"api\\u005fkey":"transcript-result-canary"}}\n</tool_result>',
+      },
+    ]);
+
+    const serialized = JSON.stringify(redacted);
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /transcript-content-canary|transcript-key-canary|transcript-command-canary|transcript-result-canary/,
+    );
+  });
+
+  it("fails closed for corrupt JSON-like legacy tool results", () => {
+    const messages = redactChatMessagesCredentials([
+      {
+        role: "tool",
+        tool_call_id: "corrupt_fenced",
+        content:
+          '<tool_result tool="shell_exec" ok="false">\n{"api\\u005fkey":"broken-fence-canary",BROKEN}\n</tool_result>',
+      },
+      {
+        role: "tool",
+        tool_call_id: "corrupt_plain",
+        content: '{"api\\u005fkey":"broken-json-canary",BROKEN',
+      },
+    ]);
+
+    const serialized = JSON.stringify(messages);
+    expect(serialized).toContain("invalid_tool_result");
+    expect(serialized).not.toMatch(/broken-fence-canary|broken-json-canary/);
   });
 
   it("synthesizes missing tool results for unanswered tool_calls", () => {

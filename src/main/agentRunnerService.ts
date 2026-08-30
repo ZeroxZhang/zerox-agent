@@ -36,12 +36,23 @@ import {
 import { formatDateInTimeZone, getSystemTimeZone } from "../shared/dateContext";
 import { serializeToolObservationWithOffload } from "./toolObservationOffload";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
-import type {
-  AgentPhase,
-  AgentRunEvent,
-  AgentRunRecord,
-  RunScheduledTaskResult,
+import {
+  assertAgentRunAdmissionLease,
+  commitAdmittedAgentRun,
+  projectSecretSafeAgentRun,
+  publishAgentRunObserverEvent,
+  type AgentRunExecutionAdmittedHandler,
+  type AgentPhase,
+  type AgentRunEvent,
+  type AgentRunAdmissionGate,
+  type AgentRunRecord,
+  type RunScheduledTaskResult,
 } from "../shared/agentRuns";
+import {
+  createSecretSafeFailure,
+  toSecretSafeFailure,
+  type SecretSafeFailure,
+} from "../shared/secretSafeFailure";
 import type { SkillRecord } from "../shared/skills";
 import type {
   ModelCapabilities,
@@ -55,6 +66,10 @@ import {
 } from "../shared/modelServiceNotice";
 import { resolveAgentContextBudget } from "../shared/contextUsage";
 import type { ProductionKernelDriver } from "./kernel/productionKernelDriver";
+import {
+  redactCredentials,
+  redactCredentialString,
+} from "../shared/credentialRedaction";
 
 export type AgentModelProfile = {
   baseUrl: string;
@@ -77,15 +92,26 @@ export type AgentRunnerService = {
       signal?: AbortSignal;
       sessionId?: string;
       onEvent?: (event: AgentRunEvent) => void;
+      beforeExecution?: AgentRunAdmissionGate;
+      onExecutionAdmitted?: AgentRunExecutionAdmittedHandler;
     },
   ): Promise<RunScheduledTaskResult>;
   resumeRun(
     runId: string,
-    options?: { signal?: AbortSignal; onEvent?: (event: AgentRunEvent) => void },
+    options?: {
+      signal?: AbortSignal;
+      onEvent?: (event: AgentRunEvent) => void;
+      beforeExecution?: AgentRunAdmissionGate;
+      onExecutionAdmitted?: AgentRunExecutionAdmittedHandler;
+    },
   ): Promise<RunScheduledTaskResult>;
   runTaskStreaming(
     taskId: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      beforeExecution?: AgentRunAdmissionGate;
+      onExecutionAdmitted?: AgentRunExecutionAdmittedHandler;
+    },
   ): AsyncIterable<AgentRunEvent>;
 };
 
@@ -175,9 +201,11 @@ export function createAgentRunnerService(options: {
   ): AgentRunEvent {
     return {
       level,
-      message,
+      message: redactCredentialString(message),
       ...(phase ? { phase } : {}),
-      ...(data ? { data } : {}),
+      ...(data
+        ? { data: redactCredentials(data) as Record<string, unknown> }
+        : {}),
       createdAt: now().toISOString(),
     };
   }
@@ -332,6 +360,9 @@ export function createAgentRunnerService(options: {
     taskId: string,
     signal: AbortSignal | undefined,
     onEvent?: (event: AgentRunEvent) => void,
+    beforeExecution?: AgentRunAdmissionGate,
+    sessionId?: string,
+    onExecutionAdmitted?: AgentRunExecutionAdmittedHandler,
   ): Promise<RunScheduledTaskResult> {
     const task = await options.taskStore.get(taskId);
     if (!task) {
@@ -343,80 +374,133 @@ export function createAgentRunnerService(options: {
     if (taskSkillName && !skill) {
       return { ok: false, message: "Task skill was not found." };
     }
+    const admittedTaskId = task.id;
+    const admittedTaskName = task.name;
+    const admittedSkillName = getRunSkillName(task);
 
     const startedAt = now().toISOString();
+    const runId = createId();
+    const admissionCandidate = {
+      runId,
+      taskId: task.id,
+      ...(sessionId ? { sessionId } : {}),
+      executionRevision: 1,
+    };
+    const admissionLease = assertAgentRunAdmissionLease(
+      admissionCandidate,
+      await beforeExecution?.(admissionCandidate),
+    );
     const events: AgentRunEvent[] = [];
+    let executionAdmitted = false;
     const emit = (event: AgentRunEvent) => {
       events.push(event);
-      onEvent?.(event);
+      publishAgentRunObserverEvent(onEvent, event);
     };
 
-    emit(createEvent("info", "Agent run started.", "planning"));
-
-    const availableToolDefinitions = filterToolDefinitionsForScheduledTask(
-      "getRegistry" in options.toolExecutor
-        ? (options.toolExecutor as AgentToolExecutor & { getRegistry(): { getDefinitions(): ToolDefinition[] } }).getRegistry().getDefinitions()
-        : buildToolDefinitions(),
-      task,
-    );
-    // Fetch model profile early so we can pass modelId to the system prompt builder.
-    // Wrapped in try/catch because this runs outside the main try block below.
-    let profile: AgentModelProfile;
-    try {
-      profile = await options.getModelProfile();
-    } catch (error) {
-      return {
-        ok: false,
-        message: `Failed to load model profile: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      };
+    async function persistInitializationFailure(): Promise<RunScheduledTaskResult> {
+      const summary = "Agent run initialization failed.";
+      const failureEvent = createEvent("error", summary, "done", {
+        code: "AGENT_RUN_INITIALIZATION_FAILED",
+      });
+      events.push(failureEvent);
+      if (executionAdmitted) {
+        publishAgentRunObserverEvent(onEvent, failureEvent);
+      }
+      const run = projectSecretSafeAgentRun({
+        id: runId,
+        taskId: admittedTaskId,
+        taskName: admittedTaskName,
+        skillName: admittedSkillName,
+        status: "failed",
+        executionRevision: admissionCandidate.executionRevision,
+        summary,
+        events,
+        failureClass: "unknown",
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
+        failureMessage: summary,
+        startedAt,
+        finishedAt: now().toISOString(),
+      });
+      await commitAdmittedAgentRun({
+        run,
+        admissionLease,
+        appendRun: (record) => options.runStore.append(record),
+      });
+      await options.taskStore.recordRun(admittedTaskId, new Date(run.finishedAt))
+        .catch(() => undefined);
+      return { ok: true, run };
     }
-    const toolDefinitions =
-      profile.modelCapabilities?.tools === false ? [] : availableToolDefinitions;
-    const toolNames = toolDefinitions.map((td) => td.function.name);
-    const systemTimeZone = getSystemTimeZone();
-    const systemPrompt = buildAgentSystemPrompt({
-      modelId: profile.model,
-      currentDate: formatDateInTimeZone(new Date(startedAt), systemTimeZone),
-      timeZone: systemTimeZone,
-    });
-    const proceduralMemoryContext =
-      await buildProceduralMemoryPromptContext({
+
+    try {
+      await onExecutionAdmitted?.(admissionCandidate);
+      executionAdmitted = true;
+    } catch {
+      return persistInitializationFailure();
+    }
+
+    let profile: AgentModelProfile;
+    let toolDefinitions: ToolDefinition[];
+    let toolNames: string[];
+    let messages: ChatMessage[];
+    let needsPlanning: boolean;
+    let proceduralMemoryContext: string | null;
+    let contextBudget: ReturnType<typeof resolveAgentContextBudget>;
+    let contextTokenBudget: number;
+    try {
+      emit(createEvent("info", "Agent run started.", "planning"));
+      const availableToolDefinitions = filterToolDefinitionsForScheduledTask(
+        "getRegistry" in options.toolExecutor
+          ? (options.toolExecutor as AgentToolExecutor & { getRegistry(): { getDefinitions(): ToolDefinition[] } }).getRegistry().getDefinitions()
+          : buildToolDefinitions(),
+        task,
+      );
+      profile = await options.getModelProfile();
+      toolDefinitions =
+        profile.modelCapabilities?.tools === false ? [] : availableToolDefinitions;
+      toolNames = toolDefinitions.map((td) => td.function.name);
+      const systemTimeZone = getSystemTimeZone();
+      const systemPrompt = buildAgentSystemPrompt({
+        modelId: profile.model,
+        currentDate: formatDateInTimeZone(new Date(startedAt), systemTimeZone),
+        timeZone: systemTimeZone,
+      });
+      proceduralMemoryContext = await buildProceduralMemoryPromptContext({
         memoryStore: options.memoryStore,
         taskName: task.name,
         skillName: taskSkillName || "prompt-task",
         skillDescription: skill?.manifest.description,
       });
-
-    let messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: appendProceduralMemoryContext(
-          buildTaskPrompt(task, skill),
-          proceduralMemoryContext,
-        ),
-      },
-    ];
+      messages = [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: appendProceduralMemoryContext(
+            buildTaskPrompt(task, skill),
+            proceduralMemoryContext,
+          ),
+        },
+      ];
+      needsPlanning = skill
+        ? skill.manifest.planning?.required === true
+        : true;
+      contextBudget = resolveAgentContextBudget({
+        contextWindow: profile.contextWindow,
+        contextWindowSource: profile.contextWindowSource,
+        maxOutputTokens: profile.maxTokens,
+      });
+      contextTokenBudget = contextBudget.tokenBudget;
+    } catch {
+      return persistInitializationFailure();
+    }
 
     let summary = "";
     let status: AgentRunRecord["status"] = "failed";
     let modelServiceNotice: ModelServiceNotice | undefined;
+    let executionFailure: SecretSafeFailure | undefined;
     let currentPhase: AgentPhase = "planning";
 
     // Planning is an explicit Skill contract. maxTurns is only a checkpoint
     // interval and must not silently enable or disable planning.
-    const needsPlanning = skill
-      ? skill.manifest.planning?.required === true
-      : true;
-    const contextBudget = resolveAgentContextBudget({
-      contextWindow: profile.contextWindow,
-      contextWindowSource: profile.contextWindowSource,
-      maxOutputTokens: profile.maxTokens,
-    });
-    const contextTokenBudget = contextBudget.tokenBudget;
-
     try {
       throwIfCanceled(signal);
       // profile already fetched above — reuse here
@@ -724,9 +808,14 @@ export function createAgentRunnerService(options: {
               } else {
                 // abort
                 reflected = true;
-                summary = `任务中止：步骤"${step.description}"失败，反思后决定中止。分析：${reflection.analysis}`;
+                executionFailure = createSecretSafeFailure(
+                  "AGENT_RUN_EXECUTION_FAILED",
+                );
+                summary = executionFailure.publicMessage;
                 status = "failed";
-                emit(createEvent("error", summary, "done"));
+                emit(createEvent("error", summary, "done", {
+                  code: executionFailure.code,
+                }));
                 break;
               }
             }
@@ -761,7 +850,7 @@ export function createAgentRunnerService(options: {
 
           // No tool calls + has content → final message
           if (!response.toolCalls.length && response.content) {
-            summary = response.content;
+            summary = redactCredentialString(response.content);
             status = "succeeded";
             emit(createEvent("info", "Agent run finished.", "done"));
             break;
@@ -786,8 +875,13 @@ export function createAgentRunnerService(options: {
           }
 
           // No content and no tool calls — treat as error
-          summary = "模型未返回有效内容或工具调用。";
-          emit(createEvent("error", summary, "done"));
+          executionFailure = createSecretSafeFailure(
+            "AGENT_RUN_EXECUTION_FAILED",
+          );
+          summary = executionFailure.publicMessage;
+          emit(createEvent("error", summary, "done", {
+            code: executionFailure.code,
+          }));
           break;
         }
       }
@@ -807,57 +901,84 @@ export function createAgentRunnerService(options: {
         modelServiceNotice = modelServiceNoticeFromError(error, {
           model: profile.model,
         });
+        executionFailure = toSecretSafeFailure(
+          error,
+          "AGENT_RUN_EXECUTION_FAILED",
+        );
         status = modelServiceNotice ? "paused" : "failed";
-        summary =
-          modelServiceNotice?.message ??
-          (error instanceof Error ? error.message : "Agent run failed.");
-        emit(createEvent(modelServiceNotice ? "warn" : "error", summary, "done"));
+        summary = modelServiceNotice?.message ?? executionFailure.publicMessage;
+        emit(createEvent(
+          modelServiceNotice ? "warn" : "error",
+          summary,
+          "done",
+          modelServiceNotice ? undefined : { code: executionFailure.code },
+        ));
       }
     }
 
+    if (status === "failed" && !executionFailure) {
+      executionFailure = createSecretSafeFailure(
+        "AGENT_RUN_EXECUTION_FAILED",
+      );
+      summary = executionFailure.publicMessage;
+    }
     currentPhase = "done";
-    const run: AgentRunRecord = {
-      id: createId(),
+    const run = projectSecretSafeAgentRun({
+      id: runId,
       taskId: task.id,
-      taskName: task.name,
-      skillName: getRunSkillName(task),
+      taskName: redactCredentialString(task.name),
+      skillName: redactCredentialString(getRunSkillName(task)),
       status,
-      summary,
+      executionRevision: admissionCandidate.executionRevision,
+      summary: redactCredentialString(summary),
       events,
-      ...(modelServiceNotice ? { modelServiceNotice } : {}),
+      ...(modelServiceNotice
+        ? {
+            modelServiceNotice: redactCredentials(
+              modelServiceNotice,
+            ) as ModelServiceNotice,
+          }
+        : {}),
+      ...(status === "failed" && executionFailure
+        ? {
+            failureClass: "unknown" as const,
+            failureCode: executionFailure.code,
+            failureMessage: executionFailure.publicMessage,
+          }
+        : {}),
       startedAt,
       finishedAt: now().toISOString(),
-    };
+    });
+
+    await commitAdmittedAgentRun({
+      run,
+      admissionLease,
+      appendRun: (record) => options.runStore.append(record),
+    });
 
     if (run.status === "succeeded" && options.memoryStore?.create) {
       try {
         await options.memoryStore.create({
           kind: "episodic",
-          title: `Run: ${task.name}`,
+          title: `Run: ${run.taskName}`,
           content: run.summary,
-          tags: ["agent-run", getRunSkillName(task)],
+          tags: ["agent-run", run.skillName],
           source: { type: "agent_run", refId: run.id },
           importance: 3,
         });
-        run.events.push(
-          createEvent("info", "Episodic memory written.", "done", {
-            memoryKind: "episodic",
-          }),
-        );
+        emit(createEvent("info", "Episodic memory written.", "done", {
+          memoryKind: "episodic",
+        }));
       } catch (error) {
-        run.events.push(
-          createEvent("warn", "Unable to write episodic memory.", "done", {
-            error:
-              error instanceof Error
-                ? error.message
-                : "Unknown memory error.",
-          }),
-        );
+        const safeFailure = toSecretSafeFailure(error, "INTERNAL_FAILURE");
+        emit(createEvent("warn", "Unable to write episodic memory.", "done", {
+          code: safeFailure.code,
+        }));
       }
     }
-
-    await options.runStore.append(run);
-    await options.taskStore.recordRun(task.id, new Date(run.finishedAt));
+    run.events = redactCredentials(events) as AgentRunEvent[];
+    await options.taskStore.recordRun(task.id, new Date(run.finishedAt))
+      .catch(() => undefined);
 
     return { ok: true, run };
   }
@@ -868,7 +989,14 @@ export function createAgentRunnerService(options: {
         return runtimeEngine.startTask(taskId, runOptions);
       }
 
-      return runInternal(taskId, runOptions?.signal, runOptions?.onEvent);
+      return runInternal(
+        taskId,
+        runOptions?.signal,
+        runOptions?.onEvent,
+        runOptions?.beforeExecution,
+        runOptions?.sessionId,
+        runOptions?.onExecutionAdmitted,
+      );
     },
 
     async resumeRun(runId, runOptions) {
@@ -903,7 +1031,14 @@ export function createAgentRunnerService(options: {
       const completion = (
         runtimeEngine
           ? runtimeEngine.startTask(taskId, { ...runOptions, onEvent })
-          : runInternal(taskId, runOptions?.signal, onEvent)
+          : runInternal(
+              taskId,
+              runOptions?.signal,
+              onEvent,
+              runOptions?.beforeExecution,
+              undefined,
+              runOptions?.onExecutionAdmitted,
+            )
       ).finally(() => {
         settled = true;
         wakeConsumer?.();

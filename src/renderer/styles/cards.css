@@ -1195,6 +1195,32 @@
   overflow-wrap: anywhere;
 }
 
+.cross-surface-attention {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--status-neutral-border);
+  background: var(--status-neutral-bg);
+}
+
+.cross-surface-attention > span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.cross-surface-attention > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cross-surface-attention.is-blocking {
+  border-left-color: var(--status-error-text);
+  background: var(--status-error-bg);
+}
+
 .plan-outcome-summary {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
@@ -1809,6 +1835,66 @@
 
 .scheduled-task-meta div + div {
   border-top: 1px solid var(--secondary-page-outline);
+}
+
+.scheduled-run-disclosure {
+  border-left: 3px solid var(--status-neutral-border);
+  background: var(--status-neutral-bg);
+}
+
+.scheduled-run-disclosure > summary,
+.scheduled-run-disclosure.is-running {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+.scheduled-run-disclosure > summary {
+  cursor: pointer;
+}
+
+.scheduled-run-disclosure > summary > span,
+.scheduled-run-disclosure.is-running > span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+}
+
+.scheduled-run-disclosure > summary > strong,
+.scheduled-run-disclosure.is-running > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.scheduled-run-disclosure > div {
+  display: grid;
+  gap: 2px;
+  padding: 0 var(--space-4) var(--space-3);
+}
+
+.scheduled-run-disclosure > div > p,
+.scheduled-run-disclosure > div > small {
+  margin: 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.scheduled-run-disclosure.is-success {
+  border-left-color: var(--status-success-text);
+  background: var(--status-success-bg);
+}
+
+.scheduled-run-disclosure.is-warning {
+  border-left-color: var(--status-warning-text);
+  background: var(--status-warning-bg);
+}
+
+.scheduled-run-disclosure.is-error {
+  border-left-color: var(--status-error-text);
+  background: var(--status-error-bg);
 }
 
 .task-row dl div,

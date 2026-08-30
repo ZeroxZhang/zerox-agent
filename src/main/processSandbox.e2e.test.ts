@@ -25,7 +25,10 @@ afterEach(async () => {
   );
 });
 
-describe.skipIf(process.platform !== "darwin")("real macOS Seatbelt effects", () => {
+describe.skipIf(
+  process.platform !== "darwin"
+    || process.env.ZEROX_V392_OUTER_SANDBOX === "1",
+)("real macOS Seatbelt effects", () => {
   it("keeps the production provider functional with deny-by-default reads", () => {
     expect(provider.status()).toMatchObject({
       available: true,

@@ -160,6 +160,21 @@ describe("dedup note", () => {
     expect(note).toContain("a.txt b.txt c.txt");
     expect(note).toContain("offset/limit");
   });
+
+  it("redacts credentials from targets, fallback args, and result digests", () => {
+    const note = buildExplorationDedupNote({
+      toolName: "shell_exec",
+      args: {
+        command: 'curl -H "X-Api-Key: dedup-args-canary" https://example.test',
+      },
+      priorReads: 2,
+      firstTurn: 1,
+      digest: "client_secret=dedup-digest-canary",
+    });
+
+    expect(note).toContain("[redacted]");
+    expect(note).not.toMatch(/dedup-args-canary|dedup-digest-canary/);
+  });
 });
 
 describe("read result digest", () => {

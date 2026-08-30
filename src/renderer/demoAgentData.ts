@@ -158,6 +158,24 @@ export const demoTasks: ScheduledTask[] = [
     lastRunAt: "2026-06-05T08:00:00.000Z",
     nextRunAt: "2026-06-06T09:00:00.000Z",
   },
+  {
+    id: "demo_task_2",
+    name: "抓取市场笔记",
+    skillName: "research-summarizer",
+    enabled: false,
+    schedule: { kind: "weekly", weekday: 1, time: "08:30" },
+    input: { topic: "本周市场笔记" },
+    permissions: {
+      files: { read: [], write: [] },
+      web: { search: true, fetchDomains: ["example.com"] },
+      shell: { commands: [] },
+      memory: { read: false, write: true },
+    },
+    createdAt: "2026-06-05T07:00:00.000Z",
+    updatedAt: "2026-06-05T07:30:03.000Z",
+    lastRunAt: "2026-06-05T07:30:00.000Z",
+    nextRunAt: "2026-06-09T08:30:00.000Z",
+  },
 ];
 
 export const demoMemories: MemoryRecord[] = [

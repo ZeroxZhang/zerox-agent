@@ -88,6 +88,8 @@ export type ToolAuditEventInput = {
 export type ToolAuditEvent = ToolAuditEventInput & {
   id: string;
   createdAt: string;
+  /** SHA-256 over the exact unsanitized task/request authorization input. */
+  requestFingerprint?: string;
 };
 
 export type AuthorizeTaskToolCallResult =

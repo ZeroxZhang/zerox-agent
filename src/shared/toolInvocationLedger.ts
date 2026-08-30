@@ -1,3 +1,8 @@
+import {
+  redactCredentials,
+  redactCredentialString,
+} from "./credentialRedaction";
+
 export type ToolInvocationStatus =
   | "proposed"
   | "visible"
@@ -16,6 +21,7 @@ export type ToolInvocationHistoryEntry = {
   ok?: boolean;
   resultRef?: string;
   error?: string;
+  approvalId?: string;
 };
 
 export type ToolInvocationRecord = {
@@ -31,6 +37,7 @@ export type ToolInvocationRecord = {
   ok?: boolean;
   resultRef?: string;
   error?: string;
+  approvalId?: string;
   history: ToolInvocationHistoryEntry[];
 };
 
@@ -51,6 +58,7 @@ export type ToolInvocationTransition = {
   ok?: boolean;
   resultRef?: string;
   error?: string;
+  approvalId?: string;
 };
 
 export function createToolInvocation(
@@ -58,6 +66,7 @@ export function createToolInvocation(
 ): ToolInvocationRecord {
   return {
     ...input,
+    args: redactCredentials(input.args) as Record<string, unknown>,
     status: "proposed",
     updatedAt: input.createdAt,
     history: [{ status: "proposed", at: input.createdAt }],
@@ -74,23 +83,41 @@ export function transitionToolInvocation(
     );
   }
 
+  const safeReason = transition.reason
+    ? redactCredentialString(transition.reason)
+    : undefined;
+  const safeError = transition.error
+    ? redactCredentialString(transition.error)
+    : undefined;
+  const safeHistory = record.history.map((entry) => ({
+    ...entry,
+    ...(entry.reason
+      ? { reason: redactCredentialString(entry.reason) }
+      : {}),
+    ...(entry.error
+      ? { error: redactCredentialString(entry.error) }
+      : {}),
+  }));
   const historyEntry: ToolInvocationHistoryEntry = {
     status: transition.status,
     at: transition.at,
-    ...(transition.reason ? { reason: transition.reason } : {}),
+    ...(safeReason ? { reason: safeReason } : {}),
     ...(typeof transition.ok === "boolean" ? { ok: transition.ok } : {}),
     ...(transition.resultRef ? { resultRef: transition.resultRef } : {}),
-    ...(transition.error ? { error: transition.error } : {}),
+    ...(safeError ? { error: safeError } : {}),
+    ...(transition.approvalId ? { approvalId: transition.approvalId } : {}),
   };
 
   return {
     ...record,
+    args: redactCredentials(record.args) as Record<string, unknown>,
     status: transition.status,
     updatedAt: transition.at,
     ...(typeof transition.ok === "boolean" ? { ok: transition.ok } : {}),
     ...(transition.resultRef ? { resultRef: transition.resultRef } : {}),
-    ...(transition.error ? { error: transition.error } : {}),
-    history: [...record.history, historyEntry],
+    ...(safeError ? { error: safeError } : {}),
+    ...(transition.approvalId ? { approvalId: transition.approvalId } : {}),
+    history: [...safeHistory, historyEntry],
   };
 }
 
@@ -136,6 +163,7 @@ export function toWorkspaceRunToolInvocationInput(
     ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
     ...(record.resultRef ? { resultRef: record.resultRef } : {}),
     ...(record.error ? { error: record.error } : {}),
+    ...(record.approvalId ? { approvalId: record.approvalId } : {}),
     payload: {
       runId: record.runId,
       history: record.history,

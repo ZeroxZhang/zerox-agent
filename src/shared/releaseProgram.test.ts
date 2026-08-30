@@ -60,6 +60,33 @@ describe("v3.9.1 release program", () => {
     );
   });
 
+  it("allows the governed local v3.9.2 successor without rewriting v3.9.1 history", () => {
+    const program = readJson(".zerox/release-program.json");
+    const conversationProgram = readJson(
+      ".zerox/conversation-disclosure-program.json",
+    );
+    const packageJson = readJson("package.json");
+    const features = readJson(".zerox/feature_list.json").features;
+    const hasLocalV392Candidate = features.some(
+      (feature: { id: string }) =>
+        feature.id === "P113-v3.9.2-disclosure-adversarial-acceptance",
+    );
+
+    expect(program).toMatchObject({ version: "3.9.1", status: "completed" });
+    expect(packageJson.version).toBe(
+      hasLocalV392Candidate ? "3.9.2" : "3.9.1",
+    );
+    if (hasLocalV392Candidate) {
+      expect(conversationProgram).toMatchObject({
+        programId: "conversation-progressive-disclosure-v3.9.2-2026-08",
+      });
+      expect([
+        "P113-v3.9.2-disclosure-adversarial-acceptance",
+        null,
+      ]).toContain(conversationProgram.activeFeatureId);
+    }
+  });
+
   it("declares ordered identity, package, push, tag, and closure gates", () => {
     const program = readJson(".zerox/release-program.json");
     expect(program.workstreams.map((workstream: { id: string }) => workstream.id))

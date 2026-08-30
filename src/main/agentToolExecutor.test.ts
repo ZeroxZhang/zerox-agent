@@ -1501,7 +1501,9 @@ describe("agent tool executor", () => {
     expect(isProcessAlive(descendantPid)).toBe(false);
   });
 
-  it("cleans private temps after real Seatbelt shell timeout and abort", async () => {
+  it.skipIf(process.env.ZEROX_V392_OUTER_SANDBOX === "1")(
+    "cleans private temps after real Seatbelt shell timeout and abort",
+    async () => {
     if (process.platform !== "darwin") return;
     const privateTempRoot = await mkdtemp(
       path.join(os.tmpdir(), "zerox-shell-private-root-"),
@@ -1553,7 +1555,8 @@ describe("agent tool executor", () => {
     } finally {
       await rm(privateTempRoot, { recursive: true, force: true });
     }
-  });
+    },
+  );
 
   it("fails closed when process sandbox mode is deny", async () => {
     const marker = path.join(tempDir, "must-not-exist.txt");

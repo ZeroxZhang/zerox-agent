@@ -11,6 +11,12 @@ const featureList = JSON.parse(
 const packageJson = JSON.parse(
   await readFile(path.join(root, "package.json"), "utf8"),
 );
+const conversationProgram = JSON.parse(
+  await readFile(
+    path.join(root, ".zerox", "conversation-disclosure-program.json"),
+    "utf8",
+  ),
+);
 const errors = [];
 
 if (manifest.schemaVersion !== 1) {
@@ -135,8 +141,20 @@ if (manifest.status === "active") {
 }
 
 if (workstreams.get("R01")?.state === "completed") {
-  if (packageJson.version !== manifest.version) {
-    errors.push("completed R01 requires package version 3.9.1");
+  const localV392Candidate =
+    packageJson.version === "3.9.2"
+    && conversationProgram.programId
+      === "conversation-progressive-disclosure-v3.9.2-2026-08"
+    && ["active", "completed"].includes(conversationProgram.status)
+    && ["in_progress", "completed"].includes(
+      conversationProgram.workstreams?.find(
+        (workstream) => workstream.id === "CD09",
+      )?.state,
+    );
+  if (packageJson.version !== manifest.version && !localV392Candidate) {
+    errors.push(
+      "completed R01 requires its v3.9.1 package or the governed local v3.9.2 successor",
+    );
   }
   for (const relativePath of [
     ".github/release-notes/v3.9.1.md",

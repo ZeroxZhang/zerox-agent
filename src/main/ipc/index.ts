@@ -111,10 +111,18 @@ type OpenProjectAgentWorkspaceInput = {
 
 type IpcInvokeHandler = Parameters<typeof ipcMain.handle>[1];
 
+export type TrustedIpcInvocationObservation = {
+  channel: string;
+  ok: boolean;
+};
+
 const maximumGoalOperationIdChars = 128;
 const safeGoalOperationIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 let trustedRendererSenderGuard:
   | ((event: IpcMainInvokeEvent) => boolean)
+  | undefined;
+let trustedInvocationObserver:
+  | ((observation: TrustedIpcInvocationObservation) => void)
   | undefined;
 
 export function registerAllIpcHandlers(
@@ -122,9 +130,13 @@ export function registerAllIpcHandlers(
   options: {
     isTrustedSender: (event: IpcMainInvokeEvent) => boolean;
     appUpdateService?: AppUpdateService;
+    onTrustedInvocation?: (
+      observation: TrustedIpcInvocationObservation,
+    ) => void;
   },
 ): void {
   trustedRendererSenderGuard = options.isTrustedSender;
+  trustedInvocationObserver = options.onTrustedInvocation;
   registerAppIpcHandlers(container, options.appUpdateService);
   registerTasksIpcHandlers(container);
   registerToolsIpcHandlers(container);
@@ -150,8 +162,37 @@ function handleTrustedIpc(
     if (!trustedRendererSenderGuard?.(event)) {
       throw new Error(`Rejected untrusted renderer IPC sender for ${channel}.`);
     }
-    return listener(event, ...args);
+    try {
+      const result = listener(event, ...args);
+      if (result && typeof result === "object" && "then" in result) {
+        return Promise.resolve(result).then(
+          (value) => {
+            publishTrustedInvocation({ channel, ok: true });
+            return value;
+          },
+          (error) => {
+            publishTrustedInvocation({ channel, ok: false });
+            throw error;
+          },
+        );
+      }
+      publishTrustedInvocation({ channel, ok: true });
+      return result;
+    } catch (error) {
+      publishTrustedInvocation({ channel, ok: false });
+      throw error;
+    }
   });
+}
+
+function publishTrustedInvocation(
+  observation: TrustedIpcInvocationObservation,
+): void {
+  try {
+    trustedInvocationObserver?.(observation);
+  } catch {
+    // Observability cannot participate in IPC authority or settlement.
+  }
 }
 
 function registerGoalProgressBroadcaster(container: AppContainer): void {

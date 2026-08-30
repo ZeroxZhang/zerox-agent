@@ -470,8 +470,13 @@ describe("remaining repositories", () => {
   it("toolAudit append/list", async () => {
     const storage = await createInMemoryStorage();
     const audit = createToolAuditRepository(storage);
-    audit.append({ taskId: "t1", request: { toolName: "shell_exec", args: {} }, decision: { allowed: true, reason: "ok" } });
+    const event = audit.append({ taskId: "t1", request: { toolName: "shell_exec", args: {} }, decision: { allowed: true, reason: "ok" } });
     expect(audit.list().length).toBe(1);
+    expect(audit.get(event.id)).toEqual(event);
+    expect(audit.get("missing")).toBeNull();
+    expect(audit.appendIfAbsent(event)).toBe(false);
+    expect(audit.appendIfAbsent({ ...event, id: "audit-claim" })).toBe(true);
+    expect(audit.appendIfAbsent({ ...event, id: "audit-claim" })).toBe(false);
     storage.close();
   });
 

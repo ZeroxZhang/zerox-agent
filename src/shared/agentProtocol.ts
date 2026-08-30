@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "../main/openAiCompatibleClient";
 import type { AgentToolName } from "./toolPermissions";
 import type { ExecutionPlan, ExecutionStep, AgentPhase } from "./agentRuns";
+import { redactCredentials } from "./credentialRedaction";
 
 export type AgentModelToolCall = {
   type: "tool_call";
@@ -893,7 +894,7 @@ export function serializeToolObservation(
   // v3.6.0: Wrap all tool results in unambiguous XML fences to structurally
   // separate external data from system instructions (SEC-12, SEC-11).
   // The system prompt instructs the model that fenced content is untrusted data.
-  const inner = JSON.stringify({
+  const inner = JSON.stringify(redactCredentials({
     type: "tool_result",
     tool: observation.tool,
     ok: observation.ok,
@@ -903,7 +904,7 @@ export function serializeToolObservation(
       ? { error_details: observation.errorDetails }
       : {}),
     ...(observation.toolCallId ? { tool_call_id: observation.toolCallId } : {}),
-  });
+  }));
   return `<tool_result tool="${observation.tool}" ok="${observation.ok}">\n${inner}\n</tool_result>`;
 }
 

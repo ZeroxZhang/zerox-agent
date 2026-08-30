@@ -1118,7 +1118,21 @@ describe("Design System — Obsidian desktop control surface", () => {
     const successSource = getFunctionSource(chatPanelSource, "applySuccessfulChatResult");
 
     expect(successSource).toContain("finalizeChatStreamResult");
-    expect(successSource).toContain("void refreshCurrentSessionMessages(result.sessionId);");
+    expect(successSource).toContain("getChatResultSettlementUiState(result)");
+    expect(successSource).toContain("result.domainStateAvailable === true");
+    expect(successSource).toContain("if (durableSessionId)");
+    expect(successSource).not.toContain("sessionIdRef.current = result.sessionId");
+    expect(successSource).toContain('result.turnSettlementStatus === "unknown"');
+    expect(successSource).toContain("历史回复已恢复，但本轮执行结果无法确认");
+    expect(successSource).toContain("void refreshCurrentSessionMessages(durableSessionId);");
+    expect(chatPanelSource).toContain("if (durableStatusSessionId && event.context)");
+  });
+
+  it("projects owning scheduled failures without treating cancellation as success", () => {
+    expect(chatPanelSource).toContain("if (result.executedRun)");
+    expect(chatPanelSource).toContain('result.turnSettlementStatus === "canceled"');
+    expect(chatPanelSource).toContain('result.executedRun?.status === "canceled"');
+    expect(chatPanelSource).toContain('settlementUiState === "canceled"');
   });
 
   it("clears session-scoped Goal draft ownership before loading another transcript", () => {
@@ -1477,6 +1491,14 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain('aria-label="自动授权工具请求"');
     expect(chatPanelSource).toContain("composer-mode-risk-summary");
     expect(chatPanelSource).toContain("resolveToolApproval");
+    expect(chatPanelSource).toContain("getPendingToolApprovals");
+    expect(chatPanelSource.indexOf("onToolApprovalRequest")).toBeLessThan(
+      chatPanelSource.indexOf("getPendingToolApprovals"),
+    );
+    expect(chatPanelSource.indexOf("onToolApprovalDecision")).toBeLessThan(
+      chatPanelSource.indexOf("getPendingToolApprovals"),
+    );
+    expect(chatPanelSource).not.toContain("setPendingToolApproval(null)");
     expect(chatPanelSource).toContain("shouldShowToolApproval(");
     expect(chatPanelSource).toContain("disabled={autoApprovalLocked}");
     expect(goalModeHandlerSource).toContain(
@@ -1528,6 +1550,55 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(scheduledTasksPanelSource).toContain("updateScheduledTask(editingTaskId");
   });
 
+  it("projects stable cross-surface attention without replacing owning state", () => {
+    expect(scheduledTasksPanelSource).toContain("latestRunByTaskId");
+    expect(scheduledTasksPanelSource).toContain(
+      "latest.set(run.taskId, run)",
+    );
+    expect(scheduledTasksPanelSource).toContain(
+      "if (run.runContext?.parentRunId) continue",
+    );
+    expect(scheduledTasksPanelSource).toContain(
+      "data-disclosure-id={`scheduled-run:${latestRun.id}`}",
+    );
+    expect(scheduledTasksPanelSource).toContain(
+      "runDisclosureExpanded[latestRun.id]",
+    );
+    expect(scheduledTasksPanelSource).toContain(
+      "latestRunPresentation.attentionRequired",
+    );
+    expect(chatPanelSource).toContain(
+      "data-disclosure-id={`plan:${props.plan.id}`}",
+    );
+    expect(chatPanelSource).toContain(
+      "data-disclosure-id={`approval:${request.id}`}",
+    );
+    expect(chatPanelSource).toContain(
+      "data-source-revision={request.revision ?? 1}",
+    );
+    expect(styles).toContain(".cross-surface-attention");
+    expect(styles).toContain(".scheduled-run-disclosure");
+  });
+
+  it("keeps Evidence Inspector selection bounded, reloadable, and secret-safe", () => {
+    expect(runTrajectoryPanelSource).toContain(
+      "readPersistedEvidenceSelection(props.runId)",
+    );
+    expect(runTrajectoryPanelSource).toContain(
+      "props.events.slice(0, visibleCount)",
+    );
+    expect(runTrajectoryPanelSource).toContain(
+      "setVisibleCount((current) => current + 50)",
+    );
+    expect(runTrajectoryPanelSource).toContain("redactCredentials({");
+    expect(runTrajectoryPanelSource).toContain("value.slice(0, 16_384)");
+    expect(runTrajectoryPanelSource).toContain(
+      'labels[type] ?? `其他证据 · ${type || "unknown"}`',
+    );
+    expect(runTrajectoryPanelSource).toContain("readToolResultRef(resultRef");
+    expect(runsPanelSource).toContain("runId={props.run?.id ?? \"unselected\"}");
+  });
+
   it("keeps goal execution UI compact when long milestone text is active", () => {
     const handleStartGoalSource = getFunctionSource(chatPanelSource, "handleStartGoal");
 
@@ -1542,6 +1613,8 @@ describe("Design System — Obsidian desktop control surface", () => {
   it("subscribes to chat stream events and projects public progress into the conversation and status rail", () => {
     expect(chatPanelSource).toContain("onChatStreamEvent");
     expect(chatPanelSource).toContain("applyChatStreamEvent");
+    expect(chatPanelSource).toContain("getDurableChatStreamSessionId(event)");
+    expect(chatPanelSource).toContain("if (durableEventSessionId)");
     expect(chatPanelSource).toContain("finalizeChatStreamResult");
     expect(chatPanelSource).toContain("ContextRuntimeSummary");
     expect(chatPanelSource).toContain("ConversationProgressDisclosure");
@@ -1549,6 +1622,20 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain(".context-runtime-summary");
     expect(styles).toContain(".conversation-progress");
     expect(styles).toContain(".session-context-status-card");
+  });
+
+  it("keeps the grouped Chat disclosure local, reversible, and accessible", () => {
+    expect(chatPanelSource).toContain("getConversationDisclosureMode()");
+    expect(chatPanelSource).toContain('disclosureMode === "projected"');
+    expect(chatPanelSource).toContain("projectChatDisclosureGroups(taskProcessEvents)");
+    expect(chatPanelSource).toContain("ProjectedConversationDisclosure");
+    expect(chatPanelSource).toContain('data-testid="conversation-disclosure"');
+    expect(chatPanelSource).toContain('aria-label="会话进展"');
+    expect(chatPanelSource).toContain("aria-expanded={expanded}");
+    expect(chatPanelSource).toContain("data-disclosure-id={row.id}");
+    expect(chatPanelSource).toContain("ConversationProgressDisclosure");
+    expect(styles).toContain(".conversation-disclosure");
+    expect(styles).toContain(".conversation-disclosure-group");
   });
 
   it("shows automatically resolved context windows and provenance without a manual window field", () => {

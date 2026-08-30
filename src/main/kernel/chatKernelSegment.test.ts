@@ -81,7 +81,23 @@ describe("Chat Kernel segment adapter", () => {
     expect(lifecycle.at(-1)).toBe("run_end");
   });
 
-  it("settles failed activity and stream before rethrowing the original error", async () => {
+  it("accepts an explicit reconciliation-only pause without claiming continuation", () => {
+    expect(validateChatKernelSettlement({
+      ...assistantSettlement("paused", "message_legacy", {}),
+      persistence: {
+        requiredStatePersisted: true,
+        assistantMessageId: "message_legacy",
+        reconciliationRequired: true,
+      },
+    })).toMatchObject({
+      status: "paused",
+      persistence: {
+        reconciliationRequired: true,
+      },
+    });
+  });
+
+  it("returns the durable safe settlement without rethrowing the original error", async () => {
     const bus = new KernelEventBus();
     const lifecycle: string[] = [];
     const error = new Error("model failed");
@@ -108,7 +124,10 @@ describe("Chat Kernel segment adapter", () => {
           });
         },
       }),
-    ).rejects.toBe(error);
+    ).resolves.toMatchObject({
+      kernel: { status: "failed", reason: "settled_failure" },
+      settlement: { status: "failed", result: { ok: false } },
+    });
 
     expect(lifecycle).toEqual([
       "failed_activity_persisted",
@@ -118,8 +137,9 @@ describe("Chat Kernel segment adapter", () => {
     expect(bus.history().at(-1)).toMatchObject({
       type: "run_end",
       status: "failed",
-      reason: "model failed",
+      reason: "settled_failure",
     });
+    expect(JSON.stringify(bus.history())).not.toContain(error.message);
   });
 
   it("settles a pre-canceled turn before run_end without executing", async () => {
@@ -199,6 +219,19 @@ describe("Chat Kernel segment adapter", () => {
       error: /requires durable continuation/i,
     },
     {
+      name: "paused with contradictory continuation and reconciliation",
+      settlement: {
+        ...assistantSettlement("paused", "message_1", {}),
+        persistence: {
+          requiredStatePersisted: true,
+          assistantMessageId: "message_1",
+          continuationPersisted: true,
+          reconciliationRequired: true,
+        },
+      },
+      error: /cannot claim both continuation and reconciliation/i,
+    },
+    {
       name: "canceled without durable activity",
       settlement: {
         status: "canceled",
@@ -220,12 +253,61 @@ describe("Chat Kernel segment adapter", () => {
       },
       error: /exactly one stream terminal/i,
     },
+    {
+      name: "incomplete persistence without a failure code",
+      settlement: {
+        status: "failed",
+        summary: "failed",
+        result: {},
+        persistence: {
+          requiredStatePersisted: false,
+          settlementRecoveryRequired: true,
+          settlementFailureCode: "",
+        },
+        streamTerminals: [{ type: "failed" }],
+      },
+      error: /typed failed or canceled recovery settlement/i,
+    },
+    {
+      name: "successful result with incomplete persistence",
+      settlement: {
+        status: "succeeded",
+        summary: "succeeded",
+        result: {},
+        persistence: {
+          requiredStatePersisted: false,
+          settlementRecoveryRequired: true,
+          settlementFailureCode: "CROSS_DOMAIN_SETTLEMENT_FAILED",
+        },
+        streamTerminals: [{ type: "completed" }],
+      },
+      error: /typed failed or canceled recovery settlement/i,
+    },
   ])("rejects $name", ({ settlement, error }) => {
     expect(() =>
       validateChatKernelSettlement(
         settlement as ChatKernelSettlement<unknown>,
       ),
     ).toThrow(error);
+  });
+
+  it("accepts an honest recovery-required failed settlement without claiming absence", () => {
+    expect(validateChatKernelSettlement({
+      status: "failed",
+      summary: "recovery required",
+      result: {},
+      persistence: {
+        requiredStatePersisted: false,
+        settlementRecoveryRequired: true,
+        settlementFailureCode: "SETTLEMENT_COMPENSATION_INCOMPLETE",
+      },
+      streamTerminals: [{ type: "failed" }],
+    })).toMatchObject({
+      persistence: {
+        requiredStatePersisted: false,
+        settlementRecoveryRequired: true,
+      },
+    });
   });
 });
 

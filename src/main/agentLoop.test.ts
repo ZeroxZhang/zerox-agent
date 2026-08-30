@@ -24,6 +24,7 @@ import type { ToolAuthorizationService } from "./toolAuthorizationService";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type { ToolCallRequest } from "../shared/toolPermissions";
 import type { ToolInvocationRecord } from "../shared/toolInvocationLedger";
+import type { ContextSurfaceState } from "../shared/contextSurface";
 
 const modelProfile = {
   baseUrl: "https://api.example.com/v1",
@@ -138,6 +139,54 @@ function runAgentLoop(...args: Parameters<typeof runProductionAgentLoop>) {
 }
 
 describe("agent loop", () => {
+  it("redacts final provider text from every returned and observed surface", async () => {
+    const canary = "provider-final-loop-canary";
+    const observedResponses: ChatCompletionResponse[] = [];
+    const observedReasoning: string[] = [];
+    const result = await runAgentLoop(
+      [{ role: "user", content: "return the final answer" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            return {
+              content: `api_key=${canary}`,
+              reasoningContent: `client_secret=${canary}`,
+              toolCalls: [],
+              finishReason: "stop",
+            };
+          },
+        },
+        toolExecutor: {
+          async execute() {
+            return { ok: true, result: {} };
+          },
+          getRegistry() {
+            return createBuiltInSourceRegistry();
+          },
+          hasTool() {
+            return true;
+          },
+        },
+        tools: [],
+        onModelResponse(response) {
+          observedResponses.push(response);
+        },
+        onReasoning(reasoning) {
+          observedReasoning.push(reasoning);
+        },
+      },
+    );
+
+    const serialized = JSON.stringify({
+      result,
+      observedResponses,
+      observedReasoning,
+    });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toContain(canary);
+  });
+
   it("fails closed when a tool call has no authorization dependencies", async () => {
     let executed = false;
     let modelCalls = 0;
@@ -1715,6 +1764,162 @@ describe("agent loop", () => {
     });
   });
 
+  it("awaits the owning Tool Invocation ref before authorization or dispatch", async () => {
+    let releaseRef!: () => void;
+    let refStarted!: () => void;
+    const refGate = new Promise<void>((resolve) => {
+      releaseRef = resolve;
+    });
+    const refStartedGate = new Promise<void>((resolve) => {
+      refStarted = resolve;
+    });
+    let authorizationCalls = 0;
+    let executionCalls = 0;
+    const chatClient: ChatClient = {
+      async complete() {
+        return toolCallResponse("tool_call_ref_gate", "/tmp/workspace");
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(_taskId, request) {
+        authorizationCalls += 1;
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "allowed" },
+          auditEvent: {
+            id: "audit_ref_gate",
+            taskId: "task_ref_gate",
+            request,
+            decision: { allowed: true, reason: "allowed" },
+            createdAt: "2026-08-18T00:00:00.000Z",
+          },
+        };
+      },
+    };
+    const toolExecutor: AgentToolExecutor = {
+      async execute() {
+        executionCalls += 1;
+        return { ok: true, result: { entries: [] } };
+      },
+      getRegistry() {
+        return createDynamicToolRegistry();
+      },
+      hasTool() {
+        return true;
+      },
+    };
+
+    const running = runAgentLoop(
+      [{ role: "user", content: "list files" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor,
+        toolAuthorizationService,
+        taskId: "task_ref_gate",
+        tools: testTools,
+        async onToolInvocation(record) {
+          if (record.status !== "proposed") return;
+          refStarted();
+          await refGate;
+          throw new Error("causal Tool Invocation ref failed");
+        },
+      },
+    );
+
+    await refStartedGate;
+    expect(authorizationCalls).toBe(0);
+    expect(executionCalls).toBe(0);
+    releaseRef();
+    await expect(running).resolves.toMatchObject({
+      status: "failed",
+      toolCallsExecuted: 0,
+      summary: "causal Tool Invocation ref failed",
+    });
+    expect(authorizationCalls).toBe(0);
+    expect(executionCalls).toBe(0);
+  });
+
+  it("binds the persisted approval id to one run-scoped Tool Invocation", async () => {
+    const invocations: ToolInvocationRecord[] = [];
+    const chatClient: ChatClient = {
+      async complete(request) {
+        if (!request.messages.some((message) => message.role === "tool")) {
+          return toolCallResponse("shared_provider_call", "/tmp/workspace");
+        }
+        return { content: "done", finishReason: "stop", toolCalls: [] };
+      },
+    };
+    const toolAuthorizationService: ToolAuthorizationService = {
+      async authorize(taskId, request, options) {
+        await options?.onApprovalRequested?.({
+          taskId,
+          taskName: "Approval task",
+          request,
+          deniedReason: "requires approval",
+          approvalId: "approval_durable_1",
+          causalRef: options.approvalContext,
+        });
+        await options?.onApprovalResolved?.({
+          approved: true,
+          approvalId: "approval_durable_1",
+          reason: "approved",
+        });
+        return {
+          ok: true,
+          decision: { allowed: true, reason: "approved" },
+          auditEvent: {
+            id: "audit_approval",
+            taskId,
+            request,
+            decision: { allowed: true, reason: "approved" },
+            createdAt: "2026-08-18T00:00:00.000Z",
+          },
+        };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "list files with approval" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        toolAuthorizationService,
+        taskId: "task_approval",
+        requestId: "request_approval",
+        runId: "trajectory_run_approval",
+        tools: testTools,
+        onToolInvocation(record) {
+          invocations.push(record);
+        },
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(invocations.map((record) => record.status)).toEqual([
+      "proposed",
+      "visible",
+      "waiting_approval",
+      "authorized",
+      "running",
+      "completed",
+    ]);
+    expect(new Set(invocations.map((record) => record.id)).size).toBe(1);
+    expect(invocations[0]?.id).toContain("trajectory_run_approval");
+    expect(invocations.find((record) => record.status === "waiting_approval"))
+      .toMatchObject({
+        runId: "trajectory_run_approval",
+        approvalId: "approval_durable_1",
+        history: expect.arrayContaining([
+          expect.objectContaining({
+            status: "waiting_approval",
+            approvalId: "approval_durable_1",
+          }),
+        ]),
+      });
+  });
+
   it("blocks raw Chrome Bookmarks file probes after chrome_bookmarks_read succeeds", async () => {
     const requests: ChatCompletionRequest[] = [];
     const executedTools: string[] = [];
@@ -2115,6 +2320,121 @@ describe("agent loop", () => {
     });
     expect(result.summary).toContain("连续 3 次工具失败");
     expect(result.summary).toContain("file_list");
+  });
+
+  it("keeps credential-bearing tool failures secret-safe across transcript and continuation", async () => {
+    const invocations: ToolInvocationRecord[] = [];
+    let modelCalls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "运行一个会失败的工具" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            return {
+              content: null,
+              finishReason: "tool_calls",
+              toolCalls: [{
+                id: `secret_call_${modelCalls}`,
+                type: "function",
+                function: {
+                  name: "file_list",
+                  arguments: JSON.stringify({
+                    path: `/tmp/secret-safe-${modelCalls}`,
+                    apiKey: "loop-arg-canary",
+                  }),
+                },
+              }],
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(undefined, undefined, {
+          ok: false,
+          error: "Authorization: Bearer loop-error-canary",
+          errorDetails: {
+            stderr: "password=loop-detail-canary",
+          },
+        }),
+        maxTurns: 6,
+        pauseOnFailureLoop: true,
+        tools: testTools,
+        async onToolInvocation(record) {
+          invocations.push(record);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "paused",
+      continuation: { reason: "tool_failure_loop" },
+    });
+    const serialized = JSON.stringify({ result, invocations });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /loop-arg-canary|loop-error-canary|loop-detail-canary/,
+    );
+  });
+
+  it("sanitizes legacy resume messages and context-surface bytes before replay", async () => {
+    const rawMessages: ChatCompletionRequest["messages"] = [
+      { role: "system", content: "resume safely" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{
+          id: "legacy_secret_call",
+          type: "function",
+          function: {
+            name: "file_list",
+            arguments:
+              '{"api\\u005fkey":"resume-args-canary","path":"/tmp"}',
+          },
+        }],
+      },
+      {
+        role: "tool",
+        tool_call_id: "legacy_secret_call",
+        content:
+          '<tool_result tool="file_list" ok="false">\n{"error_details":{"api\\u005fkey":"resume-result-canary"}}\n</tool_result>',
+      },
+    ];
+    const rawSurface: ContextSurfaceState = {
+      version: 1,
+      runId: "run_legacy_secret_resume",
+      nextSequence: 4,
+      events: rawMessages.map((message, index) => ({
+        kind: "source" as const,
+        id: `run_legacy_secret_resume:source:${index + 1}`,
+        sequence: index + 1,
+        message,
+        estimatedTokens: 1,
+        createdAt: `2026-08-24T00:00:0${index}.000Z`,
+      })),
+    };
+    let observedRequest: ChatCompletionRequest | undefined;
+
+    const result = await runAgentLoop([], modelProfile, {
+      runId: "run_legacy_secret_resume",
+      resumeMessages: rawMessages,
+      resumeContextSurface: rawSurface,
+      chatClient: {
+        async complete(request) {
+          observedRequest = request;
+          return {
+            content: "恢复完成。",
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        },
+      },
+      toolExecutor: createToolExecutor(),
+      tools: testTools,
+    });
+
+    const serialized = JSON.stringify({ observedRequest, result });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(/resume-args-canary|resume-result-canary/);
   });
 
   it("reports the last tool failure when the model returns an empty follow-up response", async () => {
@@ -2633,6 +2953,7 @@ describe("agent loop", () => {
   });
 
   it("preserves partial streamed output and pauses on an output limit", async () => {
+    const noticeCanary = "provider-notice-canary";
     let completeCalls = 0;
     const chatClient: ChatClient & StreamingChatClient = {
       async complete() {
@@ -2646,10 +2967,10 @@ describe("agent loop", () => {
           finishReason: "length",
           modelServiceNotice: {
             kind: "output_limit",
-            provider: "test-provider",
-            model: "agent-model",
-            rawReason: "length",
-            message: "模型输出达到限制。",
+            provider: `api_key=${noticeCanary}`,
+            model: `client_secret=${noticeCanary}`,
+            rawReason: `api_key=${noticeCanary}`,
+            message: `api_key=${noticeCanary}`,
           },
         };
       },
@@ -2675,6 +2996,8 @@ describe("agent loop", () => {
       role: "assistant",
       content: "partial answer",
     });
+    expect(JSON.stringify(result)).toContain("[redacted]");
+    expect(JSON.stringify(result)).not.toContain(noticeCanary);
     expect(completeCalls).toBe(0);
   });
 
@@ -2770,6 +3093,7 @@ describe("agent loop", () => {
     let streamCalls = 0;
     let completeCalls = 0;
     const retryEvents: Array<{ attempt: number; error: string }> = [];
+    const attemptEvents: Array<Record<string, unknown>> = [];
     const chatClient: ChatClient & StreamingChatClient = {
       async complete() {
         completeCalls += 1;
@@ -2798,6 +3122,9 @@ describe("agent loop", () => {
         onModelRetry(event) {
           retryEvents.push({ attempt: event.attempt, error: event.error });
         },
+        onModelAttempt(event) {
+          attemptEvents.push(event);
+        },
       },
     );
 
@@ -2810,6 +3137,11 @@ describe("agent loop", () => {
     expect(completeCalls).toBe(0);
     expect(retryEvents).toHaveLength(1);
     expect(retryEvents[0]!.error).toContain("idle timeout");
+    expect(attemptEvents).toEqual([
+      { operation: "begin", attempt: 1, turn: 1 },
+      { operation: "supersede", attempt: 2, supersedesAttempt: 1, turn: 1 },
+      { operation: "begin", attempt: 2, turn: 1 },
+    ]);
   });
 
   it("fails after repeated mid-stream idle timeouts", async () => {

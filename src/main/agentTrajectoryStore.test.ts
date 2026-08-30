@@ -304,6 +304,86 @@ describe("agent trajectory store", () => {
     storage.close();
   });
 
+  it.each(["json", "sqlite"] as const)(
+    "pages %s trajectory records with source-bound opaque cursors",
+    async (backend) => {
+      const storage = backend === "sqlite"
+        ? await createInMemoryStorage()
+        : undefined;
+      const store = createAgentTrajectoryStore({
+        configDir,
+        backend,
+        storage,
+      });
+      for (const sequence of [1, 2, 3]) {
+        await store.append(
+          "run_1",
+          createEvent("tool_call", `event_${sequence}`),
+        );
+      }
+
+      const first = await store.getPage!("run_1", { limit: 2 });
+      expect(first).toMatchObject({
+        source: "trajectory",
+        sourceId: "run_1",
+        status: "complete",
+        records: [
+          { id: "event_1", sequence: 1 },
+          { id: "event_2", sequence: 2 },
+        ],
+      });
+      expect(first.nextCursor).toBeTruthy();
+      const second = await store.getPage!("run_1", {
+        cursor: first.nextCursor,
+        limit: 2,
+      });
+      expect(second).toMatchObject({
+        status: "complete",
+        records: [{ id: "event_3", sequence: 3 }],
+      });
+      expect(second.nextCursor).toBeUndefined();
+      storage?.close();
+    },
+  );
+
+  it.each(["json", "sqlite"] as const)(
+    "rejects a stale %s trajectory cursor after the authority cut changes",
+    async (backend) => {
+      const storage = backend === "sqlite"
+        ? await createInMemoryStorage()
+        : undefined;
+      const store = createAgentTrajectoryStore({
+        configDir,
+        backend,
+        storage,
+      });
+      await store.append("run_1", createEvent("tool_call", "event_1"));
+      await store.append("run_1", createEvent("tool_call", "event_2"));
+      const first = await store.getPage!("run_1", { limit: 1 });
+      await store.append("run_1", createEvent("tool_call", "event_3"));
+
+      await expect(store.getPage!("run_1", {
+        cursor: first.nextCursor,
+        limit: 1,
+      })).resolves.toMatchObject({
+        records: [],
+        status: "incompatible",
+        reasonCode: "source_cursor_mismatch",
+      });
+      storage?.close();
+    },
+  );
+
+  it("propagates abort instead of returning unavailable trajectory data", async () => {
+    const store = createAgentTrajectoryStore({ configDir });
+    const controller = new AbortController();
+    controller.abort(new DOMException("canceled", "AbortError"));
+
+    await expect(store.getPage!("run_1", {
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("skips malformed JSONL lines while preserving valid trajectory events", async () => {
     const first = createEvent("model_request", "event_1");
     const second = createEvent("model_response", "event_2");
@@ -318,6 +398,11 @@ describe("agent trajectory store", () => {
     const store = createAgentTrajectoryStore({ configDir });
 
     await expect(store.list("run_1")).resolves.toEqual([first, second]);
+    await expect(store.getPage!("run_1")).resolves.toMatchObject({
+      records: [first, second],
+      status: "partial",
+      reasonCode: "corrupt_record",
+    });
     const files = await readdir(dir);
     expect(files.some((file) => file.startsWith("run_1.jsonl.corrupt-lines-"))).toBe(true);
   });

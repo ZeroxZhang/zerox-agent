@@ -3,7 +3,11 @@ import os from "node:os";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuditLog } from "./toolAuditLog";
 import { evaluatePermission } from "./kernel/permissionEngine";
-import { classifyToolApprovalRisk, type ToolApprovalRisk } from "../shared/toolApproval";
+import {
+  classifyToolApprovalRisk,
+  type ToolApprovalCausalRef,
+  type ToolApprovalRisk,
+} from "../shared/toolApproval";
 import {
   authorizeToolCallWithinRunContext,
   type AuthorizeTaskToolCallResult,
@@ -29,6 +33,7 @@ export type ToolAuthorizationOptions = {
   runtimeTask?: RuntimeToolAuthorizationTask;
   onApprovalRequested?: (request: ToolUserApprovalRequest) => Promise<void>;
   onApprovalResolved?: (result: ToolUserApprovalResult) => Promise<void>;
+  approvalContext?: ToolApprovalCausalRef;
 };
 
 export type RuntimeToolAuthorizationTask = {
@@ -43,12 +48,22 @@ export type ToolUserApprovalRequest = {
   request: ToolCallRequest;
   deniedReason: string;
   risk?: ToolApprovalRisk;
+  causalRef?: ToolApprovalCausalRef;
+  approvalId?: string;
 };
 
 export type ToolUserApprovalResult = {
   approved: boolean;
   reason?: string;
   automatic?: boolean;
+  approvalId?: string;
+  approvalRevision?: number;
+  decisionId?: string;
+};
+
+export type ToolUserApprovalRequestOptions = {
+  signal?: AbortSignal;
+  onIntentPersisted?: (intent: { id: string; revision: number }) => Promise<void>;
 };
 
 export function createToolAuthorizationService(options: {
@@ -58,7 +73,7 @@ export function createToolAuthorizationService(options: {
   permissionRules?: PermissionRule[] | (() => PermissionRule[]);
   requestUserApproval?: (
     request: ToolUserApprovalRequest,
-    options?: { signal?: AbortSignal },
+    options?: ToolUserApprovalRequestOptions,
   ) => Promise<ToolUserApprovalResult>;
 }): ToolAuthorizationService {
   const homeDir = options.homeDir ?? os.homedir();
@@ -197,14 +212,21 @@ export function createToolAuthorizationService(options: {
             ? risk.reason
             : decision.reason,
           risk,
+          ...(authorizeOptions?.approvalContext
+            ? { causalRef: authorizeOptions.approvalContext }
+            : {}),
         };
-        throwIfAborted(authorizeOptions?.signal);
-        await authorizeOptions?.onApprovalRequested?.(approvalRequest);
         throwIfAborted(authorizeOptions?.signal);
         const approval = await options.requestUserApproval(approvalRequest, {
           ...(authorizeOptions?.signal
             ? { signal: authorizeOptions.signal }
             : {}),
+          async onIntentPersisted(intent) {
+            await authorizeOptions?.onApprovalRequested?.({
+              ...approvalRequest,
+              approvalId: intent.id,
+            });
+          },
         });
         throwIfAborted(authorizeOptions?.signal);
         await authorizeOptions?.onApprovalResolved?.(approval);

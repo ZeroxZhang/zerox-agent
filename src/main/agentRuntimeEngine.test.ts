@@ -11,6 +11,7 @@ import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import type {
   ChatClient,
+  ChatCompletionRequest,
   ChatCompletionResponse,
   ChatMessage,
 } from "./openAiCompatibleClient";
@@ -35,7 +36,11 @@ import type {
   AgentLearningCandidate,
   AgentLearningCandidateInput,
 } from "../shared/agentLearning";
-import type { AgentRunRecord } from "../shared/agentRuns";
+import type {
+  AgentRunAdmissionCandidate,
+  AgentRunEvent,
+  AgentRunRecord,
+} from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { MemoryInput, MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { ScheduledTask } from "../shared/scheduledTasks";
@@ -107,6 +112,554 @@ describe("agent runtime engine", () => {
         (checkpoint) => checkpoint.contextSurface?.version === 1,
       ),
     ).toBe(true);
+  });
+
+  it("projects recoverable run identity into secret-safe durable run and memory inputs", async () => {
+    const canary = "recoverable-run-memory-canary";
+    const memoryWrites: MemoryInput[] = [];
+    const liveEvents: AgentRunEvent[] = [];
+    const runStore = createMemoryRunStore();
+    const task = {
+      ...createTask(),
+      name: `api%255fkey=${canary}`,
+      skillName: `client_secret=${canary}`,
+    };
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(task),
+      runStore,
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create(input) {
+          memoryWrites.push(structuredClone(input));
+          throw new Error(canary);
+        },
+      },
+      async runLoop(messages) {
+        return {
+          status: "succeeded",
+          summary: "recoverable complete",
+          turns: 1,
+          messages: [
+            ...messages,
+            { role: "assistant" as const, content: "recoverable complete" },
+          ],
+          toolCallsExecuted: 0,
+          tokensConsumed: 4,
+        };
+      },
+      createId: createSequentialId("recoverable_secret"),
+      now: createSteppedClock("2026-08-24T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask(task.id, {
+      onEvent(event) {
+        liveEvents.push(structuredClone(event));
+      },
+    });
+    const serialized = JSON.stringify({
+      result,
+      runs: runStore.runs,
+      memoryWrites,
+      liveEvents,
+    });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toContain(canary);
+    expect(memoryWrites[0]).toMatchObject({
+      title: "Run: api%255fkey=[redacted]",
+      tags: ["agent-run", "client_secret=[redacted]"],
+    });
+    expect(result.ok ? result.run.events : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Unable to write episodic memory.",
+          data: { code: "INTERNAL_FAILURE" },
+        }),
+      ]),
+    );
+    expect(liveEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Unable to write episodic memory.",
+          data: { code: "INTERNAL_FAILURE" },
+        }),
+      ]),
+    );
+    expect(runStore.runs[0]?.events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Unable to write episodic memory." }),
+      ]),
+    );
+  });
+
+  it("rejects before workspace model checkpoint Kernel or tool work when run admission fails", async () => {
+    let workspaceCalls = 0;
+    let profileCalls = 0;
+    let checkpointWrites = 0;
+    let trajectoryWrites = 0;
+    let loopCalls = 0;
+    let runWrites = 0;
+    let publishedEvents = 0;
+    const executionStore = createMemoryExecutionStore([]);
+    const originalSave = executionStore.save.bind(executionStore);
+    executionStore.save = async (checkpoint) => {
+      checkpointWrites += 1;
+      return originalSave(checkpoint);
+    };
+    const runStore = createMemoryRunStore();
+    const originalAppendRun = runStore.append.bind(runStore);
+    runStore.append = async (run) => {
+      runWrites += 1;
+      return originalAppendRun(run);
+    };
+    const trajectoryStore = createMemoryTrajectoryStore([]);
+    const originalAppendTrajectory = trajectoryStore.append.bind(trajectoryStore);
+    trajectoryStore.append = async (runId, event) => {
+      trajectoryWrites += 1;
+      return originalAppendTrajectory(runId, event);
+    };
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore,
+      executionStore,
+      trajectoryStore,
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("must not run"); } },
+      async getModelProfile() {
+        profileCalls += 1;
+        return createModelProfile();
+      },
+      workspaceService: {
+        async resolveRunContext() {
+          workspaceCalls += 1;
+          return buildPrimaryRunContext({
+            workspaceId: "workspace_admission",
+            workspaceRoot: "/workspace/admission",
+          });
+        },
+      },
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      async runLoop() {
+        loopCalls += 1;
+        throw new Error("must not run");
+      },
+      createId: createSequentialId("admission"),
+      now: createSteppedClock("2026-08-24T00:00:00.000Z"),
+    });
+
+    await expect(engine.startTask("task_123", {
+      sessionId: "session_admission",
+      onEvent: () => { publishedEvents += 1; },
+      async beforeExecution(candidate) {
+        expect(candidate).toEqual({
+          runId: "admission_1",
+          taskId: "task_123",
+          sessionId: "session_admission",
+          executionRevision: 1,
+        });
+        throw new Error("causal admission rejected");
+      },
+    })).rejects.toThrow("causal admission rejected");
+
+    expect({
+      workspaceCalls,
+      profileCalls,
+      checkpointWrites,
+      trajectoryWrites,
+      loopCalls,
+      runWrites,
+      publishedEvents,
+    }).toEqual({
+      workspaceCalls: 0,
+      profileCalls: 0,
+      checkpointWrites: 0,
+      trajectoryWrites: 0,
+      loopCalls: 0,
+      runWrites: 0,
+      publishedEvents: 0,
+    });
+  });
+
+  it("settles recoverable admission at the authoritative run commit before fallible projections", async () => {
+    const lifecycle: string[] = [];
+    const liveEvents: AgentRunEvent[] = [];
+    let releaseMemory!: () => void;
+    const memoryPending = new Promise<void>((resolve) => {
+      releaseMemory = resolve;
+    });
+    let notifyMemoryStarted!: () => void;
+    const memoryStarted = new Promise<void>((resolve) => {
+      notifyMemoryStarted = resolve;
+    });
+    const taskStore = createTaskStore({ ...createTask(), skillName: "" });
+    taskStore.recordRun = async () => {
+      lifecycle.push("task-bookkeeping");
+      throw new Error("task bookkeeping unavailable");
+    };
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    let terminalRunAppended = false;
+    runStore.append = async (run) => {
+      lifecycle.push(`run:${run.status}`);
+      const persisted = await appendRun(run);
+      terminalRunAppended = true;
+      return persisted;
+    };
+    const trajectoryStore = createMemoryTrajectoryStore([]);
+    const listTrajectory = trajectoryStore.list.bind(trajectoryStore);
+    trajectoryStore.list = async (runId) => {
+      if (!terminalRunAppended) {
+        return listTrajectory(runId);
+      }
+      lifecycle.push("learning-projection");
+      throw new Error("learning projection unavailable");
+    };
+    const engine = createAgentRuntimeEngine({
+      taskStore,
+      runStore,
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore,
+      learningStore: createMemoryLearningStore([]),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create(input) {
+          lifecycle.push("memory:start");
+          notifyMemoryStarted();
+          await memoryPending;
+          lifecycle.push("memory:done");
+          return {
+            id: "recoverable_commit_memory",
+            ...input,
+            tags: input.tags ?? [],
+            source: input.source ?? { type: "manual" },
+            importance: input.importance ?? 3,
+            createdAt: "2026-08-24T00:00:00.000Z",
+            updatedAt: "2026-08-24T00:00:00.000Z",
+          } as MemoryRecord;
+        },
+      },
+      async runLoop(_messages, _profile, loopOptions) {
+        const messages = [
+          ...(loopOptions.resumeMessages ?? []),
+          { role: "assistant" as const, content: "committed" },
+        ];
+        return {
+          status: "succeeded",
+          summary: "committed",
+          turns: 1,
+          messages,
+          contextSurface: createTestContextSurface(loopOptions.runId!, messages),
+          toolCallsExecuted: 0,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("recoverable_commit"),
+    });
+
+    const resultPromise = engine.startTask("task_123", {
+      async beforeExecution(candidate) {
+        lifecycle.push("gate");
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle(status, expectedExecutionRevision) {
+            lifecycle.push(`settle:${expectedExecutionRevision}:${status}`);
+          },
+        };
+      },
+      onEvent(event) {
+        liveEvents.push(structuredClone(event));
+      },
+    });
+
+    await memoryStarted;
+    expect(runStore.runs).toHaveLength(1);
+    expect(lifecycle).toEqual([
+      "gate",
+      "run:succeeded",
+      "settle:1:succeeded",
+      "memory:start",
+    ]);
+    expect(runStore.runs[0]?.events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Episodic memory written." }),
+      ]),
+    );
+
+    releaseMemory();
+    const result = await resultPromise;
+
+    expect(result.ok ? result.run.summary : result.message).toBe("committed");
+    expect(result).toMatchObject({
+      ok: true,
+      run: { id: "recoverable_commit_1", status: "succeeded" },
+    });
+    expect(runStore.runs).toHaveLength(1);
+    expect(lifecycle).toEqual([
+      "gate",
+      "run:succeeded",
+      "settle:1:succeeded",
+      "memory:start",
+      "memory:done",
+      "task-bookkeeping",
+      "learning-projection",
+    ]);
+    expect(result.ok ? result.run.events : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Episodic memory written." }),
+      ]),
+    );
+    expect(liveEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "Episodic memory written." }),
+      ]),
+    );
+  });
+
+  it("does not rewrite a persisted recoverable run when causal settlement fails", async () => {
+    const privateMarker = "PRIVATE_CAUSAL_SETTLEMENT_FAILURE";
+    let memoryCalls = 0;
+    const runStore = createMemoryRunStore();
+    const bus = new KernelEventBus();
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore,
+      executionStore: createMemoryExecutionStore([]),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create() {
+          memoryCalls += 1;
+          throw new Error("memory must not run before settlement");
+        },
+      },
+      productionKernelDriver: createProductionKernelDriver({ bus }),
+      async runLoop(_messages, _profile, loopOptions) {
+        const messages = [
+          ...(loopOptions.resumeMessages ?? []),
+          { role: "assistant" as const, content: "terminal owner" },
+        ];
+        return {
+          status: "succeeded",
+          summary: "terminal owner",
+          turns: 1,
+          messages,
+          contextSurface: createTestContextSurface(loopOptions.runId!, messages),
+          toolCallsExecuted: 0,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("recoverable_settlement_failure"),
+    });
+
+    await expect(engine.startTask("task_123", {
+      async beforeExecution(candidate) {
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle() {
+            throw new Error(privateMarker);
+          },
+        };
+      },
+    })).rejects.toThrow("任务运行失败，已保留可审计的终态记录。");
+    expect(runStore.runs).toEqual([
+      expect.objectContaining({
+        id: "recoverable_settlement_failure_1",
+        status: "succeeded",
+      }),
+    ]);
+    expect(bus.history().filter((event) => event.type === "run_end")).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        reason: "AGENT_RUN_EXECUTION_FAILED",
+      }),
+    ]);
+    expect(JSON.stringify({ runs: runStore.runs, kernel: bus.history() }))
+      .not.toContain(privateMarker);
+    expect(memoryCalls).toBe(0);
+  });
+
+  it.each(["workspace", "profile", "checkpoint"] as const)(
+    "persists and settles a secret-safe failed recoverable run when %s initialization fails after admission",
+    async (failureStage) => {
+      const privateMarker = `PRIVATE_RECOVERABLE_${failureStage.toUpperCase()}_CANARY`;
+      const lifecycle: string[] = [];
+      const settledStatuses: AgentRunRecord["status"][] = [];
+      const runStore = createMemoryRunStore();
+      const executionStore = createMemoryExecutionStore([]);
+      const originalSave = executionStore.save.bind(executionStore);
+      executionStore.save = async (checkpoint) => {
+        lifecycle.push("checkpoint");
+        if (failureStage === "checkpoint") throw new Error(privateMarker);
+        return originalSave(checkpoint);
+      };
+      let loopCalls = 0;
+      const engine = createAgentRuntimeEngine({
+        taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+        runStore,
+        executionStore,
+        resolveSkill: async () => null,
+        chatClient: { async complete() { return finalResponse("must not run"); } },
+        async getModelProfile() {
+          lifecycle.push("profile");
+          if (failureStage === "profile") throw new Error(privateMarker);
+          return createModelProfile();
+        },
+        workspaceService: {
+          async resolveRunContext() {
+            lifecycle.push("workspace");
+            if (failureStage === "workspace") throw new Error(privateMarker);
+            return buildPrimaryRunContext({
+              workspaceId: "workspace_initialization_failure",
+              workspaceRoot: "/workspace/initialization-failure",
+            });
+          },
+        },
+        toolAuthorizationService: createAuthorizationService(true),
+        toolExecutor: createToolExecutor(),
+        async runLoop() {
+          loopCalls += 1;
+          throw new Error("must not run");
+        },
+        createId: createSequentialId(`recoverable_${failureStage}`),
+        now: createSteppedClock("2026-08-24T00:00:00.000Z"),
+      });
+
+      const result = await engine.startTask("task_123", {
+        async beforeExecution(candidate) {
+          lifecycle.push("gate");
+          return {
+            runId: candidate.runId,
+            taskId: candidate.taskId,
+            async settle(status: AgentRunRecord["status"]) {
+              lifecycle.push(`settle:${status}`);
+              settledStatuses.push(status);
+            },
+          };
+        },
+        onExecutionAdmitted() {
+          lifecycle.push("admitted");
+        },
+        onEvent(event) {
+          lifecycle.push(`event:${event.message}`);
+        },
+      });
+
+      expect(lifecycle.slice(0, 3)).toEqual([
+        "gate",
+        "admitted",
+        "event:Agent runtime started.",
+      ]);
+      expect(loopCalls).toBe(0);
+      expect(result).toMatchObject({
+        ok: true,
+        run: {
+          id: `recoverable_${failureStage}_1`,
+          status: "failed",
+          summary: "Agent run initialization failed.",
+          failureMessage: "Agent run initialization failed.",
+        },
+      });
+      expect(JSON.stringify({ result, runs: runStore.runs, lifecycle }))
+        .not.toContain(privateMarker);
+      expect(runStore.runs).toHaveLength(1);
+      expect(settledStatuses).toEqual(["failed"]);
+      expect(lifecycle.at(-1)).toBe("settle:failed");
+    },
+  );
+
+  it("keeps one secret-safe terminal owner when the observer always throws", async () => {
+    const privateExecutionCanary = "PRIVATE_RUNTIME_EXECUTION_CANARY";
+    const privateObserverCanary = "PRIVATE_RUNTIME_OBSERVER_CANARY";
+    const lifecycle: string[] = [];
+    const settledStatuses: AgentRunRecord["status"][] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const runStore = createMemoryRunStore();
+    const appendRun = runStore.append.bind(runStore);
+    runStore.append = async (run) => {
+      lifecycle.push(`persist:${run.status}`);
+      return appendRun(run);
+    };
+    let observerCalls = 0;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore({ ...createTask(), skillName: "" }),
+      runStore,
+      executionStore: createMemoryExecutionStore([]),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => null,
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      async runLoop(_messages, _profile, loopOptions) {
+        loopOptions.onTurn?.(0, "executing");
+        throw new Error(privateExecutionCanary);
+      },
+      createId: createSequentialId("observer_failure"),
+      now: createSteppedClock("2026-08-24T01:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123", {
+      async beforeExecution(candidate) {
+        lifecycle.push("gate");
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          async settle(status) {
+            lifecycle.push(`settle:${status}`);
+            settledStatuses.push(status);
+          },
+        };
+      },
+      onEvent() {
+        observerCalls += 1;
+        throw new Error(privateObserverCanary);
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "observer_failure_1",
+        status: "failed",
+        summary: "任务运行失败，已保留可审计的终态记录。",
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
+        failureMessage: "任务运行失败，已保留可审计的终态记录。",
+      },
+    });
+    expect(observerCalls).toBeGreaterThanOrEqual(3);
+    expect(runStore.runs).toHaveLength(1);
+    expect(settledStatuses).toEqual(["failed"]);
+    expect(lifecycle.indexOf("persist:failed")).toBeLessThan(
+      lifecycle.indexOf("settle:failed"),
+    );
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "failure_classified",
+          payload: expect.objectContaining({
+            failureCode: "AGENT_RUN_EXECUTION_FAILED",
+          }),
+        }),
+      ]),
+    );
+    expect(JSON.stringify({ result, runs: runStore.runs, trajectoryEvents }))
+      .not.toContain(privateExecutionCanary);
+    expect(JSON.stringify({ result, runs: runStore.runs, trajectoryEvents }))
+      .not.toContain(privateObserverCanary);
   });
 
   it("drives scheduled lifecycle, evidence, checkpoint, and terminal events through Kernel", async () => {
@@ -255,7 +808,8 @@ describe("agent runtime engine", () => {
       ok: true,
       run: {
         status: "failed",
-        summary: expect.stringContaining("model request trajectory failed"),
+        summary: "任务运行失败，已保留可审计的终态记录。",
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
       },
     });
     expect(persistedTypes).toEqual(
@@ -307,7 +861,8 @@ describe("agent runtime engine", () => {
       ok: true,
       run: {
         status: "failed",
-        summary: "shared loop exploded",
+        summary: "任务运行失败，已保留可审计的终态记录。",
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
       },
     });
     expect(runAppends).toBe(1);
@@ -332,6 +887,7 @@ describe("agent runtime engine", () => {
     const runStore = createMemoryRunStore();
     const appendRun = runStore.append.bind(runStore);
     let appendAttempts = 0;
+    let memoryCalls = 0;
     runStore.append = async (run) => {
       expect(
         bus.history().some(
@@ -360,6 +916,12 @@ describe("agent runtime engine", () => {
       getModelProfile: async () => createModelProfile(),
       toolAuthorizationService: createAuthorizationService(true),
       toolExecutor: createToolExecutor(),
+      memoryStore: {
+        async create() {
+          memoryCalls += 1;
+          throw new Error("memory must not run before owner persistence");
+        },
+      },
       productionKernelDriver: createProductionKernelDriver({
         bus,
         now: () => "2026-08-16T10:00:00.000Z",
@@ -387,7 +949,8 @@ describe("agent runtime engine", () => {
       run: {
         id: "kernel_persistence_failure_1",
         status: "failed",
-        summary: "scheduled run persistence failed",
+        summary: "任务运行失败，已保留可审计的终态记录。",
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
       },
     });
     expect(lifecycle).toEqual([
@@ -408,8 +971,9 @@ describe("agent runtime engine", () => {
     expect(bus.history().at(-1)).toMatchObject({
       type: "run_end",
       status: "failed",
-      reason: "scheduled run persistence failed",
+      reason: "settled_failure",
     });
+    expect(memoryCalls).toBe(0);
   });
 
   it("passes a persisted context surface into shared-loop resume", async () => {
@@ -444,12 +1008,15 @@ describe("agent runtime engine", () => {
       createdAt: "2026-07-12T00:00:00.000Z",
       updatedAt: "2026-07-12T00:00:00.000Z",
     });
+    const resumeCheckpoint = (await executionStore.get("run_surface_resume"))!;
+    const runStore = createMemoryRunStore();
+    runStore.runs.push(createPausedRunOwner(resumeCheckpoint));
     let observedSurface: ContextSurfaceState | undefined;
     let observedInitialTokens = 0;
     const bus = new KernelEventBus();
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore(createTask()),
-      runStore: createMemoryRunStore(),
+      runStore,
       executionStore,
       resolveSkill: async () => createSkillRecord(),
       chatClient: { async complete() { return finalResponse("unused"); } },
@@ -478,7 +1045,9 @@ describe("agent runtime engine", () => {
       now: createSteppedClock("2026-07-12T00:00:01.000Z"),
     });
 
-    await expect(engine.resumeRun("run_surface_resume")).resolves.toMatchObject({
+    await expect(engine.resumeRun("run_surface_resume", {
+      beforeExecution: admitResumeCandidate,
+    })).resolves.toMatchObject({
       ok: true,
       run: { status: "succeeded" },
     });
@@ -500,10 +1069,518 @@ describe("agent runtime engine", () => {
     ]);
   });
 
+  it("sanitizes the first durable write when resuming a legacy secret-bearing checkpoint", async () => {
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const executionStore = createMemoryExecutionStore(savedCheckpoints);
+    const rawMessages: AgentExecutionCheckpoint["messages"] = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{
+          id: "legacy_runtime_secret_call",
+          type: "function",
+          function: {
+            name: "file_read",
+            arguments:
+              '{"api\\u005fkey":"legacy-runtime-args-canary","path":"/tmp"}',
+          },
+        }],
+      },
+      {
+        role: "tool",
+        tool_call_id: "legacy_runtime_secret_call",
+        content:
+          '<tool_result tool="file_read" ok="false">\n{"error_details":{"api\\u005fkey":"legacy-runtime-result-canary"}}\n</tool_result>',
+      },
+    ];
+    const rawSurface = createTestContextSurface(
+      "run_legacy_secret_resume",
+      rawMessages as ChatCompletionRequest["messages"],
+    );
+    await executionStore.save({
+      id: "checkpoint_legacy_secret_resume",
+      runId: "run_legacy_secret_resume",
+      taskId: "task_123",
+      status: "paused",
+      currentStepId: "step_legacy_secret_resume",
+      steps: [{
+        id: "step_legacy_secret_resume",
+        description: "resume",
+        expectedOutcome: "done",
+        state: "failed",
+        attempts: 1,
+        failureMessage: "token=legacy-runtime-step-canary",
+      }],
+      messages: rawMessages,
+      contextSurface: rawSurface,
+      toolCallCount: 1,
+      createdAt: "2026-08-24T00:00:00.000Z",
+      updatedAt: "2026-08-24T00:00:00.000Z",
+    });
+    const resumeCheckpoint = (
+      await executionStore.get("run_legacy_secret_resume")
+    )!;
+    const runStore = createMemoryRunStore();
+    runStore.runs.push(createPausedRunOwner(resumeCheckpoint));
+    let observedResume: unknown;
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore,
+      executionStore,
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      async runLoop(_messages, _profile, loopOptions) {
+        observedResume = {
+          messages: loopOptions.resumeMessages,
+          surface: loopOptions.resumeContextSurface,
+        };
+        return {
+          status: "succeeded",
+          summary: "legacy resume completed",
+          turns: 1,
+          messages: loopOptions.resumeMessages ?? [],
+          contextSurface: loopOptions.resumeContextSurface,
+          toolCallsExecuted: 1,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("legacy_secret_resume"),
+      now: createSteppedClock("2026-08-24T00:00:01.000Z"),
+    });
+
+    await engine.resumeRun("run_legacy_secret_resume", {
+      beforeExecution: admitResumeCandidate,
+    });
+
+    const postResumeWrites = savedCheckpoints.slice(1);
+    expect(postResumeWrites.length).toBeGreaterThan(0);
+    const serialized = JSON.stringify({ postResumeWrites, observedResume });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /legacy-runtime-args-canary|legacy-runtime-result-canary|legacy-runtime-step-canary/,
+    );
+  });
+
+  it.each([
+    "missing_owner",
+    "missing_hook",
+    "missing_lease",
+    "mutated_lease",
+  ] as const)(
+    "fails a resume with %s before checkpoint model trajectory or event effects",
+    async (failureMode) => {
+      const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+      const executionStore = createMemoryExecutionStore(savedCheckpoints);
+      const checkpoint: AgentExecutionCheckpoint = {
+        id: `checkpoint_${failureMode}`,
+        runId: `run_${failureMode}`,
+        taskId: "task_123",
+        status: "paused",
+        currentStepId: "step_resume",
+        steps: [{
+          id: "step_resume",
+          description: "resume",
+          expectedOutcome: "no effects before admission",
+          state: "pending",
+          attempts: 1,
+        }],
+        messages: [],
+        toolCallCount: 0,
+        createdAt: "2026-08-24T00:00:00.000Z",
+        updatedAt: "2026-08-24T00:00:00.000Z",
+      };
+      await executionStore.save(checkpoint);
+      const checkpointWritesBeforeResume = savedCheckpoints.length;
+      const runStore = createMemoryRunStore();
+      if (failureMode !== "missing_owner") {
+        runStore.runs.push(createPausedRunOwner(checkpoint));
+      }
+      const trajectoryEvents: AgentTrajectoryEvent[] = [];
+      let modelCalls = 0;
+      let loopCalls = 0;
+      let publishedEvents = 0;
+      let gateCalls = 0;
+      const engine = createAgentRuntimeEngine({
+        taskStore: createTaskStore(createTask()),
+        runStore,
+        executionStore,
+        trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+        resolveSkill: async () => createSkillRecord(),
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            return finalResponse("must not run");
+          },
+        },
+        async getModelProfile() {
+          modelCalls += 1;
+          return createModelProfile();
+        },
+        toolAuthorizationService: createAuthorizationService(true),
+        toolExecutor: createToolExecutor(),
+        async runLoop() {
+          loopCalls += 1;
+          throw new Error("must not run");
+        },
+      });
+      const beforeExecution = failureMode === "missing_hook"
+        ? undefined
+        : async (candidate: AgentRunAdmissionCandidate) => {
+            gateCalls += 1;
+            if (failureMode === "mutated_lease") {
+              return {
+                runId: candidate.runId,
+                taskId: candidate.taskId,
+                executionRevision: candidate.executionRevision,
+                executionEnvelope: {
+                  ...candidate.executionEnvelope!,
+                  taskName: "Mutated lease envelope",
+                },
+                async settle() {
+                  return;
+                },
+              };
+            }
+            return undefined;
+          };
+
+      await expect(engine.resumeRun(checkpoint.runId, {
+        ...(beforeExecution ? { beforeExecution } : {}),
+        onEvent() {
+          publishedEvents += 1;
+        },
+      })).rejects.toThrow("任务运行失败，已保留可审计的终态记录。");
+
+      expect({
+        checkpointWrites: savedCheckpoints.length,
+        ownerWrites: runStore.runs.length,
+        trajectoryWrites: trajectoryEvents.length,
+        modelCalls,
+        loopCalls,
+        publishedEvents,
+        gateCalls,
+      }).toEqual({
+        checkpointWrites: checkpointWritesBeforeResume,
+        ownerWrites: failureMode === "missing_owner" ? 0 : 1,
+        trajectoryWrites: 0,
+        modelCalls: 0,
+        loopCalls: 0,
+        publishedEvents: 0,
+        gateCalls:
+          failureMode === "missing_lease" || failureMode === "mutated_lease"
+            ? 1
+            : 0,
+      });
+    },
+  );
+
+  it.each(["task_name", "skill_name", "run_context", "started_at"] as const)(
+    "rejects a mutated resume %s before admission or runtime effects",
+    async (mutation) => {
+      const baseCheckpoint: AgentExecutionCheckpoint = {
+        id: `checkpoint_mutated_${mutation}`,
+        runId: `run_mutated_${mutation}`,
+        taskId: "task_123",
+        status: "paused",
+        runContext: buildPrimaryRunContext({
+          workspaceId: "workspace-original",
+          workspaceRoot: "/workspace/original",
+        }),
+        currentStepId: "step_resume",
+        steps: [{
+          id: "step_resume",
+          description: "resume",
+          expectedOutcome: "stable execution envelope",
+          state: "pending",
+          attempts: 1,
+        }],
+        messages: [],
+        toolCallCount: 0,
+        createdAt: "2026-08-24T00:00:00.000Z",
+        updatedAt: "2026-08-24T00:00:00.000Z",
+      };
+      const owner = createPausedRunOwner(baseCheckpoint);
+      const task = mutation === "task_name"
+        ? { ...createTask(), name: "Mutated task" }
+        : mutation === "skill_name"
+          ? { ...createTask(), skillName: "mutated-skill" }
+          : createTask();
+      const checkpoint = mutation === "run_context"
+        ? {
+            ...baseCheckpoint,
+            runContext: buildPrimaryRunContext({
+              workspaceId: "workspace-mutated",
+              workspaceRoot: "/workspace/mutated",
+            }),
+          }
+        : mutation === "started_at"
+          ? {
+              ...baseCheckpoint,
+              createdAt: "2026-08-24T00:01:00.000Z",
+            }
+          : baseCheckpoint;
+      const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+      const executionStore = createMemoryExecutionStore(savedCheckpoints);
+      await executionStore.save(checkpoint);
+      const runStore = createMemoryRunStore();
+      runStore.runs.push(owner);
+      const trajectoryEvents: AgentTrajectoryEvent[] = [];
+      let gateCalls = 0;
+      let runtimeCalls = 0;
+      const engine = createAgentRuntimeEngine({
+        taskStore: createTaskStore(task),
+        runStore,
+        executionStore,
+        trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+        resolveSkill: async () => {
+          runtimeCalls += 1;
+          return mutation === "skill_name"
+            ? { ...createSkillRecord(), manifest: {
+                ...createSkillRecord().manifest,
+                name: "mutated-skill",
+              } }
+            : createSkillRecord();
+        },
+        chatClient: {
+          async complete() {
+            runtimeCalls += 1;
+            return finalResponse("must not run");
+          },
+        },
+        async getModelProfile() {
+          runtimeCalls += 1;
+          return createModelProfile();
+        },
+        toolAuthorizationService: createAuthorizationService(true),
+        toolExecutor: createToolExecutor(),
+        async runLoop() {
+          runtimeCalls += 1;
+          throw new Error("must not run");
+        },
+      });
+
+      await expect(engine.resumeRun(checkpoint.runId, {
+        async beforeExecution(candidate) {
+          gateCalls += 1;
+          return admitResumeCandidate(candidate);
+        },
+      })).rejects.toThrow("任务运行失败，已保留可审计的终态记录。");
+      expect(gateCalls).toBe(0);
+      expect(runtimeCalls).toBe(0);
+      expect(savedCheckpoints).toHaveLength(1);
+      expect(trajectoryEvents).toEqual([]);
+      expect(runStore.runs).toEqual([owner]);
+    },
+  );
+
+  it("acquires a fenced resume lease before publish checkpoint model or owner", async () => {
+    const lifecycle: string[] = [];
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const executionStore = createMemoryExecutionStore(savedCheckpoints);
+    await executionStore.save({
+      id: "checkpoint_fenced_resume",
+      runId: "run_fenced_resume",
+      taskId: "task_123",
+      status: "paused",
+      currentStepId: "step_resume",
+      steps: [{
+        id: "step_resume",
+        description: "resume",
+        expectedOutcome: "done",
+        state: "pending",
+        attempts: 1,
+      }],
+      messages: [],
+      toolCallCount: 0,
+      createdAt: "2026-08-24T00:00:00.000Z",
+      updatedAt: "2026-08-24T00:00:00.000Z",
+    });
+    const saveCheckpoint = executionStore.save.bind(executionStore);
+    executionStore.save = async (checkpoint) => {
+      lifecycle.push(`checkpoint:${checkpoint.status}`);
+      return saveCheckpoint(checkpoint);
+    };
+    const runStore = createMemoryRunStore();
+    runStore.runs.push({
+      id: "run_fenced_resume",
+      taskId: "task_123",
+      taskName: "Organize Downloads",
+      skillName: "local-file-organizer",
+      status: "paused",
+      executionRevision: 1,
+      summary: "paused",
+      events: [],
+      startedAt: "2026-08-24T00:00:00.000Z",
+      finishedAt: "2026-08-24T00:00:01.000Z",
+    });
+    const appendRun = runStore.append.bind(runStore);
+    runStore.append = async (run) => {
+      lifecycle.push(`owner:${run.executionRevision}:${run.status}`);
+      return appendRun(run);
+    };
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore,
+      executionStore,
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      async runLoop(_messages, _profile, loopOptions) {
+        lifecycle.push("model");
+        return {
+          status: "succeeded",
+          summary: "resumed",
+          turns: 1,
+          messages: loopOptions.resumeMessages ?? [],
+          toolCallsExecuted: 0,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("fenced_resume"),
+    });
+
+    const result = await engine.resumeRun("run_fenced_resume", {
+      async beforeExecution(candidate) {
+        lifecycle.push("gate");
+        expect(candidate).toEqual({
+          runId: "run_fenced_resume",
+          taskId: "task_123",
+          executionRevision: 2,
+          executionEnvelope: {
+            id: "run_fenced_resume",
+            taskId: "task_123",
+            taskName: "Organize Downloads",
+            skillName: "local-file-organizer",
+            startedAt: "2026-08-24T00:00:00.000Z",
+          },
+        });
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          executionRevision: 2,
+          executionEnvelope: candidate.executionEnvelope,
+          async settle(status, expectedExecutionRevision) {
+            lifecycle.push(`settle:${expectedExecutionRevision}:${status}`);
+          },
+        };
+      },
+      onExecutionAdmitted() {
+        lifecycle.push("admitted");
+      },
+      onEvent() {
+        lifecycle.push("publish");
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: {
+        id: "run_fenced_resume",
+        executionRevision: 2,
+        status: "succeeded",
+      },
+    });
+    expect(lifecycle.slice(0, 5)).toEqual([
+      "gate",
+      "admitted",
+      "publish",
+      "checkpoint:running",
+      "model",
+    ]);
+    expect(lifecycle.indexOf("owner:2:succeeded")).toBeLessThan(
+      lifecycle.indexOf("settle:2:succeeded"),
+    );
+  });
+
+  it("does not rewrite a resumed owner when its revision settlement fails", async () => {
+    const executionStore = createMemoryExecutionStore([]);
+    await executionStore.save({
+      id: "checkpoint_resume_settlement_failure",
+      runId: "run_resume_settlement_failure",
+      taskId: "task_123",
+      status: "paused",
+      currentStepId: "step_resume",
+      steps: [{
+        id: "step_resume",
+        description: "resume",
+        expectedOutcome: "done",
+        state: "pending",
+        attempts: 1,
+      }],
+      messages: [],
+      toolCallCount: 0,
+      createdAt: "2026-08-24T00:00:00.000Z",
+      updatedAt: "2026-08-24T00:00:00.000Z",
+    });
+    const runStore = createMemoryRunStore();
+    runStore.runs.push({
+      id: "run_resume_settlement_failure",
+      taskId: "task_123",
+      taskName: "Organize Downloads",
+      skillName: "local-file-organizer",
+      status: "paused",
+      executionRevision: 1,
+      summary: "paused",
+      events: [],
+      startedAt: "2026-08-24T00:00:00.000Z",
+      finishedAt: "2026-08-24T00:00:01.000Z",
+    });
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore,
+      executionStore,
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor(),
+      async runLoop(_messages, _profile, loopOptions) {
+        return {
+          status: "succeeded",
+          summary: "owner committed",
+          turns: 1,
+          messages: loopOptions.resumeMessages ?? [],
+          toolCallsExecuted: 0,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("resume_settlement_failure"),
+    });
+
+    await expect(engine.resumeRun("run_resume_settlement_failure", {
+      async beforeExecution(candidate) {
+        return {
+          runId: candidate.runId,
+          taskId: candidate.taskId,
+          executionRevision: candidate.executionRevision,
+          executionEnvelope: candidate.executionEnvelope,
+          async settle() {
+            throw new Error("PRIVATE_RESUME_SETTLEMENT_CANARY");
+          },
+        };
+      },
+    })).rejects.toThrow("任务运行失败，已保留可审计的终态记录。");
+    expect(runStore.runs.filter((run) => run.executionRevision === 2))
+      .toHaveLength(1);
+    expect(runStore.runs.at(-1)).toMatchObject({
+      executionRevision: 2,
+      status: "succeeded",
+    });
+    expect(JSON.stringify(runStore.runs))
+      .not.toContain("PRIVATE_RESUME_SETTLEMENT_CANARY");
+  });
+
   it("preserves a provider limit on a paused scheduled run for manual recovery", async () => {
+    const canary = "runtime-provider-notice-canary";
+    const runStore = createMemoryRunStore();
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore({ ...createTask(), skillName: "" }),
-      runStore: createMemoryRunStore(),
+      runStore,
       executionStore: createMemoryExecutionStore([]),
       resolveSkill: async () => null,
       chatClient: { async complete() { return finalResponse("unused"); } },
@@ -523,10 +1600,10 @@ describe("agent runtime engine", () => {
           tokensConsumed: 50_000,
           modelServiceNotice: {
             kind: "output_limit",
-            provider: "test-provider",
-            model: "test-model",
-            rawReason: "MAX_TOKENS",
-            message: "模型输出被截断。",
+            provider: `api_key=${canary}`,
+            model: `client_secret=${canary}`,
+            rawReason: `password=${canary}`,
+            message: `api%255fkey=${canary}`,
           },
         };
       },
@@ -534,17 +1611,21 @@ describe("agent runtime engine", () => {
       now: createSteppedClock("2026-07-12T00:00:00.000Z"),
     });
 
-    await expect(engine.startTask("task_123")).resolves.toMatchObject({
+    const result = await engine.startTask("task_123");
+    expect(result).toMatchObject({
       ok: true,
       run: {
         status: "paused",
         summary: "partial output",
         modelServiceNotice: {
           kind: "output_limit",
-          rawReason: "MAX_TOKENS",
         },
       },
     });
+    expect(JSON.stringify({ result, runs: runStore.runs }))
+      .toContain("[redacted]");
+    expect(JSON.stringify({ result, runs: runStore.runs }))
+      .not.toContain(canary);
   });
 
   it("continues trajectory sequence numbers after engine recreation and resume", async () => {
@@ -584,7 +1665,11 @@ describe("agent runtime engine", () => {
     }];
     const engine = createAgentRuntimeEngine({
       taskStore: createTaskStore(createTask()),
-      runStore: createMemoryRunStore(),
+      runStore: (() => {
+        const store = createMemoryRunStore();
+        store.runs.push(createPausedRunOwner(persisted));
+        return store;
+      })(),
       executionStore: {
         async save(checkpoint) {
           persisted = structuredClone(checkpoint);
@@ -607,7 +1692,9 @@ describe("agent runtime engine", () => {
       now: createSteppedClock("2026-07-12T00:00:01.000Z"),
     });
 
-    await engine.resumeRun("run_resume");
+    await engine.resumeRun("run_resume", {
+      beforeExecution: admitResumeCandidate,
+    });
 
     const appendedSequences = trajectoryEvents.slice(1).map((event) => event.sequence);
     expect(appendedSequences[0]).toBe(42);
@@ -1000,7 +2087,8 @@ describe("agent runtime engine", () => {
       run: {
         status: "failed",
         failureClass: "permission_denied",
-        failureMessage: "工具调用被拒绝：denied by policy",
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
+        failureMessage: "任务运行失败，已保留可审计的终态记录。",
       },
     });
     expect(runStore.runs[0]).toMatchObject({
@@ -1134,6 +2222,151 @@ describe("agent runtime engine", () => {
     ).toEqual(["proposed", "visible", "authorized", "running", "completed"]);
     expect(trajectoryEvents.every((event) => event.redaction.containsApiKey === false)).toBe(
       true,
+    );
+  });
+
+  it("redacts credential-bearing tool failures before trajectory persistence", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const baseToolExecutor = createToolExecutor([]);
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: createChatClient([
+        {
+          content: null,
+          toolCalls: [{
+            id: "call_escaped_secret",
+            type: "function",
+            function: {
+              name: "file_read",
+              arguments:
+                '{"path":"/tmp/secret-safe.txt","api\\u005fkey":"runtime-args-canary"}',
+            },
+          }],
+          finishReason: "tool_calls",
+        },
+        finalResponse("Recovered safely"),
+      ]),
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: {
+        ...baseToolExecutor,
+        async execute() {
+          return {
+            ok: false as const,
+            error: "Authorization: Bearer runtime-error-canary",
+            errorDetails: {
+              stderr: "password=runtime-detail-canary",
+            },
+          };
+        },
+      },
+      createId: createSequentialId("trajectory_secret_safe"),
+      now: createSteppedClock("2026-08-24T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+
+    expect(result.ok).toBe(true);
+    const serialized = JSON.stringify({
+      trajectoryEvents,
+      savedCheckpoints,
+      result,
+    });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /runtime-args-canary|runtime-error-canary|runtime-detail-canary/,
+    );
+  });
+
+  it("sanitizes shared-loop callbacks and checkpoint surfaces at the runtime boundary", async () => {
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const savedCheckpoints: AgentExecutionCheckpoint[] = [];
+    const engine = createAgentRuntimeEngine({
+      taskStore: createTaskStore(createTask()),
+      runStore: createMemoryRunStore(),
+      executionStore: createMemoryExecutionStore(savedCheckpoints),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
+      resolveSkill: async () => createSkillRecord(),
+      chatClient: { async complete() { return finalResponse("unused"); } },
+      getModelProfile: async () => createModelProfile(),
+      toolAuthorizationService: createAuthorizationService(true),
+      toolExecutor: createToolExecutor([]),
+      async runLoop(_messages, _profile, loopOptions) {
+        const rawMessages: ChatCompletionRequest["messages"] = [
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              id: "shared_secret_call",
+              type: "function",
+              function: {
+                name: "file_read",
+                arguments:
+                  '{"api\\u005fkey":"shared-args-canary","path":"/tmp"}',
+              },
+            }],
+          },
+          {
+            role: "tool",
+            tool_call_id: "shared_secret_call",
+            content: 'X-Api-Key: shared-result-canary',
+          },
+        ];
+        loopOptions.onToolCall?.(
+          "file_read",
+          { apiKey: "shared-callback-canary", path: "/tmp" },
+          { toolCallId: "shared_secret_call" },
+        );
+        loopOptions.onToolResult?.(
+          "file_read",
+          false,
+          {
+            ok: false,
+            error: "Authorization: Bearer shared-error-canary",
+          },
+          { toolCallId: "shared_secret_call" },
+        );
+        const rawSurface = createTestContextSurface(
+          loopOptions.runId!,
+          rawMessages,
+        );
+        await loopOptions.onCheckpoint?.({
+          messages: rawMessages,
+          contextSurface: rawSurface,
+          turns: 1,
+          toolCallsExecuted: 1,
+          nextAction: "continue",
+          tokensConsumed: 1,
+          tokensEstimated: true,
+        });
+        return {
+          status: "succeeded",
+          summary: "shared loop completed safely",
+          turns: 1,
+          messages: rawMessages,
+          contextSurface: rawSurface,
+          toolCallsExecuted: 1,
+          tokensConsumed: 1,
+        };
+      },
+      createId: createSequentialId("shared_secret_safe"),
+      now: createSteppedClock("2026-08-24T00:00:00.000Z"),
+    });
+
+    const result = await engine.startTask("task_123");
+    const serialized = JSON.stringify({
+      trajectoryEvents,
+      savedCheckpoints,
+      result,
+    });
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(
+      /shared-args-canary|shared-result-canary|shared-callback-canary|shared-error-canary/,
     );
   });
 
@@ -1688,7 +2921,8 @@ describe("agent runtime engine", () => {
       run: {
         status: "failed",
         failureClass: "tool_error",
-        failureMessage: expect.stringContaining("duplicate_retry_blocked"),
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
+        failureMessage: "任务运行失败，已保留可审计的终态记录。",
       },
     });
     expect(modelRequests).toHaveLength(2);
@@ -1759,7 +2993,8 @@ describe("agent runtime engine", () => {
       run: {
         status: "failed",
         failureClass: "tool_error",
-        failureMessage: expect.stringContaining("duplicate_retry_blocked"),
+        failureCode: "AGENT_RUN_EXECUTION_FAILED",
+        failureMessage: "任务运行失败，已保留可审计的终态记录。",
       },
     });
     expect(executedPaths).toEqual([
@@ -2316,6 +3551,37 @@ function createMemoryRunStore(): AgentRunStore & { runs: AgentRunRecord[] } {
       return runs;
     },
     async flushShadowWrites() {
+      return;
+    },
+  };
+}
+
+function createPausedRunOwner(
+  checkpoint: AgentExecutionCheckpoint,
+  task: ScheduledTask = createTask(),
+): AgentRunRecord {
+  return {
+    id: checkpoint.runId,
+    taskId: checkpoint.taskId,
+    taskName: task.name,
+    skillName: task.skillName.trim() || "prompt-task",
+    status: "paused",
+    executionRevision: 1,
+    ...(checkpoint.runContext ? { runContext: checkpoint.runContext } : {}),
+    summary: "paused",
+    events: [],
+    startedAt: checkpoint.createdAt,
+    finishedAt: checkpoint.updatedAt,
+  };
+}
+
+async function admitResumeCandidate(candidate: AgentRunAdmissionCandidate) {
+  return {
+    runId: candidate.runId,
+    taskId: candidate.taskId,
+    executionRevision: candidate.executionRevision,
+    executionEnvelope: candidate.executionEnvelope,
+    async settle() {
       return;
     },
   };

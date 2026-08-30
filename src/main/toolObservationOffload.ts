@@ -2,6 +2,10 @@ import {
   serializeToolObservation,
   type ToolObservation,
 } from "../shared/agentProtocol";
+import {
+  redactCredentials,
+  redactCredentialString,
+} from "../shared/credentialRedaction";
 import type {
   ToolResultOffloadRef,
   ToolResultOffloadStore,
@@ -29,15 +33,16 @@ export async function serializeToolObservationWithOffload(
     workspaceRunId?: string;
   } = {},
 ): Promise<SerializedToolObservation> {
-  const content = serializeToolObservation(observation);
+  const safeObservation = redactCredentials(observation) as ToolObservation;
+  const content = serializeToolObservation(safeObservation);
   const originalChars = content.length;
   const thresholdChars =
     options.thresholdChars ?? DEFAULT_TOOL_RESULT_OFFLOAD_THRESHOLD_CHARS;
 
   if (
     !options.store ||
-    !observation.ok ||
-    !observation.result ||
+    !safeObservation.ok ||
+    !safeObservation.result ||
     originalChars <= thresholdChars
   ) {
     return {
@@ -59,7 +64,7 @@ export async function serializeToolObservationWithOffload(
     });
 
     return {
-      content: serializeCompactObservation(observation, originalChars, ref),
+      content: serializeCompactObservation(safeObservation, originalChars, ref),
       offloaded: true,
       originalChars,
       resultRef: ref.relativePath,
@@ -71,7 +76,9 @@ export async function serializeToolObservationWithOffload(
       offloaded: false,
       originalChars,
       offloadError:
-        error instanceof Error ? error.message : "Unknown offload error.",
+        error instanceof Error
+          ? redactCredentialString(error.message)
+          : "Unknown offload error.",
     };
   }
 }

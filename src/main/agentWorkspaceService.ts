@@ -46,17 +46,12 @@ export type CreateGitWorktreeWorkspaceInput = {
 
 export type GitWorktreeCreationApproval =
   | {
-      kind: "explicit_user_approval";
-      approvedAt: string;
-      approvedBy: "user";
-    }
-  | {
       kind: "trusted_repository_policy";
       policyId: string;
     }
   | {
-      kind: "session_auto_approval";
-      approvedAt: string;
+      kind: "tool_authorization_receipt";
+      auditEventId: string;
     };
 
 export type TrustedGitWorktreeRepositoryPolicy = {
@@ -88,6 +83,14 @@ export function createAgentWorkspaceService(options: {
     options: { cwd?: string },
   ) => Promise<void>;
   trustedGitWorktreeRepositories?: TrustedGitWorktreeRepositoryPolicy[];
+  consumeToolAuthorizationReceipt?: (input: {
+    auditEventId: string;
+    taskId: "agent_workspaces";
+    request: {
+      toolName: "git_worktree_add";
+      args: { name: string; repositoryRoot: string; branch: string };
+    };
+  }) => Promise<boolean>;
 }): AgentWorkspaceService {
   const createId = options.createId ?? randomUUID;
   const execFile =
@@ -191,11 +194,12 @@ export function createAgentWorkspaceService(options: {
 
     async createGitWorktreeWorkspace(input) {
       const repositoryRoot = path.resolve(input.repositoryRoot);
-      assertGitWorktreeCreationAllowed(
-        repositoryRoot,
-        input.approval,
-        options.trustedGitWorktreeRepositories,
-      );
+      await assertGitWorktreeCreationAllowed({
+        input: { ...input, repositoryRoot },
+        approval: input.approval,
+        trustedPolicies: options.trustedGitWorktreeRepositories,
+        consumeToolAuthorizationReceipt: options.consumeToolAuthorizationReceipt,
+      });
       const id = createId();
       const worktreePath = path.join(
         options.workspaceRoot,
@@ -232,33 +236,67 @@ function sanitizePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "_");
 }
 
-function assertGitWorktreeCreationAllowed(
-  repositoryRoot: string,
-  approval: GitWorktreeCreationApproval | undefined,
-  trustedPolicies: TrustedGitWorktreeRepositoryPolicy[] | undefined,
-): void {
-  if (
-    approval?.kind === "explicit_user_approval" ||
-    approval?.kind === "session_auto_approval"
-  ) {
-    return;
+async function assertGitWorktreeCreationAllowed(options: {
+  input: Omit<CreateGitWorktreeWorkspaceInput, "approval">;
+  approval: GitWorktreeCreationApproval | undefined;
+  trustedPolicies: TrustedGitWorktreeRepositoryPolicy[] | undefined;
+  consumeToolAuthorizationReceipt?: (input: {
+    auditEventId: string;
+    taskId: "agent_workspaces";
+    request: {
+      toolName: "git_worktree_add";
+      args: { name: string; repositoryRoot: string; branch: string };
+    };
+  }) => Promise<boolean>;
+}): Promise<void> {
+  const {
+    input,
+    approval,
+    trustedPolicies,
+    consumeToolAuthorizationReceipt,
+  } = options;
+  if (approval?.kind === "tool_authorization_receipt") {
+    const verified = Boolean(
+      approval.auditEventId.trim()
+      && consumeToolAuthorizationReceipt
+      && await consumeToolAuthorizationReceipt({
+        auditEventId: approval.auditEventId,
+        taskId: "agent_workspaces",
+        request: {
+          toolName: "git_worktree_add",
+          args: {
+            name: input.name,
+            repositoryRoot: input.repositoryRoot,
+            branch: input.branch,
+          },
+        },
+      }),
+    );
+    if (verified) return;
+    throw new Error(
+      "Git worktree creation requires a verified unused ToolRuntime authorization receipt.",
+    );
   }
 
   const matchingTrustedPolicy = trustedPolicies?.find((policy) =>
-    isSameOrInsidePath(repositoryRoot, path.resolve(policy.repositoryRoot)),
+    isSameOrInsidePath(input.repositoryRoot, path.resolve(policy.repositoryRoot)),
   );
-  if (matchingTrustedPolicy) {
+  if (
+    matchingTrustedPolicy
+    && approval?.kind === "trusted_repository_policy"
+    && approval.policyId === matchingTrustedPolicy.id
+  ) {
     return;
   }
 
   if (approval?.kind === "trusted_repository_policy") {
     throw new Error(
-      `Git worktree creation policy "${approval.policyId}" is not trusted for ${repositoryRoot}.`,
+      `Git worktree creation policy "${approval.policyId}" is not trusted for ${input.repositoryRoot}.`,
     );
   }
 
   throw new Error(
-    "Git worktree creation requires explicit user approval or a trusted repository policy.",
+    "Git worktree creation requires a verified ToolRuntime receipt or a trusted repository policy.",
   );
 }
 

@@ -102,6 +102,91 @@ describe("ChatSessionEventRepository", () => {
     storage.close();
   });
 
+  it("queries native Chat activity pages with an indexed sequence bound", async () => {
+    const storage = await createInMemoryStorage();
+    const repository = createChatSessionEventRepository(storage);
+    const { messages: _messages, ...session } = makeSession("session_1", []);
+    for (const sequence of [1, 2, 3]) {
+      repository.commit({
+        eventId: `activity_${sequence}`,
+        sessionId: session.id,
+        type: "activity_appended",
+        eventPayload: {
+          event: {
+            sessionId: session.id,
+            sequence,
+            state: sequence === 3 ? "completed" : "model",
+            message: `event ${sequence}`,
+            createdAt: messageTime(sequence),
+            elapsedMs: sequence,
+          },
+        },
+        createdAt: messageTime(sequence),
+        session: {
+          ...session,
+          updatedAt: messageTime(sequence),
+        },
+      });
+    }
+
+    const first = repository.getActivityPage("session_1", { limit: 2 });
+    expect(first).toMatchObject({
+      status: "complete",
+      records: [
+        { eventId: "activity_1", sequence: 1, legacy: false },
+        { eventId: "activity_2", sequence: 2, legacy: false },
+      ],
+    });
+    expect(first.nextCursor).toBeTruthy();
+    expect(repository.getActivityPage("session_1", {
+      cursor: first.nextCursor,
+      limit: 2,
+    })).toMatchObject({
+      status: "complete",
+      records: [{ eventId: "activity_3", sequence: 3, legacy: false }],
+    });
+    storage.close();
+  });
+
+  it("reports imported legacy and corrupt Chat activity explicitly", async () => {
+    const storage = await createInMemoryStorage();
+    const repository = createChatSessionEventRepository(storage);
+    const session = makeSession("session_1", []);
+    repository.importSnapshots([{ eventId: "import_1", session }]);
+    const { messages: _messages, ...metadata } = session;
+    repository.commit({
+      eventId: "activity_2",
+      sessionId: session.id,
+      type: "activity_appended",
+      eventPayload: {
+        event: {
+          sessionId: session.id,
+          state: "model",
+          message: "model",
+          createdAt: messageTime(2),
+          elapsedMs: 2,
+        },
+      },
+      createdAt: messageTime(2),
+      session: { ...metadata, updatedAt: messageTime(2) },
+    });
+    expect(repository.getActivityPage(session.id)).toMatchObject({
+      status: "partial",
+      reasonCode: "legacy_chat_activity_tail_unavailable",
+      records: [{ eventId: "activity_2" }],
+    });
+
+    storage.db.prepare(
+      "UPDATE chat_session_events SET payload = ? WHERE id = ?",
+    ).run("{bad", "activity_2");
+    expect(repository.getActivityPage(session.id)).toMatchObject({
+      status: "partial",
+      reasonCode: "corrupt_record",
+      records: [],
+    });
+    storage.close();
+  });
+
   it("keeps the deletion tombstone after removing live projection and messages", async () => {
     const storage = await createInMemoryStorage();
     const repository = createChatSessionEventRepository(storage);

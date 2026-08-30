@@ -59,4 +59,15 @@ describe("demo agent data", () => {
       },
     });
   });
+
+  it("keeps a failed owning run addressable from its scheduled task", () => {
+    expect(demoTasks.find((task) => task.id === "demo_task_2")).toMatchObject({
+      name: "抓取市场笔记",
+      enabled: false,
+    });
+    expect(demoRuns.find((run) => run.id === "demo_run_2")).toMatchObject({
+      taskId: "demo_task_2",
+      status: "failed",
+    });
+  });
 });

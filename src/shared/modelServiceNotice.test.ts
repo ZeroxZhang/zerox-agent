@@ -2,9 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   modelServiceNoticeFromError,
   modelServiceNoticeFromFinishReason,
+  sanitizeModelServiceNotice,
 } from "./modelServiceNotice";
 
 describe("model service notices", () => {
+  it("projects provider-supplied notice metadata without changing its kind", () => {
+    const canary = "provider-notice-metadata-canary";
+    const notice = sanitizeModelServiceNotice({
+      kind: "output_limit",
+      provider: `api_key=${canary}`,
+      model: `client_secret=${canary}`,
+      rawReason: `password=${canary}`,
+      message: `api%255fkey=${canary}`,
+    });
+
+    expect(notice.kind).toBe("output_limit");
+    expect(JSON.stringify(notice)).toContain("[redacted]");
+    expect(JSON.stringify(notice)).not.toContain(canary);
+  });
+
   it.each(["length", "MAX_TOKENS", "max_tokens", "max_output_tokens"])(
     "normalizes %s as an output limit",
     (finishReason) => {

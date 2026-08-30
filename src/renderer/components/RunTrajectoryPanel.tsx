@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import { summarizeTrajectoryInsights } from "../../shared/agentTrajectoryInsights";
+import { redactCredentials } from "../../shared/credentialRedaction";
 import {
   extractToolResultRef,
   type ReadToolResultRefResult,
 } from "../../shared/toolResultRefs";
 
 export function RunTrajectoryPanel(props: {
+  runId: string;
   events: AgentTrajectoryEvent[];
 }) {
-  const [selectedEventId, setSelectedEventId] = useState("");
+  const [selectedEventId, setSelectedEventId] = useState(() =>
+    readPersistedEvidenceSelection(props.runId),
+  );
+  const [visibleCount, setVisibleCount] = useState(50);
   const [loadedRef, setLoadedRef] = useState<ReadToolResultRefResult | null>(null);
   const [loadingRef, setLoadingRef] = useState(false);
   const selectedEvent = useMemo(
@@ -29,6 +34,19 @@ export function RunTrajectoryPanel(props: {
     setLoadedRef(null);
     setLoadingRef(false);
   }, [selectedEvent?.id]);
+
+  useEffect(() => {
+    setSelectedEventId(readPersistedEvidenceSelection(props.runId));
+    setVisibleCount(50);
+  }, [props.runId]);
+
+  useEffect(() => {
+    if (!selectedEvent?.id) return;
+    window.localStorage?.setItem(
+      evidenceSelectionKey(props.runId),
+      selectedEvent.id,
+    );
+  }, [props.runId, selectedEvent?.id]);
 
   async function handleLoadRef() {
     if (!resultRef || !window.buildingAgent) {
@@ -59,7 +77,11 @@ export function RunTrajectoryPanel(props: {
   }
 
   return (
-    <section className="trajectory-panel" aria-label="证据事件">
+    <section
+      aria-label="证据事件"
+      className="trajectory-panel"
+      data-evidence-run-id={props.runId}
+    >
       <div className="section-heading">
         <span>证据事件</span>
         <small>{props.events.length} 个事件</small>
@@ -90,8 +112,11 @@ export function RunTrajectoryPanel(props: {
         <small>{props.events.length} 条记录</small>
       </div>
       <div className="trajectory-event-list">
-        {props.events.map((event) => (
+        {props.events.slice(0, visibleCount).map((event) => (
           <button
+            aria-current={
+              event.id === selectedEvent?.id ? "true" : undefined
+            }
             className={`trajectory-event ${
               event.id === selectedEvent?.id ? "is-selected" : ""
             }`}
@@ -99,24 +124,24 @@ export function RunTrajectoryPanel(props: {
             onClick={() => setSelectedEventId(event.id)}
             type="button"
           >
-            <strong>{event.type}</strong>
+            <strong>{formatEvidenceEventType(event.type)}</strong>
             <small>#{event.sequence}</small>
           </button>
         ))}
       </div>
+      {visibleCount < props.events.length ? (
+        <button
+          className="secondary-action"
+          onClick={() => setVisibleCount((current) => current + 50)}
+          type="button"
+        >
+          加载更多证据
+        </button>
+      ) : null}
       {selectedEvent ? (
         <>
           <pre className="payload-preview">
-            {JSON.stringify(
-              {
-                type: selectedEvent.type,
-                payload: selectedEvent.payload,
-                redaction: selectedEvent.redaction,
-                createdAt: selectedEvent.createdAt,
-              },
-              null,
-              2,
-            )}
+            {formatEvidencePreview(selectedEvent)}
           </pre>
           {resultRef ? (
             <div className="tool-result-ref-viewer">
@@ -165,4 +190,44 @@ export function RunTrajectoryPanel(props: {
       ) : null}
     </section>
   );
+}
+
+function evidenceSelectionKey(runId: string): string {
+  return `zerox.evidence-selection:${runId}`;
+}
+
+function readPersistedEvidenceSelection(runId: string): string {
+  try {
+    return window.localStorage?.getItem(evidenceSelectionKey(runId)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function formatEvidencePreview(event: AgentTrajectoryEvent): string {
+  const value = JSON.stringify(
+    redactCredentials({
+      type: event.type,
+      payload: event.payload,
+      redaction: event.redaction,
+      createdAt: event.createdAt,
+    }),
+    null,
+    2,
+  );
+  return value.length > 16_384
+    ? `${value.slice(0, 16_384)}\n[证据预览已截断]`
+    : value;
+}
+
+function formatEvidenceEventType(type: string): string {
+  const labels: Record<string, string> = {
+    model_request: "模型请求",
+    model_response: "模型响应",
+    tool_invocation: "工具调用",
+    tool_result: "工具结果",
+    memory_write: "记忆写入",
+    run_status: "运行状态",
+  };
+  return labels[type] ?? `其他证据 · ${type || "unknown"}`;
 }

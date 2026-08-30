@@ -140,7 +140,7 @@ describe("chat task activity restore", () => {
     });
   });
 
-  it("restores guided input after a processing claim is interrupted", () => {
+  it("does not present an interrupted processing claim as resumable input", () => {
     const inputRequest = {
       id: "input_processing",
       executionId: "execution_processing",
@@ -192,20 +192,19 @@ describe("chat task activity restore", () => {
       ],
     };
 
-    expect(restoreChatTaskActivity(snapshot)).toMatchObject({
+    const restored = restoreChatTaskActivity(snapshot);
+
+    expect(restored).toMatchObject({
       status: {
-        kind: "paused",
-        message: "上次技能执行已中断，可从持久化输入继续。",
+        kind: "error",
+        message: "上次运行已中断，可以重新发送或恢复任务。",
       },
-      workPhase: "paused",
+      workPhase: "error",
       taskActivity: {
-        kind: "paused",
-        title: "技能输入可恢复",
-      },
-      pendingInputRequest: {
-        id: "input_processing",
-        requestId: "request_processing",
+        kind: "error",
+        title: "上次运行已中断",
       },
     });
+    expect(restored?.pendingInputRequest).toBeUndefined();
   });
 });

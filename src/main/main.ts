@@ -15,6 +15,7 @@ import type {
 } from "electron";
 import { autoUpdater } from "electron-updater";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { getAgentValidationModeOptions } from "./agentValidationMode";
 import { createAppContainer } from "./container";
@@ -37,6 +38,9 @@ import { settleShutdownWithDeadline } from "./shutdownDeadline";
 import { applyUserDataDirOverride } from "./userDataDirOverride";
 import { getAppMeta } from "../shared/appMeta";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
+import { createConversationCausalStore } from "./conversationCausalStore";
+import { reconcileRequiredConversationSettlements } from "./conversationSettlementReconciler";
+import { runStartupRecoverySequence } from "./startupRecoverySequence";
 import type { ResolveToolApprovalInput } from "../shared/toolApproval";
 import { KERNEL_IPC, type PermissionRule } from "../shared/kernelContract";
 import {
@@ -61,6 +65,13 @@ import {
   evaluateProductionSmokeAcceptance,
   type ProductionStorageSmokeEvidence,
 } from "../shared/productionSmoke";
+import { getConversationDisclosureAcceptanceMode } from "./conversationDisclosureAcceptanceMode";
+import {
+  createConversationDisclosureIpcRecorder,
+  prepareConversationDisclosureScenario,
+  runConversationDisclosureScenario,
+} from "./conversationDisclosureAcceptanceDriver";
+import { createConversationDisclosureScriptedClient } from "./conversationDisclosureScriptedClient";
 
 app.setName("Zerox Agent");
 applyUserDataDirOverride({
@@ -80,6 +91,9 @@ const rendererSource = resolveTrustedRendererSource({
 const appMeta = getAppMeta();
 const smokeMode = getSmokeModeOptions(process.env);
 const validationMode = getAgentValidationModeOptions(process.env);
+const disclosureAcceptanceMode =
+  getConversationDisclosureAcceptanceMode(process.env);
+const disclosureAcceptanceIpc = createConversationDisclosureIpcRecorder();
 const rendererCrashRecovery = createRendererCrashRecoveryTracker();
 
 let mainWindow: BrowserWindow | null = null;
@@ -104,7 +118,17 @@ const memoryMaintenanceIntervalMs = 30 * 60 * 1000;
 const taskSchedulerIntervalMs = 60 * 1000;
 const appUpdateIntervalMs = 4 * 60 * 60 * 1000;
 
+const conversationCausalStore = createConversationCausalStore({
+  configDir: path.join(app.getPath("userData"), "config"),
+});
+const processEpoch = `main_${randomUUID()}`;
+
 const toolApprovalCoordinator = createToolApprovalCoordinator({
+  store: conversationCausalStore,
+  processEpoch,
+  ...(disclosureAcceptanceMode.enabled
+    ? { createId: () => `approval-${disclosureAcceptanceMode.scenarioId}` }
+    : {}),
   sendToRenderers(channel, payload) {
     for (const windowInstance of BrowserWindow.getAllWindows()) {
       if (!windowInstance.isDestroyed()) {
@@ -117,6 +141,42 @@ const toolApprovalCoordinator = createToolApprovalCoordinator({
 const container = createAppContainer({
   requestToolApproval: toolApprovalCoordinator.requestUserApproval,
   setGoalActive: toolApprovalCoordinator.setGoalActive,
+  conversationCausalStore,
+  ...(disclosureAcceptanceMode.enabled
+    ? {
+        chatClientOverride: createConversationDisclosureScriptedClient(
+          disclosureAcceptanceMode.scenarioId,
+        ),
+        modelProfileOverride: {
+          baseUrl: "http://127.0.0.1/unused",
+          apiKey: "acceptance-not-a-secret",
+          model: "cd09-scripted",
+          providerId: "openai-compatible",
+          profile: "default",
+          temperature: 0,
+          maxTokens:
+            disclosureAcceptanceMode.scenarioId === "S18-context-usage"
+              ? 256
+              : 1024,
+          contextWindow:
+            disclosureAcceptanceMode.scenarioId === "S18-context-usage"
+              ? 1024
+              : 8192,
+          contextWindowSource: {
+            kind: "provider_metadata",
+            label: "CD09 local scripted acceptance profile",
+          },
+          thinking: { type: "disabled" },
+          modelCapabilities: {
+            tools: true,
+            vision: false,
+            pdf: false,
+            streaming: true,
+            parallelToolCalls: false,
+          },
+        },
+      }
+    : {}),
 });
 
 const appUpdateService = createAppUpdateService({
@@ -125,6 +185,7 @@ const appUpdateService = createAppUpdateService({
     app.isPackaged &&
     !smokeMode.enabled &&
     !validationMode.enabled &&
+    !disclosureAcceptanceMode.enabled &&
     process.env.ZEROX_DISABLE_AUTO_UPDATE !== "1",
   currentVersion: app.getVersion(),
   loadVerifiedUpdateManifest: () =>
@@ -160,6 +221,9 @@ function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      ...(process.argv.includes("--zerox-chat-disclosure=projected")
+        ? { additionalArguments: ["--zerox-chat-disclosure=projected"] }
+        : {}),
     },
   });
   mainWindow = windowInstance;
@@ -888,19 +952,68 @@ function stopAppUpdateScheduler() {
 }
 
 app.whenReady().then(async () => {
-  await container.initializeStorageConvergence();
+  await runStartupRecoverySequence({
+    initializeStorageConvergence: () => container.initializeStorageConvergence(),
+    reconcileRequiredConversationSettlements: () =>
+      reconcileRequiredConversationSettlements({
+        conversationCausalStore,
+        chatSessionStore: container.chatSessionStore(),
+        workspaceRunStore: container.workspaceRunStore(),
+      }),
+    reconcileAgentRunAdmissions: () => container.reconcileAgentRunAdmissions(),
+    interruptPriorProcessApprovals: () => toolApprovalCoordinator.initialize(),
+    interruptActiveCausalAttempts: () =>
+      conversationCausalStore.interruptActiveAttempts(),
+  });
+  const preparedDisclosureScenario = disclosureAcceptanceMode.enabled
+    ? await prepareConversationDisclosureScenario(
+        container,
+        disclosureAcceptanceMode,
+        processEpoch,
+      )
+    : null;
   registerAllIpcHandlers(container, {
     appUpdateService,
     isTrustedSender: isTrustedRendererIpcEvent,
+    ...(disclosureAcceptanceMode.enabled
+      ? { onTrustedInvocation: disclosureAcceptanceIpc.observe }
+      : {}),
   });
   registerToolApprovalIpcHandlers();
   registerKernelIpcHandlers();
-  installApplicationMenu();
 
   if (validationMode.enabled) {
     void runValidationModeAndExit();
     return;
   }
+  if (disclosureAcceptanceMode.enabled && preparedDisclosureScenario) {
+    startupComplete = true;
+    const windowInstance = createMainWindow();
+    try {
+      const receipt = await runConversationDisclosureScenario({
+        container,
+        window: windowInstance,
+        mode: disclosureAcceptanceMode,
+        processEpoch,
+        ipcInvocations: disclosureAcceptanceIpc.snapshot,
+        prepared: preparedDisclosureScenario,
+        approvalCoordinator: toolApprovalCoordinator,
+      });
+      console.log(`[cd09:scenario] ${JSON.stringify(receipt)}`);
+      isQuitting = true;
+      app.exit(0);
+    } catch (error) {
+      console.error(
+        `[cd09:scenario] ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      isQuitting = true;
+      app.exit(1);
+    }
+    return;
+  }
+  installApplicationMenu();
   if (smokeMode.performanceEnabled) {
     await seedPerformanceSmokeSessions();
   }
@@ -989,31 +1102,76 @@ async function seedPerformanceSmokeSessions(): Promise<void> {
 }
 
 function registerToolApprovalIpcHandlers() {
+  ipcMain.handle("toolApproval:listPending", (event) => {
+    assertTrustedRendererIpcEvent(event);
+    return observeAcceptanceIpc(
+      "toolApproval:listPending",
+      () => toolApprovalCoordinator.pendingSnapshot(),
+    );
+  });
   ipcMain.handle("toolApproval:getMode", (event) => {
     assertTrustedRendererIpcEvent(event);
-    return toolApprovalCoordinator.getAutoApprovalState();
+    return observeAcceptanceIpc(
+      "toolApproval:getMode",
+      () => toolApprovalCoordinator.getAutoApprovalState(),
+    );
   });
   ipcMain.handle(
     "toolApproval:setAutoApprovalEnabled",
     (event, enabled: boolean) => {
       assertTrustedRendererIpcEvent(event);
-      return toolApprovalCoordinator.setAutoApprovalEnabled(Boolean(enabled));
+      return observeAcceptanceIpc(
+        "toolApproval:setAutoApprovalEnabled",
+        () => toolApprovalCoordinator.setAutoApprovalEnabled(Boolean(enabled)),
+      );
     },
   );
   ipcMain.handle(
     "toolApproval:setGoalModeEnabled",
     (event, enabled: boolean) => {
       assertTrustedRendererIpcEvent(event);
-      return toolApprovalCoordinator.setGoalModeEnabled(Boolean(enabled));
+      return observeAcceptanceIpc(
+        "toolApproval:setGoalModeEnabled",
+        () => toolApprovalCoordinator.setGoalModeEnabled(Boolean(enabled)),
+      );
     },
   );
   ipcMain.handle(
     "toolApproval:resolve",
     (event, input: ResolveToolApprovalInput) => {
       assertTrustedRendererIpcEvent(event);
-      return toolApprovalCoordinator.resolveApproval(input);
+      return observeAcceptanceIpc(
+        "toolApproval:resolve",
+        () => toolApprovalCoordinator.resolveApproval(input),
+      );
     },
   );
+}
+
+function observeAcceptanceIpc<T>(
+  channel: string,
+  operation: () => T | Promise<T>,
+): T | Promise<T> {
+  try {
+    const result = operation();
+    if (result && typeof result === "object" && "then" in result) {
+      return Promise.resolve(result).then(
+        (value) => {
+          disclosureAcceptanceIpc.observe({ channel, ok: true });
+          return value;
+        },
+        (error) => {
+          disclosureAcceptanceIpc.observe({ channel, ok: false });
+          throw error;
+        },
+      );
+    }
+    disclosureAcceptanceIpc.observe({ channel, ok: true });
+    return result;
+  } catch (error) {
+    disclosureAcceptanceIpc.observe({ channel, ok: false });
+    throw error;
+  }
 }
 
 function registerKernelIpcHandlers() {
@@ -1105,10 +1263,10 @@ function isPermissionRuleAction(
   return action === "allow" || action === "deny" || action === "ask";
 }
 
-function resolveKernelPermission(input: unknown): {
+async function resolveKernelPermission(input: unknown): Promise<{
   ok: boolean;
   message: string;
-} {
+}> {
   const payload =
     input && typeof input === "object" ? (input as Record<string, unknown>) : {};
   const id =
@@ -1128,7 +1286,7 @@ function resolveKernelPermission(input: unknown): {
     return { ok: false, message: "Permission decision payload is invalid." };
   }
 
-  const resolved = toolApprovalCoordinator.resolveApproval({ id, approved });
+  const resolved = await toolApprovalCoordinator.resolveApproval({ id, approved });
   return resolved
     ? { ok: true, message: "Permission decision recorded." }
     : { ok: false, message: "No pending permission request matched." };
@@ -1153,11 +1311,12 @@ app.on("before-quit", (event) => {
   stopTaskScheduler();
   stopMemoryMaintenanceScheduler();
   stopAppUpdateScheduler();
-  toolApprovalCoordinator.rejectAllPending();
-  const drain = Promise.allSettled([
-    shutdownActiveChatMessages(),
-    container.shutdownRuntime(),
-  ]).then((results) => {
+  const drain = (async () => {
+    await toolApprovalCoordinator.rejectAllPending();
+    const results = await Promise.allSettled([
+      shutdownActiveChatMessages(),
+      container.shutdownRuntime(),
+    ]);
     const failures = results.filter(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
@@ -1167,7 +1326,7 @@ app.on("before-quit", (event) => {
         "One or more shutdown resources failed.",
       );
     }
-  });
+  })();
   void settleShutdownWithDeadline(drain, shutdownDeadlineMs).then((result) => {
     if (result === "timed_out") {
       console.error(

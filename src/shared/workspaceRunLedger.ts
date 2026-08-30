@@ -13,6 +13,12 @@ export type WorkspaceRunTerminalStatus = Extract<
   "succeeded" | "failed" | "canceled"
 >;
 
+export type WorkspaceRunCausalRef = {
+  turnId: string;
+  attemptId?: string;
+  sourceSequence: number;
+};
+
 export type WorkspaceRun = {
   workspaceRunId: string;
   sessionId: string;
@@ -52,6 +58,9 @@ type WorkspaceRunEventBase = {
   type: WorkspaceRunEventType;
   message?: string;
   payload?: Record<string, unknown>;
+  causalRef?: WorkspaceRunCausalRef;
+  /** Durable witness used to repair the denormalized run snapshot after a crash. */
+  lifecycleStatus?: WorkspaceRunStatus;
   createdAt: string;
 };
 
@@ -95,6 +104,7 @@ export type WorkspaceRunToolInvocationEvent = WorkspaceRunEventBase & {
   ok?: boolean;
   resultRef?: string;
   error?: string;
+  approvalId?: string;
 };
 
 export type WorkspaceRunToolDeniedEvent = WorkspaceRunEventBase & {
@@ -162,7 +172,38 @@ type WorkspaceRunEventInputBase = {
   createdAt?: string;
   message?: string;
   payload?: Record<string, unknown>;
+  causalRef?: WorkspaceRunCausalRef;
+  /** Written by settleLifecycle; callers should normally use snapshotStatus. */
+  lifecycleStatus?: WorkspaceRunStatus;
 };
+
+export type WorkspaceRunLifecycleSettlementInput = {
+  workspaceRunId: string;
+  event: WorkspaceRunEventInput & { id: string; createdAt: string };
+  snapshotStatus?: WorkspaceRunStatus;
+  summary?: string;
+};
+
+export type WorkspaceRunLifecycleSettlementResult = {
+  event: WorkspaceRunEvent;
+  run: WorkspaceRun;
+  disposition: "applied" | "duplicate";
+};
+
+export function isWorkspaceRunTerminalStatus(
+  status: WorkspaceRunStatus,
+): status is WorkspaceRunTerminalStatus {
+  return status === "succeeded" || status === "failed" || status === "canceled";
+}
+
+export function canTransitionWorkspaceRunStatus(
+  current: WorkspaceRunStatus,
+  next: WorkspaceRunStatus,
+): boolean {
+  if (current === next) return true;
+  if (isWorkspaceRunTerminalStatus(current)) return false;
+  return true;
+}
 
 export type WorkspaceRunEventInput =
   | (WorkspaceRunEventInputBase & {
@@ -192,6 +233,7 @@ export type WorkspaceRunEventInput =
       ok?: boolean;
       resultRef?: string;
       error?: string;
+      approvalId?: string;
     })
   | (WorkspaceRunEventInputBase & {
       type: "tool_result";
@@ -253,6 +295,7 @@ export type ChatTrajectoryEvent = {
   sourceEventId: string;
   message?: string;
   status?: WorkspaceRunStatus;
+  lifecycleStatus?: WorkspaceRunStatus;
   toolCallId?: string;
   toolName?: string;
   resultRef?: string;
@@ -322,6 +365,9 @@ export function projectChatTrajectoryEvents(
     sourceEventId: event.id,
     ...(event.message ? { message: event.message } : {}),
     ...projectStatus(event),
+    ...(event.lifecycleStatus
+      ? { lifecycleStatus: event.lifecycleStatus }
+      : {}),
     ...projectTool(event),
     ...projectSkill(event),
     ...projectCheckpointBoundary(event),

@@ -5,6 +5,7 @@ import type {
   AgentTrajectoryEventType,
 } from "../shared/agentTrajectory";
 import type { AgentRunContext } from "../shared/agentWorkspace";
+import { redactCredentials } from "../shared/credentialRedaction";
 
 export type ChatAgentEvidenceRecorder = {
   runId: string;
@@ -12,7 +13,8 @@ export type ChatAgentEvidenceRecorder = {
     type: AgentTrajectoryEventType,
     payload: Record<string, unknown>,
     redaction?: AgentTrajectoryEvent["redaction"],
-  ): Promise<void>;
+  ): Promise<AgentTrajectoryEvent | null>;
+  drain(): Promise<void>;
 };
 
 export function createChatAgentEvidenceRecorder(options: {
@@ -26,22 +28,23 @@ export function createChatAgentEvidenceRecorder(options: {
   const now = options.now ?? (() => new Date());
   const runId = options.runId ?? createId();
   let sequence = 0;
+  let mutationQueue: Promise<void> = Promise.resolve();
 
   return {
     runId,
     async append(type, payload, redaction) {
       if (!options.trajectoryStore) {
-        return;
+        return null;
       }
 
       sequence += 1;
-      await options.trajectoryStore.append(runId, {
+      const event: AgentTrajectoryEvent = {
         id: createId(),
         runId,
         type,
         sequence,
         ...(options.runContext ? { runContext: options.runContext } : {}),
-        payload,
+        payload: redactCredentials(payload) as Record<string, unknown>,
         redaction:
           redaction ??
           {
@@ -51,7 +54,15 @@ export function createChatAgentEvidenceRecorder(options: {
               type === "model_request" || type === "model_response",
           },
         createdAt: now().toISOString(),
-      });
+      };
+      const result = mutationQueue.then(() =>
+        options.trajectoryStore!.append(runId, event),
+      );
+      mutationQueue = result.then(() => undefined, () => undefined);
+      return result;
+    },
+    async drain() {
+      await mutationQueue;
     },
   };
 }

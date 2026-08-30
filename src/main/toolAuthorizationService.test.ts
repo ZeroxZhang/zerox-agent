@@ -76,6 +76,7 @@ describe("tool authorization service", () => {
           reason: "文件路径位于已授权目录内。",
         },
         createdAt: "2026-06-05T08:01:00.000Z",
+        requestFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
       },
     });
     await expect(auditLog.list()).resolves.toHaveLength(1);
@@ -579,10 +580,14 @@ describe("tool authorization service", () => {
     const service = createToolAuthorizationService({
       taskStore,
       auditLog,
-      requestUserApproval: async () => ({
-        approved: true,
-        reason: "approved",
-      }),
+      requestUserApproval: async (_request, options) => {
+        await options?.onIntentPersisted?.({ id: "approval_lifecycle", revision: 1 });
+        return {
+          approved: true,
+          reason: "approved",
+          approvalId: "approval_lifecycle",
+        };
+      },
     });
     await taskStore.create({
       name: "Approval lifecycle",

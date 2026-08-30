@@ -373,14 +373,17 @@ const promotedFixtureRepository =
 // Runs.
 {
   const rows = readJsonl(path.join(configDir, "agent-runs.jsonl"), "runs");
-  for (const run of rows) {
+  const latestRuns = [...new Map(
+    rows.map((run) => [run.id, run]),
+  ).values()];
+  for (const run of latestRuns) {
     trackSource("runs", run.id);
     if (dryRunOnly()) {
       bump("runs");
       continue;
     }
     try {
-      runsRepo.createRunRepository(storage).create(run);
+      runsRepo.createRunRepository(storage).importSnapshot(run);
       bump("runs");
     } catch (error) {
       logWriteError("runs", String(error));

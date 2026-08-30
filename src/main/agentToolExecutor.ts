@@ -75,6 +75,10 @@ export type AgentToolExecutionOptions = {
   artifactWrite?: TrustedArtifactWriteMetadata;
   toolResultReadScope?: ToolResultOffloadReadScope;
   onRuntimeEvent?: (event: ToolRuntimeEvent) => void;
+  /** Store-owned proof that ToolRuntime completed authorization for this dispatch. */
+  authorizationReceipt?: {
+    auditEventId: string;
+  };
 };
 
 export type TrustedArtifactWriteMetadata = {

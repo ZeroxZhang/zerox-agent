@@ -34,6 +34,7 @@ import type {
   ChatSessionWorkSummary,
   ChatStreamEvent,
   ChatTaskStatusEvent,
+  ChatTurnResultSettlementStatus,
   SendChatMessageResult,
   SkillInputField,
   SkillUserInputRequest,
@@ -126,8 +127,14 @@ import {
   createChatStreamState,
   finalizeChatStreamFailure,
   finalizeChatStreamResult,
+  getDurableChatTaskStatusSessionId,
+  getDurableChatStreamSessionId,
+  projectChatDisclosureGroups,
+  resolveChatDisclosureExpanded,
+  type ChatDisclosureGroup,
   type ChatStreamMessage,
 } from "../chatStreamReducer";
+import { getChatResultSettlementUiState } from "../chatResultSettlement";
 import {
   goalProgressEventMatchesActiveContext,
   goalRunEventMatchesActiveContext,
@@ -151,6 +158,10 @@ import type {
   ToolApprovalRequestPayload,
 } from "../../shared/toolApproval";
 import { shouldShowToolApproval } from "../toolApprovalVisibility";
+import {
+  applyToolApprovalProjectionEvent,
+  createToolApprovalProjectionState,
+} from "../toolApprovalProjection";
 import { getGoalTerminalTruthNotice } from "../goalTerminalTruth";
 import {
   ChatAttachmentReadError,
@@ -178,6 +189,7 @@ type VisibleChatMessage =
     });
 
 type SuccessfulChatResult = Extract<SendChatMessageResult, { ok: true }>;
+type FailedChatResult = Extract<SendChatMessageResult, { ok: false }>;
 
 type ChatStatus = {
   kind: "ready" | "working" | "paused" | "error";
@@ -381,9 +393,10 @@ export function AgentChatPanel({
   const [taskActivity, setTaskActivity] = useState<TaskActivityState>(idleTaskActivity);
   const [taskProcessEvents, setTaskProcessEvents] = useState<ChatTaskStatusEvent[]>([]);
   const [goalRunEvents, setGoalRunEvents] = useState<AgentRunEvent[]>([]);
-  const [pendingToolApprovals, setPendingToolApprovals] = useState<ToolApprovalRequestPayload[]>(
-    [],
+  const [toolApprovalProjection, setToolApprovalProjection] = useState(
+    createToolApprovalProjectionState,
   );
+  const pendingToolApprovals = toolApprovalProjection.pending;
   const pendingToolApproval = pendingToolApprovals[0] ?? null;
   const [activeGoalDetail, setActiveGoalDetail] = useState<Goal | null>(null);
   const [activeGoalDetailError, setActiveGoalDetailError] =
@@ -402,6 +415,12 @@ export function AgentChatPanel({
     Record<string, string | number | boolean>
   >({});
   const [chatStatusExpanded, setChatStatusExpanded] = useState(false);
+  const disclosureMode = useMemo(
+    () =>
+      window.buildingAgent?.getConversationDisclosureMode()
+      ?? resolvePreviewConversationDisclosureMode(window.location.search),
+    [],
+  );
   const [activityTick, setActivityTick] = useState(Date.now());
   const messageListRef = useRef<HTMLDivElement>(null);
   const shouldStickToLatestMessageRef = useRef(true);
@@ -796,25 +815,36 @@ export function AgentChatPanel({
       return;
     }
 
-    void window.buildingAgent
-      .getToolApprovalMode()
+    const api = window.buildingAgent;
+    const unsubscribeRequest = api.onToolApprovalRequest((request) => {
+      setToolApprovalProjection((current) => applyToolApprovalProjectionEvent(current, {
+        type: "request",
+        request,
+      }));
+    });
+    const unsubscribeDecision = api.onToolApprovalDecision((decision) => {
+      setToolApprovalProjection((current) => applyToolApprovalProjectionEvent(current, {
+        type: "decision",
+        decision,
+      }));
+    });
+    const unsubscribeMode = api.onToolApprovalModeChanged((state) => {
+      setToolApprovalMode(state);
+    });
+
+    void api.getPendingToolApprovals()
+      .then((requests) => {
+        setToolApprovalProjection((current) => applyToolApprovalProjectionEvent(current, {
+          type: "snapshot",
+          requests,
+        }));
+      })
+      .catch(() => undefined);
+    void api.getToolApprovalMode()
       .then((state) => {
         setToolApprovalMode(state);
       })
       .catch(() => undefined);
-    const unsubscribeRequest = window.buildingAgent.onToolApprovalRequest((request) => {
-        setPendingToolApprovals((current) =>
-        current.some((candidate) => candidate.id === request.id) ? current : [...current, request],
-        );
-    });
-    const unsubscribeDecision = window.buildingAgent.onToolApprovalDecision((decision) => {
-        setPendingToolApprovals((current) =>
-          current.filter((candidate) => candidate.id !== decision.id),
-        );
-    });
-    const unsubscribeMode = window.buildingAgent.onToolApprovalModeChanged((state) => {
-        setToolApprovalMode(state);
-    });
 
     return () => {
       unsubscribeRequest();
@@ -860,8 +890,11 @@ export function AgentChatPanel({
         return;
       }
 
-      activeStatusSessionIdRef.current = event.sessionId;
-      setSessionId((current) => current ?? event.sessionId);
+      const durableEventSessionId = getDurableChatStreamSessionId(event);
+      if (durableEventSessionId) {
+        activeStatusSessionIdRef.current = durableEventSessionId;
+        setSessionId((current) => current ?? durableEventSessionId);
+      }
       setChatStreamState((current) => applyChatStreamEvent(current, event, activeStream));
 
       if (
@@ -917,13 +950,16 @@ export function AgentChatPanel({
         return;
       }
 
-      activeStatusSessionIdRef.current = event.sessionId;
-      setSessionId((current) => current ?? event.sessionId);
+      const durableStatusSessionId = getDurableChatTaskStatusSessionId(event);
+      if (durableStatusSessionId) {
+        activeStatusSessionIdRef.current = durableStatusSessionId;
+        setSessionId((current) => current ?? durableStatusSessionId);
+      }
       setTaskProcessEvents((current) => appendBoundedRuntimeEvent(current, event));
-      if (event.context) {
+      if (durableStatusSessionId && event.context) {
         setSessions((currentSessions) =>
           currentSessions.map((session) =>
-            session.id === event.sessionId
+            session.id === durableStatusSessionId
               ? { ...session, context: event.context }
               : session,
           ),
@@ -1531,6 +1567,10 @@ export function AgentChatPanel({
   );
   const taskProcessItems = useMemo(
     () => buildTaskProcessItems(taskProcessEvents),
+    [taskProcessEvents],
+  );
+  const chatDisclosureGroups = useMemo(
+    () => projectChatDisclosureGroups(taskProcessEvents),
     [taskProcessEvents],
   );
   const latestStreamContext = [...taskProcessEvents]
@@ -2552,9 +2592,13 @@ export function AgentChatPanel({
     }
 
     const id = pendingToolApproval.id;
-    setPendingToolApprovals((current) => current.filter((candidate) => candidate.id !== id));
     const resolved = await window.buildingAgent
-      .resolveToolApproval({ id, approved })
+      .resolveToolApproval({
+        id,
+        approved,
+        expectedRevision: pendingToolApproval.revision ?? 1,
+        decisionId: `renderer:${id}:${approved ? "approved" : "denied"}`,
+      })
       .catch(() => false);
     if (!resolved) {
       setStatus({
@@ -2565,8 +2609,12 @@ export function AgentChatPanel({
   }
 
   function applySuccessfulChatResult(result: SuccessfulChatResult, requestId: string) {
-    sessionIdRef.current = result.sessionId;
-    setSessionId(result.sessionId);
+    const durableSessionId =
+      result.domainStateAvailable === true ? result.sessionId : null;
+    if (durableSessionId) {
+      sessionIdRef.current = durableSessionId;
+      setSessionId(durableSessionId);
+    }
     if (result.goalDraft) {
       setPendingGoalDraft(result.goalDraft);
       setGoalDraftDescription(result.goalDraft.normalizedDescription);
@@ -2590,9 +2638,11 @@ export function AgentChatPanel({
     setSelectedSkillName(null);
     const pausedAgentStatus =
       result.agentStatus?.state === "paused" ? result.agentStatus : null;
-    const isPaused = Boolean(pausedAgentStatus);
     const failedAgentStatus = result.agentStatus?.state === "failed" ? result.agentStatus : null;
-    const isFailed = Boolean(failedAgentStatus);
+    const settlementUiState = getChatResultSettlementUiState(result);
+    const isPaused = settlementUiState === "paused";
+    const isFailed = settlementUiState === "failed";
+    const isCanceled = settlementUiState === "canceled";
     const isGoalExecuting = result.activeGoal?.status === "executing";
     const isGoalDraft = Boolean(result.goalDraft);
     const isPlanAwaitingConfirmation = result.plan?.status === "awaiting_confirmation";
@@ -2605,11 +2655,15 @@ export function AgentChatPanel({
           ? "working"
           : isFailed
             ? "error"
+          : isCanceled
+            ? "ready"
           : isPaused || isPlanPaused || isPlanAwaitingConfirmation
             ? "paused"
             : "ready",
       message: isFailed
         ? formatAgentFailureForDisplay(failedAgentStatus?.message)
+        : isCanceled
+          ? "本轮执行已取消"
         : isPlanAwaitingConfirmation
         ? result.plan?.purpose === "runtime_replan"
           ? "运行期 Direct Plan 等待采用"
@@ -2623,7 +2677,9 @@ export function AgentChatPanel({
         : isGoalExecuting
         ? "目标正在后台执行"
         : isPaused
-        ? pausedAgentStatus?.modelServiceNotice?.kind === "output_limit"
+        ? result.turnSettlementStatus === "unknown"
+          ? "历史回复已恢复，但本轮执行结果无法确认，需要重新对账"
+          : pausedAgentStatus?.modelServiceNotice?.kind === "output_limit"
           ? "模型输出未完成，等待你继续生成"
           : pausedAgentStatus?.modelServiceNotice
             ? "模型服务返回限制，等待你重试"
@@ -2641,6 +2697,8 @@ export function AgentChatPanel({
         ? "tool"
         : isFailed
           ? "error"
+        : isCanceled
+          ? "done"
         : isPaused || isPlanPaused || isPlanAwaitingConfirmation
           ? "paused"
           : "done",
@@ -2673,12 +2731,23 @@ export function AgentChatPanel({
           })
         : buildTaskActivityFromAgentStatus({
             agentStatus: result.agentStatus,
+            turnSettlementStatus: result.turnSettlementStatus,
             relatedMemoryCount: result.relatedMemories.length,
-            fallbackDetail: isPaused ? "等待确认" : "回复已写入会话",
+            fallbackDetail:
+              result.turnSettlementStatus === "unknown"
+                ? "历史回复缺少可验证的执行结算收据"
+                : isCanceled
+                  ? "本轮执行已取消"
+                : isPaused
+                  ? "等待确认"
+                  : "回复已写入会话",
           }),
     );
     activeStatusSessionIdRef.current =
-      isPaused || isGoalExecuting || isGoalDraft || Boolean(result.plan) ? result.sessionId : null;
+      durableSessionId
+      && (isPaused || isGoalExecuting || isGoalDraft || Boolean(result.plan))
+        ? durableSessionId
+        : null;
     setChatStreamState((current) =>
       finalizeChatStreamResult(current, {
         requestId,
@@ -2693,9 +2762,11 @@ export function AgentChatPanel({
           ),
       }),
     );
-    void refreshSessions(result.sessionId);
-    // Persisted session state is authoritative after optimistic streaming.
-    void refreshCurrentSessionMessages(result.sessionId);
+    if (durableSessionId) {
+      void refreshSessions(durableSessionId);
+      // Persisted session state is authoritative after optimistic streaming.
+      void refreshCurrentSessionMessages(durableSessionId);
+    }
   }
 
   async function handleConfirmGoalDraft() {
@@ -3068,6 +3139,9 @@ export function AgentChatPanel({
           memoryCount: memories.length,
         }),
       });
+      if (disclosureMode === "projected") {
+        setTaskProcessEvents(buildPreviewDisclosureEvents());
+      }
       setStatus({ kind: "ready", message: "演示回复已生成" });
       setWorkPhase("done");
       setTaskActivity(
@@ -3124,7 +3198,7 @@ export function AgentChatPanel({
         ...(selectedSkillName ? { selectedSkillName } : {}),
         ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
       })
-      .catch((error) => ({
+      .catch((error): FailedChatResult => ({
         ok: false as const,
         code: "TRANSPORT_ERROR" as const,
         retryable: true,
@@ -3173,7 +3247,13 @@ export function AgentChatPanel({
         restoredAttachmentSubmission = true;
       }
       activeStatusSessionIdRef.current = null;
-      const wasCanceled = result.code === "CANCELED";
+      if (result.executedRun) {
+        setRuns((currentRuns) => [result.executedRun!, ...currentRuns]);
+      }
+      const wasCanceled =
+        result.code === "CANCELED"
+        || result.turnSettlementStatus === "canceled"
+        || result.executedRun?.status === "canceled";
       if (wasCanceled && planInputLocked && sessionId) {
         const canceledPlan = await window.buildingAgent
           .getLatestPlanForSession(sessionId)
@@ -3295,7 +3375,11 @@ export function AgentChatPanel({
           return;
         }
 
-        if (result.code === "ATTACHMENT_EXPIRED") {
+        if (
+          result.code === "ATTACHMENT_EXPIRED"
+          || result.code === "UNKNOWN_SKILL_INPUT"
+          || result.code === "CONFLICT"
+        ) {
           setPendingInputRequest(null);
         }
 
@@ -3712,13 +3796,17 @@ export function AgentChatPanel({
             />
         )}
 
-        {(status.kind === "working" || status.kind === "paused") &&
-        taskProcessItems.length > 0 ? (
-          <ConversationProgressDisclosure
-            items={taskProcessItems}
-            status={status}
-          />
-        ) : null}
+        {disclosureMode === "projected" ? (
+          chatDisclosureGroups.length > 0 ? (
+            <ProjectedConversationDisclosure groups={chatDisclosureGroups} />
+          ) : null
+        ) : (status.kind === "working" || status.kind === "paused") &&
+          taskProcessItems.length > 0 ? (
+            <ConversationProgressDisclosure
+              items={taskProcessItems}
+              status={status}
+            />
+          ) : null}
 
         {hasRuntimeSurfaces ? (
             <div className="runtime-surface-stack" aria-label="需要你的决定">
@@ -4697,7 +4785,12 @@ function PlanConfirmationCard(props: {
   ) : null;
 
   return (
-    <section className="plan-confirmation-card" aria-label="终版计划确认">
+    <section
+      aria-label="终版计划确认"
+      className="plan-confirmation-card"
+      data-disclosure-id={`plan:${props.plan.id}`}
+      data-source-revision={props.plan.revision}
+    >
       <header>
         <div>
           <span>
@@ -4716,6 +4809,26 @@ function PlanConfirmationCard(props: {
           <small>v{props.plan.revision}</small>
         </div>
       </header>
+
+      <section
+        aria-live="polite"
+        className={`cross-surface-attention ${
+          failurePresentation ? "is-blocking" : "is-normal"
+        }`}
+        role={failurePresentation ? "alert" : "status"}
+      >
+        <span>
+          {failurePresentation
+            ? "规划需要处理"
+            : props.plan.status === "awaiting_confirmation"
+              ? "等待确认"
+              : "规划进展"}
+        </span>
+        <strong>
+          {failurePresentation?.title
+            ?? outcomePresentation.title}
+        </strong>
+      </section>
 
       {props.plan.goalContractSnapshot ? (
         <details className="plan-technical-details" open>
@@ -5658,6 +5771,101 @@ function ContextRuntimeSummary(props: {
   );
 }
 
+function ProjectedConversationDisclosure(props: {
+  groups: ChatDisclosureGroup[];
+}) {
+  const [groupExpansion, setGroupExpansion] = useState<Record<string, boolean>>({});
+  const [rowExpansion, setRowExpansion] = useState<Record<string, boolean>>({});
+
+  return (
+    <section
+      aria-label="会话进展"
+      aria-live="polite"
+      className="conversation-disclosure"
+      data-testid="conversation-disclosure"
+    >
+      {props.groups.map((group) => {
+        const expanded = resolveChatDisclosureExpanded({
+          explicit: groupExpansion[group.id],
+          defaultExpanded: group.expandedByDefault,
+        });
+        return (
+          <section
+            className={`conversation-disclosure-group is-${group.id}`}
+            key={group.id}
+          >
+            <header>
+              <button
+                aria-controls={`conversation-disclosure-${group.id}`}
+                aria-expanded={expanded}
+                onClick={() =>
+                  setGroupExpansion((current) => ({
+                    ...current,
+                    [group.id]: !expanded,
+                  }))
+                }
+                type="button"
+              >
+                <Icon name={expanded ? "collapse" : "expand"} size={15} />
+                <strong>{group.label}</strong>
+                <span>{group.rows.length}</span>
+              </button>
+              {!expanded ? <p>{group.rows.at(-1)?.summary}</p> : null}
+            </header>
+            {expanded ? (
+              <ol id={`conversation-disclosure-${group.id}`}>
+                {group.rows.map((row) => {
+                  const rowExpanded = resolveChatDisclosureExpanded({
+                    explicit: rowExpansion[row.id],
+                    defaultExpanded: row.expandedByDefault,
+                  });
+                  const hasDetail = Boolean(row.detail);
+                  return (
+                    <li
+                      aria-label={
+                        row.attention === "blocking"
+                          ? `需要处理：${row.label}。${row.summary}`
+                          : undefined
+                      }
+                      className={`is-${row.attention}`}
+                      data-disclosure-id={row.id}
+                      key={row.id}
+                      role={row.attention === "blocking" ? "alert" : undefined}
+                    >
+                      <span aria-hidden="true" className="task-activity-dot" />
+                      <div>
+                        <strong>{row.label}</strong>
+                        <p>{row.summary}</p>
+                        {hasDetail && rowExpanded ? <small>{row.detail}</small> : null}
+                      </div>
+                      {hasDetail ? (
+                        <button
+                          aria-expanded={rowExpanded}
+                          aria-label={`${rowExpanded ? "收起" : "展开"}${row.label}详情`}
+                          onClick={() =>
+                            setRowExpansion((current) => ({
+                              ...current,
+                              [row.id]: !rowExpanded,
+                            }))
+                          }
+                          title={rowExpanded ? "收起详情" : "展开详情"}
+                          type="button"
+                        >
+                          <Icon name={rowExpanded ? "collapse" : "expand"} size={14} />
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : null}
+          </section>
+        );
+      })}
+    </section>
+  );
+}
+
 function ConversationProgressDisclosure(props: {
   items: ReturnType<typeof buildTaskProcessItems>;
   status: ChatStatus;
@@ -5906,6 +6114,8 @@ function ToolApprovalPanel({
         aria-labelledby="tool-approval-title"
         aria-modal="true"
         className={`tool-approval-panel${isCritical ? " is-critical-risk" : ""}`}
+        data-disclosure-id={`approval:${request.id}`}
+        data-source-revision={request.revision ?? 1}
         ref={dialogRef}
         role="alertdialog"
         tabIndex={-1}
@@ -6144,6 +6354,7 @@ function TaskProcessItem(props: TaskProcessItemProps) {
 
 function buildTaskActivityFromAgentStatus(options: {
   agentStatus: ChatAgentStatus | undefined;
+  turnSettlementStatus?: ChatTurnResultSettlementStatus;
   relatedMemoryCount: number;
   fallbackDetail: string;
 }): TaskActivityState {
@@ -6193,6 +6404,36 @@ function buildTaskActivityFromAgentStatus(options: {
       ...(isProviderLimit
         ? { actionLabel: isProviderOutput ? "继续生成" : "重试" }
         : {}),
+    });
+  }
+
+  if (options.turnSettlementStatus === "failed") {
+    return createTaskActivity({
+      kind: "error",
+      title: "本轮执行失败",
+      detail: options.fallbackDetail,
+    });
+  }
+
+  if (options.turnSettlementStatus === "canceled") {
+    return createTaskActivity({
+      kind: "done",
+      title: "本轮已取消",
+      detail: options.fallbackDetail,
+    });
+  }
+
+  if (
+    options.turnSettlementStatus === "paused"
+    || options.turnSettlementStatus === "unknown"
+  ) {
+    return createTaskActivity({
+      kind: "paused",
+      title:
+        options.turnSettlementStatus === "unknown"
+          ? "历史结算待对账"
+          : "本轮已暂停",
+      detail: options.fallbackDetail,
     });
   }
 
@@ -6695,6 +6936,97 @@ function toChatAttachmentMetadata(attachment: ChatAttachmentInput): ChatAttachme
     size: attachment.size,
     kind: attachment.kind,
   };
+}
+
+function resolvePreviewConversationDisclosureMode(
+  search: string,
+): "legacy" | "projected" {
+  return /(?:^|[?&])chatDisclosure=projected(?:&|$)/.test(search)
+    ? "projected"
+    : "legacy";
+}
+
+function buildPreviewDisclosureEvents(): ChatTaskStatusEvent[] {
+  const requestId = "preview-disclosure-request";
+  const turnId = "preview-disclosure-turn";
+  const createdAt = "2026-08-25T00:00:00.000Z";
+  return [
+    {
+      sessionId: "preview-session",
+      requestId,
+      turnId,
+      sequence: 1,
+      state: "started",
+      message: "已开始处理请求",
+      createdAt,
+      elapsedMs: 0,
+    },
+    {
+      sessionId: "preview-session",
+      requestId,
+      turnId,
+      sequence: 2,
+      state: "workspace",
+      message: "已读取当前工作区",
+      createdAt,
+      elapsedMs: 12,
+    },
+    {
+      sessionId: "preview-session",
+      requestId,
+      turnId,
+      sequence: 3,
+      state: "tool_result",
+      toolInvocationId: "preview-tool-1",
+      toolName: "file_read",
+      message: "已检查项目结构",
+      createdAt,
+      elapsedMs: 24,
+    },
+    {
+      sessionId: "preview-session",
+      requestId,
+      turnId,
+      sequence: 4,
+      state: "tool_result",
+      toolInvocationId: "preview-tool-2",
+      toolName: "search",
+      message: "已定位相关实现",
+      createdAt,
+      elapsedMs: 36,
+    },
+    {
+      sessionId: "preview-session",
+      requestId,
+      turnId,
+      sequence: 5,
+      state: "model",
+      message: "已整理可交付结果",
+      createdAt,
+      elapsedMs: 40,
+    },
+    {
+      sessionId: "preview-session",
+      requestId,
+      turnId,
+      sequence: 6,
+      state: "context",
+      message: "当前上下文保持在预算内",
+      createdAt,
+      elapsedMs: 42,
+    },
+    {
+      sessionId: "preview-session",
+      requestId,
+      turnId,
+      sequence: 7,
+      settlementId: "preview-settlement",
+      state: "completed",
+      message: "请求已完成",
+      createdAt,
+      elapsedMs: 55,
+    },
+  ];
 }
 
 function toSessionRailItem(session: ChatSessionListItem): ChatSession {

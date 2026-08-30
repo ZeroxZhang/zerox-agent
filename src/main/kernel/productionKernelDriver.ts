@@ -5,6 +5,7 @@ import {
   type KernelRunStatus,
 } from "../../shared/kernelContract";
 import type { KernelEventBus } from "./eventBus";
+import type { SecretSafeFailure } from "../../shared/secretSafeFailure";
 import {
   runRuntimeKernel,
   type RuntimeKernelResult,
@@ -16,6 +17,8 @@ export type ProductionKernelSegment = {
     "succeeded" | "failed" | "canceled" | "paused"
   >;
   summary: string;
+  /** Sanitized failure projection; raw execution errors never cross this boundary. */
+  failure?: SecretSafeFailure;
 };
 
 export type ProductionKernelReporter = {
@@ -42,6 +45,13 @@ export type ProductionKernelRunInput<
   mode: KernelRunMode;
   signal?: AbortSignal;
   checkpointEvery?: number;
+  /** Chat may convert an execution error into a validated secret-safe result. */
+  failureDisposition?: "rethrow" | "return_settlement";
+  /**
+   * Identifies a failure raised after an owning terminal record committed.
+   * Kernel records the sanitized failure but must not invoke settleFailed again.
+   */
+  resolvePostCommitFailure?(error: unknown): SecretSafeFailure | undefined;
   execute(
     reporter: ProductionKernelReporter,
     context: ProductionKernelExecutionContext,
@@ -192,6 +202,14 @@ async function runProductionSegment<
           return segment ? { summary: segment.summary } : undefined;
         },
         async beforeFailedEnd(ctx, error) {
+          const postCommitFailure = input.resolvePostCommitFailure?.(error);
+          if (postCommitFailure) {
+            segmentError = error;
+            return {
+              reason: postCommitFailure.code,
+              summary: postCommitFailure.publicMessage,
+            };
+          }
           if (!input.settleFailed) {
             segmentError = error;
             return { reason: formatError(error) };
@@ -203,11 +221,15 @@ async function runProductionSegment<
             );
             assertSettlementStatus(settled, "failed", "failed");
             segment = settled;
+            if (input.failureDisposition === "return_settlement") {
+              segmentError = undefined;
+              return {
+                reason: settled.failure?.code ?? "settled_failure",
+                summary: settled.summary,
+              };
+            }
             segmentError = error;
-            return {
-              reason: formatError(error),
-              summary: settled.summary,
-            };
+            return { reason: formatError(error) };
           } catch (settlementError) {
             segment = undefined;
             segmentError = settlementError;
@@ -234,19 +256,16 @@ async function runProductionSegment<
   }
 
   assertOneTerminalEvent(terminalEvents, kernel);
+  if (segmentError) {
+    throw segmentError;
+  }
   if (!segment) {
-    if (segmentError) {
-      throw segmentError;
-    }
     throw new Error(
       "Production Kernel ended without an execution segment result.",
     );
   }
   const settledSegment = segment as TSegment;
   assertSegmentParity(kernel, settledSegment);
-  if (segmentError) {
-    throw segmentError;
-  }
   return {
     kernel,
     segment: settledSegment,

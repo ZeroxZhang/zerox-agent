@@ -39,7 +39,7 @@ describe("chat agent evidence recorder", () => {
       now: () => new Date("2026-06-28T14:00:00.000Z"),
     });
 
-    await recorder.append(
+    const stored = await recorder.append(
       "run_context_created",
       {
         runtimeContextSnapshotSummary: {
@@ -52,6 +52,7 @@ describe("chat agent evidence recorder", () => {
         containsUserText: false,
       },
     );
+    await recorder.drain();
 
     expect(events).toEqual([
       expect.objectContaining({
@@ -64,5 +65,39 @@ describe("chat agent evidence recorder", () => {
         },
       }),
     ]);
+    expect(stored?.id).toBe(events[0]?.id);
+  });
+
+  it("redacts credentials at the durable evidence boundary", async () => {
+    const events: AgentTrajectoryEvent[] = [];
+    const recorder = createChatAgentEvidenceRecorder({
+      trajectoryStore: {
+        async append(_runId, event) {
+          events.push(event);
+          return event;
+        },
+        async list() {
+          return events;
+        },
+        async appendIfAbsent(_runId, _publicationKey, event) {
+          events.push(event);
+          return { appended: true, event };
+        },
+        async flushShadowWrites() {},
+      },
+      runId: "run_secret_safe",
+      createId: () => `event_${events.length + 1}`,
+      now: () => new Date("2026-08-24T00:00:00.000Z"),
+    });
+
+    await recorder.append("tool_result", {
+      error: "Authorization: Bearer evidence-bearer-canary",
+      args: { apiKey: "evidence-key-canary" },
+    });
+    await recorder.drain();
+
+    const serialized = JSON.stringify(events);
+    expect(serialized).toContain("[redacted]");
+    expect(serialized).not.toMatch(/evidence-bearer-canary|evidence-key-canary/);
   });
 });

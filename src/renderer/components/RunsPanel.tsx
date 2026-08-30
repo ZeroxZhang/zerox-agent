@@ -239,7 +239,7 @@ export function RunsPanel(props: {
     }
 
     if (!window.buildingAgent) {
-      setTrajectoryEvents([]);
+      setTrajectoryEvents(createDemoTrajectoryEvents(selectedRun.id));
       return;
     }
 
@@ -598,6 +598,13 @@ export function RunsPanel(props: {
                 <div className="task-record-active-list" aria-label="正在进行">
                   {activeExecutionItems.map((item) => (
                     <button
+                      aria-current={
+                        selectedRunRecord &&
+                        !isPersistedRunRecord(selectedRunRecord) &&
+                        item.id === selectedRecordId
+                          ? "true"
+                          : undefined
+                      }
                       className={`task-record-row is-active-execution ${
                         selectedRunRecord &&
                         !isPersistedRunRecord(selectedRunRecord) &&
@@ -626,6 +633,13 @@ export function RunsPanel(props: {
               <div className="task-record-list">
                 {recentRunItems.map((item) => (
                   <button
+                    aria-current={
+                      selectedRunRecord &&
+                      isPersistedRunRecord(selectedRunRecord) &&
+                      item.id === selectedRecordId
+                        ? "true"
+                        : undefined
+                    }
                     className={`task-record-row ${
                       selectedRunRecord &&
                       isPersistedRunRecord(selectedRunRecord) &&
@@ -1258,7 +1272,10 @@ function RunInspector(props: {
         </div>
       ) : null}
 
-      <RunTrajectoryPanel events={props.trajectoryEvents} />
+      <RunTrajectoryPanel
+        events={props.trajectoryEvents}
+        runId={props.run?.id ?? "unselected"}
+      />
     </aside>
   );
 }
@@ -1458,6 +1475,41 @@ function createDemoKernelEvents(): KernelEvent[] {
       status: "succeeded",
       reason: "Goal evidence accepted.",
       createdAt: "2026-06-05T08:00:06.000Z",
+    },
+  ];
+}
+
+function createDemoTrajectoryEvents(runId: string): AgentTrajectoryEvent[] {
+  return [
+    {
+      id: "demo_evidence_tool",
+      runId,
+      type: "tool_result",
+      sequence: 1,
+      payload: {
+        tool: "file_read",
+        summary: "已读取任务输入并生成报告",
+        authorization: "Bearer preview-secret",
+      },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-06-05T08:00:04.000Z",
+    },
+    {
+      id: "demo_evidence_unknown",
+      runId,
+      type: "future_optional_presenter" as AgentTrajectoryEvent["type"],
+      sequence: 2,
+      payload: { summary: "未来可选事件仍使用通用展示" },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-06-05T08:00:05.000Z",
     },
   ];
 }

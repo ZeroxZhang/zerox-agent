@@ -1,3 +1,5 @@
+import { redactCredentials } from "./credentialRedaction";
+
 export type ModelServiceNoticeKind =
   | "output_limit"
   | "rate_limit"
@@ -37,7 +39,17 @@ export class ModelServiceNoticeError extends Error {
 export function throwForModelServiceNotice(
   notice: ModelServiceNotice | undefined,
 ): void {
-  if (notice) throw new ModelServiceNoticeError(notice);
+  if (notice) throw new ModelServiceNoticeError(sanitizeModelServiceNotice(notice));
+}
+
+export function sanitizeModelServiceNotice(
+  notice: ModelServiceNotice,
+): ModelServiceNotice {
+  const safeNotice = redactCredentials(notice) as ModelServiceNotice;
+  return {
+    ...safeNotice,
+    kind: notice.kind,
+  };
 }
 
 const NORMAL_COMPLETION_REASONS = new Set([
@@ -88,14 +100,18 @@ export function withModelServiceNotice<
   const notice =
     response.modelServiceNotice ??
     modelServiceNoticeFromFinishReason(response.finishReason, context);
-  return notice ? { ...response, modelServiceNotice: notice } : response;
+  return notice
+    ? { ...response, modelServiceNotice: sanitizeModelServiceNotice(notice) }
+    : response;
 }
 
 export function modelServiceNoticeFromError(
   error: unknown,
   context: NoticeContext = {},
 ): ModelServiceNotice | undefined {
-  if (error instanceof ModelServiceNoticeError) return error.notice;
+  if (error instanceof ModelServiceNoticeError) {
+    return sanitizeModelServiceNotice(error.notice);
+  }
   const record = asRecord(error);
   const metadata = asRecord(record?.$metadata);
   const response = asRecord(record?.response);
@@ -173,12 +189,12 @@ function buildNotice(
   context: NoticeContext,
   fields: Omit<ModelServiceNotice, "kind" | "provider" | "model">,
 ): ModelServiceNotice {
-  return {
+  return sanitizeModelServiceNotice({
     kind,
     ...(context.provider ? { provider: context.provider } : {}),
     ...(context.model ? { model: context.model } : {}),
     ...fields,
-  };
+  });
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

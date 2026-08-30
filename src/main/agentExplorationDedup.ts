@@ -1,3 +1,8 @@
+import {
+  redactCredentialString,
+  stringifyRedactedCredentials,
+} from "../shared/credentialRedaction";
+
 /**
  * Exploration dedup tracker.
  *
@@ -198,10 +203,11 @@ export function buildExplorationDedupNote(input: {
   lastTurn?: number;
   digest?: string;
 }): string {
-  const target =
+  const target = redactCredentialString(
     String(
       input.args.path ?? input.args.root ?? input.args.query ?? input.args.ref ?? "",
-    ).slice(0, 120) || JSON.stringify(input.args).slice(0, 120);
+    ),
+  ).slice(0, 120) || stringifyRedactedCredentials(input.args).slice(0, 120);
   const lines = [
     `探索去重提示：「${input.toolName} ${target}」在本轮运行中已经成功读取过 ${input.priorReads} 次（最早第 ${input.firstTurn} 轮${
       input.lastTurn && input.lastTurn !== input.firstTurn
@@ -210,7 +216,7 @@ export function buildExplorationDedupNote(input: {
     }）。`,
   ];
   if (input.digest) {
-    lines.push(`最近一次读取结果摘要：${input.digest}`);
+    lines.push(`最近一次读取结果摘要：${redactCredentialString(input.digest)}`);
     lines.push(
       "若上述摘要足以支撑当前步骤，请直接复用，不要再次读取；只有需要摘要之外的具体内容时才重新读取，并优先用 offset/limit 等参数精确读取所需片段。",
     );

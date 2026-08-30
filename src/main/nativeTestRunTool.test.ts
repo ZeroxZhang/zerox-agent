@@ -171,7 +171,9 @@ describe("native test run tool", () => {
     });
   });
 
-  it("cleans private temps after real Seatbelt timeout and abort", async () => {
+  it.skipIf(process.env.ZEROX_V392_OUTER_SANDBOX === "1")(
+    "cleans private temps after real Seatbelt timeout and abort",
+    async () => {
     if (process.platform !== "darwin") return;
     const privateTempRoot = await mkdtemp(
       path.join(os.tmpdir(), "zerox-test-private-root-"),
@@ -234,7 +236,8 @@ describe("native test run tool", () => {
     } finally {
       await rm(privateTempRoot, { recursive: true, force: true });
     }
-  });
+    },
+  );
 });
 
 async function expectProcessToExit(pid: number): Promise<void> {

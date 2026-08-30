@@ -259,7 +259,9 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
     }
   });
 
-  it("holds a real private temp until stdio MCP disconnect then removes it", async () => {
+  it.skipIf(process.env.ZEROX_V392_OUTER_SANDBOX === "1")(
+    "holds a real private temp until stdio MCP disconnect then removes it",
+    async () => {
     if (process.platform !== "darwin") return;
     const dir = await realpath(
       await mkdtemp(path.join(os.tmpdir(), "zerox-mcp-close-")),
@@ -330,7 +332,8 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
         rm(privateTempRoot, { recursive: true, force: true }),
       ]);
     }
-  });
+    },
+  );
 
   it("awaits the in-flight process lease cleanup during disconnect", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "zerox-mcp-drain-"));

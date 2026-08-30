@@ -5,25 +5,75 @@
 // each event as `payload` with (run_id, seq) UNIQUE — `appendTrajectory` is the
 // synchronous hot path (contract §1.4: no async regression).
 
-import type { AgentRunRecord } from "../../../shared/agentRuns";
-import type { AgentRunStatus } from "../../../shared/agentRuns";
+import { isDeepStrictEqual } from "node:util";
+import {
+  AgentRunRevisionConflictError,
+  classifyAgentRunRevisionWrite,
+  resolveAgentRunExecutionRevision,
+  type AgentRunRecord,
+} from "../../../shared/agentRuns";
 import type {
   AgentTrajectoryEvent,
   AgentTrajectoryEventType,
 } from "../../../shared/agentTrajectory";
+import {
+  createConversationSourcePage,
+  createConversationSourceQueryHash,
+  createConversationSourceRevision,
+  normalizeConversationSourcePageLimit,
+  parseConversationSourceCursor,
+  type ConversationSourcePage,
+  type ConversationSourcePageOptions,
+} from "../../../shared/conversationEvidence";
 import type {
   RunRepository,
+  RunSnapshotImportRepository,
   Storage,
   TrajectoryRepository,
 } from "../../../shared/storageContract";
 import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../repositoryUtils";
 
-export function createRunRepository(storage: Storage): RunRepository {
+export function createRunRepository(
+  storage: Storage,
+): RunRepository & RunSnapshotImportRepository {
   const db = storage.db;
+  const createRun = db.transaction(
+    (
+      input: Omit<AgentRunRecord, "id"> & { id: string },
+      allowMissingSnapshotBootstrap: boolean,
+    ): AgentRunRecord => {
+      const candidate = canonicalizeRun({
+        ...(input as AgentRunRecord),
+        executionRevision: resolveAgentRunExecutionRevision(input),
+      });
+      const stored = getPayloadRow<AgentRunRecord>(
+        db,
+        "SELECT payload FROM runs WHERE id = ?",
+        [candidate.id],
+      );
+      const current = stored
+        ? canonicalizeRun({
+            ...stored,
+            executionRevision: resolveAgentRunExecutionRevision(stored),
+          })
+        : null;
+      const candidateRevision = resolveAgentRunExecutionRevision(candidate);
+      const disposition = current === null
+        && allowMissingSnapshotBootstrap
+        && Number.isSafeInteger(candidateRevision)
+        && candidateRevision > 0
+        ? "insert"
+        : classifyAgentRunRevisionWrite(
+            current,
+            candidate,
+            isDeepStrictEqual,
+            isDeepStrictEqual,
+          );
+      if (disposition === "conflict") {
+        throw new AgentRunRevisionConflictError();
+      }
+      if (disposition === "duplicate") return current!;
 
-  return {
-    create(input: Omit<AgentRunRecord, "id"> & { id: string }): AgentRunRecord {
-      const record: AgentRunRecord = { ...(input as AgentRunRecord) };
       db.prepare(
         `INSERT INTO runs (id, task_id, task_name, skill_name, status, summary, payload, started_at, finished_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -32,17 +82,27 @@ export function createRunRepository(storage: Storage): RunRepository {
            status=excluded.status, summary=excluded.summary, payload=excluded.payload,
            started_at=excluded.started_at, finished_at=excluded.finished_at`,
       ).run(
-        record.id,
-        record.taskId,
-        record.taskName,
-        record.skillName,
-        record.status,
-        record.summary ?? "",
-        jsonify(record),
-        record.startedAt,
-        record.finishedAt,
+        candidate.id,
+        candidate.taskId,
+        candidate.taskName,
+        candidate.skillName,
+        candidate.status,
+        candidate.summary ?? "",
+        jsonify(candidate),
+        candidate.startedAt,
+        candidate.finishedAt,
       );
-      return record;
+      return candidate;
+    },
+  );
+
+  return {
+    create(input: Omit<AgentRunRecord, "id"> & { id: string }): AgentRunRecord {
+      return createRun(input, false);
+    },
+
+    importSnapshot(input: AgentRunRecord): AgentRunRecord {
+      return createRun(input, true);
     },
 
     get(runId: string): AgentRunRecord | null {
@@ -67,14 +127,6 @@ export function createRunRepository(storage: Storage): RunRepository {
         "SELECT payload FROM runs ORDER BY started_at DESC, rowid DESC LIMIT ?",
         [limit],
       );
-    },
-
-    updateStatus(runId: string, status: AgentRunStatus): void {
-      db.prepare(
-        `UPDATE runs
-         SET status = ?, payload = json_set(payload, '$.status', ?)
-         WHERE id = ?`,
-      ).run(status, status, runId);
     },
 
     appendTrajectory(
@@ -204,7 +256,15 @@ export function createRunRepository(storage: Storage): RunRepository {
         .map((r) => parseJson<AgentTrajectoryEvent>(r.payload))
         .filter((v): v is AgentTrajectoryEvent => v !== null);
     },
+
+    getTrajectoryPage(runId, options) {
+      return queryTrajectoryPage(db, runId, options);
+    },
   };
+}
+
+function canonicalizeRun(run: AgentRunRecord): AgentRunRecord {
+  return JSON.parse(JSON.stringify(run)) as AgentRunRecord;
 }
 
 export function createTrajectoryRepository(storage: Storage): TrajectoryRepository {
@@ -253,6 +313,10 @@ export function createTrajectoryRepository(storage: Storage): TrajectoryReposito
       );
     },
 
+    getTrajectoryPage(runId, options) {
+      return queryTrajectoryPage(db, runId, options, options?.types);
+    },
+
     scanByTypes(
       types: AgentTrajectoryEventType[],
       opts?: { runId?: string; limit?: number },
@@ -266,4 +330,110 @@ export function createTrajectoryRepository(storage: Storage): TrajectoryReposito
       );
     },
   };
+}
+
+function queryTrajectoryPage(
+  db: Storage["db"],
+  runId: string,
+  options?: ConversationSourcePageOptions,
+  types?: AgentTrajectoryEventType[],
+): ConversationSourcePage<AgentTrajectoryEvent> {
+  throwIfAborted(options?.signal);
+  const normalizedTypes = [...new Set(types ?? [])].sort();
+  const queryHash = createConversationSourceQueryHash({
+    source: "trajectory",
+    sourceId: runId,
+    filters: { types: normalizedTypes },
+  });
+  const whereParts = ["run_id = ?"];
+  const whereParams: unknown[] = [runId];
+  if (normalizedTypes.length > 0) {
+    whereParts.push(`type IN (${normalizedTypes.map(() => "?").join(",")})`);
+    whereParams.push(...normalizedTypes);
+  }
+  const where = whereParts.join(" AND ");
+  const cut = db.prepare(
+    `SELECT COALESCE(MAX(seq), 0) AS max_seq, COUNT(*) AS count
+       FROM trajectory_events
+      WHERE ${where}`,
+  ).get<{ max_seq: number; count: number }>(...whereParams) ?? {
+    max_seq: 0,
+    count: 0,
+  };
+  const sourceRevision = createConversationSourceRevision({
+    source: "trajectory",
+    sourceId: runId,
+    authority: {
+      backend: "sqlite",
+      maxSequence: cut.max_seq,
+      count: cut.count,
+      types: normalizedTypes,
+    },
+  });
+  const parsedCursor = parseConversationSourceCursor(options?.cursor, {
+    source: "trajectory",
+    sourceId: runId,
+    queryHash,
+  });
+  if (
+    parsedCursor.kind === "incompatible"
+    || (
+      parsedCursor.kind === "position"
+      && (
+        parsedCursor.sourceRevision !== sourceRevision
+        || parsedCursor.position > cut.max_seq
+      )
+    )
+  ) {
+    return createConversationSourcePage({
+      source: "trajectory",
+      sourceId: runId,
+      queryHash,
+      sourceRevision,
+      status: "incompatible",
+      reasonCode: "source_cursor_mismatch",
+      records: [],
+    });
+  }
+  const position = parsedCursor.position;
+  const limit = normalizeConversationSourcePageLimit(options?.limit);
+  const rows = db.prepare(
+    `SELECT seq, payload
+       FROM trajectory_events
+      WHERE ${where}
+        AND seq > ?
+        AND seq <= ?
+      ORDER BY seq ASC
+      LIMIT ?`,
+  ).all<{ seq: number; payload: string }>(
+    ...whereParams,
+    position,
+    cut.max_seq,
+    limit + 1,
+  );
+  throwIfAborted(options?.signal);
+  const physical = rows.slice(0, limit);
+  const records = physical
+    .map((row) => parseJson<AgentTrajectoryEvent>(row.payload))
+    .filter((event): event is AgentTrajectoryEvent => event !== null);
+  const corrupt = records.length !== physical.length;
+  const hasMore = rows.length > limit;
+  return createConversationSourcePage({
+    source: "trajectory",
+    sourceId: runId,
+    queryHash,
+    sourceRevision,
+    status: corrupt ? "partial" : "complete",
+    ...(corrupt ? { reasonCode: "corrupt_record" } : {}),
+    records,
+    ...(hasMore && physical.length > 0
+      ? { nextPosition: physical.at(-1)!.seq }
+      : {}),
+  });
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new DOMException("Trajectory page query was canceled.", "AbortError");
 }

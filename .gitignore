@@ -35,5 +35,8 @@ docs/design/*
 !docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md
 .tmp_*
 .zerox/product-design-audit-*/
+# Transient PlanStore runtime scratch written during real-app acceptance
+# scenarios (atomic .tmp + rename); ephemeral app state, never a deliverable.
+.zerox/plans/
 generate_report.py
 goalEvidence.md*

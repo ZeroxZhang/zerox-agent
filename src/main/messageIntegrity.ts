@@ -1,4 +1,11 @@
 import type { ChatMessage, ToolCall } from "./openAiCompatibleClient";
+import type { ContextSurfaceState } from "../shared/contextSurface";
+import {
+  redactCredentialJsonText,
+  redactCredentialString,
+  redactCredentials,
+  stringifyRedactedCredentials,
+} from "../shared/credentialRedaction";
 
 /**
  * Message-sequence integrity layer.
@@ -170,7 +177,7 @@ export function sanitizeChatMessages(
   };
 
   for (let index = 0; index < input.length; index += 1) {
-    const message = input[index]!;
+    const message = redactChatMessageCredentials(input[index]!);
 
     if (message.role === "tool") {
       const matching = openToolCallIds.indexOf(message.tool_call_id ?? "");
@@ -247,6 +254,83 @@ export function sanitizeChatMessages(
   closeOpenBatch(input.length);
 
   return { messages: output, repairs };
+}
+
+export function redactChatMessageCredentials(message: ChatMessage): ChatMessage {
+  const redacted = redactCredentials(message) as ChatMessage;
+  const safeContent = message.role === "tool"
+    ? redactToolMessageContent(message.content)
+    : redacted.content;
+  if (!message.tool_calls?.length) {
+    return { ...redacted, content: safeContent };
+  }
+  return {
+    ...redacted,
+    content: safeContent,
+    tool_calls: message.tool_calls.map((toolCall) => ({
+      ...toolCall,
+      function: {
+        ...toolCall.function,
+        arguments: redactCredentialJsonText(toolCall.function.arguments),
+      },
+    })),
+  };
+}
+
+function redactToolMessageContent(content: string): string {
+  const fenced = content.match(
+    /^(<tool_result\b[^>]*>\s*)([\s\S]*?)(\s*<\/tool_result>\s*)$/i,
+  );
+  if (fenced) {
+    try {
+      return `${fenced[1]}${stringifyRedactedCredentials(
+        JSON.parse(fenced[2] ?? "null"),
+      )}${fenced[3]}`;
+    } catch {
+      return `${fenced[1]}{"redacted":"invalid_tool_result"}${fenced[3]}`;
+    }
+  }
+  const trimmed = content.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return stringifyRedactedCredentials(JSON.parse(content));
+    } catch {
+      return '{"redacted":"invalid_tool_result"}';
+    }
+  }
+  return redactCredentialString(content);
+}
+
+export function redactChatMessagesCredentials(
+  messages: readonly ChatMessage[],
+): ChatMessage[] {
+  return messages.map(redactChatMessageCredentials);
+}
+
+export function redactContextSurfaceCredentials(
+  state: ContextSurfaceState,
+): ContextSurfaceState {
+  return {
+    ...state,
+    events: state.events.map((event) =>
+      event.kind === "source"
+        ? {
+            ...event,
+            message: redactChatMessageCredentials(
+              event.message as ChatMessage,
+            ),
+          }
+        : {
+            ...event,
+            replacementNodes: event.replacementNodes.map((node) => ({
+              ...node,
+              message: redactChatMessageCredentials(
+                node.message as ChatMessage,
+              ),
+            })),
+          },
+    ),
+  };
 }
 
 export type MessageSequenceIssue = {

@@ -84,7 +84,7 @@ async function readRun(
   const runs = parseJsonl<AgentRunRecord>(
     await readTextOrEmpty(path.join(configDir, "agent-runs.jsonl")),
   );
-  return runs.find((run) => run.id === runId) ?? null;
+  return runs.reverse().find((run) => run.id === runId) ?? null;
 }
 
 async function readLearningCandidates(

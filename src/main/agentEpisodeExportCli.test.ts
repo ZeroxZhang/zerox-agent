@@ -27,10 +27,20 @@ describe("exportAgentEpisodeFromConfig", () => {
   });
 
   it("exports the latest validation run through the typed episode package", async () => {
-    const run = createRun("run_1");
+    const run = {
+      ...createRun("run_1"),
+      executionRevision: 2,
+      summary: "Latest resumed owner.",
+    };
+    const previousOwner = {
+      ...createRun("run_1"),
+      executionRevision: 1,
+      status: "paused" as const,
+      summary: "Stale paused owner.",
+    };
     await writeFile(
       path.join(configDir, "agent-runs.jsonl"),
-      `${JSON.stringify(createRun("run_old"))}\n${JSON.stringify(run)}\n`,
+      `${JSON.stringify(createRun("run_old"))}\n${JSON.stringify(previousOwner)}\n${JSON.stringify(run)}\n`,
     );
     await mkdir(path.join(configDir, "agent-executions"), { recursive: true });
     await writeFile(
@@ -68,6 +78,8 @@ describe("exportAgentEpisodeFromConfig", () => {
     });
 
     expect(result.runId).toBe("run_1");
+    await expect(readFile(path.join(outDir, "run.json"), "utf8"))
+      .resolves.toContain('"executionRevision": 2');
     await expect(readFile(path.join(outDir, "eval-candidate.json"), "utf8"))
       .resolves.toContain("\"status\": \"pending_review\"");
     const runGraph = await readJson(path.join(outDir, "run-graph.json"));

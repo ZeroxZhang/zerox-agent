@@ -58,11 +58,29 @@ import type {
 } from "../shared/agentTrajectory";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { AgentRunContext } from "../shared/agentWorkspace";
-import type {
-  AgentRunEvent,
-  AgentRunRecord,
-  RunScheduledTaskResult,
+import {
+  areAgentRunExecutionEnvelopesEqual,
+  assertAgentRunAdmissionLease,
+  AgentRunPostCommitSettlementError,
+  AgentRunRevisionConflictError,
+  commitAdmittedAgentRun,
+  projectSecretSafeAgentRun,
+  projectAgentRunExecutionEnvelope,
+  publishAgentRunObserverEvent,
+  requireAgentRunAdmissionLease,
+  resolveAgentRunExecutionRevision,
+  type AgentRunAdmissionLease,
+  type AgentRunExecutionAdmittedHandler,
+  type AgentRunEvent,
+  type AgentRunAdmissionGate,
+  type AgentRunRecord,
+  type RunScheduledTaskResult,
 } from "../shared/agentRuns";
+import {
+  createSecretSafeFailure,
+  toSecretSafeFailure,
+  type SecretSafeFailure,
+} from "../shared/secretSafeFailure";
 import {
   modelServiceNoticeFromError,
   type ModelServiceNotice,
@@ -90,6 +108,16 @@ import { summarizeAgentRuntimeContextSnapshot } from "../shared/agentRuntimeCont
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import { runAgentLoop as runSharedAgentLoop } from "./agentLoop";
 import { resolveAgentContextBudget } from "../shared/contextUsage";
+import {
+  redactCredentialJsonText,
+  redactCredentials,
+  redactCredentialString,
+} from "../shared/credentialRedaction";
+import {
+  redactChatMessageCredentials,
+  redactChatMessagesCredentials,
+  redactContextSurfaceCredentials,
+} from "./messageIntegrity";
 
 export type AgentRuntimeModelProfile = {
   baseUrl: string;
@@ -109,11 +137,18 @@ export type AgentRuntimeEngine = {
       signal?: AbortSignal;
       sessionId?: string;
       onEvent?: (event: AgentRunEvent) => void;
+      beforeExecution?: AgentRunAdmissionGate;
+      onExecutionAdmitted?: AgentRunExecutionAdmittedHandler;
     },
   ): Promise<RunScheduledTaskResult>;
   resumeRun(
     runId: string,
-    options?: { signal?: AbortSignal; onEvent?: (event: AgentRunEvent) => void },
+    options?: {
+      signal?: AbortSignal;
+      onEvent?: (event: AgentRunEvent) => void;
+      beforeExecution?: AgentRunAdmissionGate;
+      onExecutionAdmitted?: AgentRunExecutionAdmittedHandler;
+    },
   ): Promise<RunScheduledTaskResult>;
 };
 
@@ -178,8 +213,7 @@ export function createAgentRuntimeEngine(options: {
     event: AgentRunEvent,
     onEvent: ((event: AgentRunEvent) => void) | undefined,
   ): AgentRunEvent {
-    onEvent?.(event);
-    return event;
+    return publishAgentRunObserverEvent(onEvent, event);
   }
 
   async function saveCheckpoint(
@@ -187,12 +221,25 @@ export function createAgentRuntimeEngine(options: {
     status: AgentExecutionStatus,
     updates: Partial<AgentExecutionCheckpoint> = {},
   ): Promise<AgentExecutionCheckpoint> {
-    const updated: AgentExecutionCheckpoint = {
+    const candidate: AgentExecutionCheckpoint = {
       ...checkpoint,
       ...updates,
       status,
       id: createId(),
       updatedAt: now().toISOString(),
+    };
+    const updated: AgentExecutionCheckpoint = {
+      ...(redactCredentials(candidate) as AgentExecutionCheckpoint),
+      messages: redactChatMessagesCredentials(
+        candidate.messages.map(toChatMessage),
+      ).map(toExecutionMessage),
+      ...(candidate.contextSurface
+        ? {
+            contextSurface: redactContextSurfaceCredentials(
+              candidate.contextSurface,
+            ),
+          }
+        : {}),
     };
     if (checkpoint.status !== status) {
       await appendTrajectory(updated.runId, "state_transition", {
@@ -237,7 +284,7 @@ export function createAgentRuntimeEngine(options: {
         type,
         sequence,
         ...(runContext ? { runContext } : {}),
-        payload,
+        payload: redactCredentials(payload) as Record<string, unknown>,
         redaction: redaction ?? {
           containsApiKey: false,
           containsFileContent: false,
@@ -269,17 +316,23 @@ export function createAgentRuntimeEngine(options: {
     summary: string;
     events: AgentRunEvent[];
     startedAt: string;
+    executionRevision?: number;
     modelServiceNotice?: ModelServiceNotice;
     failure?: unknown;
     onEvent?: (event: AgentRunEvent) => void;
+    admissionLease?: AgentRunAdmissionLease;
+    onRunPersisted?: (run: AgentRunRecord) => void;
   }): Promise<RunScheduledTaskResult> {
     const finishedAt = now().toISOString();
     const failureClass = input.failure
       ? classifyAgentFailure(input.failure)
       : undefined;
-    const failureMessage = input.failure
-      ? formatFailureMessage(input.failure)
+    const safeFailure = input.failure
+      ? input.status === "canceled"
+        ? createSecretSafeFailure("RUNTIME_CANCELED")
+        : toSecretSafeFailure(input.failure, "AGENT_RUN_EXECUTION_FAILED")
       : undefined;
+    const failureMessage = safeFailure?.publicMessage;
     if (failureClass) {
       await appendTrajectory(
         input.checkpoint.runId,
@@ -287,7 +340,7 @@ export function createAgentRuntimeEngine(options: {
         buildFailureClassifiedPayload(
           input.failure,
           failureClass,
-          failureMessage,
+          safeFailure,
         ),
       );
     }
@@ -298,32 +351,43 @@ export function createAgentRuntimeEngine(options: {
         ? { steps: markCurrentStepFailed(input.checkpoint.steps, failureClass, failureMessage) }
         : undefined,
     );
-    const run: AgentRunRecord = {
+    const run = projectSecretSafeAgentRun({
       id: input.checkpoint.runId,
       taskId: input.taskId,
       taskName: input.taskName,
       skillName: input.skillName,
       status: input.status,
+      executionRevision:
+        input.executionRevision
+        ?? resolveAgentRunExecutionRevision(input.admissionLease ?? {}),
       ...(checkpoint.runContext ? { runContext: checkpoint.runContext } : {}),
-      summary: input.summary,
-      events: input.events,
+      summary: redactCredentialString(input.summary),
+      events: redactCredentials(input.events) as AgentRunEvent[],
       checkpointId: checkpoint.id,
       ...(input.modelServiceNotice
         ? { modelServiceNotice: input.modelServiceNotice }
         : {}),
       ...(failureClass ? { failureClass } : {}),
+      ...(safeFailure ? { failureCode: safeFailure.code } : {}),
       ...(failureMessage ? { failureMessage } : {}),
       startedAt: input.startedAt,
       finishedAt,
-    };
+    });
+
+    await commitAdmittedAgentRun({
+      run,
+      admissionLease: input.admissionLease,
+      appendRun: (record) => options.runStore.append(record),
+      onRunPersisted: input.onRunPersisted,
+    });
 
     if (run.status === "succeeded" && options.memoryStore?.create) {
       try {
         await options.memoryStore.create({
           kind: "episodic",
-          title: `Run: ${input.taskName}`,
+          title: `Run: ${run.taskName}`,
           content: run.summary,
-          tags: ["agent-run", input.skillName],
+          tags: ["agent-run", run.skillName],
           source: { type: "agent_run", refId: run.id },
           importance: 3,
         });
@@ -333,22 +397,19 @@ export function createAgentRuntimeEngine(options: {
           }), input.onEvent),
         );
       } catch (error) {
+        const safeMemoryFailure = toSecretSafeFailure(error, "INTERNAL_FAILURE");
         run.events.push(
           publishEvent(createEvent("warn", "Unable to write episodic memory.", {
-            error:
-              error instanceof Error
-                ? error.message
-                : "Unknown memory error.",
+            code: safeMemoryFailure.code,
           }), input.onEvent),
         );
       }
     }
-
-    await options.runStore.append(run);
     if (input.status !== "paused") {
-      await options.taskStore.recordRun(input.taskId, new Date(finishedAt));
+      await options.taskStore.recordRun(input.taskId, new Date(finishedAt))
+        .catch(() => undefined);
     }
-    await createLearningCandidates(run);
+    await createLearningCandidates(run).catch(() => undefined);
 
     return { ok: true, run };
   }
@@ -373,7 +434,10 @@ export function createAgentRuntimeEngine(options: {
     signal: AbortSignal | undefined,
     events: AgentRunEvent[],
     startedAt: string,
+    executionRevision: number,
     onEvent?: (event: AgentRunEvent) => void,
+    admissionLease?: AgentRunAdmissionLease,
+    onRunPersisted?: (run: AgentRunRecord) => void,
   ): Promise<RunScheduledTaskResult> {
     let current = await saveCheckpoint(checkpoint, "running", {
       steps: markCurrentStepRunning(
@@ -495,7 +559,7 @@ export function createAgentRuntimeEngine(options: {
             { turn, phase },
           );
           events.push(event);
-          onEvent?.(event);
+          publishEvent(event, onEvent);
           appendObserved("model_request", {
             turn,
             phase,
@@ -519,15 +583,28 @@ export function createAgentRuntimeEngine(options: {
           });
         },
         onModelRetry(event) {
-          const runEvent = createEvent("warn", "Retrying model request.", event);
+          const safeRetryFailure = createSecretSafeFailure(
+            "AGENT_RUN_EXECUTION_FAILED",
+          );
+          const safeRetryEvent = {
+            attempt: event.attempt,
+            maxRetries: event.maxRetries,
+            delayMs: event.delayMs,
+            code: safeRetryFailure.code,
+          };
+          const runEvent = createEvent(
+            "warn",
+            "Retrying model request.",
+            safeRetryEvent,
+          );
           events.push(runEvent);
-          onEvent?.(runEvent);
-          appendObserved("model_retry", event);
+          publishEvent(runEvent, onEvent);
+          appendObserved("model_retry", safeRetryEvent);
           kernelReporter?.retry({
             attempt: event.attempt,
             maxRetries: event.maxRetries,
             afterMs: event.delayMs,
-            error: event.error,
+            error: safeRetryFailure.publicMessage,
           });
         },
         onContextCompacted(event) {
@@ -537,7 +614,7 @@ export function createAgentRuntimeEngine(options: {
             { ...event },
           );
           events.push(runEvent);
-          onEvent?.(runEvent);
+          publishEvent(runEvent, onEvent);
           appendObserved("context_compacted", event);
         },
         onToolCall(toolName, args, event) {
@@ -546,17 +623,18 @@ export function createAgentRuntimeEngine(options: {
             toolName,
           });
           events.push(runEvent);
-          onEvent?.(runEvent);
+          publishEvent(runEvent, onEvent);
+          const safeArgs = redactCredentials(args) as Record<string, unknown>;
           appendObserved("tool_call", {
             toolCallId: event.toolCallId,
             toolName,
-            args,
+            args: safeArgs,
           }, {
             containsApiKey: false,
             containsFileContent: false,
             containsUserText: true,
           });
-          kernelReporter?.toolCall(toolName, args);
+          kernelReporter?.toolCall(toolName, safeArgs);
         },
         onToolRuntimeEvent(_toolName, runtimeEvent, event) {
           if (runtimeEvent.type !== "read_code_subcall") {
@@ -584,7 +662,7 @@ export function createAgentRuntimeEngine(options: {
             { toolCallId: event.toolCallId, toolName, ok },
           );
           events.push(runEvent);
-          onEvent?.(runEvent);
+          publishEvent(runEvent, onEvent);
           appendObserved("tool_result", {
             toolCallId: event.toolCallId,
             toolName,
@@ -614,7 +692,9 @@ export function createAgentRuntimeEngine(options: {
           await observationQueue.drain();
           current = await saveCheckpoint(current, "running", {
             messages: loopCheckpoint.messages.map(toExecutionMessage),
-            contextSurface: loopCheckpoint.contextSurface,
+            contextSurface: redactContextSurfaceCredentials(
+              loopCheckpoint.contextSurface,
+            ),
             toolCallCount: loopCheckpoint.toolCallsExecuted,
             tokensConsumed: loopCheckpoint.tokensConsumed,
             tokensEstimated: loopCheckpoint.tokensEstimated,
@@ -624,7 +704,7 @@ export function createAgentRuntimeEngine(options: {
             toolCallsExecuted: loopCheckpoint.toolCallsExecuted,
           });
           events.push(event);
-          onEvent?.(event);
+          publishEvent(event, onEvent);
           kernelReporter?.checkpoint(
             `agent-executions/${current.runId}/${current.id}`,
             loopCheckpoint.turns,
@@ -642,7 +722,11 @@ export function createAgentRuntimeEngine(options: {
         {
           messages: loopResult.messages.map(toExecutionMessage),
           ...(loopResult.contextSurface
-            ? { contextSurface: loopResult.contextSurface }
+            ? {
+                contextSurface: redactContextSurfaceCredentials(
+                  loopResult.contextSurface,
+                ),
+              }
             : {}),
           toolCallCount: loopResult.toolCallsExecuted,
           tokensConsumed: loopResult.tokensConsumed ?? 0,
@@ -671,28 +755,36 @@ export function createAgentRuntimeEngine(options: {
       }
 
       const status = loopResult.status;
+      const summary = status === "failed"
+        ? createSecretSafeFailure("AGENT_RUN_EXECUTION_FAILED").publicMessage
+        : status === "canceled"
+          ? "运行已取消。"
+          : redactCredentialString(loopResult.summary);
       const terminalEvent = createEvent(
         status === "succeeded" ? "info" : status === "paused" ? "warn" : "error",
         `Shared agent loop ${status}.`,
         { tokensConsumed: loopResult.tokensConsumed ?? 0 },
       );
       events.push(terminalEvent);
-      onEvent?.(terminalEvent);
+      publishEvent(terminalEvent, onEvent);
       return finishRun({
         checkpoint: current,
         taskId: task.id,
         taskName: task.name,
         skillName: getRunSkillName(task),
         status,
-        summary: loopResult.summary,
+        summary,
         events,
         startedAt,
+        executionRevision,
         ...(onEvent ? { onEvent } : {}),
+        admissionLease,
+        onRunPersisted,
         ...(loopResult.modelServiceNotice
           ? { modelServiceNotice: loopResult.modelServiceNotice }
           : {}),
         ...(status === "failed" || status === "canceled"
-          ? { failure: new Error(loopResult.summary) }
+          ? { failure: new Error(summary) }
           : {}),
       });
     };
@@ -750,15 +842,21 @@ export function createAgentRuntimeEngine(options: {
         loopResult = await executeLoopSegment();
       } catch (error) {
         const modelServiceNotice = modelServiceNoticeFromError(error);
+        const status = isPauseError(error, signal)
+          ? "paused"
+          : isCancellationError(error, signal)
+            ? "canceled"
+            : modelServiceNotice
+              ? "paused"
+              : "failed";
         loopResult = createSettledLoopResult(
-          isPauseError(error, signal)
-            ? "paused"
-            : isCancellationError(error, signal)
-              ? "canceled"
-              : modelServiceNotice
-                ? "paused"
-                : "failed",
-          modelServiceNotice?.message ?? formatFailureMessage(error),
+          status,
+          modelServiceNotice?.message ??
+            (status === "paused"
+              ? "运行已暂停。"
+              : status === "canceled"
+                ? "运行已取消。"
+                : formatFailureMessage(error)),
           modelServiceNotice,
         );
       }
@@ -775,6 +873,12 @@ export function createAgentRuntimeEngine(options: {
       const outcome = await options.productionKernelDriver.run({
         runId: current.runId,
         mode: "scheduled_task",
+        failureDisposition: "return_settlement",
+        resolvePostCommitFailure(error) {
+          return error instanceof AgentRunPostCommitSettlementError
+            ? error.failure
+            : undefined;
+        },
         ...(signal ? { signal } : {}),
         checkpointEvery: maxTurns,
         execute: executePersistedSegment,
@@ -821,7 +925,10 @@ export function createAgentRuntimeEngine(options: {
     signal: AbortSignal | undefined,
     events: AgentRunEvent[],
     startedAt: string,
+    executionRevision: number,
     onEvent?: (event: AgentRunEvent) => void,
+    admissionLease?: AgentRunAdmissionLease,
+    onRunPersisted?: (run: AgentRunRecord) => void,
   ): Promise<RunScheduledTaskResult> {
     if (options.runLoop) {
       return runFromCheckpointWithSharedLoop(
@@ -831,7 +938,10 @@ export function createAgentRuntimeEngine(options: {
         signal,
         events,
         startedAt,
+        executionRevision,
         onEvent,
+        admissionLease,
+        onRunPersisted,
       );
     }
     let current = await saveCheckpoint(checkpoint, "running", {
@@ -869,7 +979,7 @@ export function createAgentRuntimeEngine(options: {
         { estimatedTokens, compactedTokens, tokenBudget: contextTokenBudget },
       );
       events.push(event);
-      onEvent?.(event);
+      publishEvent(event, onEvent);
     }
 
     async function compactMessagesBeforeModelRequest() {
@@ -1091,7 +1201,10 @@ export function createAgentRuntimeEngine(options: {
           summary: response.content,
           events,
           startedAt,
+          executionRevision,
           ...(onEvent ? { onEvent } : {}),
+          admissionLease,
+          onRunPersisted,
         });
       }
 
@@ -1102,7 +1215,13 @@ export function createAgentRuntimeEngine(options: {
       messages.push({
         role: "assistant",
         content: response.content ?? "",
-        tool_calls: response.toolCalls,
+        tool_calls: response.toolCalls.map((toolCall) => ({
+          ...toolCall,
+          function: {
+            ...toolCall.function,
+            arguments: redactCredentialJsonText(toolCall.function.arguments),
+          },
+        })),
       });
 
       let wroteToolCheckpoint = false;
@@ -1375,66 +1494,125 @@ export function createAgentRuntimeEngine(options: {
 
       const startedAt = now().toISOString();
       const runId = createId();
-      const startedEvent = createEvent("info", "Agent runtime started.");
-      const events = [publishEvent(startedEvent, runOptions?.onEvent)];
-      const runContext = await options.workspaceService?.resolveRunContext(
-        runOptions?.sessionId ? { sessionId: runOptions.sessionId } : undefined,
+      const admissionCandidate = {
+        runId,
+        taskId: task.id,
+        ...(runOptions?.sessionId ? { sessionId: runOptions.sessionId } : {}),
+        executionRevision: 1,
+      };
+      const admissionLease = assertAgentRunAdmissionLease(
+        admissionCandidate,
+        await runOptions?.beforeExecution?.(admissionCandidate),
       );
-      const initialProfile = await options.getModelProfile();
-      const initialToolDefinitions = initialProfile.modelCapabilities?.tools === false
-        ? []
-        : filterToolDefinitionsForScheduledTask(
-            getToolDefinitions(options.toolExecutor),
-            task,
-          );
-      const systemTimeZone = getSystemTimeZone();
-      const proceduralMemoryContext =
-        await buildProceduralMemoryPromptContext({
+      let events: AgentRunEvent[] = [];
+      let executionAdmitted = false;
+      let checkpoint: AgentExecutionCheckpoint | undefined;
+      let terminalRunPersisted = false;
+      const markTerminalRunPersisted = (run: AgentRunRecord) => {
+        if (run.id !== runId) {
+          throw new Error("Persisted AgentRun identity does not match its admission.");
+        }
+        terminalRunPersisted = true;
+      };
+      const persistInitializationFailure = async (): Promise<RunScheduledTaskResult> => {
+        const summary = "Agent run initialization failed.";
+        const failureEvent = createEvent("error", summary, {
+          code: "AGENT_RUN_INITIALIZATION_FAILED",
+        });
+        events.push(failureEvent);
+        if (executionAdmitted) {
+          publishEvent(failureEvent, runOptions?.onEvent);
+        }
+        const finishedAt = now().toISOString();
+        const run = projectSecretSafeAgentRun({
+          id: runId,
+          taskId: task.id,
+          taskName: task.name,
+          skillName: getRunSkillName(task),
+          status: "failed",
+          executionRevision: admissionCandidate.executionRevision,
+          summary,
+          events,
+          ...(checkpoint ? { checkpointId: checkpoint.id } : {}),
+          failureClass: "unknown",
+          failureCode: "AGENT_RUN_EXECUTION_FAILED",
+          failureMessage: summary,
+          startedAt,
+          finishedAt,
+        });
+        await commitAdmittedAgentRun({
+          run,
+          admissionLease,
+          appendRun: (record) => options.runStore.append(record),
+          onRunPersisted: markTerminalRunPersisted,
+        });
+        await options.taskStore.recordRun(task.id, new Date(finishedAt))
+          .catch(() => undefined);
+        return { ok: true, run };
+      };
+
+      try {
+        await runOptions?.onExecutionAdmitted?.(admissionCandidate);
+        executionAdmitted = true;
+        const startedEvent = createEvent("info", "Agent runtime started.");
+        events = [publishEvent(startedEvent, runOptions?.onEvent)];
+        const runContext = await options.workspaceService?.resolveRunContext(
+          runOptions?.sessionId ? { sessionId: runOptions.sessionId } : undefined,
+        );
+        const initialProfile = await options.getModelProfile();
+        const initialToolDefinitions = initialProfile.modelCapabilities?.tools === false
+          ? []
+          : filterToolDefinitionsForScheduledTask(
+              getToolDefinitions(options.toolExecutor),
+              task,
+            );
+        const systemTimeZone = getSystemTimeZone();
+        const proceduralMemoryContext = await buildProceduralMemoryPromptContext({
           memoryStore: options.memoryStore,
           taskName: task.name,
           skillName: taskSkillName || "prompt-task",
           skillDescription: skill?.manifest.description,
         });
-      const step: AgentExecutionStep = {
-        id: createId(),
-        description: task.name,
-        expectedOutcome: "Task completes with a final summary.",
-        state: "pending",
-        attempts: 0,
-      };
-      let checkpoint: AgentExecutionCheckpoint = {
-        id: createId(),
-        runId,
-        taskId: task.id,
-        status: "queued",
-        ...(runContext ? { runContext } : {}),
-        currentStepId: step.id,
-        steps: [step],
-        messages: [
-          {
-            role: "system",
-            content: buildAgentSystemPrompt({
-              modelId: initialProfile.model,
-              currentDate: formatDateInTimeZone(new Date(startedAt), systemTimeZone),
-              timeZone: systemTimeZone,
-            }),
-          },
-          {
-            role: "user",
-            content: appendProceduralMemoryContext(
-              buildTaskPrompt(task, skill),
-              proceduralMemoryContext,
-            ),
-          },
-        ],
-        toolCallCount: 0,
-        createdAt: startedAt,
-        updatedAt: startedAt,
-      };
+        const step: AgentExecutionStep = {
+          id: createId(),
+          description: task.name,
+          expectedOutcome: "Task completes with a final summary.",
+          state: "pending",
+          attempts: 0,
+        };
+        checkpoint = {
+          id: createId(),
+          runId,
+          taskId: task.id,
+          status: "queued",
+          ...(runContext ? { runContext } : {}),
+          currentStepId: step.id,
+          steps: [step],
+          messages: [
+            {
+              role: "system",
+              content: buildAgentSystemPrompt({
+                modelId: initialProfile.model,
+                currentDate: formatDateInTimeZone(new Date(startedAt), systemTimeZone),
+                timeZone: systemTimeZone,
+              }),
+            },
+            {
+              role: "user",
+              content: appendProceduralMemoryContext(
+                buildTaskPrompt(task, skill),
+                proceduralMemoryContext,
+              ),
+            },
+          ],
+          toolCallCount: 0,
+          createdAt: startedAt,
+          updatedAt: startedAt,
+        };
 
-      await options.executionStore.save(checkpoint);
-      if (runContext) {
-        const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
+        await options.executionStore.save(checkpoint);
+        if (runContext) {
+          const runtimeContextSnapshot = createRuntimeContextSnapshotForRun({
           surface: "scheduled_task",
           runId,
           runContext,
@@ -1470,7 +1648,7 @@ export function createAgentRuntimeEngine(options: {
           now: () => startedAt,
           systemTimeZone,
         });
-        await appendTrajectory(runId, "run_context_created", {
+          await appendTrajectory(runId, "run_context_created", {
           workspaceId: runContext.workspaceId,
           workspaceRoot: runContext.workspaceRoot,
           agentRole: runContext.agentRole,
@@ -1480,17 +1658,24 @@ export function createAgentRuntimeEngine(options: {
           runtimeContextSnapshot,
           runtimeContextSnapshotSummary:
             summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot),
+          }, undefined, runContext);
+        }
+        await appendTrajectory(runId, "state_transition", {
+          from: null,
+          to: "queued",
         }, undefined, runContext);
+        await appendTrajectory(runId, "checkpoint_written", {
+          checkpointId: checkpoint.id,
+          status: checkpoint.status,
+          currentStepId: checkpoint.currentStepId,
+        }, undefined, runContext);
+      } catch {
+        return persistInitializationFailure();
       }
-      await appendTrajectory(runId, "state_transition", {
-        from: null,
-        to: "queued",
-      }, undefined, runContext);
-      await appendTrajectory(runId, "checkpoint_written", {
-        checkpointId: checkpoint.id,
-        status: checkpoint.status,
-        currentStepId: checkpoint.currentStepId,
-      }, undefined, runContext);
+
+      if (!checkpoint) {
+        return persistInitializationFailure();
+      }
 
       try {
         return await runFromCheckpoint(
@@ -1500,9 +1685,15 @@ export function createAgentRuntimeEngine(options: {
           runOptions?.signal,
           events,
           startedAt,
+          admissionCandidate.executionRevision,
           runOptions?.onEvent,
+          admissionLease,
+          markTerminalRunPersisted,
         );
       } catch (error) {
+        if (terminalRunPersisted) {
+          throw error;
+        }
         if (isPauseError(error, runOptions?.signal)) {
           const latestCheckpoint =
             (await options.executionStore.get(runId)) ?? checkpoint;
@@ -1516,6 +1707,8 @@ export function createAgentRuntimeEngine(options: {
             events: [...events, createEvent("warn", "Agent run paused.")],
             startedAt,
             ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+            admissionLease,
+            onRunPersisted: markTerminalRunPersisted,
           });
         }
 
@@ -1533,6 +1726,8 @@ export function createAgentRuntimeEngine(options: {
             startedAt,
             failure: error,
             ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+            admissionLease,
+            onRunPersisted: markTerminalRunPersisted,
           });
         }
 
@@ -1554,6 +1749,8 @@ export function createAgentRuntimeEngine(options: {
             startedAt,
             modelServiceNotice,
             ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+            admissionLease,
+            onRunPersisted: markTerminalRunPersisted,
           });
         }
         return finishRun({
@@ -1562,33 +1759,106 @@ export function createAgentRuntimeEngine(options: {
           taskName: task.name,
           skillName: getRunSkillName(task),
           status: "failed",
-          summary: error instanceof Error ? error.message : "Agent run failed.",
+          summary: formatFailureMessage(error),
           events: [...events, createEvent("error", formatFailureMessage(error))],
           startedAt,
           failure: error,
           ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+          admissionLease,
+          onRunPersisted: markTerminalRunPersisted,
         });
       }
     },
 
     async resumeRun(runId, runOptions) {
-      const checkpoint = await options.executionStore.get(runId);
-      if (!checkpoint) {
+      const storedCheckpoint = await options.executionStore.get(runId);
+      if (!storedCheckpoint) {
         return { ok: false, message: "Agent execution checkpoint was not found." };
       }
+      const checkpoint = structuredClone(storedCheckpoint);
+      if (!runOptions?.beforeExecution) {
+        throw new AgentRunRevisionConflictError();
+      }
 
-      const task = await options.taskStore.get(checkpoint.taskId);
-      if (!task) {
+      const storedOwner = await options.runStore.get(runId);
+      if (!storedOwner) {
+        throw new AgentRunRevisionConflictError();
+      }
+      const currentOwner = structuredClone(storedOwner);
+      if (currentOwner.status !== "paused") {
+        return {
+          ok: false,
+          message: "Agent run is not paused and cannot be resumed.",
+        };
+      }
+      if (
+        checkpoint.runId !== runId
+        || checkpoint.taskId !== currentOwner.taskId
+      ) {
+        throw new AgentRunRevisionConflictError();
+      }
+
+      const storedTask = await options.taskStore.get(currentOwner.taskId);
+      if (!storedTask) {
         return { ok: false, message: "Scheduled task was not found." };
+      }
+      const task = structuredClone(storedTask);
+
+      const ownerEnvelope = projectAgentRunExecutionEnvelope(currentOwner);
+      const checkpointEnvelope = {
+        id: runId,
+        taskId: checkpoint.taskId,
+        taskName: task.name,
+        skillName: getRunSkillName(task),
+        ...(checkpoint.runContext === undefined
+          ? {}
+          : { runContext: checkpoint.runContext }),
+        startedAt: checkpoint.createdAt,
+      };
+      if (!areAgentRunExecutionEnvelopesEqual(
+        ownerEnvelope,
+        checkpointEnvelope,
+      )) {
+        throw new AgentRunRevisionConflictError();
       }
 
       const taskSkillName = task.skillName.trim();
       const skill = taskSkillName ? await options.resolveSkill(taskSkillName) : null;
-      if (taskSkillName && !skill) {
+      if (
+        taskSkillName
+        && (!skill || skill.manifest.name !== taskSkillName)
+      ) {
         return { ok: false, message: "Task skill was not found." };
       }
 
+      const currentRevision = resolveAgentRunExecutionRevision(currentOwner);
+      if (!Number.isSafeInteger(currentRevision) || currentRevision < 1) {
+        throw new AgentRunRevisionConflictError();
+      }
+      const executionRevision = currentRevision + 1;
+      const admissionCandidate = {
+        runId,
+        taskId: task.id,
+        executionRevision,
+        executionEnvelope: structuredClone(ownerEnvelope),
+      };
+      const admissionLease = requireAgentRunAdmissionLease(
+        admissionCandidate,
+        await runOptions.beforeExecution(structuredClone(admissionCandidate)),
+      );
+      let terminalRunPersisted = false;
+      const markTerminalRunPersisted = (run: AgentRunRecord) => {
+        if (
+          run.id !== runId
+          || resolveAgentRunExecutionRevision(run) !== executionRevision
+        ) {
+          throw new Error("Persisted resumed AgentRun identity changed.");
+        }
+        terminalRunPersisted = true;
+      };
+
       try {
+        await runOptions?.onExecutionAdmitted?.(admissionCandidate);
         return await runFromCheckpoint(
           checkpoint,
           task,
@@ -1596,9 +1866,13 @@ export function createAgentRuntimeEngine(options: {
           runOptions?.signal,
           [publishEvent(createEvent("info", "Agent runtime resumed."), runOptions?.onEvent)],
           checkpoint.createdAt,
+          executionRevision,
           runOptions?.onEvent,
+          admissionLease,
+          markTerminalRunPersisted,
         );
       } catch (error) {
+        if (terminalRunPersisted) throw error;
         if (isPauseError(error, runOptions?.signal)) {
           const latestCheckpoint =
             (await options.executionStore.get(runId)) ?? checkpoint;
@@ -1611,7 +1885,10 @@ export function createAgentRuntimeEngine(options: {
             summary: "运行已暂停。",
             events: [createEvent("warn", "Agent run paused.")],
             startedAt: checkpoint.createdAt,
+            executionRevision,
             ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+            admissionLease,
+            onRunPersisted: markTerminalRunPersisted,
           });
         }
 
@@ -1628,25 +1905,36 @@ export function createAgentRuntimeEngine(options: {
             summary: modelServiceNotice.message,
             events: [createEvent("warn", modelServiceNotice.message)],
             startedAt: checkpoint.createdAt,
+            executionRevision,
             modelServiceNotice,
             ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+            admissionLease,
+            onRunPersisted: markTerminalRunPersisted,
           });
         }
+        const canceled = isCancellationError(error, runOptions?.signal);
         return finishRun({
           checkpoint: latestCheckpoint,
           taskId: task.id,
           taskName: task.name,
           skillName: getRunSkillName(task),
-          status: isCancellationError(error, runOptions?.signal)
-            ? "canceled"
-            : "failed",
-          summary: isCancellationError(error, runOptions?.signal)
-            ? "运行已取消。"
-            : formatFailureMessage(error),
-          events: [createEvent("error", formatFailureMessage(error))],
+          status: canceled ? "canceled" : "failed",
+          summary: canceled ? "运行已取消。" : formatFailureMessage(error),
+          events: [
+            createEvent(
+              canceled ? "warn" : "error",
+              canceled ? "Agent run canceled." : formatFailureMessage(error),
+              canceled
+                ? { code: "RUNTIME_CANCELED" }
+                : { code: "AGENT_RUN_EXECUTION_FAILED" },
+            ),
+          ],
           startedAt: checkpoint.createdAt,
+          executionRevision,
           failure: error,
           ...(runOptions?.onEvent ? { onEvent: runOptions.onEvent } : {}),
+          admissionLease,
+          onRunPersisted: markTerminalRunPersisted,
         });
       }
     },
@@ -1742,7 +2030,7 @@ function isCancellationError(
 }
 
 function formatFailureMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error ?? "Agent run failed.");
+  return toSecretSafeFailure(error, "AGENT_RUN_EXECUTION_FAILED").publicMessage;
 }
 
 class ToolReflectionFailureError extends Error {
@@ -1761,11 +2049,16 @@ class ToolReflectionFailureError extends Error {
 function buildFailureClassifiedPayload(
   failure: unknown,
   failureClass: ReturnType<typeof classifyAgentFailure>,
-  failureMessage: string | undefined,
+  safeFailure: SecretSafeFailure | undefined,
 ): Record<string, unknown> {
   return {
     failureClass,
-    ...(failureMessage ? { failureMessage } : {}),
+    ...(safeFailure
+      ? {
+          failureCode: safeFailure.code,
+          failureMessage: safeFailure.publicMessage,
+        }
+      : {}),
     ...(failure instanceof ToolReflectionFailureError
       ? {
           toolName: failure.toolName,
@@ -1778,20 +2071,23 @@ function buildFailureClassifiedPayload(
 }
 
 function toExecutionMessage(message: ChatMessage): AgentExecutionMessage {
+  const safeMessage = redactChatMessageCredentials(message);
   return {
-    role: message.role,
-    content: message.content,
-    ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
-    ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
-    ...(message.name ? { name: message.name } : {}),
-    ...(message.images
-      ? { images: message.images.map((image) => ({ ...image })) }
+    role: safeMessage.role,
+    content: safeMessage.content,
+    ...(safeMessage.tool_call_id
+      ? { tool_call_id: safeMessage.tool_call_id }
+      : {}),
+    ...(safeMessage.tool_calls ? { tool_calls: safeMessage.tool_calls } : {}),
+    ...(safeMessage.name ? { name: safeMessage.name } : {}),
+    ...(safeMessage.images
+      ? { images: safeMessage.images.map((image) => ({ ...image })) }
       : {}),
   };
 }
 
 function toChatMessage(message: AgentExecutionMessage): ChatMessage {
-  return {
+  return redactChatMessageCredentials({
     role: message.role,
     content: message.content,
     ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
@@ -1800,7 +2096,7 @@ function toChatMessage(message: AgentExecutionMessage): ChatMessage {
     ...(message.images
       ? { images: message.images.map((image) => ({ ...image })) }
       : {}),
-  };
+  });
 }
 
 function getRunSkillName(task: { skillName: string }): string {

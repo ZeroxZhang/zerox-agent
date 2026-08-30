@@ -1,4 +1,6 @@
 import type { ToolCallRequest } from "./toolPermissions";
+import type { ToolApprovalCausalRef } from "./conversationCausalSpine";
+export type { ToolApprovalCausalRef } from "./conversationCausalSpine";
 import {
   classifyExtremeRisk,
   type ExtremeRiskShellPlan,
@@ -17,6 +19,7 @@ export type ToolApprovalRisk = {
 
 export type ToolApprovalRequestPayload = {
   id: string;
+  revision?: number;
   taskId: string;
   taskName: string;
   request: ToolCallRequest;
@@ -24,10 +27,13 @@ export type ToolApprovalRequestPayload = {
   argsSummary: Record<string, unknown>;
   risk: ToolApprovalRisk;
   createdAt: string;
+  causalRef?: ToolApprovalCausalRef;
 };
 
 export type ToolApprovalDecisionPayload = {
   id: string;
+  revision?: number;
+  decisionId?: string;
   taskId: string;
   taskName: string;
   toolName: string;
@@ -71,6 +77,8 @@ export function deriveToolApprovalModeState(
 export type ResolveToolApprovalInput = {
   id: string;
   approved: boolean;
+  expectedRevision?: number;
+  decisionId?: string;
 };
 
 export function classifyToolApprovalRisk(input: {

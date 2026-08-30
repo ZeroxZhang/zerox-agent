@@ -160,6 +160,8 @@ const CHAT_IPC = {
   streamEvent: "chat:streamEvent",
 } as const;
 
+type ConversationDisclosureRendererMode = "legacy" | "projected";
+
 export type AgentRunsChangedEvent = {
   reason: "active_execution_changed" | "run_updated";
   runId?: string;
@@ -186,6 +188,10 @@ export type OpenProjectAgentWorkspaceInput = {
 };
 
 const buildingAgent = {
+  getConversationDisclosureMode: (): ConversationDisclosureRendererMode =>
+    process.argv.includes("--zerox-chat-disclosure=projected")
+      ? "projected"
+      : "legacy",
   getAppMeta: (): Promise<AppMeta> => ipcRenderer.invoke("app:getMeta"),
   getRuntimeInfo: (): Promise<DesktopRuntimeInfo> =>
     ipcRenderer.invoke("app:getRuntimeInfo"),
@@ -305,6 +311,8 @@ const buildingAgent = {
     ipcRenderer.invoke("toolApproval:setGoalModeEnabled", enabled),
   resolveToolApproval: (input: ResolveToolApprovalInput): Promise<boolean> =>
     ipcRenderer.invoke("toolApproval:resolve", input),
+  getPendingToolApprovals: (): Promise<ToolApprovalRequestPayload[]> =>
+    ipcRenderer.invoke("toolApproval:listPending"),
   onToolApprovalRequest: (
     callback: (request: ToolApprovalRequestPayload) => void,
   ) => {

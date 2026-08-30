@@ -1,6 +1,17 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+// @ts-expect-error TypeScript does not synthesize declarations for this local mjs module.
+import { computeLocalCandidateSourceManifest, computeTreeManifest } from "../../scripts/local-candidate-source-manifest.mjs";
 import {
   parseJsonConfigFileContent,
   readConfigFile,
@@ -14,6 +25,35 @@ type PackageJson = {
 };
 
 describe("package scripts", () => {
+  it("keeps every acceptance-anchor CONTROL_DIGESTS pin in sync with the real file bytes", () => {
+    // Regression lock: the anchor's hand-maintained CONTROL_DIGESTS must never
+    // drift from the actual controlled files. A stale pin makes the
+    // authoritative runner's verifyControlSet fail closed ("caller-reviewed
+    // control drift"), blocking a valid candidate. See prior Major.
+    const anchorSource = readFileSync(
+      path.join(process.cwd(), "scripts", "build-v392-acceptance-anchor.mjs"),
+      "utf8",
+    );
+    const block = anchorSource.match(
+      /const CONTROL_DIGESTS = Object\.freeze\(\{([\s\S]*?)\}\);/,
+    );
+    expect(block).not.toBeNull();
+    const entryPattern = /"([^"]+)":\s*"(sha256:[0-9a-f]{64})"/g;
+    const pins: Array<[string, string]> = [];
+    let match: RegExpExecArray | null;
+    while ((match = entryPattern.exec(block![1])) !== null) {
+      pins.push([match[1], match[2]]);
+    }
+    expect(pins.length).toBeGreaterThanOrEqual(15);
+    for (const [relativePath, pin] of pins) {
+      const actual = `sha256:${createHash("sha256")
+        .update(readFileSync(path.join(process.cwd(), relativePath)))
+        .digest("hex")}`;
+      expect(`${relativePath}=${actual}`).toBe(`${relativePath}=${pin}`);
+    }
+  });
+
+
   it("binds macOS release artifacts to one clean Git commit", () => {
     const source = readFileSync(
       path.join(process.cwd(), "scripts", "package-mac.mjs"),
@@ -66,6 +106,9 @@ describe("package scripts", () => {
       "utf8",
     );
     expect(builderConfig).toContain("afterSign: ./scripts/after-sign-mac.mjs");
+    expect(builderConfig).toContain(
+      "!node_modules/better-sqlite3/bin{,/**/*}",
+    );
     expect(builderConfig).toContain("from: build/update-signing-public-key.pem");
 
     const signScript = readFileSync(
@@ -109,7 +152,7 @@ describe("package scripts", () => {
     expect(mainSource).toContain("app.requestSingleInstanceLock()");
   });
 
-  it("sets release metadata to v3.9.1", () => {
+  it("sets live package metadata to v3.9.2", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -118,7 +161,7 @@ describe("package scripts", () => {
     ) as { version?: string; packages?: Record<string, { version?: string }> };
     const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
 
-    expect(packageJson.version).toBe("3.9.1");
+    expect(packageJson.version).toBe("3.9.2");
     expect(packageJson.scripts?.["smoke:providers"]).toContain(
       "smoke-multi-provider.mjs",
     );
@@ -127,10 +170,399 @@ describe("package scripts", () => {
     );
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.9.1");
-    expect(packageLock.packages?.[""]?.version).toBe("3.9.1");
+    expect(packageLock.version).toBe("3.9.2");
+    expect(packageLock.packages?.[""]?.version).toBe("3.9.2");
     expect(readme).toContain("current release: v3.9.1");
     expect(readme).toContain("当前版本是 **v3.9.1**");
+  });
+
+  it("keeps the local candidate bound to one source snapshot", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "scripts", "package-local-candidate.mjs"),
+      "utf8",
+    );
+
+    expect(source.match(/computeLocalCandidateSourceManifest\(root\)/g))
+      .toHaveLength(2);
+    expect(source).toContain(
+      "source tree changed while building the local candidate",
+    );
+    expect(source).toContain("throwPackageOrRestoreFailure(");
+    expect(source).toContain("throwCommandOrPostflightFailure(");
+    expect(source).toContain("checkNativeCacheBefore: false");
+    expect(source).toContain(
+      "generated native ABI cache differs from the caller-reviewed output",
+    );
+    expect(source).toContain(
+      "local candidate package contains generated native ABI cache",
+    );
+    const packagingTryIndex = source.indexOf("let packagingError = null;");
+    const electronRebuildIndex = source.indexOf(
+      'await run(path.join(root, "node_modules/.bin/electron-rebuild")',
+    );
+    const electronBuilderIndex = source.indexOf(
+      'await run(path.join(root, "node_modules/.bin/electron-builder")',
+    );
+    const nodeRestoreIndex = source.indexOf(
+      'path.join(root, "scripts/rebuild-native-sqlite.mjs")',
+    );
+    expect(packagingTryIndex).toBeGreaterThan(-1);
+    expect(electronRebuildIndex).toBeGreaterThan(packagingTryIndex);
+    expect(electronBuilderIndex).toBeGreaterThan(electronRebuildIndex);
+    expect(nodeRestoreIndex).toBeGreaterThan(electronBuilderIndex);
+    // The Node-ABI restore must not compile against the Electron headers that
+    // npm_config_nodedir points at during packaging (anchor postflight pins
+    // the Node-ABI better-sqlite3 binary).
+    expect(source).not.toContain('[npmCli, "rebuild", "better-sqlite3"]');
+    const selfTest = JSON.parse(execFileSync(
+      process.execPath,
+      [
+        "scripts/package-local-candidate.mjs",
+        "--self-test-failure-preservation",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    )) as { failurePreservationSelfTest?: string };
+    expect(selfTest.failurePreservationSelfTest).toBe("passed");
+  });
+
+  it("excludes governed build outputs from the local source manifest", async () => {
+    const helper = readFileSync(
+      path.join(
+        process.cwd(),
+        "scripts",
+        "local-candidate-source-manifest.mjs",
+      ),
+      "utf8",
+    );
+
+    expect(helper).toContain('relativePath.startsWith("release-test-")');
+    expect(helper).toContain(
+      'relativePath === ".zerox/conversation-disclosure-program.json"',
+    );
+    expect(helper).toContain(
+      'relativePath === ".zerox/feature_list.json"',
+    );
+    await expect(computeLocalCandidateSourceManifest(process.cwd()))
+      .resolves.toMatchObject({
+        digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      });
+  });
+
+  it("requires final acceptance to run from a caller-pinned external copy", () => {
+    const runner = readFileSync(
+      path.join(process.cwd(), "scripts", "build-v392-acceptance-anchor.mjs"),
+      "utf8",
+    );
+    const checker = readFileSync(
+      path.join(
+        process.cwd(),
+        "scripts",
+        "check-conversation-disclosure-successor-program.mjs",
+      ),
+      "utf8",
+    );
+
+    expect(runner).toContain(
+      "acceptance runner must execute from a caller-pinned copy outside the repository",
+    );
+    expect(runner).toContain("await verifyControlSet(repositoryRealpath)");
+    expect(runner.match(/await verifyControlSet\(repositoryRealpath\)/g))
+      .toHaveLength(3);
+    expect(runner).toContain(
+      "repository acceptance runner differs from the caller-pinned external copy",
+    );
+    expect(runner).toContain("await verifyToolchain(repositoryRealpath)");
+    expect(runner).toContain("await verifyNativeNodeAddon(repositoryRealpath)");
+    expect(
+      runner.match(/await verifyExternalExecutionIdentityPostflight\(\)/g),
+    ).toHaveLength(3);
+    expect(runner).toContain(
+      "external execution identity changed during acceptance",
+    );
+    expect(runner).toContain(
+      'captureRegularFile(SELF_PATH, "external acceptance runner")',
+    );
+    expect(runner).toContain("await verifyGitIdentity(repositoryRealpath, options)");
+    expect(runner).toContain('[executionNpmCliPath, "run", "verify"]');
+    expect(runner).toContain('ZEROX_V392_OUTER_SANDBOX: "1"');
+    expect(runner).toContain("await runTrustedSeatbeltRegressionLane(");
+    expect(runner).toContain(
+      '"trusted Seatbelt requirement roster changed"',
+    );
+    expect(runner).toContain('[executionNpmCliPath, "run", "smoke:prod"]');
+    expect(runner).toContain('[executionNpmCliPath, "audit", "--omit=dev"]');
+    expect(runner).toContain('[executionNpmCliPath, "ls", "--all"]');
+    expect(runner).toContain("execution.commandBin");
+    expect(runner).toContain(
+      '`exec ${shellWord(privateNode)} ${shellWord(stagedNpmCli)} "$@"\\n`',
+    );
+    expect(runner).toContain(
+      "caller-pinned Node must be installed under a private runtime/bin directory",
+    );
+    expect(runner).toContain("ZEROX_NODE_HEADERS_DIR: execution.nodePrefix");
+    expect(runner).toContain("headers.digest !== EXPECTED_NODE_HEADERS.digest");
+    expect(runner).toContain("--electron-cache-archive");
+    expect(runner).toContain("--electron-headers-archive");
+    expect(runner).toContain("--expected-electron-headers-digest");
+    expect(runner).toContain(
+      "electronCacheCapture.digest !== EXPECTED_ELECTRON_CACHE.digest",
+    );
+    expect(runner).toContain(
+      "electron_config_cache: execution.electronCacheRoot",
+    );
+    expect(runner).toContain(
+      "npm_config_nodedir: execution.electronHeaders",
+    );
+    expect(runner).toContain("EXPECTED_ELECTRON_HEADERS_ARCHIVE_DIGEST");
+    expect(runner).toContain("electronHeadersTree.digest");
+    expect(runner).toContain("localSocketPrefixes: electronSocketPrefixes");
+    expect(runner).toContain("(allow network-bind");
+    expect(runner).toContain("(allow network-outbound");
+    expect(runner).toContain("requiresElectronSandbox(command, args)");
+    expect(runner).toContain('["--verify", "--deep", "--strict", appPath]');
+    expect(runner).toContain("await verifyPackagedLaunch(");
+    // Regression lock: the packaged-launch smoke root must live inside a
+    // sandbox writable root (execution.temp), not a sibling of it, otherwise
+    // the sandboxed packaged app is denied writing its evidence and the gate
+    // can never pass. See prior Major.
+    expect(runner).toContain(
+      "await verifyPackagedLaunch(appPath, execution.temp, trustedEnvironment)",
+    );
+    expect(runner).toContain(
+      'const smokeRoot = await mkdtemp(path.join(writableTempRoot, "packaged-smoke-"));',
+    );
+    expect(runner).toContain("await scanPathsForEnvironmentSecrets([");
+    expect(runner).toContain("await verifySourceManifest(repositoryRealpath, options)");
+    expect(runner).toContain("await rollbackPublication(publication)");
+    expect(runner).toContain("await replaceFileAtomically(");
+    expect(runner).toContain("await recoverPublicationJournal({");
+    expect(runner).toContain('"v3.9.2-publication-transaction"');
+    expect(runner).toContain("await markPublicationCommitted(");
+    expect(runner).toContain("await hooks.afterRename?.()");
+    expect(runner).toContain(
+      '"journal rename-before-fsync fault did not recover"',
+    );
+    expect(runner).toContain(
+      "`${outputPath}.partial-${journal.transactionId}`",
+    );
+    expect(runner).toContain("await normalizeRecoverableAnchorLinks(");
+    expect(runner).toContain(
+      '"acceptance anchor publication hardlink crash did not recover"',
+    );
+    expect(runner).toContain(
+      '"acceptance anchor publication hardlink recovery left links"',
+    );
+    expect(runner).toContain("await publicationJournalIsCommitted(publication)");
+    expect(runner).toContain("committed acceptance anchor drifted");
+    expect(runner).toContain(
+      'if (recoveredPublication?.status === "committed")',
+    );
+    expect(runner).toContain("recoveredCommittedPublication: true");
+    expect(runner).toContain(
+      "publication transaction source digest differs from the caller pin",
+    );
+    expect(runner).toContain(
+      "await validateRecoveredCommittedAcceptance({",
+    );
+    expect(runner).toContain(
+      '"existing committed acceptance anchor"',
+    );
+    expect(runner).toContain(
+      "LIFECYCLE_PUBLICATION_FILES.includes(relativePath)",
+    );
+    expect(runner).toContain("--self-test-publication-journal");
+    expect(runner).toContain('publicationJournalSelfTest: "passed"');
+    expect(runner).toContain("constants.O_NOFOLLOW");
+    expect(runner).not.toContain('open(destination, "w"');
+    expect(runner).toContain("npm installation tree differs from the caller-reviewed toolchain");
+    expect(runner).toContain("external acceptance runner rejects inherited");
+    expect(runner).toContain("Node executable changed at a subprocess boundary");
+    expect(checker).toContain("ZEROX_V392_ACCEPTANCE_RUNNER_DIGEST");
+    expect(checker).toContain("ZEROX_V392_ACCEPTANCE_NPM_CLI_DIGEST");
+    expect(checker).toContain("ZEROX_V392_ELECTRON_HEADERS_ARCHIVE");
+    expect(checker).toContain("ZEROX_V392_ELECTRON_HEADERS_DIGEST");
+    expect(checker).toContain("ZEROX_V392_CODE_REVIEW_RECEIPT_DIGEST");
+    expect(checker).toContain("ZEROX_V392_SECURITY_REVIEW_RECEIPT_DIGEST");
+    expect(runner).toContain("--expected-code-review-receipt-digest");
+    expect(runner).toContain("--expected-security-review-receipt-digest");
+    expect(runner).toContain("private execution source mutated during acceptance");
+    expect(runner).toContain("canonical repository mutated outside publication");
+    expect(runner).toContain("const repositoryWatcher = watch(");
+    expect(runner).toContain("await verifyCanonicalRepositoryPostflight()");
+    expect(runner).toContain('executionCommand = sandboxed ? "/usr/bin/sandbox-exec"');
+    expect(runner).toContain('"(deny default)"');
+    expect(runner).toContain('\'(import "system.sb")\'');
+    expect(runner).toContain('"(allow signal (target same-sandbox))"');
+    expect(runner).toContain('"/private/var/select"');
+    expect(runner).toContain('"/Library/Developer/CommandLineTools"');
+    expect(runner).toContain('metadataRoots: ["/Users"]');
+    expect(runner).not.toMatch(
+      /metadataRoots:\s*\[\s*"\/Users",\s*darwinUserTempAlias/,
+    );
+    expect(runner).toContain('"electron-sibling-metadata-denied"');
+    expect(runner).toContain('"Electron sibling metadata"');
+    expect(runner).toContain("GENERATED_NATIVE_CACHE_PATH");
+    expect(runner).toContain("if (commandMutatesNativeAddon(args, cwd))");
+    expect(runner).toContain(
+      "await verifyGeneratedNativeCache()",
+    );
+    expect(runner).toContain(
+      '"generated native ABI cache differs from the caller-reviewed output"',
+    );
+    expect(runner).not.toContain("removeDirectoryEntryByParentIdentity");
+    expect(runner).toContain("await drainOwnedProcessGroup(child.pid)");
+    expect(runner).toContain(
+      'await assertExecutionQuiescent("before publication")',
+    );
+    expect(runner).toContain(
+      'await assertExecutionQuiescent("after publication capture")',
+    );
+    expect(checker).toContain("listPackage(asarPath)");
+    expect(checker).toContain(
+      '"node_modules/better-sqlite3/bin/"',
+    );
+    // Regression lock: the successor checker's toolchain tree must exclude
+    // better-sqlite3/bin, matching the anchor's EXPECTED_TOOLCHAIN pin, so a
+    // present generated ABI cache cannot make a valid anchor fail closed.
+    expect(checker).toContain(
+      'relativePath === "better-sqlite3/bin"',
+    );
+    // Regression lock: the acceptance execution-identity check must exclude
+    // better-sqlite3/bin too; otherwise the electron-rebuilt ABI cache trips
+    // "external acceptance execution identity changed" during the 19-scenario
+    // gate. See prior authoritative anchor failure.
+    {
+      const acceptance = readFileSync(
+        path.join(
+          process.cwd(),
+          "scripts",
+          "run-conversation-disclosure-acceptance.mjs",
+        ),
+        "utf8",
+      );
+      expect(acceptance).toContain(
+        'relativePath === "better-sqlite3/bin"',
+      );
+      expect(acceptance).toContain(
+        "relativePath.startsWith(`better-sqlite3/bin${path.sep}`)",
+      );
+    }
+    expect(runner).toContain("throwCommandOrPostflightFailure(");
+    expect(runner).toContain(
+      '"candidate command failed and postflight cleanup also failed"',
+    );
+    expect(runner).toContain(
+      '"candidate command primary failure was not preserved"',
+    );
+    expect(runner).not.toContain('"(allow default)"');
+    expect(runner).toContain("TMPDIR: execution.temp");
+    expect(runner).toContain("args[1] === \"audit\"");
+    expect(runner).toContain("repositoryCheckSandboxProfile");
+    expect(runner).toContain("isWithin(repositoryRealpath, cwd)");
+    expect(runner).toContain("readableFiles: [");
+    expect(runner).toContain("sourceNpmRoot");
+    expect(runner).toContain("sourceNodeHeadersRoot");
+    expect(runner).toContain(
+      "await writeRepositoryCheckSandbox(temporaryOutput)",
+    );
+    expect(runner).toContain(
+      "await writeRepositoryCheckSandbox(options.output)",
+    );
+    expect(runner).toContain(
+      '"repository checker sandbox exposed an unrelated external file"',
+    );
+    expect(runner).toContain("HOME: trustedEnvironment.HOME");
+    expect(runner).not.toContain(
+      "const anchorEnvironment = {\n    ...process.env",
+    );
+    expect(runner).toContain(
+      "assertCommandOutputDoesNotExposeEnvironmentSecrets(",
+    );
+    expect(runner).toContain(
+      '"candidate command output exposed an environment credential"',
+    );
+    expect(runner).toContain(
+      'forms.push(network ? "(allow network*)" : "(deny network*)")',
+    );
+    expect(runner).toContain("FINAL_FILES.length !== 70");
+    expect(runner).toContain("GENERATED_PUBLICATION_FILES.length !== 55");
+    expect(checker).toContain("expectedExternalControlFiles.length !== 15");
+    expect(checker).toContain("expectedFinalAnchorFiles.length !== 70");
+    expect(runner).toContain("post-commit final file drift");
+    expect(runner).toContain("post-commit local package tree drifted");
+    expect(runner).toContain('fullVerify: "split-equivalent-passed"');
+    expect(runner).toContain('nestedSandboxRegression: "passed"');
+    expect(checker).toContain('fullVerify: "split-equivalent-passed"');
+    expect(checker).toContain('nestedSandboxRegression: "passed"');
+    expect(checker).toContain("anchor?.schemaVersion !== 1");
+    expect(checker).toContain(
+      'anchor?.identityAssurance !== "caller-held-not-signed"',
+    );
+    const commitIndex = runner.indexOf(
+      "await markPublicationCommitted(publication, completedAnchor.digest)",
+    );
+    const preCommitPostflightIndex = runner.lastIndexOf(
+      "await verifyCanonicalRepositoryPostflight()",
+      commitIndex,
+    );
+    const postCommitPostflightIndex = runner.indexOf(
+      "await verifyCanonicalRepositoryPostflight()",
+      commitIndex,
+    );
+    const cleanupIndex = runner.indexOf(
+      "await finalizePublication(publication)",
+      commitIndex,
+    );
+    expect(preCommitPostflightIndex).toBeGreaterThan(-1);
+    expect(preCommitPostflightIndex).toBeLessThan(commitIndex);
+    expect(postCommitPostflightIndex).toBeGreaterThan(commitIndex);
+    expect(cleanupIndex).toBeGreaterThan(postCommitPostflightIndex);
+    const preparedJournalIndex = runner.indexOf(
+      "transaction.journal = await writePublicationJournal(journalPath",
+    );
+    const releaseStageIndex = runner.indexOf(
+      'await cp(path.join(executionRoot, "release-local"), stagedRelease',
+    );
+    expect(preparedJournalIndex).toBeGreaterThan(-1);
+    expect(preparedJournalIndex).toBeLessThan(releaseStageIndex);
+    expect(runner).toContain(
+      "Boolean(transaction.journal) || Boolean(await optionalLstat(journalPath))",
+    );
+    expect(runner).toContain("...LIFECYCLE_PUBLICATION_FILES");
+    expect(runner).toContain('"node_modules/.vite"');
+    expect(runner).toContain('"scripts/run-conversation-disclosure-real-app.mjs",');
+    expect(runner).toContain('"scripts/conversation-disclosure-acceptance-contract.mjs",');
+    expect(checker).toContain('"scripts/run-conversation-disclosure-real-app.mjs",');
+    expect(checker).toContain('"scripts/conversation-disclosure-acceptance-contract.mjs",');
+    expect(checker).toContain("v3.9.2 caller-pinned execution identity is invalid");
+    expect(checker).toContain(
+      'value.kind !== "v3.9.2-adversarial-review-receipt"',
+    );
+    expect(checker).toContain("value.reviewOutput !== expectedOutput");
+    expect(checker).toContain("text === expectedText");
+    expect(checker).not.toContain(
+      'value.reviewOutput.includes("FINAL_VERDICT: PASS")',
+    );
+  });
+
+  it("rejects chained app symlinks that escape the package root", async () => {
+    const fixtureRoot = mkdtempSync(
+      path.join(tmpdir(), "zerox-app-tree-manifest-"),
+    );
+    const appRoot = path.join(fixtureRoot, "Zerox Agent.app");
+    const outsideFile = path.join(fixtureRoot, "outside");
+    mkdirSync(appRoot);
+    writeFileSync(outsideFile, "outside");
+    symlinkSync(outsideFile, path.join(appRoot, "indirect"));
+    symlinkSync("indirect", path.join(appRoot, "entry"));
+
+    try {
+      await expect(computeTreeManifest(appRoot)).rejects.toThrow(
+        "tree symlink escapes root: entry",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("publishes an exact-tag arm64 compatibility release from GitHub Actions", () => {
@@ -164,7 +596,7 @@ describe("package scripts", () => {
     expect(releaseNotes).toContain("xattr -dr com.apple.quarantine");
   });
 
-  it("keeps release gates tracked through v3.9.1", () => {
+  it("keeps release gates tracked through the v3.9.2 successor", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -232,6 +664,24 @@ describe("package scripts", () => {
       activeFeatureId: string | null;
       maxActiveFeatures: number;
     };
+    const conversationDisclosureProgram = JSON.parse(
+      readFileSync(
+        path.join(
+          process.cwd(),
+          ".zerox/conversation-disclosure-program.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      activeFeatureId: string | null;
+      maxActiveFeatures: number;
+      workstreams: Array<{ featureId: string }>;
+    };
+    const conversationDisclosureFeatureIds = new Set(
+      conversationDisclosureProgram.workstreams.map(
+        (workstream) => workstream.featureId,
+      ),
+    );
 
     const openFeatureIds = featureList.features
       .filter((feature) => feature.status !== "done")
@@ -334,13 +784,14 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.9.1");
+    expect(packageJson.version).toBe("3.9.2");
     expect(openFeatureIds.length).toBeLessThanOrEqual(
       Math.min(
         runtimeProgram.maxActiveFeatures,
         kernelMigrationProgram.maxActiveFeatures,
         storageConvergenceProgram.maxActiveFeatures,
         releaseProgram.maxActiveFeatures,
+        conversationDisclosureProgram.maxActiveFeatures,
       ),
     );
     const activeProgramFeatureIds = [
@@ -348,6 +799,7 @@ describe("package scripts", () => {
       kernelMigrationProgram.activeFeatureId,
       storageConvergenceProgram.activeFeatureId,
       releaseProgram.activeFeatureId,
+      conversationDisclosureProgram.activeFeatureId,
     ].filter((featureId): featureId is string => Boolean(featureId));
     expect(
       openFeatureIds.filter(
@@ -355,7 +807,8 @@ describe("package scripts", () => {
           convergenceFeatureIds.has(featureId) ||
           kernelMigrationFeatureIds.has(featureId) ||
           featureId === storageConvergenceProgram.activeFeatureId ||
-          featureId === releaseProgram.activeFeatureId,
+          featureId === releaseProgram.activeFeatureId ||
+          conversationDisclosureFeatureIds.has(featureId),
       ),
     ).toEqual(
       activeProgramFeatureIds,
@@ -1002,14 +1455,44 @@ describe("package scripts", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
+    const round12PackageTarget = JSON.parse(readFileSync(path.join(
+      process.cwd(),
+      ".zerox/verification/conversation-disclosure/CD03A-round12-package.target.json",
+    ), "utf8")) as PackageJson;
 
+    expect(round12PackageTarget.scripts?.test).toBe(
+      "node scripts/run-conversation-disclosure-tests-v12.mjs",
+    );
     expect(packageJson.scripts).toMatchObject({
+      "test": "node scripts/run-conversation-disclosure-tests-v13.mjs",
       "harness:check": "node scripts/check-harness-state.mjs",
       "program:check":
-        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs",
-      "harness:score": "npm run build && node scripts/run-harness-score.mjs",
-      "episode:export":
-        "npm run build && node scripts/export-agent-episode.mjs",
+        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs && node scripts/check-conversation-disclosure-successor-program.mjs && node scripts/check-harness-state.mjs",
+      "conversation-disclosure:baseline":
+        "node scripts/run-conversation-disclosure-performance.mjs",
     });
+    const checkerSource = readFileSync(path.join(
+      process.cwd(),
+      "scripts/check-conversation-disclosure-successor-program.mjs",
+    ), "utf8");
+    const harnessSource = readFileSync(path.join(
+      process.cwd(),
+      "scripts/check-harness-state.mjs",
+    ), "utf8");
+    expect(checkerSource).toContain("expectedCd04");
+    expect(checkerSource).toContain("caller-pinned CD04 anchor");
+    expect(checkerSource).toContain("CD04 external anchor lineage changed");
+    expect(harnessSource).toContain(
+      "checkConversationDisclosureSuccessorProgram",
+    );
+    expect(harnessSource).toContain(
+      '"conversation-disclosure-successor-harness-receipt"',
+    );
+    expect(harnessSource).toContain('identityAssurance: "not-signed"');
+    expect(harnessSource).toContain("platformIdentitySignature: null");
+    expect(harnessSource).not.toContain(
+      'identityAssurance: "platform-signed"',
+    );
   });
+
 });

@@ -164,6 +164,25 @@ export function createToolAuditRepository(storage: Storage): ToolAuditRepository
       ).run(event.id, runId, tool, jsonify(event), event.createdAt);
       return event;
     },
+    appendIfAbsent(event: ToolAuditEvent): boolean {
+      const tool = event.request?.toolName ?? null;
+      const result = db.prepare(
+        `INSERT OR IGNORE INTO tool_audit (id, run_id, tool, payload, created_at) VALUES (?, ?, ?, ?, ?)`,
+      ).run(
+        event.id,
+        event.taskId,
+        tool,
+        jsonify(event),
+        event.createdAt,
+      );
+      return result.changes === 1;
+    },
+    get(id: string): ToolAuditEvent | null {
+      const row = db.prepare(
+        "SELECT payload FROM tool_audit WHERE id = ? LIMIT 1",
+      ).get(id) as { payload?: string } | undefined;
+      return row?.payload ? (JSON.parse(row.payload) as ToolAuditEvent) : null;
+    },
     list(options?: { limit?: number }): ToolAuditEvent[] {
       const limit = options?.limit ?? 1000;
       return selectPayloadRows<ToolAuditEvent>(

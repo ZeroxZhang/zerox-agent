@@ -8,7 +8,10 @@ import { createChatAgentEvidenceRecorder } from "./chatAgentEvidence";
 import { createChatOutputAssembler } from "./chatOutputAssembler";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
 import { runAgentLoop } from "./agentLoop";
-import { sanitizeChatMessages } from "./messageIntegrity";
+import {
+  redactChatMessagesCredentials,
+  sanitizeChatMessages,
+} from "./messageIntegrity";
 import { isMaxModeEnabled, type MaxMode } from "./providers/maxMode";
 import {
   toChatCompletionResponse,
@@ -21,14 +24,33 @@ import {
   runChatKernelSegment,
   type ChatKernelSettlement,
 } from "./kernel/chatKernelSegment";
-import type { AppendChatMessageResult, ChatSessionStore } from "./chatSessionStore";
+import {
+  normalizeChatTaskStatusEventForPersistence,
+  type AppendChatMessageResult,
+  type ChatSessionStore,
+} from "./chatSessionStore";
 import { extractAtomicMemoriesFromChatTurn } from "./memoryL1Extractor";
 import type { MemoryProfileStore } from "./memoryProfileStore";
 import type { MemoryStore } from "./memoryStore";
 import type { HistoryIndexStore } from "./historyIndexStore";
 import type { RawHistoryRole } from "../shared/rawHistory";
 import type { ToolResultOffloadStore } from "./toolResultOffloadStore";
-import type { WorkspaceRunStore } from "./workspaceRunStore";
+import {
+  WorkspaceRunEnvelopeConflictError,
+  type WorkspaceRunStore,
+} from "./workspaceRunStore";
+import type { ConversationCausalStore } from "./conversationCausalStore";
+import {
+  createConversationRequestFingerprint,
+  createLegacyConversationRequestFingerprint,
+  CONVERSATION_REQUEST_FINGERPRINT_VERSION,
+  LEGACY_CONVERSATION_REQUEST_FINGERPRINT_VERSION,
+  resolveDurableConversationBinding,
+  resolveConversationRequestFingerprintVersion,
+  createConversationCausalAttemptId,
+  createConversationTurnId,
+  type ConversationAssistantAcceptance,
+} from "../shared/conversationCausalSpine";
 import {
   formatMemoryRecallContext,
   recallMemoriesWithBudget,
@@ -44,26 +66,29 @@ import type {
   RuntimeToolAuthorizationTask,
   ToolAuthorizationService,
 } from "./toolAuthorizationService";
-import type {
-  ChatAgentStatus,
-  ChatAttachmentInput,
-  ChatAttachmentMetadata,
-  ChatHistoryMessage,
-  ChatRelatedMemory,
-  ChatSessionContextSnapshot,
-  ChatSessionListItem,
-  ChatSessionRecord,
-  ChatSessionGoalSummary,
-  ChatSessionTokenUsage,
-  ChatStreamEvent,
-  ChatTaskStatusEvent,
-  ChatWorkspaceSummary,
-  SendChatMessageInput,
-  SendChatMessageResult,
-  SkillPendingInputState,
-  SkillInputResponse,
-  SkillInputResponseResult,
-  SkillUserInputRequest,
+import {
+  sanitizeSkillUserInputRequest,
+  type ChatAgentStatus,
+  type ChatAttachmentInput,
+  type ChatAttachmentMetadata,
+  type ChatHistoryMessage,
+  type ChatMessageRecord,
+  type ChatRelatedMemory,
+  type ChatSessionContextSnapshot,
+  type ChatSessionListItem,
+  type ChatSessionRecord,
+  type ChatSessionGoalSummary,
+  type ChatSessionTokenUsage,
+  type ChatStreamEvent,
+  type ChatTaskStatusEvent,
+  type ChatTurnSettlementStatus,
+  type ChatWorkspaceSummary,
+  type SendChatMessageInput,
+  type SendChatMessageResult,
+  type SkillPendingInputState,
+  type SkillInputResponse,
+  type SkillInputResponseResult,
+  type SkillUserInputRequest,
 } from "../shared/chat";
 import {
   getActionableGoalSummary,
@@ -82,7 +107,11 @@ import type {
   PlanRecord,
 } from "../shared/planMode";
 import { getPlanOutcomePresentation } from "../shared/planOutcome";
-import type { AgentRunRecord, RunScheduledTaskResult } from "../shared/agentRuns";
+import type {
+  AgentRunAdmissionGate,
+  AgentRunRecord,
+  RunScheduledTaskResult,
+} from "../shared/agentRuns";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { AgentContextUsage } from "../shared/contextUsage";
@@ -90,8 +119,8 @@ import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
 import type { SkillDiscoveryResult, SkillRecord } from "../shared/skills";
 import type {
   WorkspaceRunEventInput,
+  WorkspaceRunEvent,
   WorkspaceRunStatus,
-  WorkspaceRunTerminalStatus,
 } from "../shared/workspaceRunLedger";
 import {
   buildScheduledTaskInputFromIntent,
@@ -105,7 +134,8 @@ import {
   type ChatOutputPart,
 } from "../shared/chatOutput";
 import {
-  redactCredentialText,
+  redactCredentials,
+  redactCredentialString,
   stringifyRedactedCredentials,
 } from "../shared/credentialRedaction";
 import {
@@ -113,6 +143,7 @@ import {
 } from "../shared/agentRuntimeContext";
 import {
   modelServiceNoticeFromError,
+  sanitizeModelServiceNotice,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
 import {
@@ -126,6 +157,7 @@ import {
   appendChatAttachmentContext,
   ChatAttachmentValidationError,
   processChatAttachments,
+  type ProcessedChatAttachments,
 } from "./chatAttachmentProcessor";
 import type {
   SkillInputResolution,
@@ -137,6 +169,10 @@ import {
   CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
 } from "../shared/chatAttachments";
 import { createRuntimeContextSnapshotForRun } from "./runtimeContextFactory";
+import {
+  SecretSafeFailureError,
+  toSecretSafeFailure,
+} from "../shared/secretSafeFailure";
 
 export type ChatService = {
   sendMessage(
@@ -154,6 +190,65 @@ export type SendChatMessageRuntimeOptions = {
   onStatusEvent?: (event: ChatTaskStatusEvent) => void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
 };
+
+/**
+ * Fingerprint the normalized execution input before acquiring the global
+ * request claim. Raw attachment payloads are reduced to content fingerprints
+ * so the causal store can distinguish different bytes without retaining them.
+ */
+export function createChatRequestClaimFingerprint(options: {
+  input: SendChatMessageInput;
+  userMessage: string;
+  validatedAttachments: ChatAttachmentInput[];
+}): string {
+  return createConversationRequestFingerprint(createChatRequestClaimPayload(
+    options,
+    createConversationRequestFingerprint,
+  ));
+}
+
+export function createLegacyChatRequestClaimFingerprint(options: {
+  input: SendChatMessageInput;
+  userMessage: string;
+  validatedAttachments: ChatAttachmentInput[];
+}): string {
+  return createLegacyConversationRequestFingerprint(createChatRequestClaimPayload(
+    options,
+    createLegacyConversationRequestFingerprint,
+  ));
+}
+
+function createChatRequestClaimPayload(
+  options: {
+    input: SendChatMessageInput;
+    userMessage: string;
+    validatedAttachments: ChatAttachmentInput[];
+  },
+  fingerprintAttachmentContent: (value: unknown) => string,
+): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    message: options.userMessage,
+    mode: options.input.mode ?? "chat",
+    planMode: options.input.planMode ?? "direct",
+    planAutonomyMode: options.input.planAutonomyMode ?? "standard",
+    planModelAssignments: options.input.planModelAssignments ?? {},
+    selectedSkillName: options.input.selectedSkillName ?? null,
+    workspaceId: options.input.workspaceId ?? null,
+    workspaceSummary: options.input.workspaceSummary ?? null,
+    history: options.input.history ?? [],
+    attachments: options.validatedAttachments.map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name,
+      mediaType: attachment.mediaType,
+      size: attachment.size,
+      kind: attachment.kind,
+      contentFingerprint: fingerprintAttachmentContent({
+        dataBase64: attachment.dataBase64,
+      }),
+    })),
+  };
+}
 
 type ChatContinuationState = {
   messages: ChatMessage[];
@@ -204,6 +299,18 @@ const HISTORY_ATTACHMENT_PAYLOAD_MAX_BYTES = 40 * 1024 * 1024;
 const EXPIRED_PENDING_ATTACHMENT_MESSAGE =
   "附件内容在应用重启或长时间等待后已失效，请重新发送消息并粘贴附件。";
 
+type PreparedChatMessageInput = {
+  processedAttachments: ProcessedChatAttachments;
+  userMessage: string;
+  modelUserMessage: string;
+  hasAttachments: boolean;
+  preexistingInputRoutingPlan: PlanRecord | null;
+};
+
+type ChatRequestClaim = Awaited<
+  ReturnType<ConversationCausalStore["claimRequest"]>
+>;
+
 type ChatTurnInternalOptions = {
   skipUserMessageAppend?: boolean;
   userMessageId?: string | null;
@@ -212,7 +319,97 @@ type ChatTurnInternalOptions = {
   preResolvedRunContext?: AgentRunContext;
   preResolvedWorkspaceSummary?: ChatWorkspaceSummary;
   initialStreamSequence?: number;
+  preparedInput?: PreparedChatMessageInput;
+  requestClaim?: ChatRequestClaim | null;
+  publicationAuthority?: ChatPublicationAuthority;
+  onDurableSessionResolved?: (sessionId: string) => void;
+  onDomainStateUnavailable?: () => void;
+  onWorkspaceRunRecorderResolved?: (
+    recorder: ChatWorkspaceRunRecorder | null,
+  ) => void;
 };
+
+type ChatPublicationAuthority = {
+  markDurable(sessionId: string, userMessageId: string): boolean;
+  invalidate(reasonCode: string): void;
+  durableSessionId(): string | undefined;
+  domainStateAvailable(): boolean;
+};
+
+function createChatPublicationAuthority(): ChatPublicationAuthority {
+  let state:
+    | { kind: "route_only" }
+    | { kind: "durable"; sessionId: string; userMessageId: string }
+    | { kind: "invalidated"; reasonCode: string } = { kind: "route_only" };
+  return {
+    markDurable(sessionId, userMessageId) {
+      if (state.kind === "invalidated") return false;
+      const normalizedSessionId = sessionId.trim();
+      const normalizedUserMessageId = userMessageId.trim();
+      if (!normalizedSessionId || !normalizedUserMessageId) return false;
+      if (
+        state.kind === "durable"
+        && (
+          state.sessionId !== normalizedSessionId
+          || state.userMessageId !== normalizedUserMessageId
+        )
+      ) {
+        state = { kind: "invalidated", reasonCode: "durable_binding_conflict" };
+        return false;
+      }
+      state = {
+        kind: "durable",
+        sessionId: normalizedSessionId,
+        userMessageId: normalizedUserMessageId,
+      };
+      return true;
+    },
+    invalidate(reasonCode) {
+      if (state.kind !== "invalidated") {
+        state = { kind: "invalidated", reasonCode };
+      }
+    },
+    durableSessionId() {
+      return state.kind === "durable" ? state.sessionId : undefined;
+    },
+    domainStateAvailable() {
+      return state.kind === "durable";
+    },
+  };
+}
+
+class RequiredConversationSettlementError extends SecretSafeFailureError {
+  readonly code = "CONVERSATION_SETTLEMENT_FAILED" as const;
+  constructor(
+    readonly failureStatusPersisted: boolean,
+    cause?: unknown,
+    readonly failureCode:
+      | "CHAT_SETTLEMENT_FAILED"
+      | "WORKSPACE_SETTLEMENT_FAILED"
+      | "CROSS_DOMAIN_SETTLEMENT_FAILED" = "CROSS_DOMAIN_SETTLEMENT_FAILED",
+  ) {
+    super(failureCode, cause);
+    this.name = "RequiredConversationSettlementError";
+  }
+}
+
+class AssistantAcceptanceRecoveryRequiredError extends Error {
+  constructor(
+    readonly result: SendChatMessageResult,
+  ) {
+    super("Assistant acceptance requires durable reconciliation.");
+  }
+}
+
+function createAssistantAcceptanceRecoveryResult(): SendChatMessageResult {
+  return {
+    ok: false,
+    code: "CONFLICT",
+    retryable: true,
+    message: "回复已持久化，跨域成功确认仍在恢复中。",
+    turnSettlementStatus: "unknown",
+  };
+}
 
 type ChatGoalService = {
   createFromChat(input: {
@@ -312,7 +509,7 @@ export function createChatService(options: {
   taskStore?: Pick<ScheduledTaskStore, "create" | "list">;
   runScheduledTask?: (
     taskId: string,
-    options?: { sessionId?: string },
+    options?: { sessionId?: string; beforeExecution?: AgentRunAdmissionGate },
   ) => Promise<RunScheduledTaskResult>;
   discoverSkills?: () => Promise<SkillDiscoveryResult>;
   workspaceService?: Pick<AgentWorkspaceService, "resolveRunContext">;
@@ -330,7 +527,24 @@ export function createChatService(options: {
   trajectoryStore?: AgentTrajectoryStore;
   workspaceRunStore?: Pick<
     WorkspaceRunStore,
-    "createRun" | "appendEvent" | "finishRun"
+    "ensureRun" | "settleLifecycle" | "getRun" | "listEvents"
+  >;
+  conversationCausalStore?: Pick<
+    ConversationCausalStore,
+    | "claimRequest"
+    | "bindRequest"
+    | "beginAttempt"
+    | "settleAttempt"
+    | "acceptAssistant"
+    | "prepareAssistantAcceptance"
+    | "commitAssistantAcceptance"
+    | "reconcileAssistant"
+    | "addRefs"
+    | "beginRequiredSettlement"
+    | "settleRequiredSettlement"
+    | "admitAgentRun"
+    | "settleAgentRunAdmission"
+    | "getRequest"
   >;
   historyIndexStore?: Pick<HistoryIndexStore, "append">;
   /** P2: overflow compaction strategy passed through to the chat agent loop. */
@@ -458,6 +672,187 @@ export function createChatService(options: {
     return entry.input;
   }
 
+  async function hasDurableGuidedInputOwnership(
+    persisted: SkillPendingInputState,
+  ): Promise<boolean> {
+    if (
+      !options.conversationCausalStore
+      || !options.chatSessionStore?.get
+      || !persisted.userMessageId
+      || !persisted.settlementId
+    ) {
+      return false;
+    }
+    const causalRecord = await options.conversationCausalStore.getRequest(
+      persisted.requestId,
+    ).catch(() => null);
+    const binding = resolveDurableConversationBinding(causalRecord);
+    const settlement = causalRecord?.requiredSettlements?.find(
+      (candidate) => candidate.id === persisted.settlementId,
+    );
+    const session = await options.chatSessionStore.get(
+      persisted.sessionId,
+    ).catch(() => null);
+    const sourceEvent = session?.activity?.statusEvents.find(
+      (event) => event.settlementId === persisted.settlementId,
+    );
+    const sourceFingerprint = sourceEvent
+      ? createRequiredChatEventFingerprint(sourceEvent)
+      : undefined;
+    return Boolean(
+      binding
+      && binding.sessionId === persisted.sessionId
+      && binding.userMessageId === persisted.userMessageId
+      && settlement?.state === "committed"
+      && Boolean(settlement.preparedChatEventFingerprint)
+      && settlement.chatEventFingerprint === settlement.preparedChatEventFingerprint
+      && sourceFingerprint === settlement.preparedChatEventFingerprint
+      && settlement.targetState === "waiting_for_input"
+      && settlement.guidedInputRequestId === persisted.inputRequestId
+      && causalRecord?.refs.some(
+        (ref) => ref.kind === "guided_input" && ref.id === persisted.inputRequestId,
+      ),
+    );
+  }
+
+  async function compensateUnrecoverableGuidedInputSettlement(
+    persisted: SkillPendingInputState,
+  ): Promise<void> {
+    if (
+      !options.conversationCausalStore
+      || !options.chatSessionStore?.get
+      || !persisted.userMessageId
+      || !persisted.settlementId
+    ) {
+      return;
+    }
+    const causalRecord = await options.conversationCausalStore.getRequest(
+      persisted.requestId,
+    ).catch(() => null);
+    const binding = resolveDurableConversationBinding(causalRecord);
+    const settlement = causalRecord?.requiredSettlements?.find(
+      (candidate) =>
+        candidate.id === persisted.settlementId
+        && candidate.guidedInputRequestId === persisted.inputRequestId,
+    );
+    const owningAttempt = settlement
+      ? causalRecord?.attempts.find(
+          (candidate) => candidate.attempt === settlement.attempt,
+        )
+      : undefined;
+    if (
+      owningAttempt?.state === "accepted"
+      && owningAttempt.assistantAcceptance?.state === "committed"
+      && owningAttempt.acceptedSettlement
+    ) {
+      return;
+    }
+    if (
+      !causalRecord
+      || binding?.sessionId !== persisted.sessionId
+      || binding.userMessageId !== persisted.userMessageId
+      || !settlement
+      || !causalRecord.refs.some(
+        (ref) =>
+          ref.kind === "guided_input"
+          && ref.id === persisted.inputRequestId,
+      )
+    ) {
+      return;
+    }
+    const session = await options.chatSessionStore.get(
+      persisted.sessionId,
+    ).catch(() => null);
+    const events = session?.activity?.statusEvents ?? [];
+    const sourceEvent = [...events].reverse().find(
+      (event) =>
+        event.settlementId === settlement.id
+        && event.pendingSkillInput?.inputRequestId === persisted.inputRequestId,
+    );
+    if (settlement.state === "preparing") {
+      const sourceFingerprint = sourceEvent
+        ? createRequiredChatEventFingerprint(sourceEvent)
+        : undefined;
+      await options.conversationCausalStore.settleRequiredSettlement({
+        requestId: persisted.requestId,
+        id: settlement.id,
+        state: "failed",
+        ...(sourceFingerprint === settlement.preparedChatEventFingerprint
+          ? {
+              chatEventFingerprint: sourceFingerprint,
+            }
+          : {}),
+        failureCode: "RECOVERY_INCOMPLETE",
+      }).catch(() => undefined);
+    }
+    const tombstoneId = `${settlement.id}:recovery-tombstone`;
+    if (!events.some((event) => event.settlementId === tombstoneId)) {
+      const sequence = Math.max(
+        settlement.sourceSequence,
+        ...events
+          .filter((event) => event.requestId === persisted.requestId)
+          .map((event) => event.sequence ?? 0),
+      ) + 1;
+      await persistRequiredChatActivityEvent(options.chatSessionStore, {
+        sessionId: persisted.sessionId,
+        requestId: persisted.requestId,
+        turnId: causalRecord.turnId,
+        sequence,
+        settlementId: tombstoneId,
+        state: "failed",
+        message: "Guided input recovery found an incomplete settlement.",
+        createdAt: new Date(getNowMs(options.now)).toISOString(),
+        elapsedMs: 0,
+        domainStateAvailable: false,
+        selectedSkillName: persisted.selectedSkillName,
+        pendingSkillInput: {
+          ...persisted,
+          status: "failed",
+          settlementId: settlement.id,
+          attachmentPayloads: undefined,
+        },
+      }).catch(() => undefined);
+    }
+    await options.conversationCausalStore.settleAttempt({
+      requestId: persisted.requestId,
+      attempt: settlement.attempt,
+      state: "interrupted",
+    }).catch(() => undefined);
+    await options.conversationCausalStore.addRefs({
+      requestId: persisted.requestId,
+      refs: [],
+      coverage: {
+        state: "degraded",
+        reasonCodes: ["guided_input_recovery_incomplete"],
+      },
+    }).catch(() => undefined);
+  }
+
+  async function ensureGuidedInputCausalAttempt(
+    persisted: SkillPendingInputState,
+  ): Promise<number | null> {
+    if (!options.conversationCausalStore) return 1;
+    const record = await options.conversationCausalStore.getRequest(persisted.requestId);
+    const lastAttempt = record?.attempts.at(-1);
+    if (!lastAttempt) return null;
+    if (lastAttempt.state === "active") return lastAttempt.attempt;
+    if (
+      lastAttempt.state !== "interrupted"
+      && lastAttempt.state !== "reset"
+      && lastAttempt.state !== "superseded"
+    ) {
+      return null;
+    }
+    const nextAttempt = lastAttempt.attempt + 1;
+    const begun = await options.conversationCausalStore.beginAttempt({
+      requestId: persisted.requestId,
+      attempt: nextAttempt,
+    });
+    return begun.disposition === "applied" || begun.disposition === "duplicate"
+      ? nextAttempt
+      : null;
+  }
+
   async function recoverPendingSkillInputState(
     inputRequestId: string,
   ): Promise<PendingSkillInputState | null> {
@@ -465,11 +860,16 @@ export function createChatService(options: {
       inputRequestId,
       chatSessionStore: options.chatSessionStore,
     });
-    if (
-      !persisted ||
-      (persisted.status !== "pending" &&
-        persisted.status !== "processing")
-    ) {
+    if (!persisted) {
+      return null;
+    }
+    if (persisted.status === "processing") {
+      await compensateUnrecoverableGuidedInputSettlement(persisted);
+      return null;
+    }
+    if (persisted.status !== "pending") return null;
+    if (!(await hasDurableGuidedInputOwnership(persisted))) {
+      await compensateUnrecoverableGuidedInputSettlement(persisted);
       return null;
     }
 
@@ -510,50 +910,241 @@ export function createChatService(options: {
     return recovered;
   }
 
-  async function persistSkillInputExecutionState(
+  async function persistSkillInputLifecycleState(
     pending: PendingSkillInputState,
-    status: "processing" | "completed",
-  ) {
-    if (!options.chatSessionStore?.appendActivityEvent) {
-      throw new Error("Chat session activity persistence is unavailable.");
-    }
-
-    const record = await options.chatSessionStore.appendActivityEvent(pending.sessionId, {
+    status: "processing" | "canceled",
+    attempt: number,
+  ): Promise<void> {
+    const persistedSession = options.chatSessionStore?.get
+      ? await options.chatSessionStore.get(pending.sessionId)
+      : null;
+    const nextSequence = Math.max(
+      pending.streamSequence,
+      ...(persistedSession?.activity?.statusEvents
+        .filter((event) => event.requestId === pending.requestId)
+        .map((event) => event.sequence ?? 0)
+        ?? [0]),
+    ) + 1;
+    const event: ChatTaskStatusEvent = {
       sessionId: pending.sessionId,
-      state: status === "completed" ? "completed" : "checkpoint_boundary",
+      requestId: pending.requestId,
+      turnId: createConversationTurnId(pending.requestId),
+      sequence: nextSequence,
+      state: status === "canceled" ? "canceled" : "checkpoint_boundary",
       message:
-        status === "completed"
-          ? "Skill input completed."
+        status === "canceled"
+          ? "Skill input request retired."
           : "Skill input execution claimed.",
       createdAt: new Date(getNowMs(options.now)).toISOString(),
       elapsedMs: 0,
+      domainStateAvailable: true,
       selectedSkillName: pending.selectedSkill.manifest.name,
-      ...(status === "processing" && pending.inputRequest
+      ...(pending.inputRequest
         ? { inputRequest: pending.inputRequest }
         : {}),
       pendingSkillInput: {
         ...pending.persisted,
         status,
-        ...(status === "completed"
-          ? { attachmentPayloads: undefined }
-          : {}),
+        ...(status === "canceled" ? { attachmentPayloads: undefined } : {}),
       },
-    });
-    if (!record) {
-      throw new Error("Chat session activity persistence did not update a session.");
+    };
+    let workspaceRunRecorder: ChatWorkspaceRunRecorder | null = null;
+    try {
+      workspaceRunRecorder = pending.runContext
+        ? await createChatWorkspaceRunRecorder({
+            workspaceRunStore: options.workspaceRunStore,
+            sessionId: pending.sessionId,
+            requestId: pending.requestId,
+            runContext: pending.runContext,
+            selectedSkillName: pending.selectedSkill.manifest.name,
+            createdAt: event.createdAt,
+          })
+        : null;
+      await persistRequiredConversationSettlement({
+        requestId: pending.requestId,
+        attempt,
+        event,
+        chatSessionStore: options.chatSessionStore,
+        conversationCausalStore: options.conversationCausalStore,
+        workspaceRunRecorder,
+        workspaceUnavailableReasonCode:
+          "guided_input_workspace_run_unavailable",
+        failureReasonCode: "guided_input_lifecycle_settlement_failed",
+      });
+      pending.streamSequence = nextSequence;
+    } catch (error) {
+      const settlementId = event.settlementId
+        ?? createRequiredSettlementId({
+          requestId: pending.requestId,
+          attempt,
+          sourceSequence: nextSequence,
+          targetState: toRequiredSettlementTarget(event) ?? "failed",
+        });
+      const tombstone: ChatTaskStatusEvent = {
+        ...event,
+        sequence: nextSequence + 1,
+        settlementId: `${settlementId}:tombstone`,
+        state: "failed",
+        message: "Guided input lifecycle settlement failed.",
+        pendingSkillInput: {
+          ...pending.persisted,
+          status: "failed",
+          settlementId,
+          attachmentPayloads: undefined,
+        },
+      };
+      await persistRequiredChatActivityEvent(
+        options.chatSessionStore,
+        tombstone,
+      ).catch(() => undefined);
+      await workspaceRunRecorder?.appendStatusEvent(tombstone).catch(() => undefined);
+      await options.conversationCausalStore?.settleAttempt({
+        requestId: pending.requestId,
+        attempt,
+        state: "interrupted",
+      }).catch(() => undefined);
+      pendingSkillInputRequests.delete(pending.persisted.inputRequestId);
+      throw error;
     }
   }
 
   function markPersistedSkillInputProcessing(
     pending: PendingSkillInputState,
+    attempt: number,
   ) {
-    return persistSkillInputExecutionState(pending, "processing");
+    return persistSkillInputLifecycleState(pending, "processing", attempt);
   }
 
-  function markPersistedSkillInputCompleted(
+  function markPersistedSkillInputCanceled(
     pending: PendingSkillInputState,
+    attempt: number,
   ) {
-    return persistSkillInputExecutionState(pending, "completed");
+    return persistSkillInputLifecycleState(pending, "canceled", attempt);
+  }
+
+  async function prepareChatMessageInput(
+    input: SendChatMessageInput,
+    runtimeOptions: SendChatMessageRuntimeOptions,
+  ): Promise<
+    | { ok: true; value: PreparedChatMessageInput }
+    | { ok: false; result: Extract<SendChatMessageResult, { ok: false }> }
+  > {
+    if (runtimeOptions.signal?.aborted) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          code: "CANCELED",
+          retryable: true,
+          message: "已中断任务。",
+        },
+      };
+    }
+    let processedAttachments: ProcessedChatAttachments;
+    try {
+      processedAttachments = processChatAttachments(input.attachments);
+    } catch (error) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          message:
+            error instanceof ChatAttachmentValidationError
+              ? error.message
+              : "无法读取粘贴的附件。",
+        },
+      };
+    }
+    const userMessage = input.message.trim()
+      ? input.message
+      : processedAttachments.metadata.length
+        ? "请分析这些附件。"
+        : input.message;
+    if (!userMessage.trim()) {
+      return {
+        ok: false,
+        result: { ok: false, code: "EMPTY_MESSAGE", message: "消息不能为空。" },
+      };
+    }
+    const modelUserMessage = appendChatAttachmentContext(
+      userMessage,
+      processedAttachments.textContext,
+    );
+    const hasAttachments = processedAttachments.metadata.length > 0;
+    const preexistingInputRoutingPlan =
+      options.planService && input.sessionId
+        ? await options.planService.getInputRoutingPlan(input.sessionId)
+        : null;
+    if (runtimeOptions.signal?.aborted) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          code: "CANCELED",
+          retryable: true,
+          message: "已中断任务。",
+        },
+      };
+    }
+    if (
+      processedAttachments.images.length > 0
+      && (input.mode === "goal_plan" || preexistingInputRoutingPlan)
+    ) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          message:
+            "只读 Plan Mode 暂不支持图片附件。请先移除图片，或把关键信息转为文本附件后再规划。",
+        },
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        processedAttachments,
+        userMessage,
+        modelUserMessage,
+        hasAttachments,
+        preexistingInputRoutingPlan,
+      },
+    };
+  }
+
+  function claimChatRequest(input: {
+    requestId: string;
+    turnId: string;
+    messageInput: SendChatMessageInput;
+    preparedInput: PreparedChatMessageInput;
+    createdAt: string;
+  }): Promise<ChatRequestClaim | null> {
+    if (!options.conversationCausalStore) {
+      return Promise.resolve(null);
+    }
+    return options.conversationCausalStore.claimRequest({
+      requestId: input.requestId,
+      turnId: input.turnId,
+      inputFingerprint: createChatRequestClaimFingerprint({
+        input: input.messageInput,
+        userMessage: input.preparedInput.userMessage,
+        validatedAttachments:
+          input.preparedInput.processedAttachments.validatedInputs,
+      }),
+      inputFingerprintVersion: CONVERSATION_REQUEST_FINGERPRINT_VERSION,
+      legacyInputFingerprint: createLegacyChatRequestClaimFingerprint({
+        input: input.messageInput,
+        userMessage: input.preparedInput.userMessage,
+        validatedAttachments:
+          input.preparedInput.processedAttachments.validatedInputs,
+      }),
+      coverage: options.workspaceRunStore
+        ? { state: "complete", reasonCodes: [] }
+        : {
+            state: "partial",
+            reasonCodes: ["workspace_run_adapter_unavailable"],
+          },
+      createdAt: input.createdAt,
+    });
   }
 
   async function executeMessageInternal(
@@ -562,52 +1153,217 @@ export function createChatService(options: {
     internalOptions: ChatTurnInternalOptions = {},
   ): Promise<SendChatMessageResult> {
       if (runtimeOptions.signal?.aborted) {
-        return { ok: false, code: "CANCELED", retryable: true, message: "已中断任务。" };
-      }
-      let processedAttachments;
-      try {
-        processedAttachments = processChatAttachments(input.attachments);
-      } catch (error) {
         return {
           ok: false,
-          message:
-            error instanceof ChatAttachmentValidationError
-              ? error.message
-              : "无法读取粘贴的附件。",
+          code: "CANCELED",
+          retryable: true,
+          message: "已中断任务。",
         };
       }
-      const userMessage = input.message.trim()
-        ? input.message
-        : processedAttachments.metadata.length
-          ? "请分析这些附件。"
-          : input.message;
-      if (!userMessage.trim()) {
-        return { ok: false, code: "EMPTY_MESSAGE", message: "消息不能为空。" };
+      const preparation = internalOptions.preparedInput
+        ? { ok: true as const, value: internalOptions.preparedInput }
+        : await prepareChatMessageInput(input, runtimeOptions);
+      if (!preparation.ok) {
+        return preparation.result;
       }
-      const modelUserMessage = appendChatAttachmentContext(
+      const {
+        processedAttachments,
         userMessage,
-        processedAttachments.textContext,
-      );
-      const hasAttachments = processedAttachments.metadata.length > 0;
-      const preexistingInputRoutingPlan =
-        options.planService && input.sessionId
-          ? await options.planService.getInputRoutingPlan(input.sessionId)
-          : null;
-      if (
-        processedAttachments.images.length > 0 &&
-        (input.mode === "goal_plan" || preexistingInputRoutingPlan)
-      ) {
-        return {
-          ok: false,
-          message:
-            "只读 Plan Mode 暂不支持图片附件。请先移除图片，或把关键信息转为文本附件后再规划。",
-        };
-      }
+        modelUserMessage,
+        hasAttachments,
+        preexistingInputRoutingPlan,
+      } = preparation.value;
 
       let sessionId = input.sessionId ?? createId();
       const startedAtMs = getNowMs(options.now);
       const requestId = input.requestId ?? `request_${startedAtMs}`;
       let workspaceRunRecorder: ChatWorkspaceRunRecorder | null = null;
+      let currentCausalAttempt = 0;
+      const publicationAuthority =
+        internalOptions.publicationAuthority ?? createChatPublicationAuthority();
+
+      function invalidatePublicationAuthority(reasonCode: string): void {
+        publicationAuthority.invalidate(reasonCode);
+        internalOptions.onDomainStateUnavailable?.();
+      }
+
+      async function interruptRequiredSettlementAttempt(): Promise<void> {
+        pendingContinuations.delete(sessionId);
+        if (!options.conversationCausalStore || currentCausalAttempt < 1) return;
+        try {
+          const settled = await options.conversationCausalStore.settleAttempt({
+            requestId,
+            attempt: currentCausalAttempt,
+            state: "interrupted",
+          });
+          if (
+            settled.disposition !== "applied"
+            && settled.disposition !== "duplicate"
+          ) {
+            await options.conversationCausalStore.addRefs({
+              requestId,
+              refs: [],
+              coverage: {
+                state: "degraded",
+                reasonCodes: ["required_settlement_attempt_interrupt_conflict"],
+              },
+            }).catch(() => undefined);
+          }
+        } catch {
+          await options.conversationCausalStore.addRefs({
+            requestId,
+            refs: [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: ["required_settlement_attempt_interrupt_failed"],
+            },
+          }).catch(() => undefined);
+        }
+      }
+
+      async function compensateRequiredSettlementFailure(
+        event: ChatTaskStatusEvent,
+      ): Promise<boolean> {
+        const {
+          payload: _payload,
+          inputRequest: _inputRequest,
+          pendingSkillInput,
+          maxTurns: _maxTurns,
+          ...safeEvent
+        } = event;
+        const failureEvent: ChatTaskStatusEvent = {
+          ...safeEvent,
+          ...(event.settlementId
+            ? { settlementId: `${event.settlementId}:tombstone` }
+            : {}),
+          state: "failed",
+          message: "Required conversation settlement failed.",
+          ...(pendingSkillInput
+            ? {
+                pendingSkillInput: {
+                  ...pendingSkillInput,
+                  status: "failed",
+                  attachmentPayloads: undefined,
+                },
+              }
+            : {}),
+        };
+        const [chatCompensation, workspaceCompensation] = await Promise.allSettled([
+          persistRequiredChatActivityEvent(options.chatSessionStore, failureEvent),
+          workspaceRunRecorder
+            ? workspaceRunRecorder.appendStatusEvent(failureEvent)
+            : Promise.resolve(null),
+        ]);
+        const reasonCodes = ["required_conversation_settlement_failed"];
+        if (chatCompensation.status === "rejected") {
+          reasonCodes.push("required_chat_failure_compensation_failed");
+          invalidatePublicationAuthority("required_chat_failure_compensation_failed");
+        }
+        if (workspaceCompensation.status === "rejected") {
+          reasonCodes.push("required_workspace_failure_compensation_failed");
+        }
+        const recorded = workspaceCompensation.status === "fulfilled"
+          ? workspaceCompensation.value
+          : null;
+        await options.conversationCausalStore?.addRefs({
+          requestId,
+          refs: [
+            ...(workspaceRunRecorder
+              ? [{ kind: "workspace_run" as const, id: workspaceRunRecorder.workspaceRunId }]
+              : []),
+            ...(recorded?.eventId && workspaceRunRecorder
+              ? [{
+                  kind: "workspace_event" as const,
+                  runId: workspaceRunRecorder.workspaceRunId,
+                  eventId: recorded.eventId,
+                }]
+              : []),
+          ],
+          coverage: { state: "degraded", reasonCodes },
+        }).catch(() => undefined);
+        await interruptRequiredSettlementAttempt();
+        return chatCompensation.status === "fulfilled";
+      }
+
+      async function persistChatStatusEvent(
+        event: ChatTaskStatusEvent,
+        requiredChat: boolean,
+      ): Promise<void> {
+        if (!requiredChat) {
+          if (options.chatSessionStore?.appendActivityEvent) {
+            try {
+              await options.chatSessionStore.appendActivityEvent(event.sessionId, event);
+            } catch {
+              await options.conversationCausalStore?.addRefs({
+                requestId,
+                refs: [],
+                coverage: {
+                  state: "degraded",
+                  reasonCodes: ["chat_activity_write_failed"],
+                },
+              }).catch(() => undefined);
+            }
+          }
+          if (!workspaceRunRecorder) {
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [],
+              coverage: {
+                state: "partial",
+                reasonCodes: ["workspace_run_unavailable"],
+              },
+            }).catch(() => undefined);
+            return;
+          }
+          try {
+            const recorded = await workspaceRunRecorder.appendStatusEvent(event);
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [
+                { kind: "workspace_run", id: workspaceRunRecorder.workspaceRunId },
+                ...(recorded.eventId
+                  ? [{
+                      kind: "workspace_event" as const,
+                      runId: workspaceRunRecorder.workspaceRunId,
+                      eventId: recorded.eventId,
+                    }]
+                  : []),
+              ],
+            }).catch(() => undefined);
+          } catch {
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [{ kind: "workspace_run", id: workspaceRunRecorder.workspaceRunId }],
+              coverage: {
+                state: "degraded",
+                reasonCodes: ["workspace_run_write_failed"],
+              },
+            }).catch(() => undefined);
+          }
+          return;
+        }
+        try {
+          await persistRequiredConversationSettlement({
+            requestId,
+            attempt: currentCausalAttempt,
+            event,
+            chatSessionStore: options.chatSessionStore,
+            conversationCausalStore: options.conversationCausalStore,
+            workspaceRunRecorder,
+            workspaceUnavailableReasonCode: "workspace_run_unavailable",
+          });
+        } catch (error) {
+          const failureStatusPersisted =
+            await compensateRequiredSettlementFailure(event);
+          throw new RequiredConversationSettlementError(
+            failureStatusPersisted,
+            error,
+            error instanceof RequiredConversationSettlementError
+              ? error.failureCode
+              : "CROSS_DOMAIN_SETTLEMENT_FAILED",
+          );
+        }
+      }
       const chatTimeZone = options.systemTimeZone ?? getSystemTimeZone();
       // Anchor date to turn start, interpreted in the user's system timezone.
       const chatDate = formatDateInTimeZone(new Date(startedAtMs), chatTimeZone);
@@ -619,64 +1375,109 @@ export function createChatService(options: {
         now: options.now,
         onStatusEvent: runtimeOptions.onStatusEvent,
         onStreamEvent: runtimeOptions.onStreamEvent,
+        getDomainStateAvailable: () => publicationAuthority.domainStateAvailable(),
         onPersistEvent(event) {
-          try {
-            const sessionActivityWrite =
-              options.chatSessionStore?.appendActivityEvent?.(
-                event.sessionId,
-                event,
-              );
-            void sessionActivityWrite?.catch(() => undefined);
-          } catch {
-            // Observability writes must not fail the user-facing chat turn.
-          }
-          try {
-            const workspaceRunWrite = workspaceRunRecorder?.appendStatusEvent(event);
-            void workspaceRunWrite?.catch(() => undefined);
-          } catch {
-            // Observability writes must not fail the user-facing chat turn.
-          }
+          return persistChatStatusEvent(event, false);
         },
-        ...(options.chatSessionStore?.appendActivityEvent
-          ? {
-              async onRequiredPersistEvent(event: ChatTaskStatusEvent) {
-                await persistRequiredChatActivityEvent(options.chatSessionStore, event);
-              },
-            }
-          : {}),
+        async onRequiredPersistEvent(event: ChatTaskStatusEvent) {
+          await persistChatStatusEvent(event, true);
+        },
       });
       const outputAssembler = createChatOutputAssembler(() =>
         new Date(getNowMs(options.now)).toISOString(),
       );
+      let accumulatedReasoningProjection = "";
       let terminalStreamEventSent = false;
 
       function finalizeAssistantOutput(content: string): {
         outputParts?: ChatOutputPart[];
-        finalTextPart?: ChatOutputPart;
       } {
-        const finalTextPart = outputAssembler.setFinalText(content);
+        outputAssembler.setFinalText(redactCredentialString(content));
         const outputParts = outputAssembler.parts();
         return {
           ...(outputParts.length > 0 ? { outputParts } : {}),
-          ...(finalTextPart ? { finalTextPart } : {}),
         };
       }
 
-      function emitOutputPart(part: ChatOutputPart) {
+      function emitOutputPart(
+        part: ChatOutputPart,
+        provenance: { domainStateAvailable?: false } = {},
+      ) {
         emitStatus.sendStreamEvent({
           type: "output_part",
           part,
+          ...provenance,
         });
       }
 
-      function emitTerminalStreamEvent(event: {
+      const causalTurnId = createConversationTurnId(requestId);
+      const requestClaim = internalOptions.requestClaim !== undefined
+        ? internalOptions.requestClaim
+        : await claimChatRequest({
+            requestId,
+            turnId: causalTurnId,
+            messageInput: input,
+            preparedInput: preparation.value,
+            createdAt: new Date(startedAtMs).toISOString(),
+          });
+      const claimBinding = resolveDurableConversationBinding(requestClaim?.value);
+      const legacyRequestClaim = Boolean(
+        requestClaim?.value
+        && resolveConversationRequestFingerprintVersion(requestClaim.value)
+          === LEGACY_CONVERSATION_REQUEST_FINGERPRINT_VERSION,
+      );
+      if (legacyRequestClaim) {
+        await options.conversationCausalStore?.addRefs({
+          requestId,
+          refs: [],
+          coverage: {
+            state: "degraded",
+            reasonCodes: ["legacy_request_fingerprint"],
+          },
+        }).catch(() => undefined);
+      }
+      currentCausalAttempt = requestClaim?.value?.attempts.at(-1)?.attempt ?? 0;
+
+      async function ensureCausalAttempt(): Promise<void> {
+        if (!options.conversationCausalStore) {
+          currentCausalAttempt = Math.max(1, currentCausalAttempt);
+          return;
+        }
+        const current = await options.conversationCausalStore.getRequest(requestId);
+        const last = current?.attempts.at(-1);
+        if (last?.state === "accepted") {
+          currentCausalAttempt = last.attempt;
+          return;
+        }
+        if (last?.state === "active") {
+          currentCausalAttempt = last.attempt;
+          return;
+        }
+        const nextAttempt = (last?.attempt ?? 0) + 1;
+        const begun = await options.conversationCausalStore.beginAttempt({
+          requestId,
+          attempt: nextAttempt,
+        });
+        if (begun.disposition !== "applied" && begun.disposition !== "duplicate") {
+          throw new Error("Conversation causal attempt could not be started.");
+        }
+        currentCausalAttempt = nextAttempt;
+      }
+
+      async function emitTerminalStreamEvent(event: {
         type: "completed" | "failed" | "canceled";
         message?: string;
         finalMessageId?: string;
+        domainStateAvailable?: false;
       }) {
         if (terminalStreamEventSent) {
           return;
         }
+        const domainStateAvailable =
+          event.domainStateAvailable === false
+            || !publicationAuthority.domainStateAvailable()
+            ? false as const
+            : undefined;
         if (
           event.message &&
           (event.type === "failed" || event.type === "canceled")
@@ -687,33 +1488,404 @@ export function createChatService(options: {
               title: event.type === "failed" ? "请求失败" : "请求已取消",
               message: event.message,
             }),
+            domainStateAvailable === false
+              ? { domainStateAvailable: false }
+              : {},
           );
         }
         terminalStreamEventSent = true;
-        emitStatus.sendTerminalEvent(event);
+        await emitStatus.drainPersistence();
+        emitStatus.sendTerminalEvent({
+          ...event,
+          ...(domainStateAvailable === false
+            ? { domainStateAvailable: false as const }
+            : {}),
+        });
       }
 
-      const persistedRequestTurn =
-        input.sessionId && input.requestId && options.chatSessionStore?.get
+      async function settleClaimOwnedFailure(message: string): Promise<void> {
+        const durableSessionId = publicationAuthority.durableSessionId();
+        if (durableSessionId && options.chatSessionStore?.appendActivityEvent) {
+          try {
+            await emitStatus.sendRequired({
+              state: "failed",
+              message,
+              toolCallsExecuted: 0,
+            });
+            await emitTerminalStreamEvent({
+              type: "failed",
+              message,
+            });
+            return;
+          } catch (error) {
+            if (
+              !(error instanceof RequiredConversationSettlementError)
+              || !error.failureStatusPersisted
+            ) {
+              invalidatePublicationAuthority("claim_terminal_activity_write_failed");
+            }
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [],
+              coverage: {
+                state: "degraded",
+                reasonCodes: ["claim_terminal_activity_write_failed"],
+              },
+            }).catch(() => undefined);
+            emitStatus.sendPublishedOnly({
+              state: "failed",
+              message,
+              toolCallsExecuted: 0,
+            });
+          }
+        } else {
+          invalidatePublicationAuthority(
+            durableSessionId
+              ? "chat_activity_adapter_unavailable"
+              : "session_binding_unproven",
+          );
+          await options.conversationCausalStore?.addRefs({
+            requestId,
+            refs: [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: [
+                durableSessionId
+                  ? "chat_activity_adapter_unavailable"
+                  : "session_binding_unproven",
+              ],
+            },
+          }).catch(() => undefined);
+          emitStatus.sendPublishedOnly({
+            state: "failed",
+            message,
+            toolCallsExecuted: 0,
+          });
+        }
+        await emitTerminalStreamEvent({
+          type: "failed",
+          message,
+          domainStateAvailable: false,
+        });
+      }
+
+      const replaySessionId = options.conversationCausalStore
+        ? claimBinding?.sessionId
+        : sessionId;
+      const persistedRequestTurnCandidate =
+        replaySessionId && input.requestId && options.chatSessionStore?.get
           ? await findPersistedRequestTurn(
               options.chatSessionStore,
-              input.sessionId,
+              replaySessionId,
               input.requestId,
             )
           : null;
+      if (
+        claimBinding
+        && persistedRequestTurnCandidate?.user?.id !== claimBinding.userMessageId
+      ) {
+        await settleClaimOwnedFailure(
+          "持久化会话消息与 request 因果归属不一致，已拒绝重放。",
+        );
+        return {
+          ok: false,
+          code: "CONFLICT",
+          message: "持久化会话消息与 request 因果归属不一致，已拒绝重放。",
+        };
+      }
+      const persistedRequestTurn = claimBinding
+        ? persistedRequestTurnCandidate?.user?.id === claimBinding.userMessageId
+          ? persistedRequestTurnCandidate
+          : null
+        : options.conversationCausalStore
+          ? null
+          : persistedRequestTurnCandidate;
+      if (persistedRequestTurn?.user) {
+        sessionId = persistedRequestTurn.session.id;
+        if (!publicationAuthority.markDurable(sessionId, persistedRequestTurn.user.id)) {
+          invalidatePublicationAuthority("durable_binding_conflict");
+        }
+        emitStatus.setSessionId(sessionId);
+        internalOptions.onDurableSessionResolved?.(sessionId);
+      } else if (requestClaim?.value?.sessionId && !claimBinding) {
+        await options.conversationCausalStore?.addRefs({
+          requestId,
+          refs: [],
+          coverage: {
+            state: "degraded",
+            reasonCodes: ["session_binding_unproven"],
+          },
+        }).catch(() => undefined);
+      }
+      if (requestClaim?.disposition === "conflict") {
+        await settleClaimOwnedFailure(
+          "相同 requestId 已绑定到不同输入，已拒绝冲突重放。",
+        );
+        return {
+          ok: false,
+          message: "相同 requestId 已绑定到不同输入，已拒绝冲突重放。",
+        };
+      }
       if (persistedRequestTurn?.assistant) {
-        emitStatus.setAssistantMessageId(persistedRequestTurn.assistant.id);
-        emitTerminalStreamEvent({
-          type: "completed",
-          message: persistedRequestTurn.assistant.content,
-          finalMessageId: persistedRequestTurn.assistant.id,
+        const persistedAssistant = persistedRequestTurn.assistant;
+        const replaySettlementStatus =
+          persistedAssistant.turnSettlementStatus ?? "unknown";
+        const persistedMessage = {
+          id: persistedAssistant.id,
+          role: persistedAssistant.role,
+          requestId,
+          turnId: causalTurnId,
+          content: persistedAssistant.content,
+          turnSettlementStatus: persistedAssistant.turnSettlementStatus,
+        };
+        let accepted;
+        if (options.conversationCausalStore) {
+          const witnessedAttempt = persistedAssistant.causalAttempt;
+          const expectedAttemptId = witnessedAttempt !== undefined
+            ? createConversationCausalAttemptId({
+                requestId,
+                turnId: causalTurnId,
+                attempt: witnessedAttempt,
+              })
+            : null;
+          const hasExactAttemptWitness =
+            persistedAssistant.requestId === requestId
+            && persistedAssistant.turnId === causalTurnId
+            && witnessedAttempt !== undefined
+            && witnessedAttempt > 0
+            && persistedAssistant.causalAttemptId === expectedAttemptId;
+          if (
+            replaySettlementStatus === "failed"
+            || replaySettlementStatus === "canceled"
+          ) {
+            currentCausalAttempt = Math.max(1, witnessedAttempt ?? 1);
+            return {
+              ok: false,
+              code: "CONFLICT",
+              message: "已持久化回复与因果收据冲突，未重放执行。",
+            };
+          }
+          const receiptOwnedAttempt = hasExactAttemptWitness
+            ? requestClaim?.value?.attempts.find((attempt) =>
+                attempt.attempt === witnessedAttempt,
+              )
+            : requestClaim?.value?.attempts.find((attempt) =>
+                (
+                  attempt.state === "accepted"
+                  && attempt.acceptedSettlement?.acceptedMessageId
+                    === persistedAssistant.id
+                )
+                || attempt.assistantAcceptance?.acceptedSettlement.acceptedMessageId
+                  === persistedAssistant.id,
+              );
+          if (!receiptOwnedAttempt) {
+            await options.conversationCausalStore.addRefs({
+              requestId,
+              refs: [],
+              coverage: {
+                state: "degraded",
+                reasonCodes: ["assistant_attempt_witness_missing"],
+              },
+            }).catch(() => undefined);
+            return {
+              ok: false,
+              code: "CONFLICT",
+              message: "已持久化回复缺少可验证的尝试归属，只能作为历史记录读取。",
+            };
+          }
+          currentCausalAttempt = receiptOwnedAttempt.attempt;
+          if (receiptOwnedAttempt.assistantAcceptance?.state === "preparing") {
+            const prepared = await options.conversationCausalStore
+              .prepareAssistantAcceptance({
+                requestId,
+                attempt: receiptOwnedAttempt.attempt,
+                persistedMessage,
+                ...(receiptOwnedAttempt.assistantAcceptance.workspaceRunId
+                  ? {
+                      workspaceRunId:
+                        receiptOwnedAttempt.assistantAcceptance.workspaceRunId,
+                    }
+                  : {}),
+              });
+            if (
+              prepared.disposition !== "applied"
+              && prepared.disposition !== "duplicate"
+            ) {
+              return {
+                ok: false,
+                code: "CONFLICT",
+                message: "已持久化回复与因果准备记录冲突，未发布成功。",
+              };
+            }
+            const preparation = prepared.value?.attempts.find((attempt) =>
+              attempt.attempt === receiptOwnedAttempt.attempt,
+            )?.assistantAcceptance;
+            if (!preparation) {
+              throw new AssistantAcceptanceRecoveryRequiredError(
+                createAssistantAcceptanceRecoveryResult(),
+              );
+            }
+            let workspaceEventId: string | undefined;
+            if (preparation.requiredDomains.includes("workspace")) {
+              if (!options.workspaceRunStore || !preparation.workspaceRunId) {
+                throw new AssistantAcceptanceRecoveryRequiredError(
+                  createAssistantAcceptanceRecoveryResult(),
+                );
+              }
+              const workspaceSettlement =
+                await settlePreparedWorkspaceAssistantAcceptance({
+                  workspaceRunStore: options.workspaceRunStore,
+                  workspaceRunId: preparation.workspaceRunId,
+                  acceptance: preparation,
+                });
+              workspaceEventId = workspaceSettlement.eventId;
+              if (workspaceSettlement.disposition === "recovery_required") {
+                throw new AssistantAcceptanceRecoveryRequiredError(
+                  createAssistantAcceptanceRecoveryResult(),
+                );
+              }
+            }
+            const committed = await commitPreparedAssistantAcceptance({
+              conversationCausalStore: options.conversationCausalStore,
+              requestId,
+              attempt: receiptOwnedAttempt.attempt,
+              acceptance: preparation,
+              workspaceEventId,
+            });
+            if (committed === "recovery_required") {
+              throw new AssistantAcceptanceRecoveryRequiredError(
+                createAssistantAcceptanceRecoveryResult(),
+              );
+            }
+            accepted = {
+              disposition: "duplicate" as const,
+              value: await options.conversationCausalStore.getRequest(requestId)
+                ?? undefined,
+            };
+          } else if (hasExactAttemptWitness) {
+            currentCausalAttempt = witnessedAttempt;
+            accepted = await options.conversationCausalStore.reconcileAssistant({
+              requestId,
+              attempt: witnessedAttempt,
+              causalAttemptId: expectedAttemptId!,
+              persistedMessage,
+            });
+          } else {
+            accepted = await options.conversationCausalStore.acceptAssistant({
+              requestId,
+              attempt: receiptOwnedAttempt.attempt,
+              persistedMessage,
+            });
+          }
+        } else {
+          currentCausalAttempt = Math.max(1, persistedAssistant.causalAttempt ?? 1);
+        }
+        if (
+          accepted
+          && accepted.disposition !== "applied"
+          && accepted.disposition !== "duplicate"
+        ) {
+          return {
+            ok: false,
+            code: "CONFLICT",
+            message: "已持久化回复与因果收据冲突，未重放执行。",
+          };
+        }
+        const persistedWorkspaceRunId = accepted?.value?.refs.find(
+          (ref) => ref.kind === "workspace_run",
+        )?.id;
+        if (
+          persistedWorkspaceRunId
+          && options.workspaceRunStore
+          && replaySettlementStatus === "succeeded"
+        ) {
+          const repairEventId = `chat_status_${createConversationRequestFingerprint({
+            requestId,
+            state: "completed",
+            acceptedMessageId: persistedAssistant.id,
+          })}`;
+          try {
+            await options.workspaceRunStore.settleLifecycle({
+              workspaceRunId: persistedWorkspaceRunId,
+              event: {
+                id: repairEventId,
+                createdAt: persistedAssistant.createdAt,
+                type: "status",
+                status: "succeeded",
+                message: "Recovered accepted assistant reply.",
+                causalRef: {
+                  turnId: causalTurnId,
+                  sourceSequence: 0,
+                },
+              },
+              snapshotStatus: "succeeded",
+              summary: "Recovered accepted assistant reply.",
+            });
+          } catch {
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [{ kind: "workspace_run", id: persistedWorkspaceRunId }],
+              coverage: {
+                state: "degraded",
+                reasonCodes: ["workspace_accept_reconcile_failed"],
+              },
+            }).catch(() => undefined);
+          }
+        } else if (replaySettlementStatus === "unknown") {
+          await options.conversationCausalStore?.addRefs({
+            requestId,
+            refs: persistedWorkspaceRunId
+              ? [{ kind: "workspace_run", id: persistedWorkspaceRunId }]
+              : [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: ["legacy_turn_settlement_unknown"],
+            },
+          }).catch(() => undefined);
+        }
+        emitStatus.setAssistantMessageId(persistedAssistant.id);
+        emitStatus.sendAttemptControl({
+          operation: "accepted",
+          attempt: Math.max(1, currentCausalAttempt),
+        });
+        await emitTerminalStreamEvent({
+          type:
+            replaySettlementStatus === "failed"
+              ? "failed"
+              : replaySettlementStatus === "canceled"
+                ? "canceled"
+                : "completed",
+          message: persistedAssistant.content,
+          finalMessageId: persistedAssistant.id,
         });
         return {
           ok: true,
-          reply: persistedRequestTurn.assistant.content,
-          sessionId: input.sessionId!,
+          reply: persistedAssistant.content,
+          sessionId,
           relatedMemories: [],
           memoryId: null,
+          turnSettlementStatus: replaySettlementStatus,
+        };
+      }
+      if (legacyRequestClaim) {
+        await settleClaimOwnedFailure(
+          "旧版请求记录只能读取已持久化结果，无法安全恢复执行；请重新发送为新请求。",
+        );
+        return {
+          ok: false,
+          code: "CONFLICT",
+          message:
+            "旧版请求记录只能读取已持久化结果，无法安全恢复执行；请重新发送为新请求。",
+        };
+      }
+      if (
+        requestClaim?.disposition === "duplicate"
+        && !internalOptions.skipUserMessageAppend
+      ) {
+        return {
+          ok: false,
+          retryable: true,
+          message: "相同请求仍在处理中，未启动第二次执行。",
         };
       }
 
@@ -723,14 +1895,25 @@ export function createChatService(options: {
         executedRunId?: string;
         goalId?: string;
         goalEventRef?: string;
-        terminalType?: "completed" | "failed";
+        terminalType?: "completed" | "failed" | "canceled";
+        settlementStatus?: ChatTurnSettlementStatus;
       }): Promise<string | null> {
-        const finalizedOutput = finalizeAssistantOutput(input.content);
-        const assistantMessageId = await appendAssistantMessage({
+        const settlementStatus = input.settlementStatus ?? "succeeded";
+        const safeContent = redactCredentialString(input.content);
+        const finalizedOutput = finalizeAssistantOutput(safeContent);
+        const assistantMessage = await appendAssistantMessage({
           chatSessionStore: options.chatSessionStore,
           sessionId,
           requestId,
-          content: input.content,
+          turnId: causalTurnId,
+          causalAttempt: currentCausalAttempt,
+          causalAttemptId: createConversationCausalAttemptId({
+            requestId,
+            turnId: causalTurnId,
+            attempt: currentCausalAttempt,
+          }),
+          content: safeContent,
+          turnSettlementStatus: settlementStatus,
           outputParts: finalizedOutput.outputParts,
           ...(input.relatedMemoryIds?.length
             ? { relatedMemoryIds: input.relatedMemoryIds }
@@ -739,11 +1922,92 @@ export function createChatService(options: {
           ...(input.goalId ? { goalId: input.goalId } : {}),
           ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
         });
-        emitStatus.setAssistantMessageId(assistantMessageId);
-        if (finalizedOutput.finalTextPart) {
-          emitOutputPart(finalizedOutput.finalTextPart);
+        const assistantMessageId = assistantMessage?.id ?? null;
+        await emitStatus.drainPersistence();
+        const assistantRequiresAcceptance = settlementStatus !== "failed"
+          && settlementStatus !== "canceled";
+        if (
+          assistantMessage
+          && assistantRequiresAcceptance
+          && options.conversationCausalStore
+        ) {
+          const persistedMessage = {
+            id: assistantMessage.id,
+            role: assistantMessage.role,
+            requestId,
+            turnId: causalTurnId,
+            content: assistantMessage.content,
+            turnSettlementStatus: assistantMessage.turnSettlementStatus,
+          };
+          const prepared = await options.conversationCausalStore
+            .prepareAssistantAcceptance({
+              requestId,
+              attempt: currentCausalAttempt,
+              persistedMessage,
+              ...(workspaceRunRecorder && settlementStatus === "succeeded"
+                ? { workspaceRunId: workspaceRunRecorder.workspaceRunId }
+                : {}),
+            });
+          if (
+            prepared.disposition !== "applied"
+            && prepared.disposition !== "duplicate"
+          ) {
+            throw new Error("Durable assistant message conflicts with causal receipt.");
+          }
+          const acceptance = prepared.value?.attempts.find((attempt) =>
+            attempt.attempt === currentCausalAttempt,
+          )?.assistantAcceptance;
+          if (!acceptance) {
+            throw new Error("Durable assistant acceptance was not prepared.");
+          }
+          let workspaceEventId: string | undefined;
+          if (workspaceRunRecorder && settlementStatus === "succeeded") {
+            let finalized;
+            try {
+              finalized = await workspaceRunRecorder.finalizeAccepted(acceptance);
+            } catch (error) {
+              await options.conversationCausalStore.addRefs({
+                requestId,
+                refs: [{ kind: "workspace_run", id: workspaceRunRecorder.workspaceRunId }],
+                coverage: {
+                  state: "degraded",
+                  reasonCodes: ["workspace_terminal_settlement_failed"],
+                },
+              }).catch(() => undefined);
+              throw error instanceof SecretSafeFailureError
+                ? error
+                : new SecretSafeFailureError("WORKSPACE_SETTLEMENT_FAILED", error);
+            }
+            workspaceEventId = finalized.eventId;
+            if (finalized.disposition === "recovery_required") {
+              throw new AssistantAcceptanceRecoveryRequiredError(
+                createAssistantAcceptanceRecoveryResult(),
+              );
+            }
+          }
+          const committed = await commitPreparedAssistantAcceptance({
+            conversationCausalStore: options.conversationCausalStore,
+            requestId,
+            attempt: currentCausalAttempt,
+            acceptance,
+            workspaceEventId,
+          });
+          if (committed === "recovery_required") {
+            throw new AssistantAcceptanceRecoveryRequiredError(
+              createAssistantAcceptanceRecoveryResult(),
+            );
+          }
+        } else if (workspaceRunRecorder && settlementStatus === "succeeded") {
+          await workspaceRunRecorder.finalizeAccepted();
         }
-        emitTerminalStreamEvent({
+        if (assistantMessage && assistantRequiresAcceptance) {
+          emitStatus.sendAttemptControl({
+            operation: "accepted",
+            attempt: Math.max(1, currentCausalAttempt),
+          });
+        }
+        emitStatus.setAssistantMessageId(assistantMessageId);
+        await emitTerminalStreamEvent({
           type: input.terminalType ?? "completed",
           message: input.content,
           ...(assistantMessageId ? { finalMessageId: assistantMessageId } : {}),
@@ -758,7 +2022,7 @@ export function createChatService(options: {
             workspaceId: input.workspaceId,
           });
       if (!workspaceResolution.ok) {
-        emitTerminalStreamEvent({
+        await emitTerminalStreamEvent({
           type: "failed",
           message: workspaceResolution.message,
         });
@@ -795,8 +2059,13 @@ export function createChatService(options: {
           ...(workspaceSummary ? { workspaceSummary } : {}),
         });
         sessionId = appendResult.session.id;
-        emitStatus.setSessionId(sessionId);
         userMessageId = appendResult.message.id;
+        if (!publicationAuthority.markDurable(sessionId, userMessageId)) {
+          invalidatePublicationAuthority("durable_binding_conflict");
+          throw new Error("Conversation publication authority rejected the durable user message.");
+        }
+        emitStatus.setSessionId(sessionId);
+        internalOptions.onDurableSessionResolved?.(sessionId);
         authoritativeHistory = appendResult.session.messages
           .filter((message) => message.id !== userMessageId)
           .map((message) => ({
@@ -810,10 +2079,15 @@ export function createChatService(options: {
         sessionCompactionBaseline =
           appendResult.session.context?.compactionCount ?? 0;
         activeGoal = getActiveGoalSummary(appendResult.session);
-      } else if (persistedRequestTurn?.user && input.sessionId) {
-        sessionId = input.sessionId;
-        emitStatus.setSessionId(sessionId);
+      } else if (persistedRequestTurn?.user) {
+        sessionId = persistedRequestTurn.session.id;
         userMessageId = persistedRequestTurn.user.id;
+        if (!publicationAuthority.markDurable(sessionId, userMessageId)) {
+          invalidatePublicationAuthority("durable_binding_conflict");
+          throw new Error("Conversation publication authority rejected the persisted user message.");
+        }
+        emitStatus.setSessionId(sessionId);
+        internalOptions.onDurableSessionResolved?.(sessionId);
         authoritativeHistory = persistedRequestTurn.session.messages
           .filter((message) => message.id !== persistedRequestTurn.user?.id)
           .map((message) => ({
@@ -827,12 +2101,26 @@ export function createChatService(options: {
         sessionCompactionBaseline =
           persistedRequestTurn.session.context?.compactionCount ?? 0;
       } else if (internalOptions.skipUserMessageAppend) {
-        userMessageId = internalOptions.userMessageId ?? null;
+        const expectedUserMessageId = internalOptions.userMessageId ?? null;
         const storedSession =
           options.chatSessionStore?.get && input.sessionId
             ? await options.chatSessionStore.get(input.sessionId)
             : null;
-        if (storedSession) {
+        const storedUserMessage = expectedUserMessageId
+          ? storedSession?.messages.find(
+              (message) =>
+                message.id === expectedUserMessageId && message.role === "user",
+            )
+          : null;
+        if (storedSession && storedUserMessage) {
+          sessionId = storedSession.id;
+          userMessageId = storedUserMessage.id;
+          if (!publicationAuthority.markDurable(sessionId, userMessageId)) {
+            invalidatePublicationAuthority("durable_binding_conflict");
+            throw new Error("Conversation publication authority rejected the guided-input user message.");
+          }
+          emitStatus.setSessionId(sessionId);
+          internalOptions.onDurableSessionResolved?.(sessionId);
           authoritativeHistory = storedSession.messages
             .filter((message) => message.id !== userMessageId)
             .map((message) => ({
@@ -847,6 +2135,45 @@ export function createChatService(options: {
             storedSession.context?.compactionCount ?? 0;
         }
       }
+      if (options.conversationCausalStore) {
+        if (!userMessageId) {
+          await settleClaimOwnedFailure(
+            "用户消息尚未持久化，无法安全开始或恢复执行。",
+          );
+          return {
+            ok: false,
+            retryable: true,
+            message: "用户消息尚未持久化，无法安全开始或恢复执行。",
+          };
+        }
+        const bound = await options.conversationCausalStore.bindRequest({
+          requestId,
+          sessionId,
+          userMessageId,
+        });
+        if (bound.disposition === "conflict" || bound.disposition === "not_found") {
+          await settleClaimOwnedFailure(
+            "会话消息与 request 因果绑定冲突，已停止执行。",
+          );
+          return {
+            ok: false,
+            message: "会话消息与 request 因果绑定冲突，已停止执行。",
+          };
+        }
+        const boundBinding = resolveDurableConversationBinding(bound.value);
+        if (!boundBinding || boundBinding.userMessageId !== userMessageId) {
+          invalidatePublicationAuthority("causal_binding_missing_user_message");
+          throw new Error("Conversation causal binding did not return a durable session.");
+        }
+        sessionId = boundBinding.sessionId;
+        if (!publicationAuthority.markDurable(sessionId, boundBinding.userMessageId)) {
+          invalidatePublicationAuthority("durable_binding_conflict");
+          throw new Error("Conversation publication authority rejected the causal binding.");
+        }
+        emitStatus.setSessionId(sessionId);
+        internalOptions.onDurableSessionResolved?.(sessionId);
+      }
+      await ensureCausalAttempt();
       if (processedAttachments.validatedInputs.length) {
         cacheHistoryAttachmentPayloads(
           sessionId,
@@ -861,16 +2188,78 @@ export function createChatService(options: {
           ...chatRunContext,
           sessionId,
         };
-        workspaceRunRecorder = await createChatWorkspaceRunRecorder({
-          workspaceRunStore: options.workspaceRunStore,
-          sessionId,
-          requestId,
-          runContext: chatRunContext,
-          ...(input.selectedSkillName
-            ? { selectedSkillName: input.selectedSkillName }
-            : {}),
-          createdAt: new Date(startedAtMs).toISOString(),
-        });
+        try {
+          workspaceRunRecorder = await createChatWorkspaceRunRecorder({
+            workspaceRunStore: options.workspaceRunStore,
+            sessionId,
+            requestId,
+            runContext: chatRunContext,
+            ...(input.selectedSkillName
+              ? { selectedSkillName: input.selectedSkillName }
+              : {}),
+            createdAt: new Date(startedAtMs).toISOString(),
+          });
+          internalOptions.onWorkspaceRunRecorderResolved?.(workspaceRunRecorder);
+        } catch (error) {
+          if (error instanceof WorkspaceRunEnvelopeConflictError) {
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [],
+              coverage: {
+                state: "degraded",
+                reasonCodes: ["workspace_run_envelope_conflict"],
+              },
+            }).catch(() => undefined);
+            await emitTerminalStreamEvent({
+              type: "failed",
+              message: "工作区运行状态与当前请求不一致，已安全停止。",
+            });
+            return {
+              ok: false,
+              code: "CONFLICT",
+              message: "工作区运行状态与当前请求不一致，已安全停止。",
+            };
+          }
+          const failure = toSecretSafeFailure(
+            error,
+            "WORKSPACE_RUN_INITIALIZATION_FAILED",
+          );
+          invalidatePublicationAuthority("workspace_run_initialize_failed");
+          await options.conversationCausalStore?.addRefs({
+            requestId,
+            refs: [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: [...failure.coverageReasonCodes],
+            },
+          }).catch(() => undefined);
+          emitStatus.sendPublishedOnly({
+            state: "failed",
+            message: failure.publicMessage,
+          });
+          await emitTerminalStreamEvent({
+            type: "failed",
+            message: failure.publicMessage,
+            domainStateAvailable: false,
+          });
+          return {
+            ok: false,
+            code: "INTERNAL_ERROR",
+            retryable: failure.retryable,
+            message: failure.publicMessage,
+            domainStateAvailable: false,
+          };
+        }
+        if (options.workspaceRunStore && !workspaceRunRecorder) {
+          await options.conversationCausalStore?.addRefs({
+            requestId,
+            refs: [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: ["workspace_run_initialize_failed"],
+            },
+          }).catch(() => undefined);
+        }
         emitStatus.send({
           state: "workspace",
           message: `工作区：${workspaceSummary?.name ?? chatRunContext.workspaceRoot}`,
@@ -897,7 +2286,7 @@ export function createChatService(options: {
           if (internalOptions.skipUserMessageAppend) {
             const reply =
               "当前会话已进入只读 Plan Mode，这个更早的 Skill 输入已作废；没有启动 Skill、普通 Agent 或写入工具。请直接在 Plan 输入框补充要求。";
-            emitStatus.send({
+            await emitStatus.sendRequired({
               state: "paused",
               message: "旧 Skill 输入已作废，当前会话保持只读规划",
               toolCallsExecuted: 0,
@@ -905,6 +2294,7 @@ export function createChatService(options: {
             await persistAssistantReply({
               content: reply,
               goalEventRef: `plan-invalidated-skill-input:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
+              settlementStatus: "paused",
             });
             return {
               ok: true,
@@ -912,6 +2302,7 @@ export function createChatService(options: {
               sessionId,
               relatedMemories: [],
               memoryId: null,
+              turnSettlementStatus: "paused",
               plan: inputRoutingPlan,
             };
           }
@@ -945,10 +2336,14 @@ export function createChatService(options: {
                 message: amendment.message,
                 toolCallsExecuted: 0,
               });
+              await emitTerminalStreamEvent({
+                type: "failed",
+                message: amendment.message,
+              });
               return { ok: false, message: amendment.message };
             }
             const reply = `${amendment.message} 当前 Goal 和活动 Plan 尚未改变；请在 Goal 详情中批准或拒绝。`;
-            emitStatus.send({
+            await emitStatus.sendRequired({
               state: "paused",
               message: "目标修订提案等待明确批准",
               toolCallsExecuted: 0,
@@ -956,6 +2351,7 @@ export function createChatService(options: {
             await persistAssistantReply({
               content: reply,
               goalEventRef: `goal-amendment:${amendment.proposal.id}`,
+              settlementStatus: "paused",
             });
             appendRawHistoryEntry({
               historyIndexStore: options.historyIndexStore,
@@ -973,6 +2369,7 @@ export function createChatService(options: {
               sessionId,
               relatedMemories: [],
               memoryId: null,
+              turnSettlementStatus: "paused",
               plan: inputRoutingPlan,
               ...(activeGoal?.id === inputRoutingPlan.goalId
                 ? { activeGoal }
@@ -986,7 +2383,7 @@ export function createChatService(options: {
               Boolean(inputRoutingPlan.finalArtifact));
           if (!canRevisePlan) {
             const reply = formatLockedPlanReply(inputRoutingPlan);
-            emitStatus.send({
+            await emitStatus.sendRequired({
               state: "paused",
               message: "计划仍处于只读状态，请先处理计划恢复入口",
               toolCallsExecuted: 0,
@@ -994,6 +2391,7 @@ export function createChatService(options: {
             await persistAssistantReply({
               content: reply,
               goalEventRef: `plan-locked:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
+              settlementStatus: "paused",
             });
             return {
               ok: true,
@@ -1001,6 +2399,7 @@ export function createChatService(options: {
               sessionId,
               relatedMemories: [],
               memoryId: null,
+              turnSettlementStatus: "paused",
               plan: inputRoutingPlan,
             };
           }
@@ -1024,22 +2423,19 @@ export function createChatService(options: {
                 message: "规划已中断",
                 toolCallsExecuted: 0,
               });
-              emitTerminalStreamEvent({
+              await emitTerminalStreamEvent({
                 type: "canceled",
                 message: "已中断任务。",
               });
               return { ok: false, code: "CANCELED", retryable: true, message: "已中断任务。" };
             }
-            const message =
-              error instanceof Error
-                ? `继续规划失败：${error.message}`
-                : "继续规划失败。";
+            const message = "继续规划失败，已安全停止。";
             emitStatus.send({
               state: "failed",
               message,
               toolCallsExecuted: 0,
             });
-            emitTerminalStreamEvent({ type: "failed", message });
+            await emitTerminalStreamEvent({ type: "failed", message });
             return { ok: false, message };
           }
           if (!continuation.ok) {
@@ -1048,7 +2444,7 @@ export function createChatService(options: {
               message: continuation.message,
               toolCallsExecuted: 0,
             });
-            emitTerminalStreamEvent({
+            await emitTerminalStreamEvent({
               type: "failed",
               message: continuation.message,
             });
@@ -1056,18 +2452,29 @@ export function createChatService(options: {
           }
           const plan = continuation.plan;
           const reply = formatPlanContinuationReply(plan);
-          emitStatus.send({
-            state:
-              plan.status === "awaiting_confirmation" ? "completed" : "paused",
+          const planContinuationState =
+            plan.status === "awaiting_confirmation" ? "completed" : "paused";
+          const planContinuationEvent: Omit<
+            ChatTaskStatusEvent,
+            "sessionId" | "createdAt" | "elapsedMs"
+          > = {
+            state: planContinuationState,
             message:
               plan.status === "awaiting_confirmation"
                 ? "计划已更新，等待确认"
                 : "计划仍需补充信息或处理门禁",
             toolCallsExecuted: 0,
-          });
+          };
+          if (planContinuationState === "paused") {
+            await emitStatus.sendRequired(planContinuationEvent);
+          } else {
+            emitStatus.send(planContinuationEvent);
+          }
           await persistAssistantReply({
             content: reply,
             goalEventRef: `plan-input:${plan.id}:${plan.revision}`,
+            settlementStatus:
+              plan.status === "awaiting_confirmation" ? "succeeded" : "paused",
           });
           appendRawHistoryEntry({
             historyIndexStore: options.historyIndexStore,
@@ -1085,6 +2492,8 @@ export function createChatService(options: {
             sessionId,
             relatedMemories: [],
             memoryId: null,
+            turnSettlementStatus:
+              plan.status === "awaiting_confirmation" ? "succeeded" : "paused",
             plan,
           };
         }
@@ -1121,7 +2530,7 @@ export function createChatService(options: {
             })
           : null;
       if (requestedSkill?.kind === "missing") {
-        emitTerminalStreamEvent({
+        await emitTerminalStreamEvent({
           type: "failed",
           message: requestedSkill.message,
         });
@@ -1177,6 +2586,26 @@ export function createChatService(options: {
               ? { attachmentPayloads: processedAttachments.validatedInputs }
               : {}),
           });
+          if (options.conversationCausalStore) {
+            const guidedRef = await options.conversationCausalStore.addRefs({
+              requestId,
+              refs: [{ kind: "guided_input", id: inputRequest.id }],
+            });
+            if (
+              guidedRef.disposition !== "applied"
+              && guidedRef.disposition !== "duplicate"
+            ) {
+              await emitTerminalStreamEvent({
+                type: "failed",
+                message: "Failed to establish guided input ownership.",
+              });
+              return {
+                ok: false,
+                code: "INTERNAL_ERROR",
+                message: "Failed to establish guided input ownership.",
+              };
+            }
+          }
           try {
             await emitStatus.sendWaitingForInput(
               inputRequest,
@@ -1185,7 +2614,7 @@ export function createChatService(options: {
             );
             emitOutputPart(outputAssembler.appendInputRequest(inputRequest));
           } catch {
-            emitTerminalStreamEvent({
+            await emitTerminalStreamEvent({
               type: "failed",
               message: "Failed to persist skill input request.",
             });
@@ -1246,6 +2675,8 @@ export function createChatService(options: {
         planModelAssignments: input.planModelAssignments,
         originMessageId: userMessageId,
         sessionId,
+        requestId,
+        persistAssistantReply,
         emitStatus,
         now: options.now,
         signal: runtimeOptions.signal,
@@ -1270,7 +2701,7 @@ export function createChatService(options: {
 
         if (taskCreationResult) {
           if (!taskCreationResult.ok) {
-            emitTerminalStreamEvent({
+            await emitTerminalStreamEvent({
               type: "failed",
               message: taskCreationResult.result.message,
             });
@@ -1304,6 +2735,96 @@ export function createChatService(options: {
             memoryId,
           };
         }
+        let admittedAgentRunId: string | undefined;
+        const beforeAgentRunExecution: AgentRunAdmissionGate | undefined =
+          options.conversationCausalStore
+            ? async (candidate) => {
+                if (
+                  admittedAgentRunId
+                  && admittedAgentRunId !== candidate.runId
+                ) {
+                  throw new Error("Scheduled AgentRun changed its admitted identity.");
+                }
+                if (candidate.sessionId !== sessionId) {
+                  throw new Error("Scheduled AgentRun session admission mismatch.");
+                }
+                const executionRevision = candidate.executionRevision ?? 1;
+                if (
+                  !Number.isSafeInteger(executionRevision)
+                  || executionRevision < 1
+                ) {
+                  throw new Error("Scheduled AgentRun execution revision is invalid.");
+                }
+                let linked;
+                try {
+                  linked = await options.conversationCausalStore!.admitAgentRun({
+                    requestId,
+                    runId: candidate.runId,
+                    taskId: candidate.taskId,
+                    sessionId,
+                    executionRevision,
+                  });
+                } catch {
+                  throw new Error("Scheduled AgentRun causal admission failed.");
+                }
+                if (
+                  linked.disposition !== "applied"
+                  && linked.disposition !== "duplicate"
+                ) {
+                  throw new Error("Scheduled AgentRun causal admission failed.");
+                }
+                admittedAgentRunId = candidate.runId;
+                const started = await options.conversationCausalStore!
+                  .settleAgentRunAdmission({
+                    requestId,
+                    runId: candidate.runId,
+                    expectedExecutionRevision: executionRevision,
+                    state: "started",
+                  });
+                if (
+                  started.disposition !== "applied"
+                  && started.disposition !== "duplicate"
+                ) {
+                  throw new Error("Scheduled AgentRun causal start failed.");
+                }
+                return {
+                  runId: candidate.runId,
+                  taskId: candidate.taskId,
+                  executionRevision,
+                  async settle(status, expectedExecutionRevision = executionRevision) {
+                    if (expectedExecutionRevision !== executionRevision) {
+                      throw new Error(
+                        "Scheduled AgentRun settlement revision does not match its lease.",
+                      );
+                    }
+                    const finalStatus =
+                      status === "waiting_for_approval" ? "paused" : status;
+                    if (
+                      finalStatus !== "succeeded"
+                      && finalStatus !== "paused"
+                      && finalStatus !== "failed"
+                      && finalStatus !== "canceled"
+                    ) {
+                      throw new Error("Scheduled AgentRun settled with a non-terminal status.");
+                    }
+                    const settled = await options.conversationCausalStore!
+                      .settleAgentRunAdmission({
+                        requestId,
+                        runId: candidate.runId,
+                        expectedExecutionRevision,
+                        state: "settled",
+                        finalStatus,
+                      });
+                    if (
+                      settled.disposition !== "applied"
+                      && settled.disposition !== "duplicate"
+                    ) {
+                      throw new Error("Scheduled AgentRun causal settlement failed.");
+                    }
+                  },
+                };
+              }
+            : undefined;
         const taskRunResult = requestedSkill
           ? null
           : await tryRunTaskFromIntent({
@@ -1312,20 +2833,74 @@ export function createChatService(options: {
               sessionId,
               taskStore: options.taskStore,
               runScheduledTask: options.runScheduledTask,
+              beforeExecution: beforeAgentRunExecution,
             });
 
         if (taskRunResult) {
+          const settledRun = taskRunResult.result.executedRun;
+          const executedRunId = settledRun?.id;
+          if (
+            options.conversationCausalStore
+            && (admittedAgentRunId || executedRunId)
+          ) {
+            if (!executedRunId || admittedAgentRunId !== executedRunId) {
+              throw new Error("Scheduled runner bypassed causal admission.");
+            }
+            const settledAdmission = (
+              await options.conversationCausalStore.getRequest(requestId)
+            )?.agentRunAdmissions?.find(
+              (admission) => admission.runId === executedRunId,
+            );
+            const expectedFinalStatus =
+              settledRun?.status === "waiting_for_approval"
+                ? "paused"
+                : settledRun?.status;
+            if (
+              settledAdmission?.state !== "settled"
+              || settledAdmission.finalStatus !== expectedFinalStatus
+            ) {
+              throw new Error("Scheduled runner returned before causal settlement.");
+            }
+          }
           if (!taskRunResult.ok) {
-            emitTerminalStreamEvent({
-              type: "failed",
-              message: taskRunResult.result.message,
-            });
+            const failedRun = taskRunResult.result.executedRun;
+            if (failedRun) {
+              await emitStatus.sendRequired({
+                state: failedRun.status === "canceled" ? "canceled" : "failed",
+                message: taskRunResult.result.message,
+                toolCallsExecuted: 0,
+              });
+              await persistAssistantReply({
+                content: taskRunResult.result.message,
+                executedRunId: failedRun.id,
+                settlementStatus:
+                  failedRun.status === "canceled" ? "canceled" : "failed",
+                terminalType:
+                  failedRun.status === "canceled" ? "canceled" : "failed",
+              });
+            } else {
+              await emitTerminalStreamEvent({
+                type: "failed",
+                message: taskRunResult.result.message,
+              });
+            }
             return taskRunResult.result;
           }
 
+          if (taskRunResult.result.turnSettlementStatus === "paused") {
+            await emitStatus.sendRequired({
+              state: "paused",
+              message: taskRunResult.result.reply,
+              toolCallsExecuted: 0,
+            });
+          }
           const assistantMessageId = await persistAssistantReply({
             content: taskRunResult.result.reply,
-            executedRunId: taskRunResult.result.executedRun?.id,
+            executedRunId,
+            settlementStatus:
+              taskRunResult.result.turnSettlementStatus === "paused"
+                ? "paused"
+                : "succeeded",
           });
           const memoryId = await writeSessionMemory({
             memoryStore: options.memoryStore,
@@ -1361,35 +2936,34 @@ export function createChatService(options: {
         });
         profile = await options.getModelProfile();
       } catch (error) {
+        const incompleteProfile =
+          error instanceof Error
+          && error.message.includes("Model profile is incomplete");
+        const failureMessage = incompleteProfile
+          ? "模型配置不完整：请先在设置中保存 base URL、对话模型和 API Key。"
+          : "无法读取模型配置，请检查设置后重试。";
         emitStatus.send({
           state: "failed",
-          message:
-            error instanceof Error ? error.message : "无法读取模型配置。",
+          message: failureMessage,
         });
-        if (
-          error instanceof Error &&
-          error.message.includes("Model profile is incomplete")
-        ) {
-          emitTerminalStreamEvent({
+        if (incompleteProfile) {
+          await emitTerminalStreamEvent({
             type: "failed",
-            message:
-              "模型配置不完整：请先在设置中保存 base URL、对话模型和 API Key。",
+            message: failureMessage,
           });
           return {
             ok: false,
-            message:
-              "模型配置不完整：请先在设置中保存 base URL、对话模型和 API Key。",
+            message: failureMessage,
           };
         }
 
-        emitTerminalStreamEvent({
+        await emitTerminalStreamEvent({
           type: "failed",
-          message: error instanceof Error ? error.message : "无法读取模型配置。",
+          message: failureMessage,
         });
         return {
           ok: false,
-          message:
-            error instanceof Error ? error.message : "无法读取模型配置。",
+          message: failureMessage,
         };
       }
 
@@ -1494,6 +3068,10 @@ export function createChatService(options: {
             createId,
             now: options.now,
           });
+          await options.conversationCausalStore?.addRefs({
+            requestId,
+            refs: [{ kind: "trajectory_run", id: evidence.runId }],
+          });
           const toolDefinitions =
             profile.modelCapabilities?.tools === false
               ? []
@@ -1544,7 +3122,7 @@ export function createChatService(options: {
           });
           const runtimeContextSnapshotSummary =
             summarizeAgentRuntimeContextSnapshot(runtimeContextSnapshot);
-          await evidence.append(
+          const runtimeContextEvidence = await evidence.append(
             "run_context_created",
             {
               runtimeContextSnapshot,
@@ -1556,6 +3134,16 @@ export function createChatService(options: {
               containsUserText: false,
             },
           );
+          if (runtimeContextEvidence) {
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [{
+                kind: "trajectory_event",
+                runId: evidence.runId,
+                eventId: runtimeContextEvidence.id,
+              }],
+            });
+          }
           emitStatus.send({
             state: "started",
             message: "Runtime context snapshot recorded.",
@@ -1638,6 +3226,65 @@ export function createChatService(options: {
                       continuationToResume.toolCallsExecuted,
                   }
                 : {}),
+              async onModelAttempt(event) {
+                if (!options.conversationCausalStore) {
+                  if (
+                    event.operation === "supersede"
+                    || event.operation === "reset"
+                  ) {
+                    outputAssembler.resetText();
+                    accumulatedReasoningProjection = "";
+                  }
+                  currentCausalAttempt = event.attempt;
+                  emitStatus.sendAttemptControl(event);
+                  return;
+                }
+                if (event.operation === "supersede") {
+                  const settled = await options.conversationCausalStore.settleAttempt({
+                    requestId,
+                    attempt: event.supersedesAttempt,
+                    state: "superseded",
+                    supersedesAttempt: event.supersedesAttempt,
+                  });
+                  if (
+                    settled.disposition !== "applied"
+                    && settled.disposition !== "duplicate"
+                  ) {
+                    throw new Error("Conversation retry supersede conflicted.");
+                  }
+                  outputAssembler.resetText();
+                  accumulatedReasoningProjection = "";
+                  currentCausalAttempt = event.attempt;
+                  emitStatus.sendAttemptControl(event);
+                  return;
+                }
+                if (event.operation === "reset") {
+                  const settled = await options.conversationCausalStore.settleAttempt({
+                    requestId,
+                    attempt: event.attempt,
+                    state: "reset",
+                  });
+                  if (
+                    settled.disposition !== "applied"
+                    && settled.disposition !== "duplicate"
+                  ) {
+                    throw new Error("Conversation attempt reset conflicted.");
+                  }
+                  outputAssembler.resetText();
+                  accumulatedReasoningProjection = "";
+                  emitStatus.sendAttemptControl(event);
+                  return;
+                }
+                const begun = await options.conversationCausalStore.beginAttempt({
+                  requestId,
+                  attempt: event.attempt,
+                });
+                if (begun.disposition !== "applied" && begun.disposition !== "duplicate") {
+                  throw new Error("Conversation retry begin conflicted.");
+                }
+                currentCausalAttempt = event.attempt;
+                emitStatus.sendAttemptControl(event);
+              },
               onTurn(turn, phase) {
                 void evidence.append("model_request", {
                   turn: turn + 1,
@@ -1683,11 +3330,7 @@ export function createChatService(options: {
                 void evidence.append("context_compacted", event);
               },
               onReasoning(reasoningContent) {
-                emitStatus.send({
-                  state: "reasoning",
-                  message: normalizeReasoningForStatus(reasoningContent),
-                  toolCallsExecuted: observedToolCallsExecuted,
-                });
+                accumulatedReasoningProjection += reasoningContent;
               },
               onModelStreamEvent(event) {
                 emitModelStreamEvent(emitStatus, outputAssembler, event);
@@ -1696,7 +3339,9 @@ export function createChatService(options: {
                 if (toolName === "actor") {
                   actorToolTasks.set(
                     event.toolCallId,
-                    readToolArgString(args, "task") || "subagent",
+                    redactCredentialString(
+                      readToolArgString(args, "task") || "subagent",
+                    ),
                   );
                 }
                 void evidence.append("tool_call", {
@@ -1744,7 +3389,30 @@ export function createChatService(options: {
                   }),
                 );
               },
-              onToolInvocation(record) {
+              async onToolInvocation(record) {
+                if (options.conversationCausalStore) {
+                  const causalRefWrite = await options.conversationCausalStore.addRefs({
+                    requestId,
+                    refs: [
+                      {
+                        kind: "tool_invocation",
+                        runId: record.runId,
+                        id: record.id,
+                      },
+                      ...(record.approvalId
+                        ? [{ kind: "approval" as const, id: record.approvalId }]
+                        : []),
+                    ],
+                  });
+                  if (
+                    causalRefWrite.disposition !== "applied"
+                    && causalRefWrite.disposition !== "duplicate"
+                  ) {
+                    throw new Error(
+                      "Tool Invocation requires durable causal references before dispatch.",
+                    );
+                  }
+                }
                 void evidence.append("tool_invocation", {
                   toolInvocationId: record.id,
                   toolCallId: record.toolCallId,
@@ -1757,10 +3425,11 @@ export function createChatService(options: {
                   ...(record.error ? { error: record.error } : {}),
                   history: record.history,
                 });
-                emitStatus.send({
+                const invocationStatusEvent = {
                   state: "tool_invocation",
                   message: `工具状态：${record.toolName} ${record.status}`,
                   toolInvocationId: record.id,
+                  ...(record.approvalId ? { approvalId: record.approvalId } : {}),
                   toolCallId: record.toolCallId,
                   toolName: record.toolName,
                   toolSource: record.source,
@@ -1768,11 +3437,16 @@ export function createChatService(options: {
                   ...(record.resultRef ? { resultRef: record.resultRef } : {}),
                   ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
                   toolCallsExecuted: observedToolCallsExecuted,
-                });
+                } as const;
+                if (record.status === "waiting_approval") {
+                  await emitStatus.sendRequired(invocationStatusEvent);
+                } else {
+                  emitStatus.send(invocationStatusEvent);
+                }
                 if (record.status === "waiting_approval") {
                   emitOutputPart(
                     outputAssembler.appendApprovalRequest({
-                      approvalId: record.id,
+                      approvalId: record.approvalId ?? record.id,
                       toolName: record.toolName,
                       riskLevel: inferApprovalRiskLevel({
                         toolName: record.toolName,
@@ -1796,11 +3470,12 @@ export function createChatService(options: {
                   return;
                 }
                 if (runtimeEvent.type === "actor_spawned") {
-                  actorToolTasks.set(event.toolCallId, runtimeEvent.task);
+                  const safeTask = redactCredentialString(runtimeEvent.task);
+                  actorToolTasks.set(event.toolCallId, safeTask);
                   emitActorSpawnedStatusEvent({
                     emitStatus,
                     actorId: runtimeEvent.actorId,
-                    task: runtimeEvent.task,
+                    task: safeTask,
                     toolCallId: event.toolCallId,
                     toolCallsExecuted: observedToolCallsExecuted,
                     emittedActorSpawnIds,
@@ -1906,7 +3581,17 @@ export function createChatService(options: {
               },
             },
           );
-          reply = loopResult.summary;
+          if (accumulatedReasoningProjection) {
+            emitStatus.send({
+              state: "reasoning",
+              message: normalizeReasoningForStatus(
+                accumulatedReasoningProjection,
+              ),
+              toolCallsExecuted: observedToolCallsExecuted,
+            });
+          }
+          reply = outputAssembler.setFinalText(loopResult.summary)?.text
+            ?? redactCredentialString(loopResult.summary);
           const finalToolCallsExecuted = Math.max(
             loopResult.toolCallsExecuted,
             observedToolCallsExecuted,
@@ -1916,10 +3601,21 @@ export function createChatService(options: {
             accumulatedUsage,
             loopResult.tokensConsumed,
           );
-          await evidence.append("final_summary", {
+          const finalSummaryEvidence = await evidence.append("final_summary", {
             status: loopResult.status,
             toolCallsExecuted: finalToolCallsExecuted,
           });
+          await evidence.drain();
+          if (finalSummaryEvidence) {
+            await options.conversationCausalStore?.addRefs({
+              requestId,
+              refs: [{
+                kind: "trajectory_event",
+                runId: evidence.runId,
+                eventId: finalSummaryEvidence.id,
+              }],
+            });
+          }
 
           if (loopResult.status === "canceled") {
             emitStatus.send({
@@ -1927,7 +3623,7 @@ export function createChatService(options: {
               message: "任务已中断",
               toolCallsExecuted: loopResult.toolCallsExecuted,
             });
-            emitTerminalStreamEvent({
+            await emitTerminalStreamEvent({
               type: "canceled",
               message: "已中断任务。",
             });
@@ -1953,7 +3649,7 @@ export function createChatService(options: {
               reason: loopResult.continuation.reason,
               maxTurns: loopResult.continuation.maxTurns,
               toolCallsExecuted: finalToolCallsExecuted,
-              message: loopResult.summary,
+              message: redactCredentialString(loopResult.summary),
               ...(loopResult.modelServiceNotice
                 ? { modelServiceNotice: loopResult.modelServiceNotice }
                 : {}),
@@ -1996,11 +3692,13 @@ export function createChatService(options: {
               state: "failed",
               runId: evidence.runId,
               toolCallsExecuted: finalToolCallsExecuted,
-              message: loopResult.summary,
+              message: redactCredentialString(loopResult.summary),
             };
-            emitStatus.send({
+            await emitStatus.sendRequired({
               state: "failed",
-              message: formatAgentLoopFailure(loopResult.summary),
+              message: formatAgentLoopFailure(
+                redactCredentialString(loopResult.summary),
+              ),
               toolCallsExecuted: finalToolCallsExecuted,
             });
           } else {
@@ -2026,7 +3724,7 @@ export function createChatService(options: {
               state: "canceled",
               message: "任务已中断",
             });
-            emitTerminalStreamEvent({
+            await emitTerminalStreamEvent({
               type: "canceled",
               message: "已中断任务。",
             });
@@ -2037,20 +3735,27 @@ export function createChatService(options: {
               message: "已中断任务。",
             };
           }
-          emitStatus.send({
+          const failureMessage = toSecretSafeFailure(
+            error,
+            "AGENT_RUN_EXECUTION_FAILED",
+          ).publicMessage;
+          const publishFailureStatus = error instanceof RequiredConversationSettlementError
+            ? emitStatus.sendPublishedOnly
+            : emitStatus.send;
+          publishFailureStatus({
             state: "failed",
-            message:
-              error instanceof Error ? `Agent 执行失败：${error.message}` : "Agent 执行失败。",
+            message: failureMessage,
           });
-          emitTerminalStreamEvent({
+          await emitTerminalStreamEvent({
             type: "failed",
-            message:
-              error instanceof Error ? `Agent 执行失败：${error.message}` : "Agent 执行失败。",
+            message: failureMessage,
           });
           return {
             ok: false,
-            message:
-              error instanceof Error ? `Agent 执行失败：${error.message}` : "Agent 执行失败。",
+            ...(error instanceof RequiredConversationSettlementError
+              ? { code: "INTERNAL_ERROR" as const }
+              : {}),
+            message: failureMessage,
           };
         }
       } else {
@@ -2076,9 +3781,11 @@ export function createChatService(options: {
             accumulatedUsage,
             toChatSessionTokenUsage(response.usage),
           );
-          reply = response.content ?? "";
+          reply = redactCredentialString(response.content ?? "");
           if (response.modelServiceNotice) {
-            const notice = response.modelServiceNotice;
+            const notice = sanitizeModelServiceNotice(
+              response.modelServiceNotice,
+            );
             const continuationReason =
               modelNoticeContinuationReason(notice);
             pendingContinuations.set(sessionId, {
@@ -2140,7 +3847,7 @@ export function createChatService(options: {
               state: "canceled",
               message: "任务已中断",
             });
-            emitTerminalStreamEvent({
+            await emitTerminalStreamEvent({
               type: "canceled",
               message: "已中断任务。",
             });
@@ -2192,20 +3899,27 @@ export function createChatService(options: {
               },
             });
           } else {
-            emitStatus.send({
+            const failureMessage = toSecretSafeFailure(
+              error,
+              "INTERNAL_FAILURE",
+            ).publicMessage;
+            const publishFailureStatus = error instanceof RequiredConversationSettlementError
+              ? emitStatus.sendPublishedOnly
+              : emitStatus.send;
+            publishFailureStatus({
               state: "failed",
-              message:
-                error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+              message: failureMessage,
             });
-            emitTerminalStreamEvent({
+            await emitTerminalStreamEvent({
               type: "failed",
-              message:
-                error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+              message: failureMessage,
             });
             return {
               ok: false,
-              message:
-                error instanceof Error ? `模型调用失败：${error.message}` : "模型调用失败。",
+              ...(error instanceof RequiredConversationSettlementError
+                ? { code: "INTERNAL_ERROR" as const }
+                : {}),
+              message: failureMessage,
             };
           }
         }
@@ -2223,9 +3937,16 @@ export function createChatService(options: {
         });
       }
 
+      reply = redactCredentialString(reply);
       const assistantMessageId = await persistAssistantReply({
         content: reply,
         relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
+        settlementStatus:
+          agentStatus?.state === "paused"
+            ? "paused"
+            : agentStatus?.state === "failed"
+              ? "failed"
+              : "succeeded",
         ...(agentStatus?.state === "failed"
           ? { terminalType: "failed" as const }
           : {}),
@@ -2275,6 +3996,12 @@ export function createChatService(options: {
         relatedMemories: relatedMemoryResults.map(toRelatedMemory),
         memoryId,
         ...(agentStatus ? { agentStatus } : {}),
+        turnSettlementStatus:
+          agentStatus?.state === "paused"
+            ? "paused"
+            : agentStatus?.state === "failed"
+              ? "failed"
+              : "succeeded",
         ...(requestedSkill?.kind === "matched"
           ? {
               selectedSkill: {
@@ -2291,33 +4018,281 @@ export function createChatService(options: {
     runtimeOptions: SendChatMessageRuntimeOptions,
     internalOptions: ChatTurnInternalOptions,
   ): Promise<SendChatMessageResult> {
-    if (
-      !options.productionKernelDriver ||
-      runtimeOptions.signal?.aborted
-    ) {
-      return executeMessageInternal(input, runtimeOptions, internalOptions);
+    const preparation = await prepareChatMessageInput(
+      input,
+      runtimeOptions,
+    );
+    if (!preparation.ok) {
+      return preparation.result;
+    }
+    if (runtimeOptions.signal?.aborted) {
+      return {
+        ok: false,
+        code: "CANCELED",
+        retryable: true,
+        message: "已中断任务。",
+      };
+    }
+    if (!options.productionKernelDriver) {
+      const publicationAuthority =
+        internalOptions.publicationAuthority ?? createChatPublicationAuthority();
+      let result: SendChatMessageResult;
+      try {
+        result = await executeMessageInternal(
+          input,
+          runtimeOptions,
+          {
+            ...internalOptions,
+            preparedInput: preparation.value,
+            publicationAuthority,
+          },
+        );
+      } catch (error) {
+        if (!(error instanceof AssistantAcceptanceRecoveryRequiredError)) {
+          throw error;
+        }
+        result = error.result;
+      }
+      return result.ok
+        ? {
+            ...result,
+            domainStateAvailable:
+              result.domainStateAvailable === false
+                ? false
+                : publicationAuthority.domainStateAvailable(),
+          }
+        : result;
     }
 
     const requestId =
       input.requestId ?? `request_${getNowMs(options.now)}`;
     const normalizedInput = { ...input, requestId };
+    const runId = createChatKernelRunId(requestId);
+    const requestClaim: ChatRequestClaim | null = (
+      internalOptions.skipUserMessageAppend
+      && options.conversationCausalStore
+    )
+      ? await options.conversationCausalStore.getRequest(requestId).then(
+          (record): ChatRequestClaim =>
+            record
+              ? { disposition: "duplicate", value: record }
+              : { disposition: "not_found" },
+        )
+      : await claimChatRequest({
+          requestId,
+          turnId: createConversationTurnId(requestId),
+          messageInput: normalizedInput,
+          preparedInput: preparation.value,
+          createdAt: new Date(getNowMs(options.now)).toISOString(),
+        });
+    const claimedRecord = requestClaim?.value;
+    const claimedBinding = resolveDurableConversationBinding(claimedRecord);
+    const latestClaimAttempt = claimedRecord?.attempts.at(-1);
+
+    if (requestClaim?.disposition === "conflict") {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        message: "相同 requestId 已绑定到不同输入，未改变原请求状态。",
+      };
+    }
+    if (requestClaim && !claimedRecord) {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        message: "请求归属无法确认，未开始执行。",
+      };
+    }
+    if (options.conversationCausalStore && !options.chatSessionStore) {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        retryable: true,
+        message: "Chat persistence is unavailable, so execution was not admitted.",
+      };
+    }
+    if (requestClaim?.disposition === "duplicate" && !claimedBinding) {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        retryable: true,
+        message: claimedRecord?.sessionId
+          ? "旧版请求缺少持久化用户消息证明，请使用新的 requestId 重新发送。"
+          : "相同请求仍在处理中，未启动第二次执行。",
+      };
+    }
+    if (
+      requestClaim?.disposition === "duplicate"
+      && internalOptions.skipUserMessageAppend
+      && (
+        !claimedBinding
+        || claimedBinding.sessionId !== normalizedInput.sessionId
+        || claimedBinding.userMessageId !== internalOptions.userMessageId
+      )
+    ) {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        message: "引导输入与原请求的持久化归属不一致，未恢复执行。",
+      };
+    }
+    if (
+      requestClaim?.disposition === "duplicate"
+      && !internalOptions.skipUserMessageAppend
+    ) {
+      const durableReplayTurn =
+        claimedBinding && options.chatSessionStore?.get
+          ? await findPersistedRequestTurn(
+              options.chatSessionStore,
+              claimedBinding.sessionId,
+              requestId,
+            )
+          : null;
+      if (
+        latestClaimAttempt?.state === "accepted"
+        || Boolean(durableReplayTurn?.assistant)
+      ) {
+        const replayAuthority = createChatPublicationAuthority();
+        if (claimedBinding) {
+          replayAuthority.markDurable(
+            claimedBinding.sessionId,
+            claimedBinding.userMessageId,
+          );
+        }
+        let replayResult: SendChatMessageResult;
+        try {
+          replayResult = await executeMessageInternal(normalizedInput, runtimeOptions, {
+            ...internalOptions,
+            preparedInput: preparation.value,
+            requestClaim,
+            publicationAuthority: replayAuthority,
+          });
+        } catch (error) {
+          if (!(error instanceof AssistantAcceptanceRecoveryRequiredError)) {
+            throw error;
+          }
+          replayResult = error.result;
+        }
+        return replayResult.ok
+          ? {
+              ...replayResult,
+              domainStateAvailable:
+                replayResult.domainStateAvailable === false
+                  ? false
+                  : replayAuthority.domainStateAvailable(),
+            }
+          : replayResult;
+      }
+      return {
+        ok: false,
+        code: "CONFLICT",
+        retryable: true,
+        message: "相同请求仍在处理中，未启动第二次执行。",
+      };
+    }
+    if (options.conversationCausalStore) {
+      const refMutation = await options.conversationCausalStore.addRefs({
+        requestId,
+        refs: [{ kind: "kernel_run", id: runId }],
+      });
+      if (
+        refMutation.disposition !== "applied"
+        && refMutation.disposition !== "duplicate"
+      ) {
+        throw new Error(
+          "Chat Kernel admission requires a durable causal run reference.",
+        );
+      }
+    }
+
+    const publicationAuthority = createChatPublicationAuthority();
+    let kernelWorkspaceRunRecorder: ChatWorkspaceRunRecorder | null = null;
+    const preparedInternalOptions: ChatTurnInternalOptions = {
+      ...internalOptions,
+      preparedInput: preparation.value,
+      requestClaim,
+      publicationAuthority,
+      onDurableSessionResolved(sessionId) {
+        internalOptions.onDurableSessionResolved?.(sessionId);
+      },
+      onDomainStateUnavailable() {
+        internalOptions.onDomainStateUnavailable?.();
+        publicationAuthority.invalidate("domain_state_unavailable");
+      },
+      onWorkspaceRunRecorderResolved(recorder) {
+        kernelWorkspaceRunRecorder = recorder;
+        internalOptions.onWorkspaceRunRecorderResolved?.(recorder);
+      },
+    };
+
     const terminalEvents: Array<
       Extract<
         ChatStreamEvent,
         { type: "completed" | "failed" | "canceled" }
       >
     > = [];
+    let bufferedTerminalStatusEvents: ChatTaskStatusEvent[] = [];
+    let publishedTerminalEvent = false;
     let lastStreamEvent: ChatStreamEvent | undefined;
+    let lastStatusEvent: ChatTaskStatusEvent | undefined;
+    const isTerminalStatusEvent = (event: ChatTaskStatusEvent) =>
+      event.state === "completed"
+      || event.state === "failed"
+      || event.state === "canceled";
+    const publishStatusObserver = (event: ChatTaskStatusEvent) => {
+      try {
+        runtimeOptions.onStatusEvent?.(event);
+      } catch {
+        // User observers are not part of Kernel settlement.
+      }
+      try {
+        runtimeOptions.onStreamEvent?.({
+          type: "status",
+          status: event,
+          sessionId: event.sessionId,
+          requestId: event.requestId ?? requestId,
+          sequence: event.sequence ?? 0,
+          turnId: event.turnId ?? createConversationTurnId(requestId),
+          createdAt: event.createdAt,
+          domainStateAvailable: event.domainStateAvailable === true,
+        });
+      } catch {
+        // User observers are not part of Kernel settlement.
+      }
+    };
+    const publishTerminalObserver = (
+      event: Extract<ChatStreamEvent, { type: "completed" | "failed" | "canceled" }>,
+    ) => {
+      if (publishedTerminalEvent) return;
+      publishedTerminalEvent = true;
+      try {
+        runtimeOptions.onStreamEvent?.(event);
+      } catch {
+        // User observers are not part of Kernel settlement.
+      }
+    };
     const wrappedRuntimeOptions: SendChatMessageRuntimeOptions = {
       ...runtimeOptions,
+      onStatusEvent(event) {
+        lastStatusEvent = event;
+        if (isTerminalStatusEvent(event)) {
+          bufferedTerminalStatusEvents.push(event);
+          return;
+        }
+        publishStatusObserver(event);
+      },
       onStreamEvent(event) {
         lastStreamEvent = event;
+        if (event.type === "status" && isTerminalStatusEvent(event.status)) {
+          return;
+        }
         if (
           event.type === "completed" ||
           event.type === "failed" ||
           event.type === "canceled"
         ) {
           terminalEvents.push(event);
+          return;
         }
         try {
           runtimeOptions.onStreamEvent?.(event);
@@ -2326,18 +4301,12 @@ export function createChatService(options: {
         }
       },
     };
-    const runId = [
-      "chat_kernel",
-      sanitizeRuntimeId(input.sessionId ?? "new"),
-      sanitizeRuntimeId(requestId),
-    ].join("_");
-
     const persistTerminalActivity = async (
       status: "paused" | "failed" | "canceled",
       message: string,
       sessionId: string | undefined,
-    ): Promise<boolean> => {
-      if (!sessionId) return false;
+    ): Promise<ChatTaskStatusEvent | null> => {
+      if (!sessionId) return null;
       if (!options.chatSessionStore?.appendActivityEvent) {
         throw new Error(
           "Chat Kernel terminal activity persistence is unavailable.",
@@ -2346,30 +4315,81 @@ export function createChatService(options: {
       const persistedSession = options.chatSessionStore.get
         ? await options.chatSessionStore.get(sessionId)
         : null;
-      if (
-        persistedSession?.activity?.statusEvents.some(
-          (event) =>
-            event.requestId === requestId &&
-            event.state === status,
-        )
-      ) {
-        return true;
+      const causalRecord = options.conversationCausalStore
+        ? await options.conversationCausalStore.getRequest(requestId)
+        : null;
+      const binding = resolveDurableConversationBinding(causalRecord);
+      if (options.conversationCausalStore && binding?.sessionId !== sessionId) {
+        throw new Error(
+          "Chat Kernel terminal settlement lacks an exact durable binding.",
+        );
       }
-      await persistRequiredChatActivityEvent(
-        options.chatSessionStore,
-        {
-          sessionId,
-          requestId,
-          state: status,
-          message,
-          createdAt: new Date(getNowMs(options.now)).toISOString(),
-          elapsedMs: 0,
-        },
+      const existingEvent = [
+        ...(persistedSession?.activity?.statusEvents ?? []),
+      ].reverse().find(
+        (event) => event.requestId === requestId && event.state === status,
       );
-      return true;
+      if (existingEvent) {
+        if (!options.conversationCausalStore) return existingEvent;
+        const existingSettlement = causalRecord?.requiredSettlements?.find(
+          (candidate) =>
+            candidate.id === existingEvent.settlementId
+            && candidate.state === "committed"
+            && Boolean(candidate.preparedChatEventFingerprint)
+            && candidate.chatEventFingerprint
+              === candidate.preparedChatEventFingerprint
+            && createRequiredChatEventFingerprint(existingEvent)
+              === candidate.preparedChatEventFingerprint,
+        );
+        if (existingSettlement) return existingEvent;
+      }
+      const activeAttempt = [...(causalRecord?.attempts ?? [])].reverse().find(
+        (attempt) => attempt.state === "active",
+      );
+      if (options.conversationCausalStore && !activeAttempt) {
+        throw new Error(
+          "Chat Kernel terminal settlement lacks an active causal attempt.",
+        );
+      }
+      const persistedSequence = persistedSession?.activity?.statusEvents.reduce(
+        (highest, event) =>
+          event.requestId === requestId
+            ? Math.max(highest, event.sequence ?? 0)
+            : highest,
+        0,
+      ) ?? 0;
+      const event: ChatTaskStatusEvent = {
+        sessionId,
+        requestId,
+        turnId:
+          lastStatusEvent?.turnId
+          ?? lastStreamEvent?.turnId
+          ?? createConversationTurnId(requestId),
+        sequence: Math.max(
+          persistedSequence,
+          lastStatusEvent?.sequence ?? 0,
+          lastStreamEvent?.sequence ?? 0,
+        ) + 1,
+        state: status,
+        message,
+        createdAt: new Date(getNowMs(options.now)).toISOString(),
+        elapsedMs: 0,
+        domainStateAvailable: true,
+      };
+      await persistRequiredConversationSettlement({
+        requestId,
+        attempt: activeAttempt?.attempt ?? 1,
+        event,
+        chatSessionStore: options.chatSessionStore,
+        conversationCausalStore: options.conversationCausalStore,
+        workspaceRunRecorder: kernelWorkspaceRunRecorder,
+        workspaceUnavailableReasonCode: "workspace_run_unavailable",
+        failureReasonCode: "kernel_terminal_settlement_failed",
+      });
+      return event;
     };
 
-    const emitSyntheticTerminal = (
+    const stageSyntheticTerminal = (
       type: "completed" | "failed" | "canceled",
       message: string,
       sessionId: string | undefined,
@@ -2379,32 +4399,37 @@ export function createChatService(options: {
         { type: "completed" | "failed" | "canceled" }
       > = {
         type,
-        sessionId: sessionId ?? "unpersisted",
+        sessionId:
+          sessionId
+          ?? lastStatusEvent?.sessionId
+          ?? lastStreamEvent?.sessionId
+          ?? normalizedInput.sessionId
+          ?? `runtime_${runId}`,
         requestId,
         sequence: (lastStreamEvent?.sequence ?? 0) + 1,
         turnId: lastStreamEvent?.turnId ?? `turn-${requestId}`,
         createdAt: new Date(getNowMs(options.now)).toISOString(),
         message,
+        domainStateAvailable: Boolean(sessionId),
       };
       terminalEvents.push(event);
       lastStreamEvent = event;
-      try {
-        runtimeOptions.onStreamEvent?.(event);
-      } catch {
-        // User observers are not part of Kernel settlement.
-      }
+      return event;
     };
 
     const settleResult = async (
       result: SendChatMessageResult,
     ): Promise<ChatKernelSettlement<SendChatMessageResult>> => {
-      const status = toChatKernelStatus(result);
+      const terminalBeforeSettlement = terminalEvents.at(-1);
+      const status = toChatKernelStatus(
+        result,
+        terminalBeforeSettlement,
+        lastStatusEvent,
+      );
       const message = result.ok ? result.reply : result.message;
-      const sessionId = result.ok
-        ? result.sessionId
-        : input.sessionId ?? lastStreamEvent?.sessionId;
+      const sessionId = publicationAuthority.durableSessionId();
       if (terminalEvents.length === 0) {
-        emitSyntheticTerminal(
+        stageSyntheticTerminal(
           status === "failed"
             ? "failed"
             : status === "canceled"
@@ -2417,10 +4442,30 @@ export function createChatService(options: {
       const terminal = terminalEvents.at(-1)!;
       const needsTerminalActivity =
         status === "failed" || status === "canceled";
-      const terminalActivityPersisted = needsTerminalActivity
+      const terminalActivityEvent = needsTerminalActivity
         ? await persistTerminalActivity(status, message, sessionId)
-        : false;
+        : null;
+      if (needsTerminalActivity && !terminalActivityEvent) {
+        throw new SecretSafeFailureError("SETTLEMENT_COMPENSATION_INCOMPLETE");
+      }
       const assistantMessageId = terminal.finalMessageId?.trim();
+
+      if (terminalActivityEvent) {
+        bufferedTerminalStatusEvents = [];
+        publishStatusObserver(terminalActivityEvent);
+      } else {
+        const publishableStatusEvents = result.turnSettlementStatus === "unknown"
+          ? bufferedTerminalStatusEvents.splice(0).filter((event) =>
+              event.state !== "completed"
+              && event.state !== "failed"
+              && event.state !== "canceled",
+            )
+          : bufferedTerminalStatusEvents.splice(0);
+        for (const event of publishableStatusEvents) {
+          publishStatusObserver(event);
+        }
+      }
+      publishTerminalObserver(terminal);
 
       return {
         status,
@@ -2430,12 +4475,16 @@ export function createChatService(options: {
           requiredStatePersisted: true,
           ...(assistantMessageId ? { assistantMessageId } : {}),
           ...(status === "paused"
-            ? { continuationPersisted: true as const }
+            ? result.turnSettlementStatus === "unknown"
+              ? { reconciliationRequired: true as const }
+              : { continuationPersisted: true as const }
             : {}),
-          ...(terminalActivityPersisted
+          ...(terminalActivityEvent
             ? { terminalActivityPersisted: true as const }
             : {}),
-          ...(!sessionId ? { noDomainStateCreated: true as const } : {}),
+          ...(!sessionId && !requestClaim && !options.conversationCausalStore
+            ? { noDomainStateCreated: true as const }
+            : {}),
         },
         streamTerminals: [terminal],
       };
@@ -2445,13 +4494,20 @@ export function createChatService(options: {
       driver: options.productionKernelDriver,
       runId,
       async execute() {
-        return settleResult(
-          await executeMessageInternal(
-            normalizedInput,
-            wrappedRuntimeOptions,
-            internalOptions,
-          ),
-        );
+        try {
+          return settleResult(
+            await executeMessageInternal(
+              normalizedInput,
+              wrappedRuntimeOptions,
+              preparedInternalOptions,
+            ),
+          );
+        } catch (error) {
+          if (!(error instanceof AssistantAcceptanceRecoveryRequiredError)) {
+            throw error;
+          }
+          return settleResult(error.result);
+        }
       },
       async settleAborted() {
         throw new Error(
@@ -2459,33 +4515,91 @@ export function createChatService(options: {
         );
       },
       async settleFailed(error) {
-        const message =
-          error instanceof Error ? error.message : String(error);
-        const sessionId = input.sessionId ?? lastStreamEvent?.sessionId;
-        if (terminalEvents.length === 0) {
-          emitSyntheticTerminal("failed", message, sessionId);
+        let failure = toSecretSafeFailure(error, "INTERNAL_FAILURE");
+        let sessionId = publicationAuthority.durableSessionId();
+        let terminalActivityEvent: ChatTaskStatusEvent | null = null;
+        try {
+          terminalActivityEvent = await persistTerminalActivity(
+            failure.terminal,
+            failure.publicMessage,
+            sessionId,
+          );
+        } catch {
+          publicationAuthority.invalidate("kernel_failure_activity_write_failed");
+          internalOptions.onDomainStateUnavailable?.();
+          failure = toSecretSafeFailure(
+            new SecretSafeFailureError("SETTLEMENT_COMPENSATION_INCOMPLETE"),
+          );
+          await options.conversationCausalStore?.addRefs({
+            requestId,
+            refs: [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: [...failure.coverageReasonCodes],
+            },
+          }).catch(() => undefined);
         }
-        const activityPersisted = await persistTerminalActivity(
-          "failed",
-          message,
-          sessionId,
+        terminalEvents.length = 0;
+        bufferedTerminalStatusEvents = [];
+        const safeTerminal = stageSyntheticTerminal(
+          failure.terminal,
+          failure.publicMessage,
+          terminalActivityEvent ? sessionId : undefined,
         );
+        if (terminalActivityEvent) {
+          publishStatusObserver(terminalActivityEvent);
+        } else {
+          publishStatusObserver({
+            sessionId:
+              lastStatusEvent?.sessionId
+              ?? normalizedInput.sessionId
+              ?? `runtime_${runId}`,
+            requestId,
+            turnId: lastStatusEvent?.turnId ?? createConversationTurnId(requestId),
+            sequence: Math.max(lastStatusEvent?.sequence ?? 0, safeTerminal.sequence),
+            state: "failed",
+            message: failure.publicMessage,
+            createdAt: safeTerminal.createdAt,
+            elapsedMs: 0,
+            domainStateAvailable: false,
+          });
+        }
+        publishTerminalObserver(safeTerminal);
         return {
           status: "failed",
-          summary: message,
-          result: { ok: false as const, message },
+          summary: failure.publicMessage,
+          failure,
+          result: {
+            ok: false as const,
+            code: "INTERNAL_ERROR" as const,
+            retryable: failure.retryable,
+            message: failure.publicMessage,
+          },
           persistence: {
-            requiredStatePersisted: true,
-            ...(activityPersisted
-              ? { terminalActivityPersisted: true as const }
-              : {}),
-            ...(!sessionId ? { noDomainStateCreated: true as const } : {}),
+            ...(terminalActivityEvent
+              ? {
+                  requiredStatePersisted: true as const,
+                  terminalActivityPersisted: true as const,
+                }
+              : {
+                  requiredStatePersisted: false as const,
+                  settlementRecoveryRequired: true as const,
+                  settlementFailureCode: failure.code,
+                }),
           },
           streamTerminals: [terminalEvents.at(-1)!],
         };
       },
     });
-    return outcome.settlement.result;
+    return outcome.settlement.result.ok
+      ? {
+          ...outcome.settlement.result,
+          domainStateAvailable:
+            outcome.settlement.result.domainStateAvailable === false
+              ? false
+              : publicationAuthority.domainStateAvailable(),
+        }
+      : outcome.settlement.result;
   }
 
   async function sendMessageInternal(
@@ -2530,14 +4644,25 @@ export function createChatService(options: {
     runtimeOptions: SendChatMessageRuntimeOptions,
   ): Promise<SkillInputResponseResult> {
     prunePendingAttachmentPayloads(getNowMs(options.now));
+    const cachedPending = pendingSkillInputRequests.get(input.inputRequestId);
     const pending =
-      pendingSkillInputRequests.get(input.inputRequestId) ??
-      (await recoverPendingSkillInputState(input.inputRequestId));
+      cachedPending ?? (await recoverPendingSkillInputState(input.inputRequestId));
     if (!pending) {
       return {
         ok: false,
         code: "UNKNOWN_SKILL_INPUT",
         message: "Unknown skill input request.",
+      };
+    }
+    if (
+      options.conversationCausalStore
+      && !(await hasDurableGuidedInputOwnership(pending.persisted))
+    ) {
+      pendingSkillInputRequests.delete(input.inputRequestId);
+      return {
+        ok: false,
+        code: "CONFLICT",
+        message: "Guided input ownership could not be verified.",
       };
     }
     if (
@@ -2552,12 +4677,24 @@ export function createChatService(options: {
       pending.persisted.attachments?.length &&
       !pending.attachments?.length
     ) {
+      const expiryAttempt = await ensureGuidedInputCausalAttempt(
+        pending.persisted,
+      );
+      if (!expiryAttempt) {
+        pendingSkillInputRequests.delete(input.inputRequestId);
+        return {
+          ok: false,
+          code: "CONFLICT",
+          message: "Guided input expiration could not be settled.",
+          domainStateAvailable: false,
+        };
+      }
       try {
-        await markPersistedSkillInputCompleted(pending);
+        await markPersistedSkillInputCanceled(pending, expiryAttempt);
       } catch {
         return {
           ok: false,
-          message: "Failed to persist skill input completion.",
+          message: "Failed to persist skill input retirement.",
         };
       }
       pendingSkillInputRequests.delete(input.inputRequestId);
@@ -2606,6 +4743,156 @@ export function createChatService(options: {
           ? { attachmentPayloads: pending.attachments }
           : {}),
       });
+      const guidedAttempt = await ensureGuidedInputCausalAttempt(pending.persisted);
+      if (!guidedAttempt) {
+        pendingSkillInputRequests.delete(input.inputRequestId);
+        return {
+          ok: false,
+          code: "CONFLICT",
+          message: "Guided input attempt could not be admitted.",
+          domainStateAvailable: false,
+        };
+      }
+      const admittedGuidedAttempt = guidedAttempt;
+      const guidedPublicationAuthority = createChatPublicationAuthority();
+      if (
+        !pending.userMessageId
+        || !guidedPublicationAuthority.markDurable(
+          pending.sessionId,
+          pending.userMessageId,
+        )
+      ) {
+        pendingSkillInputRequests.delete(input.inputRequestId);
+        return {
+          ok: false,
+          code: "CONFLICT",
+          message: "Guided input durable publication could not be established.",
+          domainStateAvailable: false,
+        };
+      }
+      const skillWorkspaceRunRecorder = pending.runContext
+        ? await createChatWorkspaceRunRecorder({
+            workspaceRunStore: options.workspaceRunStore,
+            sessionId: pending.sessionId,
+            requestId: pending.requestId,
+            runContext: pending.runContext,
+            selectedSkillName: pending.selectedSkill.manifest.name,
+            createdAt: inputRequest.createdAt,
+          })
+        : null;
+      const guidedRefs = await options.conversationCausalStore?.addRefs({
+        requestId: pending.requestId,
+        refs: [
+          { kind: "guided_input", id: inputRequest.id },
+          ...(skillWorkspaceRunRecorder
+            ? [{
+                kind: "workspace_run" as const,
+                id: skillWorkspaceRunRecorder.workspaceRunId,
+              }]
+            : []),
+        ],
+        ...(!skillWorkspaceRunRecorder
+          ? {
+              coverage: {
+                state: "partial" as const,
+                reasonCodes: ["guided_input_workspace_run_unavailable"],
+              },
+            }
+          : {}),
+      });
+      if (
+        guidedRefs
+        && guidedRefs.disposition !== "applied"
+        && guidedRefs.disposition !== "duplicate"
+      ) {
+        guidedPublicationAuthority.invalidate("guided_input_ref_conflict");
+        pendingSkillInputRequests.delete(input.inputRequestId);
+        return {
+          ok: false,
+          code: "CONFLICT",
+          message: "Guided input references could not be established.",
+          domainStateAvailable: false,
+        };
+      }
+      const guidedInputRequestId = pending.requestId;
+      async function persistGuidedInputStatus(
+        event: ChatTaskStatusEvent,
+        required: boolean,
+      ) {
+        if (!required) {
+          await options.chatSessionStore?.appendActivityEvent?.(event.sessionId, event);
+          if (skillWorkspaceRunRecorder) {
+            await skillWorkspaceRunRecorder.appendStatusEvent(event);
+          }
+          return;
+        }
+        try {
+          await persistRequiredConversationSettlement({
+            requestId: guidedInputRequestId,
+            attempt: admittedGuidedAttempt,
+            event,
+            chatSessionStore: options.chatSessionStore,
+            conversationCausalStore: options.conversationCausalStore,
+            workspaceRunRecorder: skillWorkspaceRunRecorder,
+            workspaceUnavailableReasonCode:
+              "guided_input_workspace_run_unavailable",
+            failureReasonCode: "guided_input_required_settlement_failed",
+          });
+        } catch (error) {
+          const targetState = toRequiredSettlementTarget(event);
+          const settlementId = event.settlementId ?? (
+            targetState
+              ? createRequiredSettlementId({
+                  requestId: guidedInputRequestId,
+                  attempt: admittedGuidedAttempt,
+                  sourceSequence: event.sequence ?? 0,
+                  targetState,
+                })
+              : `required_settlement_unavailable_${guidedInputRequestId}`
+          );
+          const failedPending = event.pendingSkillInput
+            ? {
+                ...event.pendingSkillInput,
+                status: "failed" as const,
+                settlementId,
+                attachmentPayloads: undefined,
+              }
+            : undefined;
+          const tombstone: ChatTaskStatusEvent = {
+            ...event,
+            settlementId: `${settlementId}:tombstone`,
+            state: "failed",
+            message: "Guided input settlement failed.",
+            ...(failedPending ? { pendingSkillInput: failedPending } : {}),
+          };
+          await persistRequiredChatActivityEvent(
+            options.chatSessionStore,
+            tombstone,
+          ).catch(() => undefined);
+          await skillWorkspaceRunRecorder?.appendStatusEvent(tombstone).catch(() => undefined);
+          await options.conversationCausalStore?.settleAttempt({
+            requestId: guidedInputRequestId,
+            attempt: admittedGuidedAttempt,
+            state: "interrupted",
+          }).catch(() => undefined);
+          await options.conversationCausalStore?.addRefs({
+            requestId: guidedInputRequestId,
+            refs: [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: ["guided_input_required_settlement_failed"],
+            },
+          }).catch(() => undefined);
+          guidedPublicationAuthority.invalidate("guided_input_required_settlement_failed");
+          pendingSkillInputRequests.delete(input.inputRequestId);
+          throw new SecretSafeFailureError(
+            error instanceof RequiredConversationSettlementError
+              ? error.failureCode
+              : "CROSS_DOMAIN_SETTLEMENT_FAILED",
+            error,
+          );
+        }
+      }
       const emitStatus = createChatStatusEmitter({
         sessionId: pending.sessionId,
         requestId: pending.requestId,
@@ -2614,20 +4901,13 @@ export function createChatService(options: {
         now: options.now,
         onStatusEvent: runtimeOptions.onStatusEvent,
         onStreamEvent: runtimeOptions.onStreamEvent,
+        getDomainStateAvailable: () =>
+          guidedPublicationAuthority.domainStateAvailable(),
         onPersistEvent(event) {
-          try {
-            const sessionActivityWrite =
-              options.chatSessionStore?.appendActivityEvent?.(
-                event.sessionId,
-                event,
-              );
-            void sessionActivityWrite?.catch(() => undefined);
-          } catch {
-            // Observability writes must not fail the response.
-          }
+          return persistGuidedInputStatus(event, false);
         },
         async onRequiredPersistEvent(event) {
-          await persistRequiredChatActivityEvent(options.chatSessionStore, event);
+          await persistGuidedInputStatus(event, true);
         },
       });
       try {
@@ -2643,6 +4923,7 @@ export function createChatService(options: {
           ).appendInputRequest(inputRequest),
         });
       } catch {
+        guidedPublicationAuthority.invalidate("guided_input_publish_failed");
         const outputAssembler = createChatOutputAssembler(() =>
           new Date(getNowMs(options.now)).toISOString(),
         );
@@ -2682,8 +4963,18 @@ export function createChatService(options: {
       };
     }
 
+    const executionAttempt = await ensureGuidedInputCausalAttempt(pending.persisted);
+    if (!executionAttempt) {
+      pendingSkillInputRequests.delete(input.inputRequestId);
+      return {
+        ok: false,
+        code: "CONFLICT",
+        message: "Guided input execution could not be admitted.",
+        domainStateAvailable: false,
+      };
+    }
     try {
-      await markPersistedSkillInputProcessing(pending);
+      await markPersistedSkillInputProcessing(pending, executionAttempt);
     } catch {
       return {
         ok: false,
@@ -2717,14 +5008,6 @@ export function createChatService(options: {
         initialStreamSequence: pending.streamSequence,
       },
     );
-    try {
-      await markPersistedSkillInputCompleted(pending);
-    } catch {
-      return {
-        ok: false,
-        message: "Failed to persist skill input completion.",
-      };
-    }
     pendingSkillInputRequests.delete(input.inputRequestId);
     return result;
   }
@@ -2765,20 +5048,31 @@ function createChatStatusEmitter(options: {
   startedAtMs: number;
   initialSequence?: number;
   now?: () => Date;
+  getDomainStateAvailable?: () => boolean;
   onStatusEvent?: (event: ChatTaskStatusEvent) => void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
-  onPersistEvent?: (event: ChatTaskStatusEvent) => void;
+  onPersistEvent?: (event: ChatTaskStatusEvent) => void | Promise<void>;
   onRequiredPersistEvent?: (event: ChatTaskStatusEvent) => Promise<void>;
 }) {
   let sessionId = options.sessionId;
   let assistantMessageId: string | undefined;
   let sequence = Math.max(0, options.initialSequence ?? 0);
+  let currentAttempt = 1;
+  let attemptControlSequence = 0;
   const turnId = `turn-${options.requestId}`;
   const bufferedTextEvents: Array<{
     type: "answer_delta" | "thinking_delta";
     text: string;
   }> = [];
-  let textFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  let persistenceQueue: Promise<void> = Promise.resolve();
+
+  function enqueuePersistence(statusEvent: ChatTaskStatusEvent): Promise<void> {
+    const operation = persistenceQueue.then(async () => {
+      await options.onPersistEvent?.(statusEvent);
+    });
+    persistenceQueue = operation.catch(() => undefined);
+    return operation;
+  }
 
   function createStreamBase(createdAt: string) {
     return {
@@ -2787,18 +5081,36 @@ function createChatStatusEmitter(options: {
       sequence: ++sequence,
       turnId,
       ...(assistantMessageId ? { assistantMessageId } : {}),
+      attempt: currentAttempt,
       createdAt,
+      domainStateAvailable: options.getDomainStateAvailable?.() === true,
     };
   }
 
   function createStatusEvent(
     event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
   ): ChatTaskStatusEvent {
+    const safeEvent = redactCredentials(event) as typeof event;
+    if (safeEvent.inputRequest) {
+      safeEvent.inputRequest = sanitizeSkillUserInputRequest(
+        safeEvent.inputRequest,
+      );
+    }
+    if (safeEvent.pendingSkillInput?.inputRequest) {
+      safeEvent.pendingSkillInput.inputRequest = sanitizeSkillUserInputRequest(
+        safeEvent.pendingSkillInput.inputRequest,
+      );
+    }
     const nowMs = getNowMs(options.now);
     const createdAt = new Date(nowMs).toISOString();
+    const streamBase = createStreamBase(createdAt);
     return {
-      ...event,
-      ...createStreamBase(createdAt),
+      ...safeEvent,
+      ...streamBase,
+      domainStateAvailable:
+        safeEvent.domainStateAvailable === false
+          ? false
+          : streamBase.domainStateAvailable,
       elapsedMs: Math.max(0, nowMs - options.startedAtMs),
     };
   }
@@ -2807,13 +5119,8 @@ function createChatStatusEmitter(options: {
     statusEvent: ChatTaskStatusEvent,
     optionsOverride: { persist: boolean },
   ) {
-    flushBufferedTextEvents();
     if (optionsOverride.persist) {
-      try {
-        options.onPersistEvent?.(statusEvent);
-      } catch {
-        // Persistence observers are best-effort.
-      }
+      void enqueuePersistence(statusEvent).catch(() => undefined);
     }
     try {
       options.onStatusEvent?.(statusEvent);
@@ -2831,6 +5138,7 @@ function createChatStatusEmitter(options: {
         turnId: statusEvent.turnId ?? turnId,
         ...(assistantMessageId ? { assistantMessageId } : {}),
         createdAt: statusEvent.createdAt,
+        domainStateAvailable: statusEvent.domainStateAvailable === true,
       });
     } catch {
       // Renderer observers are best-effort.
@@ -2838,26 +5146,31 @@ function createChatStatusEmitter(options: {
   }
 
   function flushBufferedTextEvents() {
-    if (textFlushTimer) {
-      clearTimeout(textFlushTimer);
-      textFlushTimer = undefined;
-    }
-    for (const event of bufferedTextEvents.splice(0)) {
+    const pending = bufferedTextEvents.splice(0);
+    const orderedTypes = [
+      ...new Set(pending.map((event) => event.type)),
+    ];
+    for (const type of orderedTypes) {
+      const text = redactCredentialString(
+        pending
+          .filter((event) => event.type === type)
+          .map((event) => event.text)
+          .join(""),
+      );
+      if (!text) {
+        continue;
+      }
       const nowMs = getNowMs(options.now);
       try {
         options.onStreamEvent?.({
-          ...event,
+          type,
+          text,
           ...createStreamBase(new Date(nowMs).toISOString()),
         });
       } catch {
         // Renderer observers are best-effort.
       }
     }
-  }
-
-  function scheduleTextFlush() {
-    if (textFlushTimer) return;
-    textFlushTimer = setTimeout(flushBufferedTextEvents, 16);
   }
 
   return {
@@ -2868,24 +5181,66 @@ function createChatStatusEmitter(options: {
       sessionId = nextSessionId;
     },
     send(event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">) {
+      if (
+        event.state === "paused"
+        || event.state === "waiting_for_input"
+        || (
+          event.state === "tool_invocation"
+          && event.invocationStatus === "waiting_approval"
+        )
+      ) {
+        throw new Error(`Status ${event.state} requires durable publication.`);
+      }
       publishStatusEvent(createStatusEvent(event), { persist: true });
+    },
+    sendPublishedOnly(
+      event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
+    ) {
+      publishStatusEvent(createStatusEvent(event), { persist: false });
+    },
+    sendAttemptControl(event: {
+      operation: "begin" | "supersede" | "reset" | "accepted";
+      attempt: number;
+      supersedesAttempt?: number;
+    }) {
+      flushBufferedTextEvents();
+      currentAttempt = event.attempt;
+      const nowMs = getNowMs(options.now);
+      try {
+        options.onStreamEvent?.({
+          type: "attempt_control",
+          operation: event.operation,
+          controlSequence: ++attemptControlSequence,
+          ...(event.supersedesAttempt
+            ? { supersedesAttempt: event.supersedesAttempt }
+            : {}),
+          ...createStreamBase(new Date(nowMs).toISOString()),
+        });
+      } catch {
+        // Renderer observers are best-effort.
+      }
     },
     async sendWaitingForInput(
       inputRequest: SkillUserInputRequest,
       message: string,
       pendingSkillInput: SkillPendingInputState,
     ) {
+      const publicInputRequest = sanitizeSkillUserInputRequest(inputRequest);
       const statusEvent = createStatusEvent({
         state: "waiting_for_input",
         message,
-        selectedSkillName: inputRequest.skillName,
-        inputRequest,
+        selectedSkillName: publicInputRequest.skillName,
+        inputRequest: publicInputRequest,
         pendingSkillInput,
       });
       if (!options.onRequiredPersistEvent) {
         throw new Error("Chat activity persistence is unavailable.");
       }
+      await persistenceQueue;
       await options.onRequiredPersistEvent(statusEvent);
+      if (statusEvent.pendingSkillInput?.settlementId) {
+        pendingSkillInput.settlementId = statusEvent.pendingSkillInput.settlementId;
+      }
       publishStatusEvent(
         {
           ...statusEvent,
@@ -2899,7 +5254,7 @@ function createChatStatusEmitter(options: {
       try {
         options.onStreamEvent?.({
           type: "waiting_for_input",
-          inputRequest,
+          inputRequest: publicInputRequest,
           ...createStreamBase(new Date(nowMs).toISOString()),
         });
       } catch {
@@ -2911,36 +5266,45 @@ function createChatStatusEmitter(options: {
     ) {
       const statusEvent = createStatusEvent(event);
       if (!options.onRequiredPersistEvent) {
-        publishStatusEvent(statusEvent, { persist: true });
+        await enqueuePersistence(statusEvent);
+        publishStatusEvent(statusEvent, { persist: false });
         return;
       }
+      await persistenceQueue;
       await options.onRequiredPersistEvent(statusEvent);
       publishStatusEvent(statusEvent, { persist: false });
     },
     setAssistantMessageId(nextAssistantMessageId: string | null | undefined) {
       assistantMessageId = nextAssistantMessageId ?? undefined;
     },
+    async drainPersistence() {
+      await persistenceQueue;
+    },
     sendStreamEvent(event: ChatModelStreamEventInput) {
       if (event.type === "answer_delta") {
         const previous = bufferedTextEvents.at(-1);
         if (previous?.type === event.type) previous.text += event.text;
         else bufferedTextEvents.push({ ...event });
-        scheduleTextFlush();
         return;
       }
       if (event.type === "thinking_delta") {
         const previous = bufferedTextEvents.at(-1);
         if (previous?.type === event.type) previous.text += event.text;
         else bufferedTextEvents.push({ ...event });
-        scheduleTextFlush();
         return;
       }
-      flushBufferedTextEvents();
       const nowMs = getNowMs(options.now);
       try {
+        const clonedEvent = cloneChatModelStreamEventInput(event);
+        const safeEvent = event.type === "output_part"
+          ? clonedEvent
+          : redactCredentials(clonedEvent) as ChatModelStreamEventInput;
         options.onStreamEvent?.({
-          ...cloneChatModelStreamEventInput(event),
+          ...safeEvent,
           ...createStreamBase(new Date(nowMs).toISOString()),
+          ...(safeEvent.domainStateAvailable === false
+            ? { domainStateAvailable: false as const }
+            : {}),
         });
       } catch {
         // Renderer observers are best-effort.
@@ -2950,6 +5314,7 @@ function createChatStatusEmitter(options: {
       type: "completed" | "failed" | "canceled";
       message?: string;
       finalMessageId?: string;
+      domainStateAvailable?: false;
     }) {
       flushBufferedTextEvents();
       if (event.finalMessageId) {
@@ -2957,9 +5322,13 @@ function createChatStatusEmitter(options: {
       }
       const nowMs = getNowMs(options.now);
       try {
+        const safeEvent = redactCredentials(event) as typeof event;
         options.onStreamEvent?.({
-          ...event,
+          ...safeEvent,
           ...createStreamBase(new Date(nowMs).toISOString()),
+          ...(safeEvent.domainStateAvailable === false
+            ? { domainStateAvailable: false as const }
+            : {}),
         });
       } catch {
         // Renderer observers are best-effort.
@@ -2968,7 +5337,7 @@ function createChatStatusEmitter(options: {
   };
 }
 
-type ChatModelStreamEventInput =
+type ChatModelStreamEventInput = { domainStateAvailable?: false } & (
   | { type: "answer_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "output_part"; part: ChatOutputPart }
@@ -2977,7 +5346,8 @@ type ChatModelStreamEventInput =
       toolCallId: string;
       toolName?: string;
       argumentsDelta?: string;
-    };
+    }
+);
 
 function cloneChatModelStreamEventInput(
   event: ChatModelStreamEventInput,
@@ -2999,10 +5369,7 @@ function emitModelStreamEvent(
 ) {
   if (event.type === "content_delta") {
     emitter.sendStreamEvent({ type: "answer_delta", text: event.text });
-    const textPart = outputAssembler.appendText(event.text);
-    if (textPart) {
-      emitter.sendStreamEvent({ type: "output_part", part: textPart });
-    }
+    outputAssembler.appendText(event.text);
     return;
   }
 
@@ -3019,7 +5386,9 @@ function emitModelStreamEvent(
       toolCallId,
       ...(index !== undefined ? { index } : {}),
       ...(event.name ? { toolName: event.name } : {}),
-      ...(event.arguments ? { argumentsDelta: event.arguments } : {}),
+      // Raw streaming argument chunks are not independently redactable: a
+      // credential key/value can straddle chunk boundaries. The accompanying
+      // output_part is assembled and sanitized before renderer publication.
     });
     emitter.sendStreamEvent({
       type: "output_part",
@@ -3043,12 +5412,99 @@ function getNowMs(now: (() => Date) | undefined): number {
   return now ? now().getTime() : Date.now();
 }
 
+function toRequiredSettlementTarget(
+  event: ChatTaskStatusEvent,
+):
+  | "waiting_for_input"
+  | "waiting_for_approval"
+  | "checkpoint_boundary"
+  | "paused"
+  | "failed"
+  | "canceled"
+  | null {
+  if (event.state === "waiting_for_input") return "waiting_for_input";
+  if (
+    event.state === "tool_invocation"
+    && event.invocationStatus === "waiting_approval"
+  ) {
+    return "waiting_for_approval";
+  }
+  if (event.state === "checkpoint_boundary") return "checkpoint_boundary";
+  if (event.state === "paused") return "paused";
+  if (event.state === "failed") return "failed";
+  if (event.state === "canceled") return "canceled";
+  return null;
+}
+
+function createRequiredSettlementId(input: {
+  requestId: string;
+  attempt: number;
+  sourceSequence: number;
+  targetState: string;
+}): string {
+  return `required_settlement_${createConversationRequestFingerprint({
+    schemaVersion: 1,
+    ...input,
+  })}`;
+}
+
+export function createRequiredChatEventFingerprint(
+  event: ChatTaskStatusEvent,
+): string {
+  const persistedEvent = normalizeChatTaskStatusEventForPersistence(event);
+  const pendingSkillInput = persistedEvent.pendingSkillInput
+    ? {
+        ...persistedEvent.pendingSkillInput,
+        ...(persistedEvent.pendingSkillInput.attachmentPayloads
+          ? {
+              attachmentPayloads: persistedEvent.pendingSkillInput.attachmentPayloads.map(
+                ({ dataBase64, ...metadata }) => ({
+                  ...metadata,
+                  dataFingerprint: createConversationRequestFingerprint(dataBase64),
+                }),
+              ),
+            }
+          : {}),
+      }
+    : undefined;
+  return createConversationRequestFingerprint({
+    schemaVersion: 2,
+    event: {
+      ...persistedEvent,
+      ...(pendingSkillInput ? { pendingSkillInput } : {}),
+    },
+  });
+}
+
+function createChatKernelRunId(requestId: string): string {
+  return `chat_kernel_${createConversationRequestFingerprint({
+    schemaVersion: 1,
+    requestId,
+    invocationId: randomUUID(),
+  })}`;
+}
+
 function toChatKernelStatus(
   result: SendChatMessageResult,
+  terminal: Extract<
+    ChatStreamEvent,
+    { type: "completed" | "failed" | "canceled" }
+  > | undefined,
+  statusEvent: ChatTaskStatusEvent | undefined,
 ): ChatKernelSettlement<unknown>["status"] {
+  if (terminal?.type === "canceled") return "canceled";
+  if (terminal?.type === "failed") return "failed";
+  if (result.turnSettlementStatus === "unknown") return "paused";
   if (!result.ok) {
+    if (statusEvent?.state === "waiting_for_input" || statusEvent?.state === "paused") {
+      return "paused";
+    }
+    if (statusEvent?.state === "canceled") return "canceled";
+    if (statusEvent?.state === "failed") return "failed";
     return result.code === "CANCELED" ? "canceled" : "failed";
   }
+  if (result.turnSettlementStatus === "paused") return "paused";
+  if (result.turnSettlementStatus === "failed") return "failed";
   if (result.agentStatus?.state === "paused") return "paused";
   if (result.agentStatus?.state === "failed") return "failed";
   return "succeeded";
@@ -3072,12 +5528,271 @@ function inferApprovalRiskLevel(input: {
 
 type ChatWorkspaceRunRecorder = {
   workspaceRunId: string;
-  appendStatusEvent(event: ChatTaskStatusEvent): Promise<void>;
+  appendStatusEvent(event: ChatTaskStatusEvent): Promise<{
+    eventId?: string;
+    deferredTerminal?: boolean;
+  }>;
+  finalizeAccepted(
+    acceptance?: ConversationAssistantAcceptance,
+  ): Promise<{
+    eventId?: string;
+    disposition: "committed" | "recovery_required";
+  }>;
 };
+
+type RequiredSettlementCoordinatorResult = {
+  settlementId?: string;
+  chatEventFingerprint: string;
+  workspaceEventId?: string;
+  disposition: "committed" | "reconciled";
+};
+
+async function persistRequiredConversationSettlement(options: {
+  requestId: string;
+  attempt: number;
+  event: ChatTaskStatusEvent;
+  chatSessionStore:
+    | Partial<Pick<ChatSessionStore, "appendActivityEvent">>
+    | undefined;
+  conversationCausalStore?: Pick<
+    ConversationCausalStore,
+    "beginRequiredSettlement" | "settleRequiredSettlement" | "addRefs"
+  >;
+  workspaceRunRecorder?: ChatWorkspaceRunRecorder | null;
+  workspaceUnavailableReasonCode?: string;
+  failureReasonCode?: string;
+}): Promise<RequiredSettlementCoordinatorResult> {
+  const targetState = toRequiredSettlementTarget(options.event);
+  if (!targetState) {
+    throw new RequiredConversationSettlementError(
+      false,
+      undefined,
+      "CROSS_DOMAIN_SETTLEMENT_FAILED",
+    );
+  }
+  const causalStore = options.conversationCausalStore;
+  if (!causalStore) {
+    const chatEventFingerprint = createRequiredChatEventFingerprint(options.event);
+    let chatPersisted = false;
+    try {
+      await persistRequiredChatActivityEvent(
+        options.chatSessionStore,
+        options.event,
+      );
+      chatPersisted = true;
+      const recorded = await options.workspaceRunRecorder?.appendStatusEvent(
+        options.event,
+      );
+      if (options.workspaceRunRecorder && !recorded?.eventId) {
+        throw new Error("Workspace required settlement did not return a receipt.");
+      }
+      return {
+        chatEventFingerprint,
+        ...(recorded?.eventId ? { workspaceEventId: recorded.eventId } : {}),
+        disposition: "committed",
+      };
+    } catch (error) {
+      throw new RequiredConversationSettlementError(
+        false,
+        error,
+        chatPersisted
+          ? "WORKSPACE_SETTLEMENT_FAILED"
+          : "CHAT_SETTLEMENT_FAILED",
+      );
+    }
+  }
+
+  const settlementId = createRequiredSettlementId({
+    requestId: options.requestId,
+    attempt: options.attempt,
+    sourceSequence: options.event.sequence ?? 0,
+    targetState,
+  });
+  options.event.settlementId = settlementId;
+  if (options.event.pendingSkillInput) {
+    options.event.pendingSkillInput.settlementId = settlementId;
+  }
+  const chatEventFingerprint = createRequiredChatEventFingerprint(options.event);
+  const preparedWorkspaceEventId = options.workspaceRunRecorder
+    ? createWorkspaceStatusEventId(options.event)
+    : undefined;
+  const preparing = await causalStore.beginRequiredSettlement({
+    requestId: options.requestId,
+    id: settlementId,
+    attempt: options.attempt,
+    sourceSequence: options.event.sequence ?? 0,
+    targetState,
+    ...(options.event.pendingSkillInput?.inputRequestId
+      ? {
+          guidedInputRequestId:
+            options.event.pendingSkillInput.inputRequestId,
+        }
+      : {}),
+    requiredDomains: options.workspaceRunRecorder
+      ? ["chat", "workspace"]
+      : ["chat"],
+    ...(options.workspaceRunRecorder && preparedWorkspaceEventId
+      ? {
+          workspaceRunId: options.workspaceRunRecorder.workspaceRunId,
+          preparedWorkspaceEventId,
+        }
+      : {}),
+    preparedChatEventFingerprint: chatEventFingerprint,
+  });
+  if (
+    preparing.disposition !== "applied"
+    && preparing.disposition !== "duplicate"
+  ) {
+    throw new RequiredConversationSettlementError(
+      false,
+      undefined,
+      "CROSS_DOMAIN_SETTLEMENT_FAILED",
+    );
+  }
+  const existingSettlement = preparing.value?.requiredSettlements?.find(
+    (candidate) => candidate.id === settlementId,
+  );
+  if (
+    preparing.disposition === "duplicate"
+    && existingSettlement?.state === "committed"
+  ) {
+    if (
+      !existingSettlement.preparedChatEventFingerprint
+      || existingSettlement.chatEventFingerprint !== chatEventFingerprint
+      || (
+        existingSettlement.requiredDomains.includes("workspace")
+        && (
+          !existingSettlement.workspaceEventId
+          || existingSettlement.workspaceEventId
+            !== existingSettlement.preparedWorkspaceEventId
+        )
+      )
+    ) {
+      throw new RequiredConversationSettlementError(
+        false,
+        undefined,
+        "CROSS_DOMAIN_SETTLEMENT_FAILED",
+      );
+    }
+    return {
+      settlementId,
+      chatEventFingerprint,
+      ...(existingSettlement.workspaceEventId
+        ? { workspaceEventId: existingSettlement.workspaceEventId }
+        : {}),
+      disposition: "reconciled",
+    };
+  }
+  if (
+    preparing.disposition === "duplicate"
+    && existingSettlement?.state === "failed"
+  ) {
+    throw new RequiredConversationSettlementError(
+      false,
+      undefined,
+      "CROSS_DOMAIN_SETTLEMENT_FAILED",
+    );
+  }
+
+  let chatPersisted = false;
+  let workspaceEventId: string | undefined;
+  try {
+    await persistRequiredChatActivityEvent(
+      options.chatSessionStore,
+      options.event,
+    );
+    chatPersisted = true;
+    if (options.workspaceRunRecorder) {
+      const recorded = await options.workspaceRunRecorder.appendStatusEvent(
+        options.event,
+      );
+      workspaceEventId = recorded.eventId;
+      if (!workspaceEventId) {
+        throw new Error("Workspace required settlement did not return a receipt.");
+      }
+      const refs = await causalStore.addRefs({
+        requestId: options.requestId,
+        refs: [
+          { kind: "workspace_run", id: options.workspaceRunRecorder.workspaceRunId },
+          {
+            kind: "workspace_event",
+            runId: options.workspaceRunRecorder.workspaceRunId,
+            eventId: workspaceEventId,
+          },
+        ],
+      });
+      if (refs.disposition !== "applied" && refs.disposition !== "duplicate") {
+        throw new Error("Workspace required settlement refs conflicted.");
+      }
+    } else if (options.workspaceUnavailableReasonCode) {
+      await causalStore.addRefs({
+        requestId: options.requestId,
+        refs: [],
+        coverage: {
+          state: "partial",
+          reasonCodes: [options.workspaceUnavailableReasonCode],
+        },
+      }).catch(() => undefined);
+    }
+    const committed = await causalStore.settleRequiredSettlement({
+      requestId: options.requestId,
+      id: settlementId,
+      state: "committed",
+      chatEventFingerprint,
+      ...(workspaceEventId ? { workspaceEventId } : {}),
+    });
+    if (
+      committed.disposition !== "applied"
+      && committed.disposition !== "duplicate"
+    ) {
+      throw new Error("Required settlement commit conflicted.");
+    }
+    return {
+      settlementId,
+      chatEventFingerprint,
+      ...(workspaceEventId ? { workspaceEventId } : {}),
+      disposition:
+        preparing.disposition === "duplicate" ? "reconciled" : "committed",
+    };
+  } catch (error) {
+    const failureCode = chatPersisted
+      ? "WORKSPACE_SETTLEMENT_FAILED" as const
+      : "CHAT_SETTLEMENT_FAILED" as const;
+    await causalStore.settleRequiredSettlement({
+      requestId: options.requestId,
+      id: settlementId,
+      state: "failed",
+      ...(chatPersisted ? { chatEventFingerprint } : {}),
+      ...(workspaceEventId ? { workspaceEventId } : {}),
+      failureCode,
+    }).catch(() => undefined);
+    await causalStore.addRefs({
+      requestId: options.requestId,
+      refs: options.workspaceRunRecorder
+        ? [{ kind: "workspace_run", id: options.workspaceRunRecorder.workspaceRunId }]
+        : [],
+      coverage: {
+        state: "degraded",
+        reasonCodes: [
+          options.failureReasonCode
+          ?? "required_conversation_settlement_write_failed",
+        ],
+      },
+    }).catch(() => undefined);
+    throw new RequiredConversationSettlementError(
+      false,
+      error,
+      failureCode,
+    );
+  }
+}
 
 async function createChatWorkspaceRunRecorder(options: {
   workspaceRunStore:
-    | Pick<WorkspaceRunStore, "createRun" | "appendEvent" | "finishRun">
+    | Pick<
+        WorkspaceRunStore,
+        "ensureRun" | "settleLifecycle" | "getRun" | "listEvents"
+      >
     | undefined;
   sessionId: string;
   requestId: string;
@@ -3093,10 +5808,11 @@ async function createChatWorkspaceRunRecorder(options: {
   const workspaceRunId = `chat_run_${sanitizeRuntimeId(
     options.sessionId,
   )}_${sanitizeRuntimeId(options.requestId)}`;
-  let finished = false;
+  let pendingCompletedEvent: ChatTaskStatusEvent | null = null;
+  let lastWorkspaceStatus: WorkspaceRunStatus = "running";
 
   try {
-    await workspaceRunStore.createRun({
+    await workspaceRunStore.ensureRun({
       workspaceRunId,
       sessionId: options.sessionId,
       requestId: options.requestId,
@@ -3108,37 +5824,279 @@ async function createChatWorkspaceRunRecorder(options: {
       status: "running",
       createdAt: options.createdAt,
     });
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof WorkspaceRunEnvelopeConflictError) {
+      throw error;
+    }
+    throw new SecretSafeFailureError(
+      "WORKSPACE_RUN_INITIALIZATION_FAILED",
+      error,
+    );
   }
 
   return {
     workspaceRunId,
     async appendStatusEvent(event) {
+      lastWorkspaceStatus = toWorkspaceRunStatus(event);
+      if (event.state === "completed") {
+        pendingCompletedEvent = structuredClone(event);
+        return { deferredTerminal: true };
+      }
       const ledgerEvent = toWorkspaceRunEventInput(event);
       if (!ledgerEvent) {
-        return;
+        return {};
       }
-
-      try {
-        await workspaceRunStore.appendEvent(workspaceRunId, ledgerEvent);
-        const terminalStatus = toWorkspaceRunTerminalStatus(event);
-        if (terminalStatus && !finished) {
-          finished = true;
-          await workspaceRunStore.finishRun(
-            workspaceRunId,
-            terminalStatus,
-            event.message,
-          );
+      const eventId = createWorkspaceStatusEventId(event);
+      const settled = await workspaceRunStore.settleLifecycle({
+        workspaceRunId,
+        event: {
+          ...ledgerEvent,
+          id: eventId,
+          createdAt: event.createdAt,
+          causalRef: {
+            turnId: event.turnId ?? createConversationTurnId(event.requestId ?? options.requestId),
+            sourceSequence: event.sequence ?? 0,
+          },
+        },
+        snapshotStatus: toWorkspaceRunStatus(event),
+        summary: event.message,
+      });
+      return { eventId: settled.event.id };
+    },
+    async finalizeAccepted(acceptance) {
+      if (acceptance) {
+        if (
+          acceptance.workspaceRunId !== workspaceRunId
+          || !acceptance.preparedWorkspaceEventId
+        ) {
+          throw new SecretSafeFailureError("WORKSPACE_SETTLEMENT_FAILED");
         }
-      } catch {
-        // Observability writes must not fail the user-facing chat turn.
+        const result = await settlePreparedWorkspaceAssistantAcceptance({
+          workspaceRunStore,
+          workspaceRunId,
+          acceptance,
+        });
+        if (result.disposition === "committed") {
+          pendingCompletedEvent = null;
+        }
+        return result;
       }
+      const event = pendingCompletedEvent ?? (
+        lastWorkspaceStatus !== "running"
+          ? null
+          : {
+              sessionId: options.sessionId,
+              requestId: options.requestId,
+              turnId: createConversationTurnId(options.requestId),
+              sequence: 0,
+              state: "completed" as const,
+              message: "Durable assistant reply accepted.",
+              createdAt: options.createdAt,
+              elapsedMs: 0,
+            }
+      );
+      if (!event) return { disposition: "committed" as const };
+      const ledgerEvent = toWorkspaceRunEventInput(event);
+      if (!ledgerEvent) return { disposition: "committed" as const };
+      const eventId = createWorkspaceStatusEventId(event);
+      const settled = await workspaceRunStore.settleLifecycle({
+        workspaceRunId,
+        event: {
+          ...ledgerEvent,
+          id: eventId,
+          createdAt: event.createdAt,
+          causalRef: {
+            turnId: event.turnId ?? createConversationTurnId(event.requestId ?? options.requestId),
+            sourceSequence: event.sequence ?? 0,
+          },
+        },
+        snapshotStatus: "succeeded",
+        summary: event.message,
+      });
+      if (pendingCompletedEvent === event) {
+        pendingCompletedEvent = null;
+      }
+      return { eventId: settled.event.id, disposition: "committed" as const };
     },
   };
 }
 
-function toWorkspaceRunEventInput(
+const WORKSPACE_ASSISTANT_ACCEPTANCE_MESSAGE =
+  "Durable assistant reply accepted.";
+
+async function commitPreparedAssistantAcceptance(options: {
+  conversationCausalStore: Pick<
+    ConversationCausalStore,
+    "commitAssistantAcceptance" | "getRequest"
+  >;
+  requestId: string;
+  attempt: number;
+  acceptance: ConversationAssistantAcceptance;
+  workspaceEventId?: string;
+}): Promise<"committed" | "recovery_required"> {
+  const receiptFingerprint =
+    options.acceptance.acceptedSettlement.acceptanceReceiptFingerprint;
+  for (let commitAttempt = 0; commitAttempt < 2; commitAttempt += 1) {
+    try {
+      const committed = await options.conversationCausalStore
+        .commitAssistantAcceptance({
+          requestId: options.requestId,
+          attempt: options.attempt,
+          acceptanceReceiptFingerprint: receiptFingerprint,
+          ...(options.workspaceEventId
+            ? { workspaceEventId: options.workspaceEventId }
+            : {}),
+        });
+      if (
+        (committed.disposition === "applied"
+          || committed.disposition === "duplicate")
+        && conversationAssistantAcceptanceCommitted(
+          committed.value,
+          options.attempt,
+          receiptFingerprint,
+          options.workspaceEventId,
+        )
+      ) {
+        return "committed";
+      }
+    } catch {
+      // The commit can be ambiguous after the causal file replacement. Retry
+      // once, then classify from the owning store instead of emitting failure.
+    }
+  }
+  try {
+    const record = await options.conversationCausalStore.getRequest(options.requestId);
+    if (
+      conversationAssistantAcceptanceCommitted(
+        record,
+        options.attempt,
+        receiptFingerprint,
+        options.workspaceEventId,
+      )
+    ) {
+      return "committed";
+    }
+  } catch {
+    // An unavailable causal authority is unresolved, never a failed success.
+  }
+  return "recovery_required";
+}
+
+function conversationAssistantAcceptanceCommitted(
+  record: Awaited<ReturnType<ConversationCausalStore["getRequest"]>> | undefined,
+  attempt: number,
+  receiptFingerprint: string,
+  workspaceEventId: string | undefined,
+): boolean {
+  const target = record?.attempts.find((candidate) => candidate.attempt === attempt);
+  return target?.state === "accepted"
+    && target.acceptedSettlement?.acceptanceReceiptFingerprint === receiptFingerprint
+    && target.assistantAcceptance?.state === "committed"
+    && target.assistantAcceptance.workspaceEventId === workspaceEventId;
+}
+
+async function settlePreparedWorkspaceAssistantAcceptance(options: {
+  workspaceRunStore: Pick<
+    WorkspaceRunStore,
+    "settleLifecycle" | "getRun" | "listEvents"
+  >;
+  workspaceRunId: string;
+  acceptance: ConversationAssistantAcceptance;
+}): Promise<{
+  eventId: string;
+  disposition: "committed" | "recovery_required";
+}> {
+  const eventId = options.acceptance.preparedWorkspaceEventId;
+  if (
+    !eventId
+    || options.acceptance.workspaceRunId !== options.workspaceRunId
+    || !options.acceptance.requiredDomains.includes("workspace")
+    || (
+      options.acceptance.state === "committed"
+      && options.acceptance.workspaceEventId !== eventId
+    )
+  ) {
+    throw new SecretSafeFailureError("WORKSPACE_SETTLEMENT_FAILED");
+  }
+  const eventInput = {
+    id: eventId,
+    createdAt: options.acceptance.createdAt,
+    type: "status" as const,
+    status: "succeeded" as const,
+    message: WORKSPACE_ASSISTANT_ACCEPTANCE_MESSAGE,
+    causalRef: {
+      turnId: options.acceptance.acceptedSettlement.turnId,
+      sourceSequence: options.acceptance.acceptedSettlement.lastSequence,
+    },
+  };
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const settled = await options.workspaceRunStore.settleLifecycle({
+        workspaceRunId: options.workspaceRunId,
+        event: eventInput,
+        snapshotStatus: "succeeded",
+        summary: WORKSPACE_ASSISTANT_ACCEPTANCE_MESSAGE,
+      });
+      if (settled.event.id !== eventId || settled.run.status !== "succeeded") {
+        throw new Error("Workspace assistant acceptance receipt is incomplete.");
+      }
+      return { eventId, disposition: "committed" };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  try {
+    const [run, events] = await Promise.all([
+      options.workspaceRunStore.getRun(options.workspaceRunId),
+      options.workspaceRunStore.listEvents(options.workspaceRunId),
+    ]);
+    const storedEvent = events.find((event) => event.id === eventId);
+    if (storedEvent && !workspaceAssistantAcceptanceEventMatches(storedEvent, eventInput)) {
+      throw new SecretSafeFailureError("WORKSPACE_SETTLEMENT_FAILED");
+    }
+    if (storedEvent && run?.status === "succeeded") {
+      return { eventId, disposition: "committed" };
+    }
+    if (!storedEvent && run?.status !== "succeeded") {
+      throw new SecretSafeFailureError(
+        "WORKSPACE_SETTLEMENT_FAILED",
+        lastError,
+      );
+    }
+  } catch (error) {
+    if (error instanceof SecretSafeFailureError) throw error;
+    return { eventId, disposition: "recovery_required" };
+  }
+  return { eventId, disposition: "recovery_required" };
+}
+
+function workspaceAssistantAcceptanceEventMatches(
+  stored: WorkspaceRunEvent,
+  expected: WorkspaceRunEventInput & { id: string; createdAt: string },
+): boolean {
+  return stored.id === expected.id
+    && stored.type === "status"
+    && stored.status === "succeeded"
+    && stored.lifecycleStatus === "succeeded"
+    && stored.message === expected.message
+    && stored.createdAt === expected.createdAt
+    && stored.causalRef?.turnId === expected.causalRef?.turnId
+    && stored.causalRef?.sourceSequence === expected.causalRef?.sourceSequence;
+}
+
+export function createWorkspaceStatusEventId(event: ChatTaskStatusEvent): string {
+  return `chat_status_${createConversationRequestFingerprint({
+    sessionId: event.sessionId,
+    requestId: event.requestId,
+    turnId: event.turnId,
+    sequence: event.sequence,
+    state: event.state,
+  })}`;
+}
+
+export function toWorkspaceRunEventInput(
   event: ChatTaskStatusEvent,
 ): WorkspaceRunEventInput | null {
   const payload = {
@@ -3147,6 +6105,7 @@ function toWorkspaceRunEventInput(
     ...(typeof event.turn === "number" ? { turn: event.turn } : {}),
     ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
     ...(event.toolInvocationId ? { toolInvocationId: event.toolInvocationId } : {}),
+    ...(event.approvalId ? { approvalId: event.approvalId } : {}),
     ...(event.toolSource ? { toolSource: event.toolSource } : {}),
     ...(event.resultRef ? { resultRef: event.resultRef } : {}),
     ...(typeof event.resultBytes === "number"
@@ -3220,6 +6179,7 @@ function toWorkspaceRunEventInput(
           ? event.invocationStatus
           : "proposed",
       ...(typeof event.ok === "boolean" ? { ok: event.ok } : {}),
+      ...(event.approvalId ? { approvalId: event.approvalId } : {}),
       ...(event.resultRef ? { resultRef: event.resultRef } : {}),
       ...(typeof event.resultBytes === "number"
         ? { resultBytes: event.resultBytes }
@@ -3239,21 +6199,19 @@ function toWorkspaceRunEventInput(
   };
 }
 
-function toWorkspaceRunStatus(event: ChatTaskStatusEvent): WorkspaceRunStatus {
+export function toWorkspaceRunStatus(event: ChatTaskStatusEvent): WorkspaceRunStatus {
+  if (event.state === "waiting_for_input") return "waiting_for_user";
+  if (
+    event.state === "tool_invocation"
+    && event.invocationStatus === "waiting_approval"
+  ) {
+    return "waiting_for_approval";
+  }
   if (event.state === "paused") return "paused";
   if (event.state === "failed") return "failed";
   if (event.state === "canceled") return "canceled";
   if (event.state === "completed") return "succeeded";
   return "running";
-}
-
-function toWorkspaceRunTerminalStatus(
-  event: ChatTaskStatusEvent,
-): WorkspaceRunTerminalStatus | null {
-  if (event.state === "completed") return "succeeded";
-  if (event.state === "failed") return "failed";
-  if (event.state === "canceled") return "canceled";
-  return null;
 }
 
 function getStatusEventToolCallId(event: ChatTaskStatusEvent): string {
@@ -3283,13 +6241,10 @@ async function resolveChatWorkspace(options: {
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
     });
     return { ok: true, runContext };
-  } catch (error) {
+  } catch {
     return {
       ok: false,
-      message:
-        error instanceof Error
-          ? `无法解析工作区：${error.message}`
-          : "无法解析工作区。",
+      message: "无法解析工作区，已安全停止本次任务。",
     };
   }
 }
@@ -3505,7 +6460,7 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 function normalizeReasoningForStatus(reasoningContent: string): string {
-  const normalized = reasoningContent
+  const normalized = redactCredentialString(reasoningContent)
     .replace(/<\/?think>/gi, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -3530,15 +6485,28 @@ function buildToolResultStatusMessage(
 
   const details = result.errorDetails;
   if (details?.kind === "timeout") {
-    return `工具失败：${toolName}（超时 ${details.timeoutMs} ms）`;
+    const timeoutMs =
+      typeof details.timeoutMs === "number" && Number.isFinite(details.timeoutMs)
+        ? details.timeoutMs
+        : undefined;
+    return timeoutMs === undefined
+      ? `工具失败：${toolName}（超时）`
+      : `工具失败：${toolName}（超时 ${timeoutMs} ms）`;
   }
   if (details?.kind === "canceled") {
     return `工具中断：${toolName}`;
   }
   if (details?.kind === "empty_exit") {
-    return `工具失败：${toolName}（退出码 ${details.exitCode ?? 1}，无 stdout/stderr）`;
+    const exitCode =
+      typeof details.exitCode === "number" && Number.isFinite(details.exitCode)
+        ? details.exitCode
+        : 1;
+    return `工具失败：${toolName}（退出码 ${exitCode}，无 stdout/stderr）`;
   }
-  if (typeof details?.exitCode === "number") {
+  if (
+    typeof details?.exitCode === "number"
+    && Number.isFinite(details.exitCode)
+  ) {
     return `工具失败：${toolName}（退出码 ${details.exitCode}）`;
   }
 
@@ -3554,23 +6522,28 @@ function emitActorToolStatusEvents(options: {
   emittedActorSpawnIds: Set<string>;
 }): void {
   const payload = getActorToolResultPayload(options.result);
-  const actorId = readToolArgString(payload, "actorId");
+  const actorId = normalizeActorStatusId(
+    readToolArgString(payload, "actorId"),
+  );
   if (!actorId) {
     return;
   }
 
-  const actorStatus =
+  const actorStatus = normalizeActorStatus(
     readToolArgString(payload, "status") ||
-    readToolArgString(payload, "actorStatus");
+    readToolArgString(payload, "actorStatus"),
+  );
   const summary =
     readToolArgString(payload, "summary") ||
     readToolArgString(payload, "error") ||
     "";
+  const safeSummary = redactCredentialString(summary);
+  const safeTask = redactCredentialString(options.task);
 
   emitActorSpawnedStatusEvent({
     emitStatus: options.emitStatus,
     actorId,
-    task: options.task,
+    task: safeTask,
     toolCallId: options.toolCallId,
     toolCallsExecuted: options.toolCallsExecuted,
     emittedActorSpawnIds: options.emittedActorSpawnIds,
@@ -3582,7 +6555,7 @@ function emitActorToolStatusEvents(options: {
 
   options.emitStatus.send({
     state: "actor_done",
-    message: buildActorDoneStatusMessage(actorStatus, summary || actorId),
+    message: buildActorDoneStatusMessage(actorStatus, safeSummary || actorId),
     toolCallId: options.toolCallId,
     toolName: "actor",
     toolCallsExecuted: options.toolCallsExecuted,
@@ -3590,8 +6563,8 @@ function emitActorToolStatusEvents(options: {
     payload: {
       actorId,
       actorStatus,
-      summary,
-      task: options.task,
+      summary: safeSummary,
+      task: safeTask,
     },
   });
 }
@@ -3604,22 +6577,47 @@ function emitActorSpawnedStatusEvent(options: {
   toolCallsExecuted: number;
   emittedActorSpawnIds: Set<string>;
 }): void {
-  if (options.emittedActorSpawnIds.has(options.actorId)) {
+  const safeActorId = normalizeActorStatusId(options.actorId);
+  if (options.emittedActorSpawnIds.has(safeActorId)) {
     return;
   }
-  options.emittedActorSpawnIds.add(options.actorId);
+  options.emittedActorSpawnIds.add(safeActorId);
+  const safeTask = redactCredentialString(options.task);
 
   options.emitStatus.send({
     state: "actor_spawned",
-    message: `子代理已启动：${options.task}`,
+    message: `子代理已启动：${safeTask}`,
     toolCallId: options.toolCallId,
     toolName: "actor",
     toolCallsExecuted: options.toolCallsExecuted,
     payload: {
-      actorId: options.actorId,
-      task: options.task,
+      actorId: safeActorId,
+      task: safeTask,
     },
   });
+}
+
+function normalizeActorStatusId(value: string): string {
+  if (!value) {
+    return "";
+  }
+  return /^[a-zA-Z0-9_-]{1,160}$/.test(value)
+    ? value
+    : "actor_redacted";
+}
+
+function normalizeActorStatus(
+  value: string,
+): "running" | "done" | "failed" | "canceled" | "" {
+  if (
+    value === "running"
+    || value === "done"
+    || value === "failed"
+    || value === "canceled"
+  ) {
+    return value;
+  }
+  return value ? "failed" : "";
 }
 
 function buildActorDoneStatusMessage(status: string, summary: string): string {
@@ -3650,7 +6648,7 @@ function readToolArgString(
 }
 
 function summarizeToolError(error: string): string {
-  const normalized = error.replace(/\s+/g, " ").trim();
+  const normalized = redactCredentialString(error).replace(/\s+/g, " ").trim();
   if (normalized.length <= 180) {
     return normalized || "未知错误";
   }
@@ -3786,10 +6784,11 @@ function emitGoalRequirementStatusEvents(options: {
   if (!options.emitStatus) {
     return;
   }
+  const emitStatus = options.emitStatus;
 
   const labels = deriveGoalRequirementLabels(options.description);
   labels.forEach((label, index) => {
-    options.emitStatus?.send({
+    emitStatus.send({
       state: "requirement",
       message: `子任务：${label}`,
       toolCallsExecuted: 0,
@@ -3899,6 +6898,13 @@ async function tryRouteGoalIntent(options: {
   planModelAssignments?: PlanModelAssignments;
   originMessageId: string | null;
   sessionId: string;
+  requestId: string;
+  persistAssistantReply?: (input: {
+    content: string;
+    goalId?: string;
+    goalEventRef?: string;
+    settlementStatus?: ChatTurnSettlementStatus;
+  }) => Promise<string | null>;
   emitStatus?: ReturnType<typeof createChatStatusEmitter>;
   now?: () => Date;
   signal?: AbortSignal;
@@ -3911,26 +6917,29 @@ async function tryRouteGoalIntent(options: {
     content: string;
     goalId?: string;
     goalEventRef?: string;
+    settlementStatus?: ChatTurnSettlementStatus;
   }) {
+    if (options.persistAssistantReply) {
+      await options.persistAssistantReply(input);
+      return;
+    }
     const goalOutputAssembler = createChatOutputAssembler(() =>
       new Date(getNowMs(options.now)).toISOString(),
     );
-    const finalTextPart = goalOutputAssembler.setFinalText(input.content);
-    const assistantMessageId = await appendAssistantMessage({
+    goalOutputAssembler.setFinalText(input.content);
+    const assistantMessage = await appendAssistantMessage({
       chatSessionStore: options.chatSessionStore,
       sessionId: options.sessionId,
+      requestId: options.requestId,
       content: input.content,
+      turnSettlementStatus: input.settlementStatus ?? "succeeded",
       outputParts: goalOutputAssembler.parts(),
       ...(input.goalId ? { goalId: input.goalId } : {}),
       ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
     });
+    const assistantMessageId = assistantMessage?.id ?? null;
     options.emitStatus?.setAssistantMessageId(assistantMessageId);
-    if (finalTextPart) {
-      options.emitStatus?.sendStreamEvent({
-        type: "output_part",
-        part: finalTextPart,
-      });
-    }
+    await options.emitStatus?.drainPersistence();
     options.emitStatus?.sendTerminalEvent({
       type: "completed",
       message: input.content,
@@ -3978,6 +6987,7 @@ async function tryRouteGoalIntent(options: {
             message: "规划已中断",
             toolCallsExecuted: 0,
           });
+          await options.emitStatus?.drainPersistence();
           options.emitStatus?.sendTerminalEvent({
             type: "canceled",
             message: "已中断任务。",
@@ -3985,6 +6995,8 @@ async function tryRouteGoalIntent(options: {
           return {
             result: {
               ok: false,
+              code: "CANCELED",
+              retryable: true,
               message: "已中断任务。",
             },
           };
@@ -3998,6 +7010,7 @@ async function tryRouteGoalIntent(options: {
           message,
           toolCallsExecuted: 0,
         });
+        await options.emitStatus?.drainPersistence();
         options.emitStatus?.sendTerminalEvent({
           type: "failed",
           message,
@@ -4011,15 +7024,26 @@ async function tryRouteGoalIntent(options: {
       }
       const outcome = getPlanOutcomePresentation(plan);
       const reply = `${outcome.title}。${outcome.detail} 下一步：${outcome.nextAction}`;
-      options.emitStatus?.send({
-        state:
-          plan.status === "awaiting_confirmation" ? "completed" : "paused",
+      const planCreationState =
+        plan.status === "awaiting_confirmation" ? "completed" : "paused";
+      const planCreationEvent: Omit<
+        ChatTaskStatusEvent,
+        "sessionId" | "createdAt" | "elapsedMs"
+      > = {
+        state: planCreationState,
         message: `${outcome.title} · ${outcome.nextAction}`,
         toolCallsExecuted: 0,
-      });
+      };
+      if (planCreationState === "paused") {
+        await options.emitStatus?.sendRequired(planCreationEvent);
+      } else {
+        options.emitStatus?.send(planCreationEvent);
+      }
       await appendGoalReply({
         content: reply,
         goalEventRef: `plan_created:${plan.id}`,
+        settlementStatus:
+          plan.status === "awaiting_confirmation" ? "succeeded" : "paused",
       });
       return {
         result: {
@@ -4028,6 +7052,8 @@ async function tryRouteGoalIntent(options: {
           sessionId: options.sessionId,
           relatedMemories: [],
           memoryId: null,
+          turnSettlementStatus:
+            plan.status === "awaiting_confirmation" ? "succeeded" : "paused",
           plan,
           ...(options.selectedSkill
             ? {
@@ -4177,7 +7203,7 @@ async function tryRouteGoalIntent(options: {
       amendedGoalSummary,
     );
     const reply = `${amendment.message} GoalContract 和活动 Plan 尚未改变；请在 Goal 详情中批准或拒绝。`;
-    options.emitStatus?.send({
+    await options.emitStatus?.sendRequired({
       state: "paused",
       message: "目标修订提案等待明确批准",
       toolCallsExecuted: 0,
@@ -4186,6 +7212,7 @@ async function tryRouteGoalIntent(options: {
       content: reply,
       goalId: options.activeGoal.id,
       goalEventRef: `goal-amendment:${amendment.proposal.id}`,
+      settlementStatus: "paused",
     });
     return {
       result: {
@@ -4194,6 +7221,7 @@ async function tryRouteGoalIntent(options: {
         sessionId: options.sessionId,
         relatedMemories: [],
         memoryId: null,
+        turnSettlementStatus: "paused",
         activeGoal: amendedGoalSummary,
       },
     };
@@ -4203,7 +7231,7 @@ async function tryRouteGoalIntent(options: {
     if (options.activeGoal.status === "stopped_budget") {
       const reply =
         "这是旧版本地预算机制留下的只读任务，不能继续执行。你仍可查看原结果和执行证据。";
-      options.emitStatus?.send({
+      await options.emitStatus?.sendRequired({
         state: "paused",
         message: "旧版任务已停止（只读）",
         toolCallsExecuted: 0,
@@ -4212,6 +7240,7 @@ async function tryRouteGoalIntent(options: {
         content: reply,
         goalId: options.activeGoal.id,
         goalEventRef: "legacy_goal_read_only",
+        settlementStatus: "paused",
       });
       return {
         result: {
@@ -4220,6 +7249,7 @@ async function tryRouteGoalIntent(options: {
           sessionId: options.sessionId,
           relatedMemories: [],
           memoryId: null,
+          turnSettlementStatus: "paused",
           activeGoal: options.activeGoal,
         },
       };
@@ -4407,13 +7437,17 @@ async function appendAssistantMessage(options: {
   chatSessionStore: Pick<ChatSessionStore, "appendMessage"> | undefined;
   sessionId: string;
   requestId?: string;
+  turnId?: string;
+  causalAttempt?: number;
+  causalAttemptId?: string;
   content: string;
   outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
-}): Promise<string | null> {
+  turnSettlementStatus?: ChatTurnSettlementStatus;
+}): Promise<ChatMessageRecord | null> {
   if (!options.chatSessionStore) {
     return null;
   }
@@ -4422,6 +7456,11 @@ async function appendAssistantMessage(options: {
     await options.chatSessionStore.appendMessage({
       sessionId: options.sessionId,
       ...(options.requestId ? { requestId: options.requestId } : {}),
+      ...(options.turnId ? { turnId: options.turnId } : {}),
+      ...(options.causalAttempt !== undefined
+        ? { causalAttempt: options.causalAttempt }
+        : {}),
+      ...(options.causalAttemptId ? { causalAttemptId: options.causalAttemptId } : {}),
       role: "assistant",
       content: options.content,
       ...(options.outputParts?.length ? { outputParts: options.outputParts } : {}),
@@ -4431,8 +7470,11 @@ async function appendAssistantMessage(options: {
       ...(options.executedRunId ? { executedRunId: options.executedRunId } : {}),
       ...(options.goalId ? { goalId: options.goalId } : {}),
       ...(options.goalEventRef ? { goalEventRef: options.goalEventRef } : {}),
+      ...(options.turnSettlementStatus
+        ? { turnSettlementStatus: options.turnSettlementStatus }
+        : {}),
     });
-  return appendResult.message.id;
+  return appendResult.message;
 }
 
 type TaskRunDetection =
@@ -4498,13 +7540,12 @@ async function tryCreateTaskFromIntent(options: {
         createdTask: task,
       },
     };
-  } catch (error) {
+  } catch {
     return {
       ok: false,
       result: {
         ok: false,
-        message:
-          error instanceof Error ? `创建任务失败：${error.message}` : "创建任务失败。",
+        message: "创建任务失败，未保存不完整的任务。",
       },
     };
   }
@@ -4516,8 +7557,12 @@ async function tryRunTaskFromIntent(options: {
   sessionId: string;
   taskStore: Pick<ScheduledTaskStore, "list"> | undefined;
   runScheduledTask:
-    | ((taskId: string, options?: { sessionId?: string }) => Promise<RunScheduledTaskResult>)
+    | ((
+        taskId: string,
+        options?: { sessionId?: string; beforeExecution?: AgentRunAdmissionGate },
+      ) => Promise<RunScheduledTaskResult>)
     | undefined;
+  beforeExecution?: AgentRunAdmissionGate;
 }): Promise<TaskRunDetection | null> {
   if (options.route.kind !== "run_task") {
     return null;
@@ -4542,6 +7587,7 @@ async function tryRunTaskFromIntent(options: {
 
   const runResult = await options.runScheduledTask(matchedTask.id, {
     sessionId: options.sessionId,
+    ...(options.beforeExecution ? { beforeExecution: options.beforeExecution } : {}),
   });
   if (!runResult.ok) {
     return {
@@ -4549,6 +7595,37 @@ async function tryRunTaskFromIntent(options: {
       result: {
         ok: false,
         message: `任务“${matchedTask.name}”没有运行成功：${runResult.message}`,
+      },
+    };
+  }
+
+  if (runResult.run.status === "failed" || runResult.run.status === "canceled") {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        code:
+          runResult.run.status === "canceled" ? "CANCELED" : "INTERNAL_ERROR",
+        retryable: runResult.run.status === "canceled",
+        message: formatTaskRunReply(runResult.run),
+        executedRun: runResult.run,
+        turnSettlementStatus: runResult.run.status,
+      },
+    };
+  }
+
+  if (
+    runResult.run.status === "queued"
+    || runResult.run.status === "running"
+  ) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        code: "INTERNAL_ERROR",
+        message: "任务运行未返回可结算的最终状态。",
+        executedRun: runResult.run,
+        turnSettlementStatus: "failed",
       },
     };
   }
@@ -4562,6 +7639,11 @@ async function tryRunTaskFromIntent(options: {
       relatedMemories: [],
       memoryId: null,
       executedRun: runResult.run,
+      turnSettlementStatus:
+        runResult.run.status === "paused"
+        || runResult.run.status === "waiting_for_approval"
+          ? "paused"
+          : "succeeded",
     },
   };
 }
@@ -4577,6 +7659,10 @@ function translateRunStatus(status: AgentRunRecord["status"]): string {
 
   if (status === "canceled") {
     return "已取消";
+  }
+
+  if (status === "paused" || status === "waiting_for_approval") {
+    return "已暂停";
   }
 
   return "失败";
@@ -4668,10 +7754,14 @@ function toInMemoryPendingSkillInputState(options: {
   createdAtMs: number;
   streamSequence?: number;
 }): PendingSkillInputState {
+  const authorityInputRequest = restoreAuthoritySkillInputRequest(
+    options.persisted.inputRequest,
+    options.selectedSkill,
+  );
   return {
     persisted: options.persisted,
-    ...(options.persisted.inputRequest
-      ? { inputRequest: options.persisted.inputRequest }
+    ...(authorityInputRequest
+      ? { inputRequest: authorityInputRequest }
       : {}),
     sessionId: options.persisted.sessionId,
     requestId: options.persisted.requestId,
@@ -4691,6 +7781,34 @@ function toInMemoryPendingSkillInputState(options: {
     ...(options.attachments?.length
       ? { attachments: options.attachments }
       : {}),
+  };
+}
+
+function restoreAuthoritySkillInputRequest(
+  persisted: SkillUserInputRequest | undefined,
+  selectedSkill: SkillRecord,
+): SkillUserInputRequest | undefined {
+  if (!persisted) {
+    return undefined;
+  }
+  const requestedNames = new Set(persisted.fields.map((field) => field.name));
+  const authorityFields = selectedSkill.manifest.inputs.filter(
+    (field) => requestedNames.size === 0 || requestedNames.has(field.name),
+  );
+  return {
+    ...persisted,
+    skillName: selectedSkill.manifest.name,
+    fields: authorityFields.map((field) => ({
+      name: field.name,
+      label: field.label,
+      type: field.type,
+      required: field.required,
+      ...(field.description ? { description: field.description } : {}),
+      ...(field.defaultValue !== undefined
+        ? { defaultValue: field.defaultValue }
+        : {}),
+      ...(field.choices?.length ? { choices: [...field.choices] } : {}),
+    })),
   };
 }
 
@@ -4716,8 +7834,10 @@ async function findPersistedPendingSkillInputState(options: {
     }
   }
 
-  return latest &&
-      (latest.status === "pending" || latest.status === "processing")
+  return latest && (
+    latest.status === "pending"
+    || latest.status === "processing"
+  )
     ? latest
     : null;
 }
@@ -4727,7 +7847,7 @@ function toPersistedChatContinuation(
 ): PersistedChatContinuation {
   return {
     version: 1,
-    messages: structuredClone(continuation.messages),
+    messages: redactChatMessagesCredentials(continuation.messages),
     maxTurns: continuation.maxTurns,
     toolCallsExecuted: continuation.toolCallsExecuted,
     ...(continuation.evidenceRunId
@@ -4809,7 +7929,7 @@ function parsePersistedChatContinuation(value: unknown): ChatContinuationState |
     return null;
   }
   return {
-    messages: structuredClone(value.messages),
+    messages: redactChatMessagesCredentials(value.messages),
     maxTurns: value.maxTurns,
     toolCallsExecuted: value.toolCallsExecuted,
     ...(typeof value.evidenceRunId === "string" && value.evidenceRunId
@@ -5360,7 +8480,12 @@ async function recordSessionTokenUsage(options: {
   sessionId: string;
   usage: ChatSessionTokenUsage;
 }): Promise<void> {
-  await options.chatSessionStore?.addTokenUsage(options.sessionId, options.usage);
+  try {
+    await options.chatSessionStore?.addTokenUsage(options.sessionId, options.usage);
+  } catch {
+    // Usage is a derivative projection. Once assistant/Workspace/causal
+    // acceptance has committed, a metering write cannot reverse the turn.
+  }
 }
 
 function normalizeTokenCount(value: unknown): number | undefined {
@@ -5424,7 +8549,7 @@ function appendRawHistoryEntry(options: {
   }
 
   const safeContent = truncateHistoryContent(
-    redactCredentialText(options.content),
+    redactCredentialString(options.content),
   );
   void options.historyIndexStore
     .append({

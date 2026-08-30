@@ -10,7 +10,7 @@
 // factories keep their async public signatures and proxy to these repositories
 // — that dual layering is P1's compatibility commitment (spec §3.1).
 
-import type { AgentRunRecord, AgentRunStatus } from "./agentRuns";
+import type { AgentRunRecord } from "./agentRuns";
 import type {
   AgentTrajectoryEvent,
   AgentTrajectoryEventType,
@@ -54,6 +54,10 @@ import type {
 } from "./memory";
 import type { MemoryProfileDocument } from "./memoryProfile";
 import type { AgentExecutionCheckpoint } from "./agentExecution";
+import type {
+  ConversationSourcePage,
+  ConversationSourcePageOptions,
+} from "./conversationEvidence";
 
 // ---------------------------------------------------------------------------
 // Storage service (contract §1.3)
@@ -110,7 +114,6 @@ export interface RunRepository {
   create(input: Omit<AgentRunRecord, "id"> & { id: string }): AgentRunRecord;
   get(runId: string): AgentRunRecord | null;
   list(options?: { limit?: number; taskId?: string }): AgentRunRecord[];
-  updateStatus(runId: string, status: AgentRunStatus): void;
   appendTrajectory(
     runId: string,
     event: AgentTrajectoryEvent,
@@ -128,6 +131,19 @@ export interface RunRepository {
     runId: string,
     opts?: { fromSeq?: number },
   ): AgentTrajectoryEvent[];
+  getTrajectoryPage(
+    runId: string,
+    options?: ConversationSourcePageOptions,
+  ): ConversationSourcePage<AgentTrajectoryEvent>;
+}
+
+/**
+ * Restricted bootstrap surface for importing an already-authoritative run
+ * snapshot. Unlike `create`, it may seed an empty target at revision > 1; once
+ * an identity exists it is governed by the ordinary revision CAS contract.
+ */
+export interface RunSnapshotImportRepository {
+  importSnapshot(input: AgentRunRecord): AgentRunRecord;
 }
 
 export interface TrajectoryRepository {
@@ -135,6 +151,12 @@ export interface TrajectoryRepository {
     runId: string,
     opts?: { fromSeq?: number; types?: AgentTrajectoryEventType[] },
   ): AgentTrajectoryEvent[];
+  getTrajectoryPage(
+    runId: string,
+    options?: ConversationSourcePageOptions & {
+      types?: AgentTrajectoryEventType[];
+    },
+  ): ConversationSourcePage<AgentTrajectoryEvent>;
   scanByTypes(
     types: AgentTrajectoryEventType[],
     opts?: { runId?: string; limit?: number },
@@ -371,6 +393,8 @@ export interface TaskRepository {
 
 export interface ToolAuditRepository {
   append(input: ToolAuditEventInput): ToolAuditEvent;
+  appendIfAbsent(input: ToolAuditEvent): boolean;
+  get(id: string): ToolAuditEvent | null;
   list(options?: { limit?: number }): ToolAuditEvent[];
 }
 

@@ -20,14 +20,23 @@ describe("context surface production boundary", () => {
     );
 
     expect(body).toContain("createContextSurface({");
-    expect(body).toContain("contextSurface.append(message)");
-    expect(body).toContain("contextSurface.insert(index, message)");
-    expect(body).toContain("contextSurface.replace(replacement, input)");
+    expect(body).toContain(
+      "contextSurface.append(redactChatMessageCredentials(message))",
+    );
+    expect(body).toContain(
+      "redactChatMessageCredentials(message),",
+    );
+    expect(body).toContain(
+      "redactChatMessagesCredentials(replacement),",
+    );
+    expect(body).not.toContain("contextSurface.append(message)");
+    expect(body).not.toContain("contextSurface.insert(index, message)");
+    expect(body).not.toContain("contextSurface.replace(replacement, input)");
     expect(body).toContain("messages: contextSurface.messages()");
     expect(body).toContain("contextSurface: contextSurface.snapshot()");
     expect(body.match(/\bmessages\.push\(/g)).toHaveLength(1);
     expect(body).toContain(
-      "const event = contextSurface.append(message);\n    messages.push(event.message);",
+      "const event = contextSurface.append(redactChatMessageCredentials(message));\n    messages.push(event.message);",
     );
     expect(body).not.toContain("contextManager.estimateTokens(messages)");
     expect(appendBody).not.toContain("projectContextSurface(state)");
@@ -45,9 +54,15 @@ describe("context surface production boundary", () => {
       "resumeContextSurface: current.contextSurface",
     );
     expect(runtime).toContain(
-      "contextSurface: loopCheckpoint.contextSurface",
+      "contextSurface: redactContextSurfaceCredentials(\n              loopCheckpoint.contextSurface",
     );
     expect(runtime).toContain(
+      "contextSurface: redactContextSurfaceCredentials(\n                  loopResult.contextSurface",
+    );
+    expect(runtime).not.toContain(
+      "contextSurface: loopCheckpoint.contextSurface",
+    );
+    expect(runtime).not.toContain(
       "contextSurface: loopResult.contextSurface",
     );
   });

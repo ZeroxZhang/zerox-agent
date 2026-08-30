@@ -46,6 +46,8 @@ export function ScheduledTasksPanel() {
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [runDisclosureExpanded, setRunDisclosureExpanded] =
+    useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [createMenuOpen, setCreateMenuOpen] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -221,6 +223,21 @@ export function ScheduledTasksPanel() {
     () => buildToolSafetySummary(permissionPolicy),
     [permissionPolicy],
   );
+  const latestRunByTaskId = useMemo(() => {
+    const latest = new Map<string, AgentRunRecord>();
+    for (const run of runs) {
+      if (run.runContext?.parentRunId) continue;
+      const current = latest.get(run.taskId);
+      if (
+        !current
+        || run.startedAt > current.startedAt
+        || (run.startedAt === current.startedAt && run.id > current.id)
+      ) {
+        latest.set(run.taskId, run);
+      }
+    }
+    return latest;
+  }, [runs]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -519,6 +536,10 @@ export function ScheduledTasksPanel() {
             tasks.map((task) => {
               const taskIsBusy =
                 runningTaskId === task.id || updatingTaskId === task.id;
+              const latestRun = latestRunByTaskId.get(task.id);
+              const latestRunPresentation = latestRun
+                ? presentScheduledRun(latestRun)
+                : null;
 
               return (
                 <article
@@ -565,6 +586,47 @@ export function ScheduledTasksPanel() {
                       <dd>{formatNextRun(task.nextRunAt)}</dd>
                     </div>
                   </dl>
+
+                  {runningTaskId === task.id ? (
+                    <section
+                      aria-live="polite"
+                      className="scheduled-run-disclosure is-running"
+                      data-disclosure-id={`scheduled-running:${task.id}`}
+                      role="status"
+                    >
+                      <span>执行中</span>
+                      <strong>正在运行当前任务</strong>
+                    </section>
+                  ) : latestRun && latestRunPresentation ? (
+                    <details
+                      className={`scheduled-run-disclosure is-${latestRunPresentation.tone}`}
+                      data-disclosure-id={`scheduled-run:${latestRun.id}`}
+                      key={latestRun.id}
+                      onToggle={(event) => {
+                        const open = event.currentTarget.open;
+                        setRunDisclosureExpanded((current) => (
+                          current[latestRun.id] === open
+                            ? current
+                            : { ...current, [latestRun.id]: open }
+                        ));
+                      }}
+                      open={
+                        runDisclosureExpanded[latestRun.id]
+                        ?? latestRunPresentation.attentionRequired
+                      }
+                    >
+                      <summary>
+                        <span>{latestRunPresentation.label}</span>
+                        <strong>{latestRun.summary || latestRunPresentation.fallback}</strong>
+                      </summary>
+                      <div>
+                        <p>{formatRunTime(latestRun.startedAt)}</p>
+                        <small>
+                          Run {latestRun.id} · revision {latestRun.executionRevision ?? 1}
+                        </small>
+                      </div>
+                    </details>
+                  ) : null}
 
                   <div className="scheduled-task-card-actions">
                     <button
@@ -1277,14 +1339,39 @@ function summarizePermissions(policy: TaskPermissionPolicy): string {
   return `${fileCount} 个文件权限 / ${memoryCount} 个记忆权限 / ${webCount} 个网页权限 / ${shellCount} 个命令权限`;
 }
 
-function translateRunStatus(status: AgentRunRecord["status"]): string {
-  if (status === "succeeded") {
-    return "成功";
+function presentScheduledRun(run: AgentRunRecord): {
+  label: string;
+  fallback: string;
+  tone: "success" | "warning" | "error";
+  attentionRequired: boolean;
+} {
+  if (run.status === "succeeded") {
+    return {
+      label: "最近成功",
+      fallback: "任务已完成",
+      tone: "success",
+      attentionRequired: false,
+    };
   }
-
-  if (status === "canceled") {
-    return "已取消";
+  if (run.status === "canceled") {
+    return {
+      label: "最近取消",
+      fallback: "运行已取消",
+      tone: "warning",
+      attentionRequired: true,
+    };
   }
+  return {
+    label: "最近失败",
+    fallback: run.failureMessage || "运行失败",
+    tone: "error",
+    attentionRequired: true,
+  };
+}
 
-  return "失败";
+function formatRunTime(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "时间未知"
+    : parsed.toLocaleString("zh-CN", { hour12: false });
 }

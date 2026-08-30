@@ -51,7 +51,11 @@ describe("production Kernel boundary", () => {
     const driver = read("src/main/kernel/productionKernelDriver.ts");
 
     expect(runtime).toContain("kernelReporter?.retry({");
-    expect(runtime).toContain("kernelReporter?.toolCall(toolName, args)");
+    expect(runtime).toContain(
+      "const safeArgs = redactCredentials(args) as Record<string, unknown>",
+    );
+    expect(runtime).toContain("kernelReporter?.toolCall(toolName, safeArgs)");
+    expect(runtime).not.toContain("kernelReporter?.toolCall(toolName, args)");
     expect(runtime).toContain("kernelReporter?.checkpoint(");
     expect(driver).toContain("mode: input.mode");
     expect(driver).toContain("Object.freeze({");

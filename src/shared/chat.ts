@@ -6,6 +6,10 @@ import type { ChatOutputPart } from "./chatOutput";
 import type { ModelServiceNotice } from "./modelServiceNotice";
 import type { GoalDraft } from "./goalTranslation";
 import type { AgentContextUsage } from "./contextUsage";
+import {
+  isCredentialKey,
+  redactCredentialString,
+} from "./credentialRedaction";
 import type {
   PlanAutonomyMode,
   PlanMode,
@@ -36,13 +40,29 @@ export type ChatHistoryMessage = {
 export type ChatMessageRecord = ChatHistoryMessage & {
   id: string;
   requestId?: string;
+  /** Durable request-turn witness; absent on legacy rows. */
+  turnId?: string;
+  /** Durable numeric attempt witness; absent on legacy rows. */
+  causalAttempt?: number;
+  /** Stable durable attempt identity; absent on legacy rows. */
+  causalAttemptId?: string;
   createdAt: string;
   outputParts?: ChatOutputPart[];
   relatedMemoryIds?: string[];
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
+  /** Durable business settlement for this assistant turn; absent on legacy rows. */
+  turnSettlementStatus?: ChatTurnSettlementStatus;
 };
+
+export type ChatTurnSettlementStatus =
+  | "succeeded"
+  | "paused"
+  | "failed"
+  | "canceled";
+/** Renderer/Kernel result status; `unknown` is reserved for legacy rows without a durable receipt. */
+export type ChatTurnResultSettlementStatus = ChatTurnSettlementStatus | "unknown";
 
 export type ChatSessionGoalSummary = {
   id: string;
@@ -208,6 +228,51 @@ export type SkillUserInputRequest = {
   createdAt: string;
 };
 
+export function sanitizeSkillUserInputRequest(
+  inputRequest: SkillUserInputRequest,
+): SkillUserInputRequest {
+  return {
+    ...inputRequest,
+    skillName: redactCredentialString(inputRequest.skillName),
+    reason: redactCredentialString(inputRequest.reason),
+    fields: inputRequest.fields.map((field) => {
+      const credentialField = isCredentialKey(field.name);
+      return {
+        ...field,
+        label: redactCredentialString(field.label),
+        ...(field.description !== undefined
+          ? { description: redactCredentialString(field.description) }
+          : {}),
+        ...(field.defaultValue !== undefined
+          ? {
+              defaultValue: sanitizeSkillInputProjectionValue(
+                field.defaultValue,
+                credentialField,
+              ),
+            }
+          : {}),
+        ...(field.choices
+          ? {
+              choices: field.choices.map((choice) =>
+                sanitizeSkillInputProjectionValue(choice, credentialField),
+              ) as string[],
+            }
+          : {}),
+      };
+    }),
+  };
+}
+
+function sanitizeSkillInputProjectionValue(
+  value: string | number | boolean,
+  credentialField: boolean,
+): string | number | boolean {
+  if (typeof value !== "string") {
+    return credentialField ? "[redacted]" : value;
+  }
+  return credentialField ? "[redacted]" : redactCredentialString(value);
+}
+
 export type SkillInputResponse = {
   inputRequestId: string;
   requestId?: string;
@@ -216,7 +281,14 @@ export type SkillInputResponse = {
 
 export type SkillPendingInputState = {
   inputRequestId: string;
-  status: "pending" | "processing" | "completed";
+  status:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "canceled"
+    | "superseded";
+  settlementId?: string;
   inputRequest?: SkillUserInputRequest;
   sessionId: string;
   requestId: string;
@@ -239,7 +311,11 @@ type ChatStreamEventBase = {
   sequence: number;
   turnId: string;
   assistantMessageId?: string;
+  /** Model answer attempt; absent only on legacy persisted/transport events. */
+  attempt?: number;
   createdAt: string;
+  /** True only when sessionId is proven to identify durable Chat state. */
+  domainStateAvailable?: boolean;
 };
 
 export type ChatOutputStreamEvent = ChatStreamEventBase & {
@@ -248,6 +324,13 @@ export type ChatOutputStreamEvent = ChatStreamEventBase & {
 };
 
 export type ChatStreamEvent =
+  | (ChatStreamEventBase & {
+      type: "attempt_control";
+      operation: "begin" | "supersede" | "reset" | "accepted";
+      attempt: number;
+      controlSequence: number;
+      supersedesAttempt?: number;
+    })
   | (ChatStreamEventBase & {
       type: "answer_delta";
       text: string;
@@ -316,6 +399,10 @@ export type ChatAgentStatus =
 
 export type ChatTaskStatusEvent = {
   sessionId: string;
+  /** Idempotency key for a required cross-domain settlement. */
+  settlementId?: string;
+  /** True only when sessionId is proven to identify durable Chat state. */
+  domainStateAvailable?: boolean;
   /** Present on newly emitted events; optional only for persisted v1 records. */
   requestId?: string;
   /** Monotonic within one request across status and stream events. */
@@ -351,6 +438,7 @@ export type ChatTaskStatusEvent = {
   turn?: number;
   toolCallId?: string;
   toolInvocationId?: string;
+  approvalId?: string;
   toolName?: string;
   toolSource?: string;
   resultRef?: string;
@@ -441,6 +529,9 @@ export type SendChatMessageResult =
       executedRun?: AgentRunRecord;
       createdTask?: ScheduledTask;
       agentStatus?: ChatAgentStatus;
+      turnSettlementStatus?: ChatTurnResultSettlementStatus;
+      /** Positive renderer provenance for adopting sessionId as durable state. */
+      domainStateAvailable?: boolean;
       activeGoal?: ChatSessionGoalSummary;
       goalDraft?: GoalDraft;
       plan?: PlanRecord;
@@ -454,4 +545,7 @@ export type SendChatMessageResult =
       message: string;
       code?: ChatErrorCode;
       retryable?: boolean;
+      executedRun?: AgentRunRecord;
+      turnSettlementStatus?: ChatTurnResultSettlementStatus;
+      domainStateAvailable?: boolean;
     };

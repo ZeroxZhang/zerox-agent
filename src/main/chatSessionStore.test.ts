@@ -254,6 +254,111 @@ describe("chat session store", () => {
     });
   });
 
+  it("sanitizes guided-input metadata before durable activity persistence", async () => {
+    const canary = "guided-store-canary";
+    const store = createChatSessionStore({
+      configDir,
+      createId: createSequentialId("guided-secret-safe"),
+    });
+    const session = await store.appendMessage({
+      role: "user",
+      content: "继续技能",
+    });
+    const inputRequest = {
+      id: "input_secret_safe",
+      executionId: "execution_secret_safe",
+      sessionId: session.session.id,
+      requestId: "request_secret_safe",
+      skillName: "local-skill",
+      reason: `api_key=${canary}`,
+      fields: [{
+        name: "api%255fkey",
+        label: "Credential",
+        type: "choice" as const,
+        required: true,
+        description: `client_secret=${canary}`,
+        defaultValue: canary,
+        choices: [canary],
+      }],
+      createdAt: "2026-08-24T00:00:00.000Z",
+    };
+    await store.appendActivityEvent(session.session.id, {
+      sessionId: session.session.id,
+      requestId: inputRequest.requestId,
+      state: "waiting_for_input",
+      message: "Skill input required.",
+      createdAt: inputRequest.createdAt,
+      elapsedMs: 1,
+      inputRequest,
+      pendingSkillInput: {
+        inputRequestId: inputRequest.id,
+        status: "pending",
+        inputRequest,
+        sessionId: session.session.id,
+        requestId: inputRequest.requestId,
+        userMessage: "继续技能",
+        selectedSkillName: inputRequest.skillName,
+        partialValues: {},
+      },
+    });
+    await store.flush();
+
+    const raw = await readFile(path.join(configDir, "chat-sessions.json"), "utf8");
+    expect(raw).toContain("[redacted]");
+    expect(raw).not.toContain(canary);
+    const restarted = await createChatSessionStore({ configDir }).get(
+      session.session.id,
+    );
+    expect(JSON.stringify(restarted)).not.toContain(canary);
+  });
+
+  it.each(["failed", "canceled", "superseded"] as const)(
+    "preserves a %s guided-input settlement tombstone across restart",
+    async (status) => {
+      const store = createChatSessionStore({
+        configDir,
+        createId: createSequentialId(`guided-${status}`),
+      });
+      const session = await store.appendMessage({
+        role: "user",
+        content: "继续技能",
+      });
+      await store.appendActivityEvent(session.session.id, {
+        sessionId: session.session.id,
+        requestId: `request_${status}`,
+        state: status === "canceled" ? "canceled" : "checkpoint_boundary",
+        message: `Guided input ${status}.`,
+        createdAt: "2026-08-24T00:00:00.000Z",
+        elapsedMs: 1,
+        pendingSkillInput: {
+          inputRequestId: `input_${status}`,
+          status,
+          settlementId: `settlement_${status}`,
+          sessionId: session.session.id,
+          requestId: `request_${status}`,
+          userMessage: "继续技能",
+          selectedSkillName: "local-skill",
+          partialValues: {},
+        },
+      });
+      await store.flush();
+
+      const restarted = createChatSessionStore({ configDir });
+      await expect(restarted.get(session.session.id)).resolves.toMatchObject({
+        activity: {
+          statusEvents: [
+            expect.objectContaining({
+              pendingSkillInput: expect.objectContaining({
+                status,
+                settlementId: `settlement_${status}`,
+              }),
+            }),
+          ],
+        },
+      });
+    },
+  );
+
   it("reuses the pending user record when the same attachment turn is retried", async () => {
     const store = createChatSessionStore({
       configDir,
@@ -389,6 +494,48 @@ describe("chat session store", () => {
   });
 
   it.each(["json", "sqlite"] as const)(
+    "persists causal attempt witnesses and canceled settlement with the %s backend",
+    async (backend) => {
+      const storage =
+        backend === "sqlite" ? await createInMemoryStorage() : undefined;
+      const store = createChatSessionStore({
+        configDir,
+        backend,
+        ...(storage ? { storage } : {}),
+        createId: createSequentialId(`witness-${backend}`),
+      });
+
+      try {
+        const appended = await store.appendMessage({
+          role: "assistant",
+          content: "The owning attempt was canceled.",
+          requestId: "request_witness",
+          turnId: "turn-request_witness",
+          causalAttempt: 2,
+          causalAttemptId: "attempt_request_witness_2",
+          turnSettlementStatus: "canceled",
+        });
+        await store.flush();
+
+        const loaded = backend === "json"
+          ? await createChatSessionStore({ configDir }).get(appended.session.id)
+          : await store.get(appended.session.id);
+        expect(loaded?.messages).toEqual([
+          expect.objectContaining({
+            requestId: "request_witness",
+            turnId: "turn-request_witness",
+            causalAttempt: 2,
+            causalAttemptId: "attempt_request_witness_2",
+            turnSettlementStatus: "canceled",
+          }),
+        ]);
+      } finally {
+        storage?.close();
+      }
+    },
+  );
+
+  it.each(["json", "sqlite"] as const)(
     "pages %s transcripts by stable message sequence without hydrating metadata",
     async (backend) => {
       const storage =
@@ -436,6 +583,112 @@ describe("chat session store", () => {
         ["message 1", "message 2", "message 3", "message 4", "message 5"],
       );
       expect(oldest?.page.hasMoreBefore).toBe(false);
+      storage?.close();
+    },
+  );
+
+  it.each(["json", "sqlite"] as const)(
+    "pages bounded %s Chat activity with honest source coverage",
+    async (backend) => {
+      const storage =
+        backend === "sqlite" ? await createInMemoryStorage() : undefined;
+      const store = createChatSessionStore({
+        configDir,
+        backend,
+        storage,
+        createId: createSequentialId(`activity-${backend}`),
+      });
+      const session = await store.appendMessage({
+        role: "user",
+        content: "activity page",
+      });
+      for (const [index, state] of [
+        "started",
+        "model",
+        "completed",
+      ].entries()) {
+        await store.appendActivityEvent(session.session.id, {
+          sessionId: session.session.id,
+          requestId: "request_1",
+          sequence: index + 1,
+          state: state as "started" | "model" | "completed",
+          message: state,
+          createdAt: `2026-08-24T00:00:0${index + 1}.000Z`,
+          elapsedMs: index + 1,
+        });
+      }
+
+      const first = await store.getActivityPage!(session.session.id, {
+        limit: 2,
+      });
+      expect(first.status).toBe(
+        backend === "json" ? "partial" : "complete",
+      );
+      expect(first.reasonCode).toBe(
+        backend === "json" ? "legacy_chat_activity_tail" : undefined,
+      );
+      expect(first.records.map((entry) => entry.event.state)).toEqual([
+        "started",
+        "model",
+      ]);
+      expect(first.records.every((entry) =>
+        entry.legacy === (backend === "json"))).toBe(true);
+      const second = await store.getActivityPage!(session.session.id, {
+        cursor: first.nextCursor,
+        limit: 2,
+      });
+      expect(second.records.map((entry) => entry.event.state))
+        .toEqual(["completed"]);
+      expect(second.nextCursor).toBeUndefined();
+      storage?.close();
+    },
+  );
+
+  it.each(["json", "sqlite"] as const)(
+    "rejects a stale %s Chat activity cursor after a new owner event",
+    async (backend) => {
+      const storage =
+        backend === "sqlite" ? await createInMemoryStorage() : undefined;
+      const store = createChatSessionStore({
+        configDir,
+        backend,
+        storage,
+        createId: createSequentialId(`activity-stale-${backend}`),
+      });
+      const session = await store.appendMessage({
+        role: "user",
+        content: "activity page",
+      });
+      for (const [index, state] of ["started", "model"].entries()) {
+        await store.appendActivityEvent(session.session.id, {
+          sessionId: session.session.id,
+          sequence: index + 1,
+          state: state as "started" | "model",
+          message: state,
+          createdAt: `2026-08-24T00:00:0${index + 1}.000Z`,
+          elapsedMs: index + 1,
+        });
+      }
+      const first = await store.getActivityPage!(session.session.id, {
+        limit: 1,
+      });
+      await store.appendActivityEvent(session.session.id, {
+        sessionId: session.session.id,
+        sequence: 3,
+        state: "completed",
+        message: "completed",
+        createdAt: "2026-08-24T00:00:03.000Z",
+        elapsedMs: 3,
+      });
+
+      await expect(store.getActivityPage!(session.session.id, {
+        cursor: first.nextCursor,
+        limit: 1,
+      })).resolves.toMatchObject({
+        records: [],
+        status: "incompatible",
+        reasonCode: "source_cursor_mismatch",
+      });
       storage?.close();
     },
   );
@@ -828,6 +1081,20 @@ describe("chat session store", () => {
         },
       },
     ]);
+    const legacySession = await store.get("legacy");
+    expect(legacySession).toMatchObject({
+      messages: [
+        {
+          id: "m1",
+          role: "user",
+          content: "继续",
+          createdAt: "2026-06-18T08:00:00.000Z",
+        },
+      ],
+    });
+    expect(legacySession?.messages[0]).not.toHaveProperty("turnId");
+    expect(legacySession?.messages[0]).not.toHaveProperty("causalAttempt");
+    expect(legacySession?.messages[0]).not.toHaveProperty("causalAttemptId");
   });
 
   it("drops malformed persisted workspace summaries", async () => {
@@ -1136,6 +1403,33 @@ describe("chat session store", () => {
       }),
     ]);
   });
+
+  it("deduplicates an exact required settlement and rejects conflicting reuse", async () => {
+    const store = createChatSessionStore({ configDir });
+    const session = await store.appendMessage({ role: "user", content: "hello" });
+    const event = {
+      sessionId: session.session.id,
+      settlementId: "settlement:chat:1",
+      state: "paused" as const,
+      message: "paused",
+      approvalId: "approval:chat:1",
+      createdAt: "2026-08-24T00:00:00.000Z",
+      elapsedMs: 1,
+    };
+    await store.appendActivityEvent(session.session.id, event);
+    await store.appendActivityEvent(session.session.id, event);
+    expect((await store.get(session.session.id))?.activity?.statusEvents).toEqual([
+      expect.objectContaining({ approvalId: "approval:chat:1" }),
+    ]);
+    await expect(store.appendActivityEvent(session.session.id, {
+      ...event,
+      message: "conflict",
+    })).rejects.toThrow("settlement id conflicts");
+    await expect(store.appendActivityEvent(session.session.id, {
+      ...event,
+      approvalId: "approval:chat:changed",
+    })).rejects.toThrow("settlement id conflicts");
+  });
 });
 
 describe("SQLite chat session store", () => {
@@ -1347,6 +1641,29 @@ describe("SQLite chat session store", () => {
         file.startsWith("chat-sessions.json.corrupt-"),
       ),
     ).toBe(true);
+  });
+
+  it("deduplicates required settlement ids in SQLite", async () => {
+    const store = createChatSessionStore({
+      configDir,
+      backend: "sqlite",
+      storage,
+    });
+    const session = await store.appendMessage({ role: "user", content: "hello" });
+    const event = {
+      sessionId: session.session.id,
+      settlementId: "settlement:sqlite:1",
+      state: "paused" as const,
+      message: "paused",
+      approvalId: "approval:sqlite:1",
+      createdAt: "2026-08-24T00:00:00.000Z",
+      elapsedMs: 1,
+    };
+    await store.appendActivityEvent(session.session.id, event);
+    await store.appendActivityEvent(session.session.id, event);
+    expect((await store.get(session.session.id))?.activity?.statusEvents).toEqual([
+      expect.objectContaining({ approvalId: "approval:sqlite:1" }),
+    ]);
   });
 });
 

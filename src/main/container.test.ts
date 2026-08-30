@@ -16,11 +16,13 @@ import {
 import type { ModelSettingsStore } from "./modelSettingsStore";
 import { registerAllIpcHandlers } from "./ipc";
 import { createToolApprovalCoordinator } from "./toolApprovalCoordinator";
+import { createConversationCausalStore } from "./conversationCausalStore";
 import { issueToolResultRefReadCapability } from "./toolResultOffloadStore";
 import type { Goal } from "../shared/agentGoal";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { GoalProgressEvent } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
+import type { ToolApprovalIntent } from "../shared/conversationCausalSpine";
 import type { AcceptanceValidator } from "./agentGoalValidatorRegistry";
 import type { AcceptanceContext } from "./agentGoalAcceptance";
 import type { PlanArtifact, PlanRecord } from "../shared/planMode";
@@ -33,6 +35,11 @@ import {
   createGoalContractRef,
   deriveGoalContractFromPlan,
 } from "./goalPlanContractService";
+import {
+  createConversationDisclosureScope,
+  projectConversationDisclosureSnapshot,
+  type ConversationDisclosureFact,
+} from "../shared/conversationDisclosure";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -310,6 +317,1423 @@ describe("app container goal drafts", () => {
       maxRetries: 5,
       retryDelay: 20,
     });
+  });
+
+  it("marks a missing Chat scope owner as degraded", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "chat",
+      sessionId: "session_missing",
+      queryHash: "query:missing-chat",
+    });
+
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+
+    expect(snapshot.coverage.state).toBe("degraded");
+    expect(snapshot.sourceCuts).toContainEqual({
+      source: "chat_message",
+      sourceIdentity: "session_missing",
+      requiredness: "required",
+      status: "unavailable",
+      reasonCode: "required_owner_missing",
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("loads Goal ledger, Goal context, and aggregate usage into Chat disclosure", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "Inspect Goal usage",
+    });
+    const goal: Goal = {
+      ...createStoredGoal({
+        id: "goal_disclosure_usage",
+        chatSessionId: session.session.id,
+        status: "executing",
+        executionUsage: {
+          iterations: 1,
+          toolCalls: 2,
+          wallClockMs: 300,
+          tokens: 400,
+          tokensEstimated: true,
+          replans: 0,
+        },
+      }),
+      contextUsage: {
+        estimatedTokens: 320,
+        tokenBudget: 4_096,
+        occupancyRatio: 320 / 4_096,
+        messageCount: 4,
+        compactionCount: 1,
+        updatedAt: "2026-08-25T00:01:00.000Z",
+      },
+    };
+    await container.agentGoalStore().save(goal);
+    await container.agentGoalStore().appendLedger(goal.id, {
+      at: "2026-08-25T00:01:00.000Z",
+      publicationKey: "goal-usage-ledger",
+      kind: "milestone_started",
+      milestoneId: goal.milestones[0]!.id,
+      summary: "Milestone started",
+    });
+    await container.chatSessionStore().attachGoal(session.session.id, {
+      id: goal.id,
+      description: goal.description,
+      status: goal.status,
+      updatedAt: goal.updatedAt,
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "chat",
+      sessionId: session.session.id,
+      queryHash: "query:goal-usage",
+    });
+
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+
+    expect(snapshot.items).toContainEqual(expect.objectContaining({
+      primarySource: expect.objectContaining({
+        kind: "context",
+        ref: `goal-context:${goal.id}`,
+      }),
+      estimatedTokens: 320,
+      compactionCount: 1,
+    }));
+    expect(snapshot.items).toContainEqual(expect.objectContaining({
+      primarySource: expect.objectContaining({
+        kind: "usage",
+        ref: `session-usage:${session.session.id}`,
+      }),
+      totalTokens: 400,
+      lifecycle: "completed_unverified",
+    }));
+    const goalItem = snapshot.items.find(
+      (item) =>
+        item.primarySource.kind === "goal"
+        && item.primarySource.ref === goal.id,
+    );
+    expect(goalItem?.contributors).toContainEqual(expect.objectContaining({
+      kind: "goal",
+      ref: `ledger:${goal.id}:goal-usage-ledger`,
+    }));
+    expect(goalItem?.contributorSetComplete).toBe(true);
+    await container.shutdownRuntime();
+  });
+
+  it("loads execution checkpoint context and usage for a Run scope", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const checkpoint: AgentExecutionCheckpoint = {
+      id: "checkpoint_disclosure_context",
+      runId: "run_disclosure_context",
+      taskId: "task_disclosure_context",
+      status: "running",
+      currentStepId: "step_1",
+      steps: [],
+      messages: [],
+      contextSurface: {
+        version: 1,
+        runId: "run_disclosure_context",
+        nextSequence: 2,
+        events: [{
+          kind: "source",
+          id: "context_source_1",
+          sequence: 1,
+          message: { role: "user", content: "bounded context" },
+          estimatedTokens: 25,
+          createdAt: "2026-08-25T00:00:00.000Z",
+        }],
+      },
+      toolCallCount: 0,
+      tokensConsumed: 55,
+      tokensEstimated: true,
+      createdAt: "2026-08-25T00:00:00.000Z",
+      updatedAt: "2026-08-25T00:00:01.000Z",
+    };
+    await container.agentExecutionStore().save(checkpoint);
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: checkpoint.runId,
+      queryHash: "query:execution-context",
+    });
+
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+
+    expect(snapshot.items).toContainEqual(expect.objectContaining({
+      primarySource: expect.objectContaining({
+        kind: "context",
+        ref: `execution-context:${checkpoint.runId}`,
+      }),
+      estimatedTokens: 25,
+    }));
+    expect(snapshot.items).toContainEqual(expect.objectContaining({
+      primarySource: expect.objectContaining({
+        kind: "usage",
+        ref: `execution-usage:${checkpoint.runId}`,
+      }),
+      totalTokens: 55,
+      lifecycle: "completed_unverified",
+    }));
+    await container.shutdownRuntime();
+  });
+
+  it("does not treat a Trajectory page as the owning Run record", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const runId = "run_without_owner";
+    await container.agentTrajectoryStore().append(runId, {
+      id: "trajectory_without_owner",
+      runId,
+      sequence: 1,
+      type: "model_request",
+      payload: {},
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-25T00:00:00.000Z",
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId,
+      queryHash: "query:run-without-owner",
+    });
+
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+
+    expect(snapshot.coverage.state).toBe("degraded");
+    expect(snapshot.sourceCuts).toContainEqual({
+      source: "agent_run",
+      sourceIdentity: `record:${runId}`,
+      requiredness: "required",
+      status: "unavailable",
+      reasonCode: "required_owner_missing",
+    });
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === "trajectory_without_owner",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toEqual({
+      ok: true,
+      result: { kind: "forbidden", reasonCode: "not_authorized" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("denies orphaned Trajectory evidence in a session scope", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-session-orphan"),
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "Inspect an orphaned run",
+    });
+    await causalStore.claimRequest({
+      requestId: "request_session_orphan",
+      turnId: "turn_session_orphan",
+      inputFingerprint: "fingerprint_session_orphan",
+    });
+    await causalStore.bindRequest({
+      requestId: "request_session_orphan",
+      sessionId: session.session.id,
+      userMessageId: session.message.id,
+    });
+    await causalStore.addRefs({
+      requestId: "request_session_orphan",
+      refs: [{ kind: "trajectory_run", id: "run_session_orphan" }],
+    });
+    await container.agentTrajectoryStore().append("run_session_orphan", {
+      id: "trajectory_session_orphan",
+      runId: "run_session_orphan",
+      sequence: 1,
+      type: "model_request",
+      payload: {},
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-25T00:00:00.000Z",
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "chat",
+      sessionId: session.session.id,
+      queryHash: "query:session-orphan",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === "trajectory_session_orphan",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toEqual({
+      ok: true,
+      result: { kind: "forbidden", reasonCode: "not_authorized" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("denies run evidence after its owning session is deleted", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-deleted-session"),
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "Inspect then delete",
+    });
+    const requestId = "request_deleted_session";
+    const runId = "run_deleted_session";
+    await causalStore.claimRequest({
+      requestId,
+      turnId: "turn_deleted_session",
+      inputFingerprint: "fingerprint_deleted_session",
+    });
+    await causalStore.bindRequest({
+      requestId,
+      sessionId: session.session.id,
+      userMessageId: session.message.id,
+    });
+    await causalStore.addRefs({
+      requestId,
+      refs: [
+        { kind: "trajectory_run", id: runId },
+        { kind: "workspace_run", id: runId },
+      ],
+    });
+    await container.workspaceRunStore().createRun({
+      workspaceRunId: runId,
+      sessionId: session.session.id,
+      requestId,
+    });
+    await container.agentTrajectoryStore().append(runId, {
+      id: "trajectory_deleted_session",
+      runId,
+      sequence: 1,
+      type: "model_request",
+      payload: {},
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-25T00:00:00.000Z",
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "chat",
+      sessionId: session.session.id,
+      queryHash: "query:deleted-session",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === "trajectory_deleted_session",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+    const anchor = resolver.issueAnchor({ snapshot, itemId: item.id });
+    await container.chatSessionStore().delete(session.session.id);
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor,
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toEqual({
+      ok: true,
+      result: { kind: "forbidden", reasonCode: "not_authorized" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("materializes a causally referenced decided approval", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-decided-approval"),
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const session = await container.chatSessionStore().appendMessage({
+      role: "user",
+      content: "Approve the bounded action",
+    });
+    const requestId = "request_decided_approval";
+    const turnId = "turn_decided_approval";
+    await causalStore.claimRequest({
+      requestId,
+      turnId,
+      inputFingerprint: "fingerprint_decided_approval",
+    });
+    await causalStore.bindRequest({
+      requestId,
+      sessionId: session.session.id,
+      userMessageId: session.message.id,
+    });
+    const intent: ToolApprovalIntent = {
+      schemaVersion: 1,
+      id: "approval_decided",
+      revision: 1,
+      state: "pending",
+      requestFingerprint: "fingerprint_decided_approval",
+      taskId: "task_decided_approval",
+      taskName: "Bounded action",
+      toolName: "read_file",
+      safeArgsSummary: {},
+      risk: {
+        level: "normal",
+        category: "filesystem",
+        requiresConfirmation: true,
+      },
+      causalRef: {
+        sessionId: session.session.id,
+        requestId,
+        turnId,
+      },
+      ownerProcessEpoch: "epoch_decided_approval",
+      createdAt: "2026-08-25T00:00:00.000Z",
+      updatedAt: "2026-08-25T00:00:00.000Z",
+      expiresAt: "2026-08-25T01:00:00.000Z",
+    };
+    await causalStore.createApprovalIntentAndLink({ requestId, intent });
+    await causalStore.decideApproval({
+      id: intent.id,
+      expectedRevision: 1,
+      decision: {
+        decisionId: "decision_decided_approval",
+        outcome: "approved",
+        automatic: false,
+        reasonCode: "user_approved",
+        decidedAt: "2026-08-25T00:00:01.000Z",
+      },
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "chat",
+      sessionId: session.session.id,
+      queryHash: "query:decided-approval",
+    });
+
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+
+    expect(snapshot.items).toContainEqual(expect.objectContaining({
+      lifecycle: "succeeded",
+      primarySource: expect.objectContaining({
+        kind: "approval",
+        ref: intent.id,
+        domainRevision: "2",
+        domainStatus: "approved",
+      }),
+    }));
+    await container.shutdownRuntime();
+  });
+
+  it("resolves generic AgentRun evidence from current owner state", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const run = {
+      id: "run_evidence",
+      taskId: "task_evidence",
+      taskName: "Evidence task",
+      skillName: "fixture",
+      status: "running" as const,
+      summary: "",
+      events: [],
+      executionRevision: 1,
+      startedAt: "2026-08-25T00:00:00.000Z",
+      finishedAt: "",
+    };
+    await container.agentRunStore().append(run);
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: run.id,
+      queryHash: "query:evidence-owner",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.kind === "agent_run",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+    const response = await resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        kind: "found",
+        entries: [{
+          id: run.id,
+          kind: "agent_run",
+          status: "running",
+        }],
+      },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("refreshes owning state before accepting an evidence anchor", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const checkpoint: AgentExecutionCheckpoint = {
+      id: "checkpoint_stale_evidence",
+      runId: "run_stale_evidence",
+      taskId: "task_stale_evidence",
+      status: "running",
+      currentStepId: "step_1",
+      steps: [],
+      messages: [],
+      toolCallCount: 0,
+      createdAt: "2026-08-25T00:00:00.000Z",
+      updatedAt: "2026-08-25T00:00:00.000Z",
+    };
+    await container.agentExecutionStore().save(checkpoint);
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: checkpoint.runId,
+      queryHash: "query:stale-evidence-owner",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.kind === "agent_run",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+    const anchor = resolver.issueAnchor({ snapshot, itemId: item.id });
+    await container.agentExecutionStore().save({
+      ...checkpoint,
+      status: "paused",
+      updatedAt: "2026-08-25T00:01:00.000Z",
+    });
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor,
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toEqual({
+      ok: true,
+      result: { kind: "incompatible", reasonCode: "authority_changed" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("resolves a Tool Invocation beyond the first Workspace event page", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-workspace-evidence"),
+    });
+    await addCausalToolLink(causalStore, {
+      requestId: "request_evidence",
+      logicalRunId: "workspace_evidence",
+      workspaceRunId: "workspace_evidence",
+      invocationId: "invocation_evidence",
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const workspaceRun = await container.workspaceRunStore().createRun({
+      workspaceRunId: "workspace_evidence",
+      sessionId: "session_evidence",
+      requestId: "request_evidence",
+    });
+    for (let index = 0; index < 200; index += 1) {
+      await container.workspaceRunStore().appendEvent(
+        workspaceRun.workspaceRunId,
+        {
+          id: `event_${index}`,
+          type: "model_request",
+          message: `event ${index}`,
+          createdAt: `2026-08-25T00:00:${
+            String(index % 60).padStart(2, "0")
+          }.000Z`,
+        },
+      );
+    }
+    await container.workspaceRunStore().appendEvent(
+      workspaceRun.workspaceRunId,
+      {
+        id: "event_tool_terminal",
+        type: "tool_invocation",
+        toolInvocationId: "invocation_evidence",
+        toolCallId: "call_evidence",
+        toolName: "read_file",
+        invocationStatus: "completed",
+        ok: true,
+        createdAt: "2026-08-25T00:01:00.000Z",
+      },
+    );
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: workspaceRun.workspaceRunId,
+      queryHash: "query:tool-evidence",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === "invocation_evidence",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+    const response = await resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      result: {
+        kind: "found",
+        complete: true,
+        entries: [{
+          id: "invocation_evidence",
+          kind: "tool_invocation",
+          status: "completed",
+          sequence: 201,
+        }],
+      },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("resolves a trajectory-only Tool Invocation with matching status revision", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-trajectory-tool"),
+    });
+    await addCausalToolLink(causalStore, {
+      requestId: "request_trajectory_tool",
+      logicalRunId: "run_trajectory_tool",
+      invocationId: "invocation_trajectory",
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    await container.agentRunStore().append(
+      makeEvidenceAgentRun("run_trajectory_tool"),
+    );
+    const occurredAt = "2026-08-25T00:02:00.000Z";
+    await container.agentTrajectoryStore().append("run_trajectory_tool", {
+      id: "trajectory_tool_result",
+      runId: "run_trajectory_tool",
+      sequence: 1,
+      type: "tool_result",
+      payload: {
+        toolInvocationId: "invocation_trajectory",
+        toolCallId: "call_trajectory",
+        toolName: "read_file",
+        ok: true,
+      },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: occurredAt,
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: "run_trajectory_tool",
+      queryHash: "query:trajectory-tool",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === "invocation_trajectory",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toMatchObject({
+      ok: true,
+      result: {
+        kind: "found",
+        entries: [{
+          id: "invocation_trajectory",
+          kind: "tool_invocation",
+          status: "completed",
+        }],
+      },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("scans every Trajectory page before resolving an anchored event", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const runId = "run_trajectory_event_scan";
+    await container.agentRunStore().append(makeEvidenceAgentRun(runId));
+    await container.agentTrajectoryStore().append(runId, {
+      id: "trajectory_scanned",
+      runId,
+      sequence: 1,
+      type: "model_request",
+      payload: { marker: "first" },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-25T00:00:00.000Z",
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId,
+      queryHash: "query:trajectory-event-scan",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === "trajectory_scanned",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+    const anchor = resolver.issueAnchor({ snapshot, itemId: item.id });
+    for (let sequence = 2; sequence <= 201; sequence += 1) {
+      await container.agentTrajectoryStore().append(runId, {
+        id: `trajectory_filler_${sequence}`,
+        runId,
+        sequence,
+        type: "model_request",
+        payload: {},
+        redaction: {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: false,
+        },
+        createdAt: "2026-08-25T00:00:01.000Z",
+      });
+    }
+    await container.agentTrajectoryStore().append(runId, {
+      id: "trajectory_scanned",
+      runId,
+      sequence: 202,
+      type: "model_response",
+      payload: { marker: "conflicting" },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-25T00:00:02.000Z",
+    });
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor,
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toEqual({
+      ok: true,
+      result: { kind: "incompatible", reasonCode: "authority_changed" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("fails closed when a Trajectory Tool scan encounters a partial page", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-partial-trajectory"),
+    });
+    await addCausalToolLink(causalStore, {
+      requestId: "request_partial_trajectory",
+      logicalRunId: "run_partial_trajectory",
+      invocationId: "invocation_partial_trajectory",
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const runId = "run_partial_trajectory";
+    const invocationId = "invocation_partial_trajectory";
+    await container.agentRunStore().append(makeEvidenceAgentRun(runId));
+    const occurredAt = "2026-08-25T00:03:00.000Z";
+    const store = container.agentTrajectoryStore();
+    await store.append(runId, {
+      id: "trajectory_partial_result",
+      runId,
+      sequence: 1,
+      type: "tool_result",
+      payload: {
+        toolInvocationId: invocationId,
+        toolCallId: "call_partial_trajectory",
+        toolName: "read_file",
+        ok: true,
+      },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: occurredAt,
+    });
+    const page = await store.getPage!(runId, { limit: 200 });
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId,
+      queryHash: "query:partial-trajectory",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === invocationId,
+    )!;
+    vi.spyOn(store, "getPage").mockResolvedValue({
+      ...page,
+      status: "partial",
+      reasonCode: "corrupt_record",
+    });
+    const resolver = container.conversationEvidenceResolver();
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { kind: "incompatible", reasonCode: "authority_changed" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it.each([
+    {
+      pageStatus: "partial" as const,
+      expected: {
+        ok: true,
+        result: { kind: "incompatible", reasonCode: "authority_changed" },
+      },
+    },
+    {
+      pageStatus: "unavailable" as const,
+      expected: {
+        ok: false,
+        error: { code: "resolver_unavailable", retryable: true },
+      },
+    },
+  ])("fails closed when a Workspace Tool scan is $pageStatus", async ({
+    pageStatus,
+    expected,
+  }) => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, `causal-workspace-${pageStatus}`),
+    });
+    await addCausalToolLink(causalStore, {
+      requestId: "request_partial_workspace",
+      logicalRunId: "workspace_partial_evidence",
+      workspaceRunId: "workspace_partial_evidence",
+      invocationId: "invocation_partial_workspace",
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const runId = "workspace_partial_evidence";
+    const invocationId = "invocation_partial_workspace";
+    const occurredAt = "2026-08-25T00:04:00.000Z";
+    await container.agentTrajectoryStore().append(runId, {
+      id: "trajectory_complete_result",
+      runId,
+      sequence: 1,
+      type: "tool_result",
+      payload: {
+        toolInvocationId: invocationId,
+        toolCallId: "call_partial_workspace",
+        toolName: "read_file",
+        ok: true,
+      },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: occurredAt,
+    });
+    await container.workspaceRunStore().createRun({
+      workspaceRunId: runId,
+      sessionId: "session_partial_workspace",
+      requestId: "request_partial_workspace",
+    });
+    await container.workspaceRunStore().appendEvent(runId, {
+      id: "workspace_partial_result",
+      type: "tool_invocation",
+      toolInvocationId: invocationId,
+      toolCallId: "call_partial_workspace",
+      toolName: "read_file",
+      invocationStatus: "completed",
+      ok: true,
+      createdAt: occurredAt,
+    });
+    const store = container.workspaceRunStore();
+    const page = await store.getEventPage!(runId, { limit: 200 });
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId,
+      queryHash: "query:partial-workspace",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === invocationId,
+    )!;
+    vi.spyOn(store, "getEventPage").mockResolvedValue({
+      ...page,
+      status: pageStatus,
+      reasonCode: "corrupt_record",
+    });
+    const resolver = container.conversationEvidenceResolver();
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toMatchObject(expected);
+    await container.shutdownRuntime();
+  });
+
+  it("rejects a Workspace Tool candidate bound to another logical run", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-workspace-collision"),
+    });
+    await addCausalToolLink(causalStore, {
+      requestId: "request_collision",
+      logicalRunId: "workspace_collision",
+      workspaceRunId: "workspace_collision",
+      invocationId: "invocation_collision",
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const runId = "workspace_collision";
+    const invocationId = "invocation_collision";
+    const occurredAt = "2026-08-25T00:05:00.000Z";
+    await container.workspaceRunStore().createRun({
+      workspaceRunId: runId,
+      sessionId: "session_collision",
+      requestId: "request_collision",
+    });
+    await container.workspaceRunStore().appendEvent(runId, {
+      id: "workspace_collision_valid",
+      type: "tool_invocation",
+      toolInvocationId: invocationId,
+      toolCallId: "call_collision",
+      toolName: "read_file",
+      invocationStatus: "completed",
+      ok: true,
+      createdAt: occurredAt,
+    });
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId,
+      queryHash: "query:workspace-collision",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) => candidate.primarySource.ref === invocationId,
+    )!;
+    await container.workspaceRunStore().appendEvent(runId, {
+      id: "workspace_collision_event",
+      type: "tool_invocation",
+      toolInvocationId: invocationId,
+      toolCallId: "call_collision",
+      toolName: "read_file",
+      invocationStatus: "completed",
+      ok: true,
+      payload: { runId: "foreign_logical_run" },
+      createdAt: occurredAt,
+    });
+    const resolver = container.conversationEvidenceResolver();
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { kind: "incompatible", reasonCode: "authority_changed" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("resolves a causally linked Workspace Tool for a different logical run id", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-workspace-tool-link"),
+    });
+    await causalStore.claimRequest({
+      requestId: "request_workspace_tool_link",
+      turnId: "turn_workspace_tool_link",
+      inputFingerprint: "fingerprint_workspace_tool_link",
+    });
+    await causalStore.addRefs({
+      requestId: "request_workspace_tool_link",
+      refs: [
+        { kind: "workspace_run", id: "workspace_tool_link" },
+        {
+          kind: "tool_invocation",
+          runId: "logical_tool_run",
+          id: "invocation_workspace_link",
+        },
+      ],
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    await container.agentRunStore().append(
+      makeEvidenceAgentRun("logical_tool_run"),
+    );
+    await container.agentTrajectoryStore().append("logical_tool_run", {
+      id: "trajectory_unrelated",
+      runId: "logical_tool_run",
+      sequence: 1,
+      type: "model_request",
+      payload: {},
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-25T00:05:00.000Z",
+    });
+    await container.workspaceRunStore().createRun({
+      workspaceRunId: "workspace_tool_link",
+      sessionId: "session_workspace_tool_link",
+      requestId: "request_workspace_tool_link",
+    });
+    await container.workspaceRunStore().appendEvent(
+      "workspace_tool_link",
+      {
+        id: "workspace_tool_link_event",
+        type: "tool_invocation",
+        toolInvocationId: "invocation_workspace_link",
+        toolCallId: "call_workspace_link",
+        toolName: "read_file",
+        invocationStatus: "completed",
+        ok: true,
+        createdAt: "2026-08-25T00:05:01.000Z",
+      },
+    );
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: "logical_tool_run",
+      queryHash: "query:workspace-tool-link",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) =>
+        candidate.primarySource.ref === "invocation_workspace_link"
+        && candidate.runId === "logical_tool_run",
+    )!;
+    expect(snapshot.coverage.state).toBe("complete");
+    expect(snapshot.sourceCuts).not.toContainEqual(expect.objectContaining({
+      source: "tool_invocation",
+      status: "incompatible",
+    }));
+    expect(item.contributors).toContainEqual(expect.objectContaining({
+      kind: "workspace_run",
+      ref: "workspace_tool_link_event",
+    }));
+    const resolver = container.conversationEvidenceResolver();
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toMatchObject({
+      ok: true,
+      result: {
+        kind: "found",
+        entries: [{
+          id: "invocation_workspace_link",
+          status: "completed",
+        }],
+      },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("rejects an older cross-store Tool candidate with conflicting identity", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-tool-conflict"),
+    });
+    await causalStore.claimRequest({
+      requestId: "request_tool_conflict",
+      turnId: "turn_tool_conflict",
+      inputFingerprint: "fingerprint_tool_conflict",
+    });
+    await causalStore.addRefs({
+      requestId: "request_tool_conflict",
+      refs: [
+        { kind: "workspace_run", id: "workspace_tool_conflict" },
+        {
+          kind: "tool_invocation",
+          runId: "logical_tool_conflict",
+          id: "invocation_tool_conflict",
+        },
+      ],
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    await container.agentRunStore().append(
+      makeEvidenceAgentRun("logical_tool_conflict"),
+    );
+    await container.agentTrajectoryStore().append("logical_tool_conflict", {
+      id: "trajectory_tool_conflict",
+      runId: "logical_tool_conflict",
+      sequence: 1,
+      type: "tool_result",
+      payload: {
+        toolInvocationId: "invocation_tool_conflict",
+        toolCallId: "call_tool_conflict",
+        toolName: "read_file",
+        ok: true,
+      },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: false,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-25T00:05:59.000Z",
+    });
+    await container.workspaceRunStore().createRun({
+      workspaceRunId: "workspace_tool_conflict",
+      sessionId: "session_tool_conflict",
+      requestId: "request_tool_conflict",
+    });
+    await container.workspaceRunStore().appendEvent(
+      "workspace_tool_conflict",
+      {
+        id: "workspace_tool_conflict_event",
+        type: "tool_invocation",
+        toolInvocationId: "invocation_tool_conflict",
+        toolCallId: "call_tool_conflict",
+        toolName: "write_file",
+        invocationStatus: "completed",
+        ok: true,
+        createdAt: "2026-08-25T00:06:00.000Z",
+      },
+    );
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: "logical_tool_conflict",
+      queryHash: "query:tool-conflict",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) =>
+        candidate.primarySource.ref === "invocation_tool_conflict"
+        && candidate.runId === "logical_tool_conflict",
+    );
+
+    expect(item).toBeUndefined();
+    expect(snapshot.coverage.state).toBe("degraded");
+    expect(snapshot.sourceCuts).toContainEqual(expect.objectContaining({
+      source: "tool_invocation",
+      sourceIdentity: "record:invocation_tool_conflict",
+      requiredness: "required",
+      status: "incompatible",
+      reasonCode: "source_identity_conflict",
+    }));
+    await container.shutdownRuntime();
+  });
+
+  it("rejects conflicting same-store Tool candidates at one authority revision", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-workspace-tool-same-store-conflict"),
+    });
+    await addCausalToolLink(causalStore, {
+      requestId: "request_same_store_conflict",
+      logicalRunId: "logical_same_store_conflict",
+      workspaceRunId: "workspace_same_store_conflict",
+      invocationId: "invocation_same_store_conflict",
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    await container.agentRunStore().append(
+      makeEvidenceAgentRun("logical_same_store_conflict"),
+    );
+    await container.workspaceRunStore().createRun({
+      workspaceRunId: "workspace_same_store_conflict",
+      sessionId: "session_same_store_conflict",
+      requestId: "request_same_store_conflict",
+    });
+    const occurredAt = "2026-08-25T00:07:00.000Z";
+    await container.workspaceRunStore().appendEvent(
+      "workspace_same_store_conflict",
+      {
+        id: "workspace_same_store_first",
+        type: "tool_invocation",
+        toolInvocationId: "invocation_same_store_conflict",
+        toolCallId: "call_same_store_conflict",
+        toolName: "read_file",
+        invocationStatus: "completed",
+        ok: true,
+        createdAt: occurredAt,
+      },
+    );
+    const scope = createConversationDisclosureScope({
+      surface: "run",
+      runId: "logical_same_store_conflict",
+      queryHash: "query:same-store-conflict",
+    });
+    const snapshot = await container
+      .conversationDisclosureMaterializer()
+      .snapshot(scope);
+    const item = snapshot.items.find(
+      (candidate) =>
+        candidate.primarySource.ref === "invocation_same_store_conflict"
+        && candidate.runId === "logical_same_store_conflict",
+    )!;
+    const resolver = container.conversationEvidenceResolver();
+    const anchor = resolver.issueAnchor({ snapshot, itemId: item.id });
+    await container.workspaceRunStore().appendEvent(
+      "workspace_same_store_conflict",
+      {
+        id: "workspace_same_store_second",
+        type: "tool_invocation",
+        toolInvocationId: "invocation_same_store_conflict",
+        toolCallId: "call_same_store_conflict",
+        toolName: "write_file",
+        invocationStatus: "completed",
+        ok: true,
+        createdAt: occurredAt,
+      },
+    );
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor,
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toEqual({
+      ok: true,
+      result: { kind: "incompatible", reasonCode: "authority_changed" },
+    });
+    await container.shutdownRuntime();
+  });
+
+  it("denies a valid anchor when composite scope ownership conflicts", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const goal = await container.agentGoalStore().save(createStoredGoal({
+      id: "goal_scope_owner",
+      chatSessionId: "session_owner",
+      status: "waiting_for_review",
+    }));
+    const scope = createConversationDisclosureScope({
+      surface: "goal",
+      sessionId: goal.chatSessionId,
+      goalId: goal.id,
+      runId: "foreign_run",
+      queryHash: "query:composite",
+    });
+    const fact: ConversationDisclosureFact<"goal"> = {
+      schemaVersion: 1,
+      kind: "goal",
+      authorityRef: goal.id,
+      scope,
+      domainRevision: String(goal.planVersion),
+      domainStatus: goal.status,
+      requiredness: "required",
+      durability: "durable",
+      sensitivity: "technical",
+      occurredAt: goal.updatedAt,
+      payload: {
+        semanticSlot: `goal:${goal.id}`,
+        summary: `Goal ${goal.status}`,
+        disclosureClass: "gate",
+        goalId: goal.id,
+        planVersion: goal.planVersion,
+        actionRequired: true,
+        evidenceTarget: {
+          schemaVersion: 1,
+          kind: "goal_record",
+          goalId: goal.id,
+          revision: goal.planVersion,
+        },
+      },
+    };
+    const snapshot = projectConversationDisclosureSnapshot({
+      scope,
+      generation: "generation:composite",
+      expectedSourceCuts: [],
+      seeds: [{ primary: fact }],
+    });
+    const item = snapshot.items[0]!;
+    const resolver = container.conversationEvidenceResolver();
+
+    await expect(resolver.resolve({
+      schemaVersion: 1,
+      anchor: resolver.issueAnchor({ snapshot, itemId: item.id }),
+      target: item.evidenceTarget!,
+    }, {
+      actorId: "local-user",
+      scope,
+      allowTechnical: true,
+      allowRestricted: false,
+    })).resolves.toEqual({
+      ok: true,
+      result: { kind: "forbidden", reasonCode: "not_authorized" },
+    });
+    await container.shutdownRuntime();
   });
 
   it("wires ZEROX_TOOL_WORKER=subprocess through the production container worker", () => {
@@ -593,6 +2017,41 @@ describe("app container goal drafts", () => {
     await expect(shutdown).resolves.toBeUndefined();
   });
 
+  it("does not publish active execution events when task admission rejects", async () => {
+    const container = createAppContainer({
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const task = await container.scheduledTaskStore().create({
+      name: "Rejected task",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "12:33" },
+      input: { request: "must remain externally invisible" },
+    });
+    const events: unknown[] = [];
+    const unsubscribe = container.onAgentRunsChanged((event) => {
+      events.push(event);
+    });
+    const gate = vi.fn(async () => {
+      throw new Error("agent run admission rejected");
+    });
+
+    await expect(container.runAgentTask(task.id, {
+      beforeExecution: gate,
+      writeChatTranscript: false,
+    })).rejects.toThrow("agent run admission rejected");
+
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([]);
+    await expect(container.agentRunStore().list({ taskId: task.id })).resolves
+      .toEqual([]);
+
+    unsubscribe();
+    await container.shutdownRuntime();
+  });
+
   it("tracks resume admission before checkpoint lookup and drains it on shutdown", async () => {
     const container = createAppContainer({
       async requestToolApproval() {
@@ -639,6 +2098,251 @@ describe("app container goal drafts", () => {
     });
     await expect(shutdown).resolves.toBeUndefined();
   });
+
+  it("fails closed when a configured causal store cannot claim a resumed run", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "causal-resume-missing"),
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    const checkpoint: AgentExecutionCheckpoint = {
+      id: "checkpoint_resume_without_claim",
+      runId: "run_resume_without_claim",
+      taskId: "task_resume_without_claim",
+      status: "paused",
+      currentStepId: "step_1",
+      steps: [{
+        id: "step_1",
+        description: "Resume only with a causal lease",
+        expectedOutcome: "Admission rejects",
+        state: "pending",
+        attempts: 1,
+      }],
+      messages: [],
+      toolCallCount: 0,
+      createdAt: "2026-08-24T00:00:00.000Z",
+      updatedAt: "2026-08-24T00:00:00.000Z",
+    };
+    await container.agentExecutionStore().save(checkpoint);
+    const resumeRun = vi.spyOn(container.agentRunnerService(), "resumeRun")
+      .mockImplementation(async (runId, options) => {
+        await options?.beforeExecution?.({
+          runId,
+          taskId: checkpoint.taskId,
+          executionRevision: 2,
+          executionEnvelope: {
+            id: runId,
+            taskId: checkpoint.taskId,
+            taskName: "Resume only with a causal lease",
+            skillName: "prompt-task",
+            startedAt: checkpoint.createdAt,
+          },
+        });
+        throw new Error("resume must not pass admission");
+      });
+
+    await expect(container.resumeAgentRun(checkpoint.runId)).rejects.toThrow(
+      "任务运行失败，已保留可审计的终态记录。",
+    );
+    expect(resumeRun).toHaveBeenCalledTimes(1);
+    await expect(container.agentRunStore().get(checkpoint.runId)).resolves
+      .toBeNull();
+    await container.shutdownRuntime();
+  });
+
+  it("reconciles AgentRun admissions after storage authority initialization", async () => {
+    const causalStore = createConversationCausalStore({
+      configDir: path.join(tempDir, "config"),
+      now: () => new Date("2026-08-24T03:00:00.000Z"),
+    });
+    const container = createAppContainer({
+      conversationCausalStore: causalStore,
+      async requestToolApproval() {
+        return { approved: false, reason: "test" };
+      },
+    });
+    for (const suffix of ["owned", "missing"] as const) {
+      await causalStore.claimRequest({
+        requestId: `request:${suffix}`,
+        turnId: `turn:${suffix}`,
+        inputFingerprint: `input:${suffix}`,
+      });
+      await causalStore.admitAgentRun({
+        requestId: `request:${suffix}`,
+        runId: `run:${suffix}`,
+        taskId: `task:${suffix}`,
+      });
+    }
+    await causalStore.settleAgentRunAdmission({
+      requestId: "request:owned",
+      runId: "run:owned",
+      expectedExecutionRevision: 1,
+      state: "started",
+    });
+    await container.agentRunStore().append({
+      id: "run:owned",
+      taskId: "task:owned",
+      taskName: "Owned",
+      skillName: "prompt-task",
+      status: "succeeded",
+      executionRevision: 1,
+      summary: "done",
+      events: [],
+      startedAt: "2026-08-24T02:59:00.000Z",
+      finishedAt: "2026-08-24T03:00:00.000Z",
+    });
+
+    await expect(container.initializeStorageConvergence()).resolves.toEqual({
+      imported: [],
+      existing: [],
+    });
+    await expect(container.reconcileAgentRunAdmissions()).resolves.toEqual({
+      reconciled: 2,
+      settled: 1,
+      aborted: 1,
+    });
+    await expect(causalStore.getRequest("request:owned")).resolves.toMatchObject({
+      agentRunAdmissions: [{
+        state: "settled",
+        finalStatus: "succeeded",
+        executionRevision: 1,
+      }],
+    });
+    await expect(causalStore.getRequest("request:missing")).resolves.toMatchObject({
+      agentRunAdmissions: [{
+        state: "aborted",
+        failureCode: "AGENT_RUN_OWNER_MISSING",
+        executionRevision: 1,
+      }],
+    });
+    await container.shutdownRuntime();
+  });
+
+  it.each(
+    (["json", "sqlite"] as const).flatMap((backend) =>
+      (["succeeded", "paused", "failed", "canceled"] as const).map((status) =>
+        [backend, status] as const,
+      ),
+    ),
+  )(
+    "fails closed across a %s owner revision gap and accepts an exact restarted %s revision",
+    async (backend, status) => {
+      process.env.ZEROX_STORAGE_BACKEND = backend;
+      const causalDir = path.join(tempDir, `causal-${backend}-${status}`);
+      const causalStore = createConversationCausalStore({ configDir: causalDir });
+      for (const suffix of ["gap", "continuous"] as const) {
+        await causalStore.claimRequest({
+          requestId: `request:${suffix}`,
+          turnId: `turn:${suffix}`,
+          inputFingerprint: `input:${suffix}`,
+        });
+        await causalStore.admitAgentRun({
+          requestId: `request:${suffix}`,
+          runId: `run:${suffix}`,
+          taskId: `task:${suffix}`,
+        });
+        await causalStore.settleAgentRunAdmission({
+          requestId: `request:${suffix}`,
+          runId: `run:${suffix}`,
+          expectedExecutionRevision: 1,
+          state: "started",
+        });
+        await causalStore.settleAgentRunAdmission({
+          requestId: `request:${suffix}`,
+          runId: `run:${suffix}`,
+          expectedExecutionRevision: 1,
+          state: "settled",
+          finalStatus: "paused",
+        });
+      }
+      await causalStore.beginAgentRunResume({
+        runId: "run:continuous",
+        taskId: "task:continuous",
+        executionEnvelopeFingerprint: "d".repeat(64),
+      });
+
+      const seedingContainer = createAppContainer({
+        conversationCausalStore: causalStore,
+        async requestToolApproval() {
+          return { approved: false, reason: "test" };
+        },
+      });
+      const runRecord = (
+        suffix: "gap" | "continuous",
+        executionRevision: number,
+        runStatus: "succeeded" | "paused" | "failed" | "canceled",
+      ) => ({
+        id: `run:${suffix}`,
+        taskId: `task:${suffix}`,
+        taskName: `Task ${suffix}`,
+        skillName: "prompt-task",
+        status: runStatus,
+        executionRevision,
+        summary: `${suffix}:${executionRevision}:${runStatus}`,
+        events: [],
+        startedAt: "2026-08-24T02:59:00.000Z",
+        finishedAt: `2026-08-24T03:0${executionRevision}:00.000Z`,
+      });
+      await seedingContainer.agentRunStore().append(runRecord("gap", 1, "paused"));
+      await seedingContainer.agentRunStore().append(runRecord("gap", 2, "paused"));
+      await seedingContainer.agentRunStore().append(runRecord("gap", 3, status));
+      await seedingContainer.agentRunStore().append(
+        runRecord("continuous", 1, "paused"),
+      );
+      await seedingContainer.agentRunStore().append(
+        runRecord("continuous", 2, status),
+      );
+      await seedingContainer.agentRunStore().flushShadowWrites();
+      await seedingContainer.shutdownRuntime();
+
+      const restartedCausalStore = createConversationCausalStore({ configDir: causalDir });
+      const restartedContainer = createAppContainer({
+        conversationCausalStore: restartedCausalStore,
+        async requestToolApproval() {
+          return { approved: false, reason: "test" };
+        },
+      });
+      await restartedContainer.initializeStorageConvergence();
+      await expect(restartedContainer.reconcileAgentRunAdmissions()).resolves.toEqual({
+        reconciled: 2,
+        settled: 1,
+        aborted: 1,
+      });
+      await expect(restartedCausalStore.getRequest("request:gap")).resolves
+        .toMatchObject({
+          agentRunAdmissions: [{
+            executionRevision: 1,
+            state: "aborted",
+            failureCode: "AGENT_RUN_REVISION_GAP",
+          }],
+        });
+      await expect(restartedCausalStore.beginAgentRunResume({
+        runId: "run:gap",
+        taskId: "task:gap",
+        executionEnvelopeFingerprint: "e".repeat(64),
+      })).resolves.toMatchObject({ disposition: "conflict" });
+      await expect(restartedCausalStore.getRequest("request:continuous")).resolves
+        .toMatchObject({
+          agentRunAdmissions: [{
+            executionRevision: 2,
+            state: "settled",
+            finalStatus: status,
+          }],
+        });
+      await expect(restartedCausalStore.beginAgentRunResume({
+        runId: "run:continuous",
+        taskId: "task:continuous",
+        executionEnvelopeFingerprint: "f".repeat(64),
+      })).resolves.toMatchObject({
+        disposition: status === "paused" ? "applied" : "conflict",
+      });
+      await restartedContainer.shutdownRuntime();
+    },
+  );
 
   it("does not instantiate unavailable workflow-backed self improvement by default", () => {
     const container = createAppContainer({
@@ -1073,6 +2777,8 @@ describe("app container goal drafts", () => {
 
   it("allows ordinary git worktree creation when auto approval is enabled", async () => {
     const coordinator = createToolApprovalCoordinator({
+      store: createConversationCausalStore({ configDir: tempDir }),
+      processEpoch: "process:container-test",
       sendToRenderers() {},
       createId: () => "approval_auto_worktree",
       now: () => "2026-06-21T00:00:00.000Z",
@@ -1091,12 +2797,12 @@ describe("app container goal drafts", () => {
     });
 
     await expect(worktreePromise).resolves.toBeDefined();
-    expect(
+    await expect(
       coordinator.resolveApproval({
         id: "approval_auto_worktree",
         approved: true,
       }),
-    ).toBe(false);
+    ).resolves.toBe(false);
   });
 
   it("syncs background goal status changes into chat session summaries before notifying listeners", async () => {
@@ -3169,6 +4875,35 @@ describe("app container goal drafts", () => {
   });
 });
 
+async function addCausalToolLink(
+  store: ReturnType<typeof createConversationCausalStore>,
+  input: {
+    requestId: string;
+    logicalRunId: string;
+    workspaceRunId?: string;
+    invocationId: string;
+  },
+): Promise<void> {
+  await store.claimRequest({
+    requestId: input.requestId,
+    turnId: `turn:${input.requestId}`,
+    inputFingerprint: `fingerprint:${input.requestId}`,
+  });
+  await store.addRefs({
+    requestId: input.requestId,
+    refs: [
+      ...(input.workspaceRunId
+        ? [{ kind: "workspace_run" as const, id: input.workspaceRunId }]
+        : []),
+      {
+        kind: "tool_invocation",
+        runId: input.logicalRunId,
+        id: input.invocationId,
+      },
+    ],
+  });
+}
+
 function planMilestone(
   id: string,
   title: string,
@@ -3221,6 +4956,21 @@ function expectedPlanStatusForGoal(
     return "paused";
   }
   return "executing";
+}
+
+function makeEvidenceAgentRun(id: string) {
+  return {
+    id,
+    taskId: `task:${id}`,
+    taskName: "Evidence task",
+    skillName: "fixture",
+    status: "succeeded" as const,
+    summary: "",
+    events: [],
+    executionRevision: 1,
+    startedAt: "2026-08-25T00:00:00.000Z",
+    finishedAt: "2026-08-25T00:10:00.000Z",
+  };
 }
 
 function createStoredGoal(

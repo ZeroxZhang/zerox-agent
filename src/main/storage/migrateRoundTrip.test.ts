@@ -712,6 +712,52 @@ describe("P1 migration scripts round-trip", () => {
     }
   });
 
+  it("bootstraps SQLite from the latest revision > 1 AgentRun snapshot", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-run-revision-"));
+    try {
+      const paused = {
+        id: "run_revisioned",
+        taskId: "task_revisioned",
+        taskName: "Revisioned task",
+        skillName: "prompt-task",
+        status: "paused",
+        executionRevision: 1,
+        summary: "paused",
+        events: [],
+        startedAt: "2026-08-24T00:00:00.000Z",
+        finishedAt: "2026-08-24T00:00:01.000Z",
+      };
+      const terminal = {
+        ...paused,
+        status: "succeeded",
+        executionRevision: 2,
+        summary: "resumed and completed",
+        finishedAt: "2026-08-24T00:00:02.000Z",
+      };
+      writeFileSync(
+        path.join(dir, "agent-runs.jsonl"),
+        `${JSON.stringify(paused)}\n${JSON.stringify(terminal)}\n`,
+      );
+
+      expect(runMigrationVerify(dir)).toMatch(
+        /"targetCounts":\s*{\s*"runs": 1/,
+      );
+      expect(runMigrationVerify(dir)).toContain('"write": 0');
+
+      const db = new Database(path.join(dir, "zerox.db"), { readonly: true });
+      try {
+        const row = db
+          .prepare("SELECT payload FROM runs WHERE id = ?")
+          .get(terminal.id) as { payload: string };
+        expect(JSON.parse(row.payload)).toEqual(terminal);
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it("rejects stale JSON when SQLite has a newer P97 generation", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "zerox-mig-generation-"));
     try {

@@ -1,29 +1,50 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import type {
-  ChatAttachmentMetadata,
-  ChatAttachmentInput,
-  ChatMessageSearchOptions,
-  ChatMessageSearchResult,
-  ChatMessageRecord,
-  ChatSessionGoalSummary,
-  ChatSessionContextSnapshot,
-  ChatSessionActivitySnapshot,
-  ChatSessionListItem,
-  ChatSessionRecord,
-  ChatSessionTranscriptPage,
-  ChatSessionTranscriptPageOptions,
-  ChatSessionTokenUsage,
-  ChatTaskStatusEvent,
-  ChatWorkspaceSummary,
-  SkillInputField,
-  SkillInputFieldType,
-  SkillPendingInputState,
-  SkillUserInputRequest,
+import {
+  sanitizeSkillUserInputRequest,
+  type ChatAttachmentMetadata,
+  type ChatAttachmentInput,
+  type ChatMessageSearchOptions,
+  type ChatMessageSearchResult,
+  type ChatMessageRecord,
+  type ChatSessionGoalSummary,
+  type ChatSessionContextSnapshot,
+  type ChatSessionActivitySnapshot,
+  type ChatSessionListItem,
+  type ChatSessionRecord,
+  type ChatSessionTranscriptPage,
+  type ChatSessionTranscriptPageOptions,
+  type ChatSessionTokenUsage,
+  type ChatTaskStatusEvent,
+  type ChatTurnSettlementStatus,
+  type ChatWorkspaceSummary,
+  type SkillInputField,
+  type SkillInputFieldType,
+  type SkillPendingInputState,
+  type SkillUserInputRequest,
 } from "../shared/chat";
 import type { ChatOutputPart } from "../shared/chatOutput";
+import {
+  createConversationSourcePage,
+  createConversationSourceQueryHash,
+  createConversationSourceRevision,
+  normalizeConversationSourcePageLimit,
+  parseConversationSourceCursor,
+  type ConversationChatActivityRecord,
+  type ConversationSourcePage,
+  type ConversationSourcePageOptions,
+} from "../shared/conversationEvidence";
 import {
   deriveChatSessionWork,
   getActiveGoalSummary,
@@ -43,10 +64,14 @@ type StoredChatSessions = {
 };
 
 const SESSION_SUMMARY_PREVIEW_MAX_CHARS = 160;
+const LEGACY_CHAT_SOURCE_MAX_BYTES = 64 * 1024 * 1024;
 
 export type AppendChatMessageInput = {
   sessionId?: string;
   requestId?: string;
+  turnId?: string;
+  causalAttempt?: number;
+  causalAttemptId?: string;
   role: ChatMessageRecord["role"];
   content: string;
   outputParts?: ChatOutputPart[];
@@ -54,6 +79,7 @@ export type AppendChatMessageInput = {
   executedRunId?: string;
   goalId?: string;
   goalEventRef?: string;
+  turnSettlementStatus?: ChatTurnSettlementStatus;
   attachments?: ChatAttachmentMetadata[];
   workspaceId?: string;
   workspaceSummary?: ChatWorkspaceSummary;
@@ -74,6 +100,10 @@ export type ChatSessionStore = {
     sessionId: string,
     options?: ChatSessionTranscriptPageOptions,
   ): Promise<ChatSessionTranscriptPage | null>;
+  getActivityPage?(
+    sessionId: string,
+    options?: ConversationSourcePageOptions,
+  ): Promise<ConversationSourcePage<ConversationChatActivityRecord>>;
   appendMessage(input: AppendChatMessageInput): Promise<AppendChatMessageResult>;
   rename(sessionId: string, title: string): Promise<ChatSessionRecord | null>;
   archive(sessionId: string): Promise<ChatSessionRecord | null>;
@@ -253,6 +283,73 @@ function createJsonChatSessionStore(options: {
       return pageJsonTranscript(session, pageOptions);
     },
 
+    async getActivityPage(sessionId, pageOptions) {
+      await mutationQueue;
+      throwIfPageAborted(pageOptions?.signal);
+      let handle: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        handle = await open(
+          sessionsPath,
+          constants.O_RDONLY | constants.O_NOFOLLOW,
+        );
+        const sourceStat = await handle.stat();
+        if (
+          !sourceStat.isFile()
+          || sourceStat.nlink !== 1
+          || sourceStat.size > LEGACY_CHAT_SOURCE_MAX_BYTES
+        ) {
+          return unavailableChatActivityPage(
+            sessionId,
+            "legacy_json_source_unavailable",
+          );
+        }
+        const raw = await handle.readFile({ encoding: "utf8" });
+        const [afterRead, currentPath] = await Promise.all([
+          handle.stat(),
+          lstat(sessionsPath),
+        ]);
+        if (
+          !afterRead.isFile()
+          || afterRead.nlink !== 1
+          || afterRead.dev !== sourceStat.dev
+          || afterRead.ino !== sourceStat.ino
+          || afterRead.size !== sourceStat.size
+          || afterRead.mtimeMs !== sourceStat.mtimeMs
+          || !currentPath.isFile()
+          || currentPath.isSymbolicLink()
+          || currentPath.nlink !== 1
+          || currentPath.dev !== sourceStat.dev
+          || currentPath.ino !== sourceStat.ino
+          || currentPath.size !== sourceStat.size
+        ) {
+          return unavailableChatActivityPage(
+            sessionId,
+            "legacy_json_source_unavailable",
+          );
+        }
+        const stored = JSON.parse(raw) as
+          StoredChatSessions;
+        throwIfPageAborted(pageOptions?.signal);
+        const session = Array.isArray(stored.sessions)
+          ? stored.sessions
+            .map(normalizeStoredSession)
+            .find((candidate) => candidate.id === sessionId)
+          : undefined;
+        if (!session) {
+          return unavailableChatActivityPage(sessionId, "session_not_found");
+        }
+        return pageJsonActivity(session, pageOptions);
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        return unavailableChatActivityPage(
+          sessionId,
+          "legacy_json_source_unavailable",
+        );
+      } finally {
+        await handle?.close();
+      }
+    },
+
     async appendMessage(input) {
       return serializeMutation(mutationQueue, (nextQueue) => {
         mutationQueue = nextQueue;
@@ -279,9 +376,15 @@ function createJsonChatSessionStore(options: {
         const workspaceSummary =
           normalizeChatWorkspaceSummary(input.workspaceSummary) ??
           existingSession?.workspaceSummary;
+        const turnId = normalizeOptionalString(input.turnId);
+        const causalAttempt = normalizeCausalAttempt(input.causalAttempt);
+        const causalAttemptId = normalizeOptionalString(input.causalAttemptId);
         const message: ChatMessageRecord = {
           id: createId(),
           ...(input.requestId ? { requestId: input.requestId } : {}),
+          ...(turnId ? { turnId } : {}),
+          ...(causalAttempt !== undefined ? { causalAttempt } : {}),
+          ...(causalAttemptId ? { causalAttemptId } : {}),
           role: input.role,
           content,
           ...(input.outputParts?.length ? { outputParts: input.outputParts } : {}),
@@ -291,6 +394,9 @@ function createJsonChatSessionStore(options: {
           ...(input.executedRunId ? { executedRunId: input.executedRunId } : {}),
           ...(input.goalId ? { goalId: input.goalId } : {}),
           ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
+          ...(input.turnSettlementStatus
+            ? { turnSettlementStatus: input.turnSettlementStatus }
+            : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           createdAt: timestamp,
         };
@@ -383,8 +489,19 @@ function createJsonChatSessionStore(options: {
 
     async appendActivityEvent(sessionId, event, eventOptions) {
       return updateSessionById(sessionId, (session) => {
-        const normalizedEvent = normalizeStatusEvent(event);
+        const normalizedEvent = normalizeChatTaskStatusEventForPersistence(event);
         const previousEvents = session.activity?.statusEvents ?? [];
+        const priorSettlement = normalizedEvent.settlementId
+          ? previousEvents.find(
+              (candidate) => candidate.settlementId === normalizedEvent.settlementId,
+            )
+          : undefined;
+        if (priorSettlement) {
+          if (JSON.stringify(priorSettlement) !== JSON.stringify(normalizedEvent)) {
+            throw new Error("Chat required settlement id conflicts with persisted activity.");
+          }
+          return session;
+        }
         const statusEvents = [...previousEvents, normalizedEvent].slice(-80);
         const selectedSkillName =
           eventOptions?.selectedSkillName ??
@@ -621,6 +738,21 @@ function createSqliteChatSessionStore(options: {
       return repository.getTranscriptPage(sessionId, pageOptions);
     },
 
+    async getActivityPage(sessionId, pageOptions) {
+      await mutationQueue;
+      await ensureReady();
+      throwIfPageAborted(pageOptions?.signal);
+      try {
+        if (!repository.getProjection(sessionId)) {
+          return unavailableChatActivityPage(sessionId, "session_not_found");
+        }
+        return repository.getActivityPage(sessionId, pageOptions);
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        return unavailableChatActivityPage(sessionId, "sqlite_query_failed");
+      }
+    },
+
     async appendMessage(input) {
       return serialize(async () => {
         const existingProjection = input.sessionId
@@ -652,9 +784,15 @@ function createSqliteChatSessionStore(options: {
         const workspaceSummary =
           normalizeChatWorkspaceSummary(input.workspaceSummary) ??
           existingProjection?.session.workspaceSummary;
+        const turnId = normalizeOptionalString(input.turnId);
+        const causalAttempt = normalizeCausalAttempt(input.causalAttempt);
+        const causalAttemptId = normalizeOptionalString(input.causalAttemptId);
         const message: ChatMessageRecord = {
           id: createId(),
           ...(input.requestId ? { requestId: input.requestId } : {}),
+          ...(turnId ? { turnId } : {}),
+          ...(causalAttempt !== undefined ? { causalAttempt } : {}),
+          ...(causalAttemptId ? { causalAttemptId } : {}),
           role: input.role,
           content,
           ...(input.outputParts?.length
@@ -669,6 +807,9 @@ function createSqliteChatSessionStore(options: {
           ...(input.goalId ? { goalId: input.goalId } : {}),
           ...(input.goalEventRef
             ? { goalEventRef: input.goalEventRef }
+            : {}),
+          ...(input.turnSettlementStatus
+            ? { turnSettlementStatus: input.turnSettlementStatus }
             : {}),
           ...(input.attachments?.length
             ? { attachments: input.attachments }
@@ -812,9 +953,20 @@ function createSqliteChatSessionStore(options: {
       return serialize(async () => {
         const projection = repository.getProjection(sessionId);
         if (!projection) return null;
-        const normalizedEvent = normalizeStatusEvent(event);
+        const normalizedEvent = normalizeChatTaskStatusEventForPersistence(event);
         const previousEvents =
           projection.session.activity?.statusEvents ?? [];
+        const priorSettlement = normalizedEvent.settlementId
+          ? previousEvents.find(
+              (candidate) => candidate.settlementId === normalizedEvent.settlementId,
+            )
+          : undefined;
+        if (priorSettlement) {
+          if (JSON.stringify(priorSettlement) !== JSON.stringify(normalizedEvent)) {
+            throw new Error("Chat required settlement id conflicts with persisted activity.");
+          }
+          return repository.getSession(sessionId);
+        }
         const statusEvents = [...previousEvents, normalizedEvent].slice(-80);
         const selectedSkillName =
           eventOptions?.selectedSkillName ??
@@ -932,6 +1084,113 @@ function pageJsonTranscript(
       hasMoreBefore: startIndex > 0,
     },
   };
+}
+
+function pageJsonActivity(
+  session: ChatSessionRecord,
+  options?: ConversationSourcePageOptions,
+): ConversationSourcePage<ConversationChatActivityRecord> {
+  const sourceId = session.id;
+  const queryHash = createConversationSourceQueryHash({
+    source: "chat_activity",
+    sourceId,
+    filters: { source: "legacy_tail" },
+  });
+  const events = session.activity?.statusEvents ?? [];
+  const sourceRevision = createConversationSourceRevision({
+    source: "chat_activity",
+    sourceId,
+    authority: {
+      source: "legacy_json_tail",
+      updatedAt: session.activity?.updatedAt ?? session.updatedAt,
+      events,
+    },
+  });
+  const cursor = parseConversationSourceCursor(options?.cursor, {
+    source: "chat_activity",
+    sourceId,
+    queryHash,
+  });
+  if (
+    cursor.kind === "incompatible"
+    || (
+      cursor.kind === "position"
+      && (
+        cursor.sourceRevision !== sourceRevision
+        || cursor.position > events.length
+      )
+    )
+  ) {
+    return createConversationSourcePage({
+      source: "chat_activity",
+      sourceId,
+      queryHash,
+      sourceRevision,
+      status: "incompatible",
+      reasonCode: "source_cursor_mismatch",
+      records: [],
+    });
+  }
+  const limit = normalizeConversationSourcePageLimit(options?.limit);
+  const start = cursor.position;
+  const selected = events.slice(start, start + limit);
+  const records = selected.map((event, index) => ({
+    eventId: `legacy:${createConversationSourceRevision({
+      source: "chat_activity",
+      sourceId,
+      authority: {
+        index: start + index,
+        requestId: event.requestId ?? null,
+        sequence: event.sequence ?? null,
+        state: event.state,
+        createdAt: event.createdAt,
+        message: event.message,
+      },
+    })}`,
+    sequence: event.sequence ?? start + index + 1,
+    event,
+    legacy: true,
+  }));
+  const nextPosition = start + selected.length;
+  return createConversationSourcePage({
+    source: "chat_activity",
+    sourceId,
+    queryHash,
+    sourceRevision,
+    status: "partial",
+    reasonCode: "legacy_chat_activity_tail",
+    records,
+    ...(nextPosition < events.length ? { nextPosition } : {}),
+  });
+}
+
+function unavailableChatActivityPage(
+  sessionId: string,
+  reasonCode: string,
+): ConversationSourcePage<ConversationChatActivityRecord> {
+  return createConversationSourcePage({
+    source: "chat_activity",
+    sourceId: sessionId,
+    queryHash: createConversationSourceQueryHash({
+      source: "chat_activity",
+      sourceId: sessionId,
+      filters: null,
+    }),
+    sourceRevision: "unavailable",
+    status: "unavailable",
+    reasonCode,
+    records: [],
+  });
+}
+
+function throwIfPageAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new DOMException("Chat activity page query was canceled.", "AbortError");
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function toListItemFromProjection(
@@ -1165,7 +1424,9 @@ function normalizeActivitySnapshot(
   snapshot: ChatSessionActivitySnapshot,
 ): ChatSessionActivitySnapshot {
   const statusEvents = Array.isArray(snapshot.statusEvents)
-    ? snapshot.statusEvents.map(normalizeStatusEvent).filter(Boolean)
+    ? snapshot.statusEvents
+        .map(normalizeChatTaskStatusEventForPersistence)
+        .filter(Boolean)
     : [];
   return {
     updatedAt: String(snapshot.updatedAt ?? new Date(0).toISOString()),
@@ -1176,7 +1437,9 @@ function normalizeActivitySnapshot(
   };
 }
 
-function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
+export function normalizeChatTaskStatusEventForPersistence(
+  event: ChatTaskStatusEvent,
+): ChatTaskStatusEvent {
   const state = normalizeStatusEventState(event.state);
   const inputRequest = normalizeSkillUserInputRequest(event.inputRequest);
   const pendingSkillInput = normalizeSkillPendingInputState(
@@ -1184,6 +1447,12 @@ function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
   );
   return {
     sessionId: String(event.sessionId ?? ""),
+    ...(normalizeOptionalString(event.settlementId)
+      ? { settlementId: normalizeOptionalString(event.settlementId) }
+      : {}),
+    ...(typeof event.domainStateAvailable === "boolean"
+      ? { domainStateAvailable: event.domainStateAvailable }
+      : {}),
     ...(normalizeOptionalString(event.requestId)
       ? { requestId: normalizeOptionalString(event.requestId) }
       : {}),
@@ -1205,6 +1474,7 @@ function normalizeStatusEvent(event: ChatTaskStatusEvent): ChatTaskStatusEvent {
     ...(event.toolInvocationId
       ? { toolInvocationId: String(event.toolInvocationId) }
       : {}),
+    ...(event.approvalId ? { approvalId: String(event.approvalId) } : {}),
     ...(event.toolName ? { toolName: String(event.toolName) } : {}),
     ...(event.toolSource ? { toolSource: String(event.toolSource) } : {}),
     ...(event.resultRef ? { resultRef: String(event.resultRef) } : {}),
@@ -1391,7 +1661,7 @@ function normalizeSkillUserInputRequest(
         .filter((field): field is SkillInputField => Boolean(field))
     : [];
 
-  return {
+  return sanitizeSkillUserInputRequest({
     id: String(request.id ?? ""),
     executionId: String(request.executionId ?? ""),
     sessionId: String(request.sessionId ?? ""),
@@ -1400,7 +1670,7 @@ function normalizeSkillUserInputRequest(
     reason: String(request.reason ?? ""),
     fields,
     createdAt: String(request.createdAt ?? new Date(0).toISOString()),
-  };
+  });
 }
 
 function normalizeSkillPendingInputState(
@@ -1432,11 +1702,16 @@ function normalizeSkillPendingInputState(
   return {
     inputRequestId,
     status:
-      pending.status === "completed"
-        ? "completed"
-        : pending.status === "processing"
-          ? "processing"
-          : "pending",
+      pending.status === "processing"
+      || pending.status === "completed"
+      || pending.status === "failed"
+      || pending.status === "canceled"
+      || pending.status === "superseded"
+        ? pending.status
+        : "pending",
+    ...(normalizeOptionalString(pending.settlementId)
+      ? { settlementId: normalizeOptionalString(pending.settlementId) }
+      : {}),
     ...(inputRequest ? { inputRequest } : {}),
     sessionId,
     requestId,
@@ -1582,6 +1857,15 @@ function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
     ...(normalizeOptionalString(message.requestId)
       ? { requestId: normalizeOptionalString(message.requestId) }
       : {}),
+    ...(normalizeOptionalString(message.turnId)
+      ? { turnId: normalizeOptionalString(message.turnId) }
+      : {}),
+    ...(normalizeCausalAttempt(message.causalAttempt) !== undefined
+      ? { causalAttempt: normalizeCausalAttempt(message.causalAttempt) }
+      : {}),
+    ...(normalizeOptionalString(message.causalAttemptId)
+      ? { causalAttemptId: normalizeOptionalString(message.causalAttemptId) }
+      : {}),
     role,
     content: String(message.content ?? ""),
     ...(outputParts?.length ? { outputParts } : {}),
@@ -1591,9 +1875,29 @@ function normalizeStoredMessage(message: ChatMessageRecord): ChatMessageRecord {
     ...(message.executedRunId ? { executedRunId: String(message.executedRunId) } : {}),
     ...(message.goalId ? { goalId: String(message.goalId) } : {}),
     ...(message.goalEventRef ? { goalEventRef: String(message.goalEventRef) } : {}),
+    ...(isChatTurnSettlementStatus(message.turnSettlementStatus)
+      ? { turnSettlementStatus: message.turnSettlementStatus }
+      : {}),
     ...(attachments.length ? { attachments } : {}),
     createdAt: String(message.createdAt ?? new Date(0).toISOString()),
   };
+}
+
+function isChatTurnSettlementStatus(
+  value: unknown,
+): value is ChatTurnSettlementStatus {
+  return (
+    value === "succeeded"
+    || value === "paused"
+    || value === "failed"
+    || value === "canceled"
+  );
+}
+
+function normalizeCausalAttempt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1
+    ? Math.floor(value)
+    : undefined;
 }
 
 function normalizeOutputParts(

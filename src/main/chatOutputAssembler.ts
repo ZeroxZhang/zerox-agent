@@ -14,10 +14,18 @@ import {
   type ChatToolCallPart,
   type ChatToolResultPart,
 } from "../shared/chatOutput";
-import type { SkillUserInputRequest } from "../shared/chat";
+import {
+  sanitizeSkillUserInputRequest,
+  type SkillUserInputRequest,
+} from "../shared/chat";
+import {
+  redactCredentials,
+  redactCredentialString,
+} from "../shared/credentialRedaction";
 
 export type ChatOutputAssembler = {
   appendText(text: string): ChatTextPart | undefined;
+  resetText(): void;
   setFinalText(text: string): ChatTextPart | undefined;
   appendToolCall(input: {
     toolCallId: string;
@@ -64,6 +72,7 @@ export function createChatOutputAssembler(
 ): ChatOutputAssembler {
   const parts: ChatOutputPart[] = [];
   const toolCalls = new Map<string, ToolCallBuffer>();
+  const rawTextByPartId = new Map<string, string>();
 
   function pushPart<T extends ChatOutputPart>(part: T): T {
     parts.push(part);
@@ -75,24 +84,40 @@ export function createChatOutputAssembler(
       return undefined;
     }
 
-    const lastPart = parts.at(-1);
-    if (lastPart?.type === "text") {
-      lastPart.text += text;
-      return clonePart(lastPart);
+    const existingPart = parts.find(
+      (part): part is ChatTextPart => part.type === "text",
+    );
+    if (existingPart) {
+      const accumulated =
+        `${rawTextByPartId.get(existingPart.id) ?? existingPart.text}${text}`;
+      rawTextByPartId.set(existingPart.id, accumulated);
+      existingPart.text = redactCredentialString(accumulated);
+      return clonePart(existingPart);
     }
 
-    return pushPart({
+    const part: ChatTextPart = {
       id: `text_${parts.length + 1}`,
       type: "text",
-      text,
+      text: redactCredentialString(text),
       format: "markdown",
       createdAt: now(),
-    });
+    };
+    rawTextByPartId.set(part.id, text);
+    return pushPart(part);
   }
 
   return {
     appendText(text) {
       return appendOrUpdateText(text);
+    },
+
+    resetText() {
+      for (let index = parts.length - 1; index >= 0; index -= 1) {
+        const part = parts[index];
+        if (part?.type !== "text") continue;
+        rawTextByPartId.delete(part.id);
+        parts.splice(index, 1);
+      }
     },
 
     setFinalText(text) {
@@ -105,10 +130,11 @@ export function createChatOutputAssembler(
         const part: ChatTextPart = {
           id: "text_1",
           type: "text",
-          text,
+          text: redactCredentialString(text),
           format: "markdown",
           createdAt: now(),
         };
+        rawTextByPartId.set(part.id, text);
         parts.unshift(part);
         return clonePart(part);
       }
@@ -118,9 +144,14 @@ export function createChatOutputAssembler(
         return undefined;
       }
 
-      firstTextPart.text = text;
+      const accumulatedRaw = rawTextByPartId.get(firstTextPart.id)
+        ?? firstTextPart.text;
+      const finalRaw = accumulatedRaw.endsWith(text) ? accumulatedRaw : text;
+      firstTextPart.text = redactCredentialString(finalRaw);
+      rawTextByPartId.set(firstTextPart.id, finalRaw);
       for (let index = parts.length - 1; index > firstTextIndex; index -= 1) {
         if (parts[index]?.type === "text") {
+          rawTextByPartId.delete(parts[index].id);
           parts.splice(index, 1);
         }
       }
@@ -145,7 +176,7 @@ export function createChatOutputAssembler(
         existing.argumentsText = accumulatedArguments;
         existing.part.toolName = input.toolName ?? existing.part.toolName;
         existing.part.toolSource = input.toolSource ?? existing.part.toolSource;
-        existing.part.argsPreview = maskPreviewSecrets(argsPreview);
+        existing.part.argsPreview = sanitizePreview(argsPreview);
         return clonePart(existing.part);
       }
 
@@ -156,7 +187,7 @@ export function createChatOutputAssembler(
         toolName: input.toolName ?? "tool",
         ...(input.toolSource ? { toolSource: input.toolSource } : {}),
         ...(argsPreview !== undefined
-          ? { argsPreview: maskPreviewSecrets(argsPreview) }
+          ? { argsPreview: sanitizePreview(argsPreview) }
           : {}),
         createdAt: now(),
       };
@@ -178,12 +209,14 @@ export function createChatOutputAssembler(
         ok: input.ok,
         ...(input.ok
           ? input.resultPreview !== undefined
-            ? { resultPreview: maskPreviewSecrets(input.resultPreview) }
+            ? { resultPreview: sanitizePreview(input.resultPreview) }
             : {}
           : {}),
-        ...(!input.ok && input.error ? { error: input.error } : {}),
+        ...(!input.ok && input.error
+          ? { error: redactCredentialString(input.error) }
+          : {}),
         ...(!input.ok && input.resultPreview !== undefined
-          ? { resultPreview: maskPreviewSecrets(input.resultPreview) }
+          ? { resultPreview: sanitizePreview(input.resultPreview) }
           : {}),
         createdAt: now(),
       }));
@@ -191,7 +224,7 @@ export function createChatOutputAssembler(
       for (const derivedPart of deriveStructuredToolParts({
         toolCallId: input.toolCallId,
         toolName: input.toolName,
-        resultPreview: input.resultPreview,
+        resultPreview: sanitizePreview(input.resultPreview),
         now,
       })) {
         emitted.push(pushPart(derivedPart));
@@ -205,8 +238,10 @@ export function createChatOutputAssembler(
         id: `ledger_${parts.length + 1}`,
         type: "ledger_event",
         status: input.status,
-        title: input.title,
-        ...(input.detail ? { detail: input.detail } : {}),
+        title: redactCredentialString(input.title),
+        ...(input.detail
+          ? { detail: redactCredentialString(input.detail) }
+          : {}),
         ...(input.toolName ? { toolName: input.toolName } : {}),
         createdAt: now(),
       });
@@ -220,20 +255,21 @@ export function createChatOutputAssembler(
         toolName: input.toolName,
         riskLevel: input.riskLevel,
         ...(input.argsPreview !== undefined
-          ? { argsPreview: maskPreviewSecrets(input.argsPreview) }
+          ? { argsPreview: sanitizePreview(input.argsPreview) }
           : {}),
         createdAt: now(),
       });
     },
 
     appendInputRequest(inputRequest) {
+      const safeInputRequest = sanitizeSkillUserInputRequest(inputRequest);
       return pushPart({
-        id: `input_${inputRequest.id}`,
+        id: `input_${safeInputRequest.id}`,
         type: "input_request",
-        inputRequestId: inputRequest.id,
-        skillName: inputRequest.skillName,
-        reason: inputRequest.reason,
-        fields: inputRequest.fields.map((field) => ({
+        inputRequestId: safeInputRequest.id,
+        skillName: safeInputRequest.skillName,
+        reason: safeInputRequest.reason,
+        fields: safeInputRequest.fields.map((field) => ({
           name: field.name,
           label: field.label,
           required: field.required,
@@ -253,8 +289,8 @@ export function createChatOutputAssembler(
         id: `diagnostic_${parts.length + 1}`,
         type: "diagnostic",
         severity: input.severity,
-        title: input.title,
-        message: input.message,
+        title: redactCredentialString(input.title),
+        message: redactCredentialString(input.message),
         ...(input.relatedToolCallId
           ? { relatedToolCallId: input.relatedToolCallId }
           : {}),
@@ -266,6 +302,10 @@ export function createChatOutputAssembler(
       return parts.map((part) => clonePart(part));
     },
   };
+}
+
+function sanitizePreview(value: unknown): unknown {
+  return maskPreviewSecrets(redactCredentials(value));
 }
 
 function normalizeArgsPreview(argumentsText: string): unknown {

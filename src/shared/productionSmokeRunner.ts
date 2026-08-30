@@ -335,7 +335,12 @@ export async function runProductionSmoke(options: {
       await run(
         "electron_app",
         electronBin,
-        ["."],
+        [
+          ...(env.ZEROX_V392_OUTER_SANDBOX === "1"
+            ? ["--no-sandbox"]
+            : []),
+          ".",
+        ],
         appEnv,
         resolveElectronAppTimeoutMs(appEnv),
       )

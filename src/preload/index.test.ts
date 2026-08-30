@@ -7,6 +7,10 @@ describe("preload bridge", () => {
     path.join(process.cwd(), "src/preload/index.ts"),
     "utf8",
   );
+  const mainSource = readFileSync(
+    path.join(process.cwd(), "src/main/main.ts"),
+    "utf8",
+  );
 
   it("does not import shared modules at runtime in the sandboxed preload", () => {
     const sharedImports = preloadSource
@@ -23,6 +27,16 @@ describe("preload bridge", () => {
     expect(runtimeSharedImports).toEqual([]);
     expect(preloadSource).toContain("import type");
     expect(preloadSource).toContain("const KERNEL_IPC");
+  });
+
+  it("exposes a local default-off Chat disclosure mode without adding IPC authority", () => {
+    expect(preloadSource).toContain("getConversationDisclosureMode");
+    expect(preloadSource).toContain(
+      'process.argv.includes("--zerox-chat-disclosure=projected")',
+    );
+    expect(preloadSource).toContain('? "projected"');
+    expect(preloadSource).toContain(': "legacy"');
+    expect(mainSource).not.toContain("conversationDisclosure:getMode");
   });
 
   it("exposes chat session management operations through stable IPC channels", () => {
@@ -71,6 +85,27 @@ describe("preload bridge", () => {
     expect(preloadSource).toContain(
       'ipcRenderer.invoke("chatSessions:getTranscriptPage"',
     );
+  });
+
+  it("exposes a pull snapshot for subscribe-first tool approval recovery", () => {
+    expect(preloadSource).toContain("getPendingToolApprovals");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("toolApproval:listPending")',
+    );
+    expect(mainSource).toContain('ipcMain.handle("toolApproval:listPending"');
+    expect(mainSource).toContain("return observeAcceptanceIpc(");
+    expect(mainSource).toContain('"toolApproval:listPending",');
+    expect(mainSource).toContain(
+      "() => toolApprovalCoordinator.pendingSnapshot()",
+    );
+    const handlerStart = mainSource.indexOf(
+      'ipcMain.handle("toolApproval:listPending"',
+    );
+    const handlerEnd = mainSource.indexOf("});", handlerStart);
+    expect(mainSource.slice(handlerStart, handlerEnd)).toContain(
+      "assertTrustedRendererIpcEvent(event)",
+    );
+    expect(mainSource).not.toContain("toolApprovalCoordinator.republishPending()");
   });
 
   it("exposes app update state, retry, install, and event operations", () => {

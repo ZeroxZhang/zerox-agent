@@ -2,9 +2,20 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import {
+  createConversationSourcePage,
+  createConversationSourceQueryHash,
+  parseConversationSourceCursor,
+  normalizeConversationSourcePageLimit,
+  type ConversationSourcePage,
+  type ConversationSourcePageOptions,
+} from "../shared/conversationEvidence";
 import type { StorageBackend, RunRepository, Storage } from "../shared/storageContract";
 import { createRunRepository } from "./storage/repositories/runRepository";
-import { readRecoverableJsonl } from "./jsonlRecovery";
+import {
+  readRecoverableJsonl,
+  readRecoverableJsonlPage,
+} from "./jsonlRecovery";
 import {
   createFailureVisibleSerialQueue,
   type PersistenceQueueDrainOptions,
@@ -23,6 +34,10 @@ export type AgentTrajectoryStore = {
     options?: { signal?: AbortSignal },
   ): Promise<{ appended: boolean; event: AgentTrajectoryEvent }>;
   list(runId: string): Promise<AgentTrajectoryEvent[]>;
+  getPage?(
+    runId: string,
+    options?: ConversationSourcePageOptions,
+  ): Promise<ConversationSourcePage<AgentTrajectoryEvent>>;
   flushShadowWrites(options?: PersistenceQueueDrainOptions): Promise<void>;
 };
 
@@ -86,6 +101,9 @@ export function createAgentTrajectoryStore(
     },
     async list(runId) {
       return readRecoverableJsonl<AgentTrajectoryEvent>(trajectoryPath(runId));
+    },
+    async getPage(runId, pageOptions) {
+      return readJsonTrajectoryPage(trajectoryPath(runId), runId, pageOptions);
     },
     async flushShadowWrites() {
       return;
@@ -172,10 +190,142 @@ export function createAgentTrajectoryStore(
     async list(runId) {
       return repo.getTrajectory(runId);
     },
+    async getPage(runId, pageOptions) {
+      try {
+        return repo.getTrajectoryPage(runId, pageOptions);
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        return unavailableTrajectoryPage(runId, "sqlite_query_failed");
+      }
+    },
     async flushShadowWrites(flushOptions) {
       await shadowQueue.drain(flushOptions);
     },
   };
+}
+
+async function readJsonTrajectoryPage(
+  filePath: string,
+  runId: string,
+  options?: ConversationSourcePageOptions,
+): Promise<ConversationSourcePage<AgentTrajectoryEvent>> {
+  const queryHash = createConversationSourceQueryHash({
+    source: "trajectory",
+    sourceId: runId,
+    filters: null,
+  });
+  const cursor = parseConversationSourceCursor(options?.cursor, {
+    source: "trajectory",
+    sourceId: runId,
+    queryHash,
+  });
+  if (cursor.kind === "incompatible") {
+    return createConversationSourcePage({
+      source: "trajectory",
+      sourceId: runId,
+      queryHash,
+      sourceRevision: "jsonl:unknown",
+      status: "incompatible",
+      reasonCode: cursor.reasonCode,
+      records: [],
+    });
+  }
+  const pinned = cursor.kind === "position"
+    ? parseJsonlRevision(cursor.sourceRevision)
+    : undefined;
+  if (cursor.kind === "position" && !pinned) {
+    return createConversationSourcePage({
+      source: "trajectory",
+      sourceId: runId,
+      queryHash,
+      sourceRevision: "jsonl:unknown",
+      status: "incompatible",
+      reasonCode: "source_cursor_mismatch",
+      records: [],
+    });
+  }
+  try {
+    const page = await readRecoverableJsonlPage<AgentTrajectoryEvent>(
+      filePath,
+      {
+        offset: cursor.position,
+        limit: normalizeConversationSourcePageLimit(options?.limit),
+        ...(pinned
+          ? {
+              endOffset: pinned.endOffset,
+              expectedIdentity: {
+                dev: pinned.dev,
+                ino: pinned.ino,
+              },
+            }
+          : {}),
+        signal: options?.signal,
+      },
+    );
+    if (
+      cursor.kind === "position"
+      && page.sourceRevision !== cursor.sourceRevision
+    ) {
+      return createConversationSourcePage({
+        source: "trajectory",
+        sourceId: runId,
+        queryHash,
+        sourceRevision: page.sourceRevision,
+        status: "incompatible",
+        reasonCode: "source_cursor_mismatch",
+        records: [],
+      });
+    }
+    return createConversationSourcePage({
+      source: "trajectory",
+      sourceId: runId,
+      queryHash,
+      sourceRevision: page.sourceRevision,
+      status: page.status,
+      ...(page.reasonCode ? { reasonCode: page.reasonCode } : {}),
+      records: page.records,
+      ...(page.nextOffset !== undefined
+        ? { nextPosition: page.nextOffset }
+        : {}),
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    return unavailableTrajectoryPage(runId, "jsonl_read_failed");
+  }
+}
+
+function unavailableTrajectoryPage(
+  runId: string,
+  reasonCode: string,
+): ConversationSourcePage<AgentTrajectoryEvent> {
+  return createConversationSourcePage({
+    source: "trajectory",
+    sourceId: runId,
+    queryHash: createConversationSourceQueryHash({
+      source: "trajectory",
+      sourceId: runId,
+      filters: null,
+    }),
+    sourceRevision: "unavailable",
+    status: "unavailable",
+    reasonCode,
+    records: [],
+  });
+}
+
+function parseJsonlRevision(value: string) {
+  const match = /^jsonl:(\d+):(\d+):(\d+):\d+:\d+$/.exec(value);
+  return match
+    ? {
+        dev: match[1]!,
+        ino: match[2]!,
+        endOffset: Number(match[3]),
+      }
+    : null;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function createPublicationEvent(

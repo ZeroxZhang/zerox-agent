@@ -479,13 +479,10 @@ function findResumableSkillInputRequest(
       return undefined;
     }
     const inputRequest = event.inputRequest ?? pending.inputRequest;
-    if (
-      (pending.status === "pending" ||
-        pending.status === "processing") &&
-      inputRequest
-    ) {
+    if (pending.status === "pending" && inputRequest) {
       return inputRequest;
     }
+    return undefined;
   }
   return undefined;
 }

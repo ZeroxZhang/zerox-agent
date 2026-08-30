@@ -11,6 +11,7 @@ function makeRun(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
     taskName: "Test task",
     skillName: "test",
     status: "running",
+    executionRevision: 1,
     summary: "",
     events: [],
     startedAt: "2026-06-19T00:00:00.000Z",
@@ -52,14 +53,113 @@ describe("RunRepository", () => {
     storage.close();
   });
 
-  it("create upserts on conflict (idempotent)", async () => {
+  it("enforces the AgentRun revision fence at the SQLite authority", async () => {
     const storage = await createInMemoryStorage();
     const runs = createRunRepository(storage);
-    runs.create(makeRun({ summary: "v1" }));
-    runs.create(makeRun({ summary: "v2", status: "succeeded" }));
-    const got = runs.get("run-1");
-    expect(got?.summary).toBe("v2");
-    expect(got?.status).toBe("succeeded");
+    const paused = makeRun({ status: "paused", summary: "v1" });
+    expect(runs.create(paused)).toEqual(paused);
+    expect(runs.create(structuredClone(paused))).toEqual(paused);
+    expect(() => runs.create({ ...paused, summary: "same revision mutation" }))
+      .toThrow("任务运行失败，已保留可审计的终态记录。");
+
+    const resumed = {
+      ...paused,
+      executionRevision: 2,
+      status: "succeeded" as const,
+      summary: "v2",
+    };
+    expect(runs.create(resumed)).toEqual(resumed);
+    expect(() => runs.create(paused))
+      .toThrow("任务运行失败，已保留可审计的终态记录。");
+    expect(() => runs.create({
+      ...resumed,
+      executionRevision: 3,
+      summary: "terminal cannot revive",
+    })).toThrow("任务运行失败，已保留可审计的终态记录。");
+    expect(runs.get("run-1")).toEqual(resumed);
+    storage.close();
+  });
+
+  it("rejects revision gaps, invalid revisions, and non-terminal resume owners", async () => {
+    const storage = await createInMemoryStorage();
+    const runs = createRunRepository(storage);
+    const paused = makeRun({ status: "paused" });
+    runs.create(paused);
+
+    for (const candidate of [
+      { ...paused, executionRevision: 3, status: "succeeded" as const },
+      { ...paused, executionRevision: 0, status: "succeeded" as const },
+      { ...paused, executionRevision: 2, status: "running" as const },
+    ]) {
+      expect(() => runs.create(candidate))
+        .toThrow("任务运行失败，已保留可审计的终态记录。");
+    }
+    expect(runs.get("run-1")).toEqual(paused);
+    storage.close();
+  });
+
+  it("keeps the execution envelope immutable across a resume revision", async () => {
+    const storage = await createInMemoryStorage();
+    const runs = createRunRepository(storage);
+    const paused = makeRun({
+      status: "paused",
+      runContext: {
+        workspaceId: "workspace-1",
+        workspaceRoot: "/workspace/one",
+        sandbox: {
+          mode: "workspace_write",
+          network: "none",
+          shell: "disabled",
+          allowWorkspaceEscape: false,
+          extraReadRoots: [],
+          extraWriteRoots: [],
+        },
+        agentRole: "primary",
+        depth: 0,
+      },
+    });
+    runs.create(paused);
+
+    const mutations: AgentRunRecord[] = [
+      { ...paused, taskId: "task-other" },
+      { ...paused, taskName: "Renamed task" },
+      { ...paused, skillName: "other-skill" },
+      { ...paused, startedAt: "2026-06-19T00:01:00.000Z" },
+      {
+        ...paused,
+        runContext: { ...paused.runContext!, workspaceRoot: "/workspace/two" },
+      },
+    ].map((candidate) => ({
+      ...candidate,
+      executionRevision: 2,
+      status: "succeeded",
+    }));
+
+    for (const candidate of mutations) {
+      expect(() => runs.create(candidate))
+        .toThrow("任务运行失败，已保留可审计的终态记录。");
+    }
+    expect(runs.get(paused.id)).toEqual(paused);
+    storage.close();
+  });
+
+  it("imports a revision > 1 snapshot only into a missing SQLite identity", async () => {
+    const storage = await createInMemoryStorage();
+    const runs = createRunRepository(storage);
+    const snapshot = makeRun({
+      id: "run-imported",
+      status: "succeeded",
+      executionRevision: 2,
+      summary: "authoritative terminal snapshot",
+    });
+
+    expect(() => runs.create(snapshot))
+      .toThrow("任务运行失败，已保留可审计的终态记录。");
+    expect(runs.importSnapshot(snapshot)).toEqual(snapshot);
+    expect(runs.importSnapshot(structuredClone(snapshot))).toEqual(snapshot);
+    expect(() => runs.importSnapshot({ ...snapshot, summary: "mutated" }))
+      .toThrow("任务运行失败，已保留可审计的终态记录。");
+    expect(runs.get(snapshot.id)).toEqual(snapshot);
     storage.close();
   });
 
@@ -72,17 +172,6 @@ describe("RunRepository", () => {
     expect(runs.list().map((r) => r.id)).toEqual(["c", "b", "a"]);
     expect(runs.list({ taskId: "t1" }).map((r) => r.id)).toEqual(["c", "a"]);
     expect(runs.list({ limit: 1 }).map((r) => r.id)).toEqual(["c"]);
-    storage.close();
-  });
-
-  it("updateStatus keeps the denormalized column and canonical payload aligned", async () => {
-    const storage = await createInMemoryStorage();
-    const runs = createRunRepository(storage);
-    runs.create(makeRun());
-    runs.updateStatus("run-1", "succeeded");
-    expect(runs.get("run-1")?.status).toBe("succeeded");
-    const row = storage.db.prepare("SELECT status FROM runs WHERE id = ?").get<{ status: string }>("run-1");
-    expect(row?.status).toBe("succeeded");
     storage.close();
   });
 

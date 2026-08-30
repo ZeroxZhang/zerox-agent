@@ -273,6 +273,7 @@ export function createToolRuntime(options: {
             executionOptions,
             input.taskId,
             canonicalRuntimeTask,
+            authorization.auditEvent.id,
           ),
         );
       } catch (error) {
@@ -342,15 +343,20 @@ function deriveDispatchOptions(
   executionOptions: AgentToolExecutionOptions | undefined,
   taskId: string,
   runtimeTask: RuntimeToolAuthorizationTask | undefined,
+  authorizationAuditEventId: string,
 ): AgentToolExecutionOptions {
   const {
     authorizedShellCommand: _untrustedCommand,
+    authorizationReceipt: _untrustedAuthorizationReceipt,
     ...safeOptions
   } = executionOptions ?? {};
   return {
     ...safeOptions,
     taskId,
     ...(runtimeTask ? { runtimeTask } : {}),
+    authorizationReceipt: {
+      auditEventId: authorizationAuditEventId,
+    },
     ...(request.toolName === "shell_exec" || request.toolName === "test_run"
       ? { authorizedShellCommand: String(request.args.command ?? "") }
       : {}),

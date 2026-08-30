@@ -50,6 +50,7 @@ import {
 import {
   modelServiceNoticeFromError,
   modelServiceNoticeFromFinishReason,
+  sanitizeModelServiceNotice,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
 import {
@@ -58,7 +59,12 @@ import {
   type ToolInvocationRecord,
   type ToolInvocationTransition,
 } from "../shared/toolInvocationLedger";
-import { sanitizeChatMessages } from "./messageIntegrity";
+import {
+  redactChatMessageCredentials,
+  redactChatMessagesCredentials,
+  redactContextSurfaceCredentials,
+  sanitizeChatMessages,
+} from "./messageIntegrity";
 import {
   buildExplorationDedupNote,
   buildReadResultDigest,
@@ -75,10 +81,17 @@ import {
 import type { ModelContextWindowSource } from "../shared/modelSettings";
 import type { ContextSurfaceState } from "../shared/contextSurface";
 import { createContextSurface } from "./contextSurface";
+import { createConversationToolInvocationId } from "../shared/conversationCausalSpine";
 import {
   createSerialToolPolicyAdmission,
   scheduleToolBatch,
 } from "./toolBatchScheduler";
+import {
+  redactCredentialJsonText,
+  redactCredentials,
+  redactCredentialString,
+  stringifyRedactedCredentials,
+} from "../shared/credentialRedaction";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -140,7 +153,7 @@ export type AgentLoopOptions = {
     runtimeEvent: ToolRuntimeEvent,
     event: AgentLoopToolEvent,
   ) => void;
-  onToolInvocation?: (record: ToolInvocationRecord) => void;
+  onToolInvocation?: (record: ToolInvocationRecord) => void | Promise<void>;
   onTurn?: (turn: number, phase: string) => void;
   onReasoning?: (reasoningContent: string, turn: number) => void;
   onModelResponse?: (response: ChatCompletionResponse, turn: number) => void;
@@ -148,6 +161,7 @@ export type AgentLoopOptions = {
   onContextCompacted?: (event: AgentLoopContextCompaction) => void;
   onContextUsage?: (usage: AgentContextUsage) => void;
   onModelRetry?: (event: ModelRetryEvent) => void;
+  onModelAttempt?: (event: AgentLoopModelAttemptEvent) => void | Promise<void>;
   onStrategyGuard?: (event: AgentLoopStrategyGuardEvent) => void;
   onCheckpoint?: (checkpoint: AgentLoopCheckpoint) => void | Promise<void>;
   /** Optional production model-step override (for example best-of-N). */
@@ -166,6 +180,16 @@ export type AgentLoopCheckpoint = {
   tokensConsumed: number;
   tokensEstimated: boolean;
 };
+
+export type AgentLoopModelAttemptEvent =
+  | { operation: "begin"; attempt: number; turn: number }
+  | {
+      operation: "supersede";
+      attempt: number;
+      supersedesAttempt: number;
+      turn: number;
+    }
+  | { operation: "reset"; attempt: number; turn: number };
 
 export type AgentLoopContextCompaction = {
   originalMessageCount: number;
@@ -213,7 +237,7 @@ type ExecutedAgentToolCall = {
   runtimeOutcome?: ToolRuntimeOutcome;
   transitionInvocation?: (
     transition: Omit<ToolInvocationTransition, "at"> & { at?: string },
-  ) => void;
+  ) => Promise<void>;
 };
 
 export type AgentLoopContinuation = {
@@ -303,11 +327,13 @@ export async function runAgentLoop(
     onContextCompacted,
     onContextUsage,
     onModelRetry,
+    onModelAttempt,
     onStrategyGuard,
     modelRequestExecutor,
   } = options;
   const signal = parentSignal;
   const checkpointInterval = Math.max(1, Math.floor(maxTurns));
+  let answerAttempt = 0;
 
   async function emitCheckpoint(nextAction: string): Promise<void> {
     await onCheckpoint?.({
@@ -345,14 +371,17 @@ export async function runAgentLoop(
   } else {
     initialSurfaceMessages.push(...resumeMessages);
   }
+  const safeInitialSurfaceMessages = redactChatMessagesCredentials(
+    initialSurfaceMessages,
+  );
   const contextSurface = createContextSurface({
     runId: runId ?? taskId ?? requestId ?? "agent_loop",
     ...(resumeContextSurface
       ? {
-          state: resumeContextSurface,
-          expectedMessages: initialSurfaceMessages,
+          state: redactContextSurfaceCredentials(resumeContextSurface),
+          expectedMessages: safeInitialSurfaceMessages,
         }
-      : { initialMessages: initialSurfaceMessages }),
+      : { initialMessages: safeInitialSurfaceMessages }),
     estimateMessageTokens: (message) =>
       contextManager.estimateTokens([message]),
   });
@@ -363,13 +392,16 @@ export async function runAgentLoop(
   }
 
   function appendMessage(message: ChatMessage): ChatMessage {
-    const event = contextSurface.append(message);
+    const event = contextSurface.append(redactChatMessageCredentials(message));
     messages.push(event.message);
     return messages.at(-1)!;
   }
 
   function insertMessage(index: number, message: ChatMessage): void {
-    const event = contextSurface.insert(index, message);
+    const event = contextSurface.insert(
+      index,
+      redactChatMessageCredentials(message),
+    );
     messages.splice(index, 0, event.message);
   }
 
@@ -386,7 +418,10 @@ export async function runAgentLoop(
       checkpointRef?: string;
     },
   ) {
-    const event = contextSurface.replace(replacement, input);
+    const event = contextSurface.replace(
+      redactChatMessagesCredentials(replacement),
+      input,
+    );
     refreshMessagesFromSurface();
     return event;
   }
@@ -745,8 +780,12 @@ export async function runAgentLoop(
   ): void {
     lastToolFailure = {
       toolName,
-      error,
-      ...(args ? { args } : {}),
+      error: redactCredentialString(error),
+      ...(args
+        ? {
+            args: redactCredentials(args) as Record<string, unknown>,
+          }
+        : {}),
     };
   }
 
@@ -777,11 +816,14 @@ export async function runAgentLoop(
       recordModelResponseTokens(response);
 
       if (response.content) {
-        summary = `${options.summaryPrefix}\n\n${response.content}`;
+        const safeContent = redactCredentialString(response.content);
+        summary = redactCredentialString(
+          `${options.summaryPrefix}\n\n${safeContent}`,
+        );
         status = "succeeded";
         appendMessage({
           role: "assistant",
-          content: response.content,
+          content: safeContent,
         });
       } else {
         summary = options.fallbackSummary;
@@ -789,7 +831,9 @@ export async function runAgentLoop(
       }
     } catch (error) {
       summary = `${options.fallbackSummary}${
-        error instanceof Error ? ` 总结生成失败：${error.message}` : ""
+        error instanceof Error
+          ? ` 总结生成失败：${redactCredentialString(error.message)}`
+          : ""
       }`;
       status = "failed";
     }
@@ -829,6 +873,10 @@ export async function runAgentLoop(
     request: ChatCompletionRequest,
     turn: number,
   ): Promise<ChatCompletionResponse> {
+    if (answerAttempt === 0) {
+      answerAttempt = 1;
+      await onModelAttempt?.({ operation: "begin", attempt: answerAttempt, turn });
+    }
     if (modelRequestExecutor) {
       return modelRequestExecutor(request, turn);
     }
@@ -886,8 +934,32 @@ export async function runAgentLoop(
                   : String(error.cause ?? "unknown")
               }`,
             });
+            const supersedesAttempt = answerAttempt;
+            const nextAttempt = answerAttempt + 1;
+            await onModelAttempt?.({
+              operation: "supersede",
+              attempt: nextAttempt,
+              supersedesAttempt,
+              turn,
+            });
+            answerAttempt = nextAttempt;
+            await onModelAttempt?.({
+              operation: "begin",
+              attempt: answerAttempt,
+              turn,
+            });
             await sleepBeforeStreamRetry(delayMs, request.signal);
             continue;
+          }
+          if (
+            error instanceof StreamingCompletionError
+            && error.hasMeaningfulStreamEvent
+          ) {
+            await onModelAttempt?.({
+              operation: "reset",
+              attempt: answerAttempt,
+              turn,
+            });
           }
           throw error;
         }
@@ -961,23 +1033,35 @@ export async function runAgentLoop(
         tool_choice: "auto",
         ...(signal ? { signal } : {}),
       }, turns + 1), signal);
-      onModelResponse?.(response, turns + 1);
+      onModelResponse?.(
+        redactCredentials(response) as ChatCompletionResponse,
+        turns + 1,
+      );
       if (response.reasoningContent) {
-        onReasoning?.(response.reasoningContent, turns + 1);
+        onReasoning?.(
+          redactCredentialString(response.reasoningContent),
+          turns + 1,
+        );
       }
 
       recordModelResponseTokens(response);
-      modelServiceNotice =
-        response.modelServiceNotice ??
-        modelServiceNoticeFromFinishReason(response.finishReason, {
-          provider: modelProfile.providerId,
-          model: modelProfile.model,
-        });
+      const responseModelServiceNotice =
+        response.modelServiceNotice ?? modelServiceNoticeFromFinishReason(
+          response.finishReason,
+          {
+            provider: modelProfile.providerId,
+            model: modelProfile.model,
+          },
+        );
+      modelServiceNotice = responseModelServiceNotice
+        ? sanitizeModelServiceNotice(responseModelServiceNotice)
+        : undefined;
       if (modelServiceNotice) {
-        const partialContent =
+        const partialContent = redactCredentialString(
           response.content?.trim() ||
           response.reasoningContent?.trim() ||
-          modelServiceNotice.message;
+          modelServiceNotice.message,
+        );
         appendMessage({ role: "assistant", content: partialContent });
         status = "paused";
         continuation = {
@@ -991,14 +1075,16 @@ export async function runAgentLoop(
 
       // No tool calls + content → final
       if (!response.toolCalls.length && response.content) {
-        summary = response.content;
+        summary = redactCredentialString(response.content);
         status = "succeeded";
-        appendMessage({ role: "assistant", content: response.content });
+        appendMessage({ role: "assistant", content: summary });
         break;
       }
 
       if (!response.toolCalls.length && response.reasoningContent?.trim()) {
-        summary = buildFinalReplyFromReasoningContent(response.reasoningContent);
+        summary = redactCredentialString(
+          buildFinalReplyFromReasoningContent(response.reasoningContent),
+        );
         status = "succeeded";
         appendMessage({
           role: "assistant",
@@ -1065,7 +1151,7 @@ export async function runAgentLoop(
         appendMessage({
           role: "assistant",
           content: response.content ?? "",
-          tool_calls: response.toolCalls,
+          tool_calls: redactToolCallsForPersistence(response.toolCalls),
         });
         const assistantToolMessageIndex = messages.length - 1;
         const processedToolCalls: ToolCall[] = [];
@@ -1116,7 +1202,7 @@ export async function runAgentLoop(
           const result = runtimeOutcome.result;
           if (!runtimeOutcome.dispatched) {
             const failure = result.ok ? "工具调用未执行。" : result.error;
-            transitionInvocation({
+            await transitionInvocation({
               status: "error",
               error: failure,
             });
@@ -1195,7 +1281,7 @@ export async function runAgentLoop(
             resultRef: serializedObservation.resultRef,
             resultBytes: serializedObservation.originalChars,
           });
-          transitionInvocation(
+          await transitionInvocation(
             result.ok
               ? {
                   status: "completed",
@@ -1334,8 +1420,8 @@ export async function runAgentLoop(
               toolCallsExecuted,
               toolName,
               failureKind,
-              failureError: result.error,
-              failureArgs: args,
+              failureError: redactCredentialString(result.error),
+              failureArgs: redactCredentials(args) as Record<string, unknown>,
             };
             summary = buildToolFailureLoopPauseSummary({
               toolName,
@@ -1382,24 +1468,29 @@ export async function runAgentLoop(
                   prepared.registeredToolSource;
                 const toolSource =
                   registeredToolSource ?? "built-in";
+                const toolInvocationRunId =
+                  runId ??
+                  taskId ??
+                  workspaceRunId ??
+                  requestId ??
+                  runContext?.runId ??
+                  "agent_loop";
                 let toolInvocation = createToolInvocation({
-                  id: `tool_invocation_${toolCall.id}`,
-                  runId:
-                    taskId ??
-                    workspaceRunId ??
-                    requestId ??
-                    runContext?.runId ??
-                    "agent_loop",
+                  id: createConversationToolInvocationId({
+                    runId: toolInvocationRunId,
+                    toolCallId: toolCall.id,
+                  }),
+                  runId: toolInvocationRunId,
                   toolCallId: toolCall.id,
                   toolName,
                   source: toolSource,
                   args,
                   createdAt: new Date().toISOString(),
                 });
-                const emitToolInvocation = () => {
-                  onToolInvocation?.(toolInvocation);
+                const emitToolInvocation = async () => {
+                  await onToolInvocation?.(toolInvocation);
                 };
-                const transitionInvocation = (
+                const transitionInvocation = async (
                   transition: Omit<
                     ToolInvocationTransition,
                     "at"
@@ -1414,10 +1505,10 @@ export async function runAgentLoop(
                         new Date().toISOString(),
                     },
                   );
-                  emitToolInvocation();
+                  await emitToolInvocation();
                 };
-                emitToolInvocation();
-                transitionInvocation({ status: "visible" });
+                await emitToolInvocation();
+                await transitionInvocation({ status: "visible" });
 
                 let runtimeOutcome: ToolRuntimeOutcome;
                 try {
@@ -1432,15 +1523,39 @@ export async function runAgentLoop(
                     },
                     authorizationOptions: {
                       ...(runtimeTask ? { runtimeTask } : {}),
+                      approvalContext: {
+                        ...(runContext?.sessionId
+                          ? { sessionId: runContext.sessionId }
+                          : {}),
+                        ...(requestId
+                          ? {
+                              requestId,
+                              turnId: `turn-${requestId}`,
+                              attempt: Math.max(1, answerAttempt),
+                            }
+                          : {}),
+                        ...(runId ? { trajectoryRunId: runId } : {}),
+                        ...(workspaceRunId ? { workspaceRunId } : {}),
+                        toolInvocationId: toolInvocation.id,
+                        toolInvocationRunId: toolInvocation.runId,
+                      },
                       onApprovalRequested: async (request) => {
-                        transitionInvocation({
-                          status: "waiting_approval",
-                          reason: request.deniedReason,
-                        });
+                        toolInvocation = transitionToolInvocation(
+                          toolInvocation,
+                          {
+                            status: "waiting_approval",
+                            reason: request.deniedReason,
+                            ...(request.approvalId
+                              ? { approvalId: request.approvalId }
+                              : {}),
+                            at: new Date().toISOString(),
+                          },
+                        );
+                        await onToolInvocation?.(toolInvocation);
                       },
                       onApprovalResolved: async (approval) => {
                         if (approval.approved) {
-                          transitionInvocation({
+                          await transitionInvocation({
                             status: "authorized",
                             reason:
                               approval.reason ?? "user approved",
@@ -1469,12 +1584,12 @@ export async function runAgentLoop(
                           : {}),
                       },
                     },
-                    onStage(event) {
+                    async onStage(event) {
                       if (
                         event.stage === "authorized" &&
                         toolInvocation.status !== "authorized"
                       ) {
-                        transitionInvocation({
+                        await transitionInvocation({
                           status: "authorized",
                           reason: event.reason,
                         });
@@ -1485,13 +1600,13 @@ export async function runAgentLoop(
                           args,
                           toolEventBase,
                         );
-                        transitionInvocation({ status: "running" });
+                        await transitionInvocation({ status: "running" });
                         release();
                       }
                     },
                   });
                 } catch (error) {
-                  transitionInvocation({
+                  await transitionInvocation({
                     status: "error",
                     error:
                       error instanceof Error
@@ -1592,7 +1707,9 @@ export async function runAgentLoop(
         summary = modelServiceNotice.message;
       } else {
         status = "failed";
-        summary = error instanceof Error ? error.message : "Agent loop failed.";
+        summary = error instanceof Error
+          ? redactCredentialString(error.message)
+          : "Agent loop failed.";
       }
     }
   }
@@ -1605,7 +1722,7 @@ export async function runAgentLoop(
   enforceMessageIntegrity("trim");
 
   return {
-    summary,
+    summary: redactCredentialString(summary),
     status,
     turns,
     messages: contextSurface.messages(),
@@ -1615,7 +1732,9 @@ export async function runAgentLoop(
     contextSurface: contextSurface.snapshot(),
     ...(latestContextUsage ? { contextUsage: latestContextUsage } : {}),
     ...(continuation ? { continuation } : {}),
-    ...(modelServiceNotice ? { modelServiceNotice } : {}),
+    ...(modelServiceNotice
+      ? { modelServiceNotice: sanitizeModelServiceNotice(modelServiceNotice) }
+      : {}),
   };
 }
 
@@ -1768,11 +1887,12 @@ async function aggregateStreamingCompletion(
       model: request.model,
     })
       ? {
-          modelServiceNotice:
+          modelServiceNotice: sanitizeModelServiceNotice(
             streamModelServiceNotice ??
             modelServiceNoticeFromFinishReason(finishReason, {
               model: request.model,
-            }),
+            })!,
+          ),
         }
       : {}),
     ...(reasoningContent ? { reasoningContent } : {}),
@@ -1821,7 +1941,11 @@ function buildToolFailureLoopPauseSummary(options: {
 }): string {
   return [
     `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
-    ...(options.error ? [`最近错误：${truncateForPrompt(options.error, 240)}`] : []),
+    ...(options.error
+      ? [
+          `最近错误：${truncateForPrompt(redactCredentialString(options.error), 240)}`,
+        ]
+      : []),
     ...(options.args ? [`最近参数：${formatToolArgsForPrompt(options.args)}`] : []),
     `我已经暂停，避免继续在同一个失败模式里空转。累计执行 ${options.toolCallsExecuted} 个工具。`,
     "你可以回复“继续”让我带着已有诊断接着试，也可以调整目标、提供脚本参数或要求我换一种工具路径。",
@@ -1924,7 +2048,7 @@ function buildToolFailureLoopRecoveryPrompt(options: {
 }): string {
   return [
     `连续 ${options.count} 次工具失败（${options.toolName}，${options.failureKind}）。`,
-    `最近错误：${truncateForPrompt(options.error, 240)}`,
+    `最近错误：${truncateForPrompt(redactCredentialString(options.error), 240)}`,
     `最近参数：${formatToolArgsForPrompt(options.args)}`,
     `已执行工具数：${options.toolCallsExecuted}`,
     "",
@@ -1944,7 +2068,7 @@ function buildEmptyModelResponseAfterToolFailureSummary(options: {
   return [
     "模型没有返回可用回复，已停止本轮执行。",
     `最近失败工具：${options.toolName}`,
-    `失败原因：${truncateForPrompt(options.error, 240)}`,
+    `失败原因：${truncateForPrompt(redactCredentialString(options.error), 240)}`,
     ...(options.args ? [`最近参数：${formatToolArgsForPrompt(options.args)}`] : []),
     "这通常表示模型在工具失败后没有给出最终总结。你可以直接重试，或补充一个更明确的数据来源/链接后继续。",
   ].join("\n");
@@ -2017,7 +2141,7 @@ function normalizeToolFailureKind(
 ): string {
   const detailKind = result.errorDetails?.kind;
   if (typeof detailKind === "string" && detailKind.trim()) {
-    return detailKind.trim();
+    return truncateForPrompt(redactCredentialString(detailKind), 80);
   }
   if (/timeout|超时/i.test(result.error)) return "timeout";
   if (/enoent|not found|no such file|不存在|找不到/i.test(result.error)) {
@@ -2031,7 +2155,7 @@ function normalizeToolFailureKind(
 }
 
 function formatToolArgsForPrompt(args: Record<string, unknown>): string {
-  return truncateForPrompt(JSON.stringify(args), 240);
+  return truncateForPrompt(stringifyRedactedCredentials(args), 240);
 }
 
 function truncateForPrompt(value: string, maxLength: number): string {
@@ -2048,7 +2172,7 @@ function buildRepeatedToolCallFinalizationPrompt(
   toolCallsExecuted: number,
 ): string {
   return [
-    `检测到模型重复请求相同工具（${toolName}，参数：${stableStringify(args)}）。`,
+    `检测到模型重复请求相同工具（${toolName}，参数：${formatToolArgsForPrompt(args)}）。`,
     `此前已执行 ${toolCallsExecuted} 个工具。`,
     "现在不要再调用工具。",
     "请只基于当前对话和已有工具结果，用中文给用户一个简洁的阶段性总结。",
@@ -2181,7 +2305,17 @@ function createToolCallSignature(
   toolName: string,
   args: Record<string, unknown>,
 ): string {
-  return `${toolName}:${stableStringify(args)}`;
+  return `${toolName}:${stableStringify(redactCredentials(args))}`;
+}
+
+function redactToolCallsForPersistence(toolCalls: ToolCall[]): ToolCall[] {
+  return toolCalls.map((toolCall) => ({
+    ...toolCall,
+    function: {
+      ...toolCall.function,
+      arguments: redactCredentialJsonText(toolCall.function.arguments),
+    },
+  }));
 }
 
 function findLastExecutedToolSignature(messages: ChatMessage[]): string | null {
