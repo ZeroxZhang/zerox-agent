@@ -3,9 +3,9 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S16-plan-confirmation",
   "scenarioDigest": "sha256:b629d2c39b858f620076e3b26976ba7261d6f4d04db51565df665f1ff1b3c432",
-  "executionId": "04314443-9a0d-4b60-a8f8-cc889c5d7b30",
+  "executionId": "e7619dcc-d2ea-4d9f-8d13-fb81e247ef07",
   "processEpochs": [
-    "main_5568eac2-6f70-448f-a216-dfe8516dab47"
+    "main_2c8ba399-4063-437f-8a11-9277a0090703"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,12 +26,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "c93a355c-c3f5-41f7-be33-3fb0bcae3aac",
+        "5a2b6691-0731-45f3-809e-40f93b2e3a95",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_5568eac2-6f70-448f-a216-dfe8516dab47"
+        "process:main_2c8ba399-4063-437f-8a11-9277a0090703"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -49,12 +49,12 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "c93a355c-c3f5-41f7-be33-3fb0bcae3aac",
+        "5a2b6691-0731-45f3-809e-40f93b2e3a95",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_5568eac2-6f70-448f-a216-dfe8516dab47"
+        "process:main_2c8ba399-4063-437f-8a11-9277a0090703"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,12 +72,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "c93a355c-c3f5-41f7-be33-3fb0bcae3aac",
+        "5a2b6691-0731-45f3-809e-40f93b2e3a95",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_5568eac2-6f70-448f-a216-dfe8516dab47"
+        "process:main_2c8ba399-4063-437f-8a11-9277a0090703"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -97,7 +97,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:43e2d06eda831b91f4c049f4d65bb0410ad7d960c7a5cc0d0768d8be01ff0769",
-        "screenshot:sha256:c32e77fc165770d8699154284fd0bbb9cb8073a112fc9f44ac67b0ecf2d0ffb8"
+        "screenshot:sha256:5150fead7b7325c236bae6658984cc4547f84d348ef0add87b3a554bb2cecbb5"
       ]
     },
     {
@@ -106,7 +106,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:dd6342067e590b4cc3b680da6e67e0cdf09c28740c71871408663da8edea3aa1",
-        "screenshot:sha256:c32e77fc165770d8699154284fd0bbb9cb8073a112fc9f44ac67b0ecf2d0ffb8"
+        "screenshot:sha256:5150fead7b7325c236bae6658984cc4547f84d348ef0add87b3a554bb2cecbb5"
       ]
     },
     {
@@ -115,7 +115,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:cd49bae0bca16954d7b19b5a50e4f5bfecdf98e3579d85678ce0c8b2daf2aa17",
-        "screenshot:sha256:c32e77fc165770d8699154284fd0bbb9cb8073a112fc9f44ac67b0ecf2d0ffb8"
+        "screenshot:sha256:5150fead7b7325c236bae6658984cc4547f84d348ef0add87b3a554bb2cecbb5"
       ]
     }
   ],
@@ -427,82 +427,82 @@
     },
     {
       "ordinal": 62,
-      "channel": "goal:get",
+      "channel": "plans:get",
       "ok": true
     },
     {
       "ordinal": 63,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 64,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 65,
-      "channel": "plans:get",
-      "ok": true
-    },
-    {
-      "ordinal": 66,
-      "channel": "plans:get",
-      "ok": true
-    },
-    {
-      "ordinal": 67,
       "channel": "toolApproval:listPending",
       "ok": true
     },
     {
-      "ordinal": 68,
+      "ordinal": 64,
       "channel": "toolApproval:getMode",
       "ok": true
     },
     {
-      "ordinal": 69,
+      "ordinal": 65,
       "channel": "scheduledTasks:list",
       "ok": true
     },
     {
-      "ordinal": 70,
+      "ordinal": 66,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 71,
+      "ordinal": 67,
       "channel": "memory:list",
       "ok": true
     },
     {
-      "ordinal": 72,
+      "ordinal": 68,
       "channel": "skills:list",
       "ok": true
     },
     {
-      "ordinal": 73,
+      "ordinal": 69,
       "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
-      "ordinal": 74,
+      "ordinal": 70,
       "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
-      "ordinal": 75,
+      "ordinal": 71,
       "channel": "app:getMeta",
       "ok": true
     },
     {
-      "ordinal": 76,
+      "ordinal": 72,
       "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
-      "ordinal": 77,
+      "ordinal": 73,
       "channel": "navigation:list",
+      "ok": true
+    },
+    {
+      "ordinal": 74,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 75,
+      "channel": "app:getUpdateState",
+      "ok": true
+    },
+    {
+      "ordinal": 76,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 77,
+      "channel": "modelCatalog:load",
       "ok": true
     },
     {
@@ -512,57 +512,57 @@
     },
     {
       "ordinal": 79,
-      "channel": "app:getUpdateState",
-      "ok": true
-    },
-    {
-      "ordinal": 80,
-      "channel": "modelSettings:load",
-      "ok": true
-    },
-    {
-      "ordinal": 81,
-      "channel": "modelCatalog:load",
-      "ok": true
-    },
-    {
-      "ordinal": 82,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 83,
       "channel": "chatSessions:get",
       "ok": true
     },
     {
-      "ordinal": 84,
+      "ordinal": 80,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 85,
+      "ordinal": 81,
       "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
-      "ordinal": 86,
+      "ordinal": 82,
       "channel": "scheduledTasks:list",
       "ok": true
     },
     {
-      "ordinal": 87,
+      "ordinal": 83,
       "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
-      "ordinal": 88,
+      "ordinal": 84,
       "channel": "goal:get",
       "ok": true
     },
     {
-      "ordinal": 89,
+      "ordinal": 85,
       "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 86,
+      "channel": "plans:get",
+      "ok": true
+    },
+    {
+      "ordinal": 87,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 88,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 89,
+      "channel": "goal:get",
       "ok": true
     },
     {
@@ -577,43 +577,23 @@
     },
     {
       "ordinal": 92,
-      "channel": "chatSessions:getTranscriptPage",
+      "channel": "plans:get",
       "ok": true
     },
     {
       "ordinal": 93,
-      "channel": "goal:get",
+      "channel": "plans:get",
       "ok": true
     },
     {
       "ordinal": 94,
-      "channel": "plans:get",
-      "ok": true
-    },
-    {
-      "ordinal": 95,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 96,
-      "channel": "plans:get",
-      "ok": true
-    },
-    {
-      "ordinal": 97,
-      "channel": "plans:get",
-      "ok": true
-    },
-    {
-      "ordinal": 98,
       "channel": "plans:confirm",
       "ok": true
     }
   ],
   "screenshotDigests": [
-    "sha256:c32e77fc165770d8699154284fd0bbb9cb8073a112fc9f44ac67b0ecf2d0ffb8"
+    "sha256:5150fead7b7325c236bae6658984cc4547f84d348ef0add87b3a554bb2cecbb5"
   ],
   "status": "passed",
-  "digest": "sha256:c600d512c26e92b129dfa7bfab2183436e767776d3578379ce0fd03c660b5eb1"
+  "digest": "sha256:f0774540007791bd91c05f5a0d5b883e5a20aaa2ffd9086da3ddeaf2c6d29278"
 }

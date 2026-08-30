@@ -3,9 +3,9 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S08-scheduled-progress",
   "scenarioDigest": "sha256:d6f3755be71fea9927b72ba5edef0f4a1a7b0e721accf24ac278843d53143bda",
-  "executionId": "0d8f7339-f6ce-48f0-a65d-9bb81bd8568a",
+  "executionId": "ebd10273-0344-4dcd-9716-cc9bace60d02",
   "processEpochs": [
-    "main_f8d67212-93ef-4081-b210-715543cb1b88"
+    "main_a68d727c-1a7d-4095-809b-df931b55e891"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,11 +26,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "12010f0f-478a-4c24-b8cc-d22f0f077c51",
+        "9d367fbb-b7bc-4fac-98f6-2db12aec52b3",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "c0237b6d-1fb5-447f-a894-1890f52ebdc8",
-        "process:main_f8d67212-93ef-4081-b210-715543cb1b88"
+        "6c02e642-098a-4a11-b771-b3440ef8aac2",
+        "process:main_a68d727c-1a7d-4095-809b-df931b55e891"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -39,7 +39,7 @@
         "trajectoryLoaded": true,
         "scheduledTaskFound": true,
         "streamEventCount": 5,
-        "actualRunId": "f40a1f77-902b-42a7-b6b7-814ec3a37c9b",
+        "actualRunId": "500b9189-48e0-4693-a7a4-646cc970fbea",
         "runError": "none"
       }
     },
@@ -49,11 +49,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "12010f0f-478a-4c24-b8cc-d22f0f077c51",
+        "9d367fbb-b7bc-4fac-98f6-2db12aec52b3",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "c0237b6d-1fb5-447f-a894-1890f52ebdc8",
-        "process:main_f8d67212-93ef-4081-b210-715543cb1b88"
+        "6c02e642-098a-4a11-b771-b3440ef8aac2",
+        "process:main_a68d727c-1a7d-4095-809b-df931b55e891"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,11 +72,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "12010f0f-478a-4c24-b8cc-d22f0f077c51",
+        "9d367fbb-b7bc-4fac-98f6-2db12aec52b3",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "c0237b6d-1fb5-447f-a894-1890f52ebdc8",
-        "process:main_f8d67212-93ef-4081-b210-715543cb1b88"
+        "6c02e642-098a-4a11-b771-b3440ef8aac2",
+        "process:main_a68d727c-1a7d-4095-809b-df931b55e891"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,7 +96,7 @@
       "requirement": "progress arrives before the blocking result",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:44f2b58489fed305646730bde287039e8cd01d33b3446410af2786d89893fc1c",
+        "action:0:sha256:d4a6e16aecb743b47bb50d29d9e3d82025e43cc63bf51598da4119b4fd872bcf",
         "screenshot:sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
       ]
     },
@@ -380,5 +380,5 @@
     "sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
   ],
   "status": "passed",
-  "digest": "sha256:35e52581d735fdd0b295e23da7c93674155afb99a82e209910c4f091ec36189d"
+  "digest": "sha256:77808f7abbd7826257e823faa515c5070ce197ecc23cd81c68c516a71d72ccb4"
 }

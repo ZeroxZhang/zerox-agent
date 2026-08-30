@@ -3,9 +3,9 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S07-plan-progress",
   "scenarioDigest": "sha256:93e611cabbd360e91c44b9ec2a70377013c1a8140c77a2d97e18fbcf3be5b7e0",
-  "executionId": "c1f19237-8c85-424e-ad2b-a14f6bf2e5b1",
+  "executionId": "67fc702d-358f-4586-b84d-fa82263d9b20",
   "processEpochs": [
-    "main_bae088a3-fa43-4eb5-8eed-70c1952023ad"
+    "main_964cbb45-6d27-49fb-a29a-a6df1c8271c9"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,11 +26,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "6d5da040-0c3b-4b19-81a5-7c8bf12956ae",
+        "aa4d3269-a8b8-4ad3-994c-2f6d77c42f65",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "cd09-plan-S07-plan-progress",
-        "process:main_bae088a3-fa43-4eb5-8eed-70c1952023ad"
+        "process:main_964cbb45-6d27-49fb-a29a-a6df1c8271c9"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -48,11 +48,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "6d5da040-0c3b-4b19-81a5-7c8bf12956ae",
+        "aa4d3269-a8b8-4ad3-994c-2f6d77c42f65",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "cd09-plan-S07-plan-progress",
-        "process:main_bae088a3-fa43-4eb5-8eed-70c1952023ad"
+        "process:main_964cbb45-6d27-49fb-a29a-a6df1c8271c9"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -69,11 +69,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "6d5da040-0c3b-4b19-81a5-7c8bf12956ae",
+        "aa4d3269-a8b8-4ad3-994c-2f6d77c42f65",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "cd09-plan-S07-plan-progress",
-        "process:main_bae088a3-fa43-4eb5-8eed-70c1952023ad"
+        "process:main_964cbb45-6d27-49fb-a29a-a6df1c8271c9"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -93,7 +93,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:6c29972cb581d87927b3cef924b3cbecc7d3e7176813d10d9e68cbc6e04be0da",
-        "screenshot:sha256:657931beeb197111825d74afc5159c352b0f19250713b612a6f99c7f8ddc03b1"
+        "screenshot:sha256:941166738b6836c68444ddbed15a38e0edb874e72c07401ef4ff103d81039cfb"
       ]
     },
     {
@@ -102,7 +102,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:b1fc92ab41f94f17c7a9e47e124417d37b29be164d20cd636af894966c39e041",
-        "screenshot:sha256:657931beeb197111825d74afc5159c352b0f19250713b612a6f99c7f8ddc03b1"
+        "screenshot:sha256:941166738b6836c68444ddbed15a38e0edb874e72c07401ef4ff103d81039cfb"
       ]
     },
     {
@@ -111,7 +111,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:c4f590bb04aea76f4f40dc00ea50b97b36f6e39afcab5272e2d6e8e8fbc4610e",
-        "screenshot:sha256:657931beeb197111825d74afc5159c352b0f19250713b612a6f99c7f8ddc03b1"
+        "screenshot:sha256:941166738b6836c68444ddbed15a38e0edb874e72c07401ef4ff103d81039cfb"
       ]
     }
   ],
@@ -413,8 +413,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:657931beeb197111825d74afc5159c352b0f19250713b612a6f99c7f8ddc03b1"
+    "sha256:941166738b6836c68444ddbed15a38e0edb874e72c07401ef4ff103d81039cfb"
   ],
   "status": "passed",
-  "digest": "sha256:8912128089e6fcccbd65800e9678bcb260c4804d6c5549a1247a87f8b1306994"
+  "digest": "sha256:25b8451b1ef4c7e300fccbf933a3b5b25d96640224f80c0e5169e24d675b3586"
 }
