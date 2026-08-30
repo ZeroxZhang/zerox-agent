@@ -13359,3 +13359,22 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   after an anchor run may therefore show those files as modified relative
   to any commit made before that run. This is expected per-run ephemera,
   not drift in attested inputs.
+
+## 2026-08-30 - B11 fix and round-12 re-anchor
+
+- B11 (round-11 postflight false positive): the canonical-repository watch
+  evaluated late-delivered FSEvents against the already-flipped "none" mode,
+  so the publish rehearsal's own transient
+  `release-test-v392-rollback-<uuid>` create/delete events could be flagged
+  as "canonical repository mutated outside publication" even though the path
+  was whitelisted in active modes. Any fixed-length settle remains a race.
+  Fix: `isAllowedRepositoryMutation` now sanctions the publish-machinery
+  scratch prefixes (`release-test-v392-publish-*`,
+  `release-test-v392-rollback-*`) in EVERY mode including "none" — they are
+  excluded from all manifests and the runner only ever consumes the single
+  rollback dir it created itself, so attested inputs cannot be masked.
+  Verified by round-12 postflight passing.
+- Runner digest changed to `sha256:eb7a670c…`; the receipt cascade was
+  re-run (gen11) and all caller pins re-synced before this evidence was
+  committed (commit 4) and the round-12 anchor run. The round-12 anchor
+  path/digest are recorded in `/private/tmp/zerox-v392-pins/checker-env.sh`.

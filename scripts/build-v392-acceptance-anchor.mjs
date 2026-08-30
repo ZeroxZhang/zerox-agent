@@ -3755,8 +3755,18 @@ function isAllowedExecutionMutation(relativePath, allowedPrefixes) {
 function isAllowedRepositoryMutation(relativePath, mode) {
   const cleanupPath = relativePath.startsWith("release-test-v392-publish-")
     || relativePath.startsWith("release-test-v392-rollback-");
-  if (mode === "cleanup") return cleanupPath;
-  return cleanupPath
+  // Publish-machinery scratch directories are sanctioned in EVERY mode,
+  // including "none": their create/delete events are produced by the
+  // transactional publish rehearsal itself, and macOS FSEvents can deliver
+  // those events after the watch mode has flipped back to "none" (any
+  // fixed-length settle remains a race). These paths are excluded from every
+  // manifest, and the runner only ever consumes the single rollback dir it
+  // created itself, so allowing them here cannot mask tampering with
+  // attested inputs. (B11: postflight false positive on a late-delivered
+  // rollback-dir event.)
+  if (cleanupPath) return true;
+  if (mode === "cleanup") return false;
+  return false
     // Atomic generated-file publish stages through a sibling temporary file
     // named .zerox-publish-<pid>-<uuid> in the destination directory (see
     // replaceFileAtomically); its create/write/rename events are part of the

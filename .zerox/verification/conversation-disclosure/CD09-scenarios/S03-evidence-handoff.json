@@ -3,9 +3,9 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S03-evidence-handoff",
   "scenarioDigest": "sha256:8040007dfb92f72b8b2e3a305cf2e705ce8a7ed80e7fd5c0907c06743cad125c",
-  "executionId": "afcc29bb-1deb-4d70-802a-40809e834d1b",
+  "executionId": "648c4a74-96ee-4746-8834-2ff4d0d3dcc7",
   "processEpochs": [
-    "main_06afb1cc-1c59-444b-9fcd-7d4ff5a0623c"
+    "main_5c2fc967-6fb7-47f3-a87a-d355af686cab"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,10 +26,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "a366777c-45c4-447b-8f7b-4f0fde622afd",
+        "d6b4a759-ae66-48ad-be95-e2d9d981d679",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_06afb1cc-1c59-444b-9fcd-7d4ff5a0623c"
+        "process:main_5c2fc967-6fb7-47f3-a87a-d355af686cab"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -49,10 +49,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "a366777c-45c4-447b-8f7b-4f0fde622afd",
+        "d6b4a759-ae66-48ad-be95-e2d9d981d679",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_06afb1cc-1c59-444b-9fcd-7d4ff5a0623c"
+        "process:main_5c2fc967-6fb7-47f3-a87a-d355af686cab"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -169,22 +169,22 @@
     },
     {
       "ordinal": 15,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 16,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 17,
+      "ordinal": 16,
       "channel": "agentRuns:listActiveExecutions",
       "ok": true
     },
     {
-      "ordinal": 18,
+      "ordinal": 17,
       "channel": "agentEvalCandidates:list",
+      "ok": true
+    },
+    {
+      "ordinal": 18,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -199,12 +199,12 @@
     },
     {
       "ordinal": 21,
-      "channel": "agentRuns:list",
+      "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
       "ordinal": 22,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
@@ -292,5 +292,5 @@
     "sha256:8d75658875c68939df891860d3d2f25d50dea13f3501c882237468906fa6b83b"
   ],
   "status": "passed",
-  "digest": "sha256:b55db40704ad2ad77c048da1b8e464639b3e28bee5a587d6567f8c709a8bdc24"
+  "digest": "sha256:7c33caca4b4def1f72375cccc08525a962ccd2cb2e148a6ff2accfdd5c0a361b"
 }

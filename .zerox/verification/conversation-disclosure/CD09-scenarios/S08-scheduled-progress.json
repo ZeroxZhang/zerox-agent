@@ -3,9 +3,9 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S08-scheduled-progress",
   "scenarioDigest": "sha256:d6f3755be71fea9927b72ba5edef0f4a1a7b0e721accf24ac278843d53143bda",
-  "executionId": "ebd10273-0344-4dcd-9716-cc9bace60d02",
+  "executionId": "4757dc14-5093-478e-8ef2-43a7077e9d2d",
   "processEpochs": [
-    "main_a68d727c-1a7d-4095-809b-df931b55e891"
+    "main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,11 +26,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "9d367fbb-b7bc-4fac-98f6-2db12aec52b3",
+        "eff888db-8733-4dc4-8aa8-4162e157ff4f",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "6c02e642-098a-4a11-b771-b3440ef8aac2",
-        "process:main_a68d727c-1a7d-4095-809b-df931b55e891"
+        "1f22684a-3e6a-4cfb-8f71-94dcb3b93e10",
+        "process:main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -39,7 +39,7 @@
         "trajectoryLoaded": true,
         "scheduledTaskFound": true,
         "streamEventCount": 5,
-        "actualRunId": "500b9189-48e0-4693-a7a4-646cc970fbea",
+        "actualRunId": "fe481f7c-553c-4222-8c48-3ae2350cc920",
         "runError": "none"
       }
     },
@@ -49,11 +49,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "9d367fbb-b7bc-4fac-98f6-2db12aec52b3",
+        "eff888db-8733-4dc4-8aa8-4162e157ff4f",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "6c02e642-098a-4a11-b771-b3440ef8aac2",
-        "process:main_a68d727c-1a7d-4095-809b-df931b55e891"
+        "1f22684a-3e6a-4cfb-8f71-94dcb3b93e10",
+        "process:main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,11 +72,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "9d367fbb-b7bc-4fac-98f6-2db12aec52b3",
+        "eff888db-8733-4dc4-8aa8-4162e157ff4f",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "6c02e642-098a-4a11-b771-b3440ef8aac2",
-        "process:main_a68d727c-1a7d-4095-809b-df931b55e891"
+        "1f22684a-3e6a-4cfb-8f71-94dcb3b93e10",
+        "process:main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,7 +96,7 @@
       "requirement": "progress arrives before the blocking result",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:d4a6e16aecb743b47bb50d29d9e3d82025e43cc63bf51598da4119b4fd872bcf",
+        "action:0:sha256:0e731674e772a15fb9675213bf29705a4e94db91cada896fb332c8222edbb95e",
         "screenshot:sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
       ]
     },
@@ -337,17 +337,17 @@
     },
     {
       "ordinal": 44,
-      "channel": "agentRuns:listTrajectory",
-      "ok": true
-    },
-    {
-      "ordinal": 45,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 46,
+      "ordinal": 45,
       "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 46,
+      "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
@@ -380,5 +380,5 @@
     "sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
   ],
   "status": "passed",
-  "digest": "sha256:77808f7abbd7826257e823faa515c5070ce197ecc23cd81c68c516a71d72ccb4"
+  "digest": "sha256:732fa7426a188a1e82860d1efe2df9d1a03604adc401e5360d5720669049e9f1"
 }

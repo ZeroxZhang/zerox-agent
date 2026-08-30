@@ -3,9 +3,9 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S04-failure-attention",
   "scenarioDigest": "sha256:9c7eb05998e2d24ecc2a53e27d8dfce91df3d7d5f84d54085f0dea50bcd37d00",
-  "executionId": "32d539cd-f70e-4f9d-a3a1-a18861055c2f",
+  "executionId": "3b061eb5-f32e-4108-a097-85c62f4af556",
   "processEpochs": [
-    "main_9a57c36f-4a8f-4b52-b08e-3886119aa105"
+    "main_3027f7c9-9009-4b21-8603-ec1e8439c485"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,10 +26,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "698c3dc1-7897-49fe-9974-019a5ee71154",
+        "89689ce0-ea38-4e62-9eda-e94969828c63",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_9a57c36f-4a8f-4b52-b08e-3886119aa105"
+        "process:main_3027f7c9-9009-4b21-8603-ec1e8439c485"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -47,10 +47,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "698c3dc1-7897-49fe-9974-019a5ee71154",
+        "89689ce0-ea38-4e62-9eda-e94969828c63",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_9a57c36f-4a8f-4b52-b08e-3886119aa105"
+        "process:main_3027f7c9-9009-4b21-8603-ec1e8439c485"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -334,5 +334,5 @@
     "sha256:9c9adab49c998b5205ca85134c0a3e7095047f1ed1429d1c7db635a05970b366"
   ],
   "status": "passed",
-  "digest": "sha256:0944a4aa1b9a483daa0297543ac1a4e5e7015d5289981e7251c3b8ebc22c9633"
+  "digest": "sha256:2aa81fff3f89c995b2dc0171484bc35868f7fc228e4e462d1a8e7deb6791d45e"
 }

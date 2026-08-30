@@ -3,9 +3,9 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S12-retry-attempt",
   "scenarioDigest": "sha256:49d4fb731a204d7b797ede14668b357e45234789b55325523987a21b05d43ef7",
-  "executionId": "9359739c-da00-4c84-ad10-aa3c0b796092",
+  "executionId": "b806b036-64cf-4957-8424-d5048d98af1a",
   "processEpochs": [
-    "main_d9808e96-208d-4567-b2ba-b87c3d7a7f3c"
+    "main_40120ab2-9d0e-4f08-b731-4fec47355921"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,10 +26,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "31290e31-28c5-4c03-a01f-20b69dfd2998",
+        "3499fc19-6045-4edf-97ad-46d16fadc5d1",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_d9808e96-208d-4567-b2ba-b87c3d7a7f3c"
+        "process:main_40120ab2-9d0e-4f08-b731-4fec47355921"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -49,10 +49,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "31290e31-28c5-4c03-a01f-20b69dfd2998",
+        "3499fc19-6045-4edf-97ad-46d16fadc5d1",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_d9808e96-208d-4567-b2ba-b87c3d7a7f3c"
+        "process:main_40120ab2-9d0e-4f08-b731-4fec47355921"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -69,10 +69,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "31290e31-28c5-4c03-a01f-20b69dfd2998",
+        "3499fc19-6045-4edf-97ad-46d16fadc5d1",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_d9808e96-208d-4567-b2ba-b87c3d7a7f3c"
+        "process:main_40120ab2-9d0e-4f08-b731-4fec47355921"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -91,7 +91,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:5cb2bd5c1aa0719064d1cae7e4a5902391fa2ca29bd8d2830185406a3a978688",
-        "screenshot:sha256:35db3fbc9426f672d54c6679534c18ba3f88f92702277db952c3694ac3307c37"
+        "screenshot:sha256:1cb58ab78797062a04d6cacdc1fb444a2e8a181e29521799708285c7619aa299"
       ]
     },
     {
@@ -100,7 +100,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:a1c37cf4b092f17dff3fb80b865cae4e5d8ec1f28d50929f794bfebeec36039a",
-        "screenshot:sha256:35db3fbc9426f672d54c6679534c18ba3f88f92702277db952c3694ac3307c37"
+        "screenshot:sha256:1cb58ab78797062a04d6cacdc1fb444a2e8a181e29521799708285c7619aa299"
       ]
     },
     {
@@ -109,7 +109,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:b763fc738a8b416d406fce6fad85cb36c809408c30a557057cb8949d2423f6c6",
-        "screenshot:sha256:35db3fbc9426f672d54c6679534c18ba3f88f92702277db952c3694ac3307c37"
+        "screenshot:sha256:1cb58ab78797062a04d6cacdc1fb444a2e8a181e29521799708285c7619aa299"
       ]
     }
   ],
@@ -186,12 +186,12 @@
     },
     {
       "ordinal": 15,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 16,
-      "channel": "skills:list",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
@@ -331,22 +331,22 @@
     },
     {
       "ordinal": 44,
-      "channel": "modelSettings:load",
-      "ok": true
-    },
-    {
-      "ordinal": 45,
-      "channel": "modelCatalog:load",
-      "ok": true
-    },
-    {
-      "ordinal": 46,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 47,
+      "ordinal": 45,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 46,
       "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 47,
+      "channel": "modelCatalog:load",
       "ok": true
     },
     {
@@ -386,8 +386,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:35db3fbc9426f672d54c6679534c18ba3f88f92702277db952c3694ac3307c37"
+    "sha256:1cb58ab78797062a04d6cacdc1fb444a2e8a181e29521799708285c7619aa299"
   ],
   "status": "passed",
-  "digest": "sha256:9ca4f7c3ee90f98db5ddd1065d2e487ade3e737ab3dd5ae3441a22a2b421e0b6"
+  "digest": "sha256:85e9564a4858c83c19f5e4b67ec81d491367ad2d0e110a41b1e0197538a94301"
 }
