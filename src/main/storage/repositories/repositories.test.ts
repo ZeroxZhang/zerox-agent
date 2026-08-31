@@ -327,6 +327,33 @@ describe("GoalRepository", () => {
     storage.close();
   });
 
+  it("fails closed when a SQLite Goal row and payload claim different owners", async () => {
+    const storage = await createInMemoryStorage();
+    const goals = createGoalRepository(storage);
+    const foreign = baseGoal({
+      id: "goal_foreign",
+      chatSessionId: "chat_owner",
+      status: "executing",
+    });
+    storage.db.prepare(
+      `INSERT INTO goals (id, chat_session_id, status, payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "goal_owner",
+      foreign.chatSessionId,
+      foreign.status,
+      JSON.stringify(foreign),
+      foreign.createdAt,
+      foreign.updatedAt,
+    );
+
+    expect(goals.get("goal_owner")).toBeNull();
+    expect(goals.getMany(["goal_owner"])).toEqual([]);
+    expect(goals.listActive()).toEqual([]);
+    expect(goals.listByChatSession("chat_owner")).toEqual([]);
+    storage.close();
+  });
+
   it.each(["executing", "canceled"] as const)(
     "loses the SQLite manual CAS when canonical %s wins",
     async (winnerStatus) => {

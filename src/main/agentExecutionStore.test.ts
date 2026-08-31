@@ -137,6 +137,23 @@ describe("agent execution store", () => {
     expect(files).not.toContain("run_corrupt.json");
   });
 
+  it("quarantines a checkpoint whose embedded owner differs from its file owner", async () => {
+    const store = createAgentExecutionStore({ configDir });
+    const executionsDir = path.join(configDir, "agent-executions");
+    await mkdir(executionsDir, { recursive: true });
+    await writeFile(
+      path.join(executionsDir, "run_owner.json"),
+      JSON.stringify(createCheckpoint("run_foreign", "running")),
+      "utf8",
+    );
+
+    await expect(store.get("run_owner")).resolves.toBeNull();
+    const files = await readdir(executionsDir);
+    expect(files).toEqual([
+      expect.stringMatching(/^run_owner\.corrupt-.*\.json$/),
+    ]);
+  });
+
   it("serializes corrupt quarantine with a concurrent valid save", async () => {
     const store = createAgentExecutionStore({ configDir });
     await mkdir(path.join(configDir, "agent-executions"), { recursive: true });

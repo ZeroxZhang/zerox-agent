@@ -118,6 +118,10 @@ export interface RunRepository {
     runId: string,
     event: AgentTrajectoryEvent,
   ): AgentTrajectoryEvent;
+  appendTrajectoryNext(
+    runId: string,
+    event: AgentTrajectoryEvent,
+  ): AgentTrajectoryEvent;
   appendTrajectoryIfAbsent(
     runId: string,
     event: AgentTrajectoryEvent,

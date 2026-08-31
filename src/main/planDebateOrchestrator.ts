@@ -738,8 +738,14 @@ export function createPlanDebateOrchestrator(options: {
       record.workspaceRoot,
     );
     const generationCompletedAt = now();
+    const completedGenerationAlreadyRecorded = (record.planningStages ?? []).some(
+      (stage) =>
+        stage.kind === "generation" &&
+        stage.status === "completed" &&
+        stage.runId === finalRound.runId,
+    );
     const generationStage: PlanningStageRecord | undefined =
-      isPlannerV2(record)
+      isPlannerV2(record) && !completedGenerationAlreadyRecorded
         ? {
             id: `planning_stage_${createId()}`,
             kind: "generation",
@@ -777,12 +783,13 @@ export function createPlanDebateOrchestrator(options: {
     ) {
       const reviewRunId = `plan_review_${createId()}`;
       const reviewStartedAt = now();
+      const reviewClient = clientForRound("direct", clients);
       const runningReviewStage: PlanningStageRecord = {
         id: `planning_stage_${createId()}`,
         kind: "review",
         runId: reviewRunId,
         status: "running",
-        modelBinding: structuredClone(finalRound.modelBinding),
+        modelBinding: structuredClone(reviewClient.binding),
         evidenceRefs: record.planningBrief?.evidenceRefs ?? [],
         startedAt: reviewStartedAt,
       };
@@ -800,7 +807,7 @@ export function createPlanDebateOrchestrator(options: {
       );
       try {
         let review = await completePlanReview(
-          clientForRound("direct", clients),
+          reviewClient,
           record,
           artifact,
           signal,
@@ -816,7 +823,7 @@ export function createPlanDebateOrchestrator(options: {
           )
         ) {
           const repair = await completeStructuredRound(
-            clientForRound("direct", clients),
+            reviewClient,
             "direct",
             buildDirectRepairPrompt(record, artifact, review),
             signal,
@@ -831,7 +838,7 @@ export function createPlanDebateOrchestrator(options: {
           );
           revisionAttempted = true;
           review = await completePlanReview(
-            clientForRound("direct", clients),
+            reviewClient,
             record,
             artifact,
             signal,
@@ -1813,8 +1820,6 @@ export function createPlanDebateOrchestrator(options: {
         );
         const sequence =
           existing.mode === "direct" ? (["direct"] as const) : DEBATE_SEQUENCE;
-        const startIndex = existing.mode === "direct" ? 0 : sequence.length - 1;
-        const activeKinds = new Set(sequence.slice(startIndex));
         const reset = await options.planStore.save(
           {
             ...existing,
@@ -1827,14 +1832,9 @@ export function createPlanDebateOrchestrator(options: {
               : existing.requestedModelAssignments,
             frozenModelAssignments: freezeBindings(clients),
             planningStages: (existing.planningStages ?? []).map((stage) =>
-              ["generation", "review", "quality"].includes(stage.kind)
+              ["review", "quality"].includes(stage.kind)
                 ? { ...stage, status: "invalidated" as const }
                 : stage,
-            ),
-            rounds: existing.rounds.map((round) =>
-              activeKinds.has(round.kind)
-                ? { ...round, status: "invalidated" as const }
-                : round,
             ),
             status: "drafting",
             actionGate: "blocked",
@@ -1847,16 +1847,23 @@ export function createPlanDebateOrchestrator(options: {
           {
             kind: failedPlanningStage.kind,
             replacementProfileId,
+            reusedGenerationRunId: latestCompletedRound(
+              existing,
+              existing.mode === "direct" ? "direct" : "c",
+            )?.runId,
           },
         );
-        const resumed = await runFrom(reset, clients, startIndex, signal);
+        // Review is downstream of an already completed, persisted generation.
+        // Resume after the model-round sequence so runFrom reuses that exact
+        // candidate and only re-executes review plus deterministic quality.
+        const resumed = await runFrom(reset, clients, sequence.length, signal);
         return {
           ok: true,
           plan: resumed,
           message:
             resumed.status === "paused"
               ? "规划阶段重试后仍未通过，计划保持暂停。"
-              : "已从规划失败阶段继续。",
+              : "已复用此前生成的计划，并从审查失败阶段继续。",
         };
       }
       if (!failed) {

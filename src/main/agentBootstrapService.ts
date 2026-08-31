@@ -229,15 +229,16 @@ function toRunStep(result: RunScheduledTaskResult): AgentBootstrapRunStep {
 }
 
 function translateRunStatus(status: AgentRunStatus): string {
-  if (status === "succeeded") {
-    return "成功";
-  }
-
-  if (status === "canceled") {
-    return "已取消";
-  }
-
-  return "失败";
+  const labels: Record<AgentRunStatus, string> = {
+    queued: "排队中",
+    running: "运行中",
+    waiting_for_approval: "等待授权",
+    paused: "已暂停",
+    succeeded: "成功",
+    failed: "失败",
+    canceled: "已取消",
+  };
+  return labels[status];
 }
 
 function createDefaultFileOrganizerTaskInput(): ScheduledTaskInput {

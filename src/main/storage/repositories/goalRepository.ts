@@ -11,7 +11,7 @@ import {
   type ProgressLedgerEvent,
 } from "../../../shared/agentGoal";
 import type { GoalRepository, Storage } from "../../../shared/storageContract";
-import { getPayloadRow, jsonify, parseJson, selectPayloadRows } from "../repositoryUtils";
+import { jsonify, parseJson } from "../repositoryUtils";
 
 const TERMINAL_GOAL_STATUSES = new Set<GoalStatus>([
   "achieved",
@@ -38,14 +38,12 @@ function normalizedPlanVersion(goal: Goal): number {
 
 export function createGoalRepository(storage: Storage): GoalRepository {
   const db = storage.db;
-  const readStoredGoal = (goalId: string): Goal | null =>
-    sanitizeStoredGoal(
-      getPayloadRow<Goal>(
-        db,
-        "SELECT payload FROM goals WHERE id = ?",
-        [goalId],
-      ),
-    );
+  const readStoredGoal = (goalId: string): Goal | null => {
+    const row = db.prepare(
+      "SELECT id, payload FROM goals WHERE id = ?",
+    ).get<{ id: string; payload: string }>(goalId);
+    return row ? parseOwnedGoalRow(row) : null;
+  };
   const writeGoal = (candidate: Goal): void => {
     db.prepare(
       `INSERT INTO goals (
@@ -236,7 +234,7 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         rows
           .map((row) => [
             row.id,
-            sanitizeStoredGoal(parseJson<Goal>(row.payload)),
+            parseOwnedGoalRow(row),
           ] as const)
           .filter(
             (entry): entry is readonly [string, Goal] => entry[1] !== null,
@@ -249,23 +247,22 @@ export function createGoalRepository(storage: Storage): GoalRepository {
     },
 
     listActive(): Goal[] {
-      return selectPayloadRows<Goal>(
-        db,
-        `SELECT payload FROM goals
+      return db.prepare(
+        `SELECT id, payload FROM goals
          WHERE status NOT IN ('achieved','completed_unverified','stopped_budget','stopped_stalled','stopped_blocked','failed','canceled')
          ORDER BY updated_at DESC`,
       )
-        .map(sanitizeStoredGoal)
+        .all<{ id: string; payload: string }>()
+        .map(parseOwnedGoalRow)
         .filter((goal): goal is Goal => goal !== null && isActive(goal.status));
     },
 
     listByChatSession(chatSessionId: string): Goal[] {
-      return selectPayloadRows<Goal>(
-        db,
-        "SELECT payload FROM goals WHERE chat_session_id = ? ORDER BY updated_at DESC",
-        [chatSessionId],
+      return db.prepare(
+        "SELECT id, payload FROM goals WHERE chat_session_id = ? ORDER BY updated_at DESC",
       )
-        .map(sanitizeStoredGoal)
+        .all<{ id: string; payload: string }>(chatSessionId)
+        .map(parseOwnedGoalRow)
         .filter((goal): goal is Goal => goal !== null);
     },
 
@@ -292,6 +289,14 @@ export function createGoalRepository(storage: Storage): GoalRepository {
         .filter((v): v is ProgressLedgerEvent => v !== null);
     },
   };
+}
+
+function parseOwnedGoalRow(row: { id: string; payload: string }): Goal | null {
+  const goal = sanitizeStoredGoal(parseJson<Goal>(row.payload));
+  // SQLite row ids are ownership, not an index hint. A payload that claims a
+  // different id is corrupt or foreign and must never cross the authority
+  // boundary under the queried owner's name.
+  return goal?.id === row.id ? goal : null;
 }
 
 function stripUnverifiedCompletionCertificate(goal: Goal): Goal {

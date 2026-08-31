@@ -225,7 +225,7 @@ const toolGuidanceProvider: LayerProvider = {
       label: "Tool guidance",
       content: [
         "工作原则：",
-        "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；本地文件整理优先使用 file_inventory、file_move_plan、file_apply_moves、file_verify_moves；只有原生工具无法完成时再使用 shell_exec。",
+        "- 文件诊断优先使用 file_list、file_stat、file_search、file_read；本地文件整理优先使用 file_inventory、file_move_plan、file_apply_moves、file_verify_moves；中断后先用 file_move_transaction_read 恢复事务，再决定验证或回滚；只有原生工具无法完成时再使用 shell_exec。",
         "- Chrome/浏览器书签读取必须优先使用 chrome_bookmarks_read；它会自动产出完整 artifact:bookmark_list 和 artifact:goalEvidence，不要用 file_read/file_stat/shell_exec 读取或解析 Chrome Bookmarks。",
         "- 当工具结果包含 result_ref 或 tool-result-refs/... 时，必须使用 tool_result_read 读取完整工具结果，不要把引用路径传给 file_read。",
         "- 代码工程优先使用 code_search、git_status、git_diff、test_run；只有这些原生工具无法完成时再申请 shell_exec。",

@@ -87,6 +87,36 @@ describe("chat session work projection", () => {
       status: "failed",
     });
   });
+
+  it.each(["waiting_approval", "waiting_for_approval"])(
+    "projects a pending tool approval (%s) as waiting for approval",
+    (invocationStatus) => {
+      const session = createSession({
+        activity: {
+          updatedAt: "2026-08-02T08:05:00.000Z",
+          statusEvents: [
+            {
+              sessionId: "session_1",
+              requestId: "request_1",
+              sequence: 1,
+              turnId: "turn_1",
+              state: "tool_invocation",
+              invocationStatus,
+              message: "等待工具授权",
+              createdAt: "2026-08-02T08:05:00.000Z",
+              elapsedMs: 1,
+            },
+          ],
+        },
+      });
+
+      expect(deriveChatSessionWork(session)).toEqual({
+        source: "chat",
+        status: "waiting_for_approval",
+        updatedAt: "2026-08-02T08:05:00.000Z",
+      });
+    },
+  );
 });
 
 function createSession(

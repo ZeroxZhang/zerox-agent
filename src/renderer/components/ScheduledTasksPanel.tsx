@@ -11,6 +11,7 @@ import {
 import { buildToolSafetySummary } from "../../shared/toolSafetySummary";
 import type { TaskPermissionPolicy } from "../../shared/toolPermissions";
 import { demoRuns, demoTasks } from "../demoAgentData";
+import { presentScheduledRun } from "../runStatusPresentation";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Icon } from "./Icon";
 import { ToolSafetySummaryCard } from "./ToolSafetySummaryCard";
@@ -1337,36 +1338,6 @@ function summarizePermissions(policy: TaskPermissionPolicy): string {
     (policy.memory?.read ? 1 : 0) + (policy.memory?.write ? 1 : 0);
 
   return `${fileCount} 个文件权限 / ${memoryCount} 个记忆权限 / ${webCount} 个网页权限 / ${shellCount} 个命令权限`;
-}
-
-function presentScheduledRun(run: AgentRunRecord): {
-  label: string;
-  fallback: string;
-  tone: "success" | "warning" | "error";
-  attentionRequired: boolean;
-} {
-  if (run.status === "succeeded") {
-    return {
-      label: "最近成功",
-      fallback: "任务已完成",
-      tone: "success",
-      attentionRequired: false,
-    };
-  }
-  if (run.status === "canceled") {
-    return {
-      label: "最近取消",
-      fallback: "运行已取消",
-      tone: "warning",
-      attentionRequired: true,
-    };
-  }
-  return {
-    label: "最近失败",
-    fallback: run.failureMessage || "运行失败",
-    tone: "error",
-    attentionRequired: true,
-  };
 }
 
 function formatRunTime(value: string): string {

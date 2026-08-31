@@ -130,6 +130,44 @@ describe("tool result offload store", () => {
         }),
       }),
     ).resolves.toBe('{"ok":true}');
+
+    await expect(
+      store.read(ref.relativePath, {
+        capability: issueToolResultRefReadCapability({
+          ref: ref.relativePath,
+          issuedByRunId: "run_b",
+        }),
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("authorizes a resumed run only through its stable internal continuation owner", async () => {
+    const configDir = await createTempConfigDir();
+    const store = createToolResultOffloadStore({
+      configDir,
+      createId: () => "goal_resume",
+    });
+    const ref = await store.write({
+      runId: "run_a",
+      continuationOwnerId: "goal:goal_1",
+      toolName: "file_read",
+      content: '{"ok":true}',
+    });
+
+    await expect(store.read(ref.relativePath, {
+      runId: "run_b",
+      continuationOwnerId: "goal:goal_1",
+    })).resolves.toBe('{"ok":true}');
+    await expect(store.read(ref.relativePath, {
+      runId: "run_b",
+      continuationOwnerId: "goal:goal_other",
+    })).resolves.toBeNull();
+    await expect(store.read(ref.relativePath, {
+      runId: "run_a",
+    })).resolves.toBeNull();
+    await expect(store.read(ref.relativePath, {
+      runId: "run_b",
+    })).resolves.toBeNull();
   });
 
   it("fails closed for scoped reads when metadata is missing or damaged", async () => {
@@ -199,6 +237,52 @@ describe("tool result offload store", () => {
     await expect(
       store.read(ref.relativePath, { runId: "run_a" }),
     ).resolves.toBeNull();
+  });
+
+  it("preserves unique ref identities when long owner fields exhaust the readable prefix", async () => {
+    const configDir = await createTempConfigDir();
+    const ids = ["unique_suffix_one", "unique_suffix_two"];
+    const store = createToolResultOffloadStore({
+      configDir,
+      createId: () => ids.shift()!,
+    });
+    const input = {
+      runId: `run_${"a".repeat(220)}`,
+      toolCallId: `call_${"b".repeat(220)}`,
+      toolName: "file_read",
+    };
+
+    const first = await store.write({ ...input, content: "first" });
+    const second = await store.write({ ...input, content: "second" });
+
+    expect(first.refId).not.toBe(second.refId);
+    expect(first.refId.length).toBeLessThanOrEqual(180);
+    expect(second.refId.length).toBeLessThanOrEqual(180);
+    await expect(readFile(first.absolutePath, "utf8")).resolves.toBe("first");
+    await expect(readFile(second.absolutePath, "utf8")).resolves.toBe("second");
+  });
+
+  it("rejects ref-id collisions without overwriting immutable evidence", async () => {
+    const configDir = await createTempConfigDir();
+    const store = createToolResultOffloadStore({
+      configDir,
+      createId: () => "reused_suffix",
+    });
+    const input = {
+      runId: "run_immutable",
+      toolCallId: "call_immutable",
+      toolName: "file_read",
+    };
+
+    const first = await store.write({ ...input, content: "first" });
+    await expect(
+      store.write({ ...input, content: "replacement" }),
+    ).rejects.toMatchObject({ code: "EEXIST" });
+
+    await expect(readFile(first.absolutePath, "utf8")).resolves.toBe("first");
+    await expect(
+      store.read(first.relativePath, { runId: "run_immutable" }),
+    ).resolves.toBe("first");
   });
 });
 

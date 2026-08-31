@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AcceptanceRepairDirective,
   FinalGoalJudgeReplayEvidence,
@@ -2028,6 +2028,55 @@ describe("agent goal controller", () => {
       "acceptance_manual_completion_requested",
       "acceptance_manual_completion_recorded",
     ]);
+  });
+
+  it("uses the store allocator for mutable Goal trajectory events", async () => {
+    await store.save(waitingForAcceptanceGoal());
+    const recordedEvents: AgentTrajectoryEvent[] = [];
+    const append = vi.fn(async () => {
+      throw new Error("exact append must not allocate mutable Goal sequences");
+    });
+    const appendNext = vi.fn(async (runId: string, event: AgentTrajectoryEvent) => {
+      const stored = {
+        ...event,
+        runId,
+        sequence: recordedEvents.length + 41,
+      };
+      recordedEvents.push(stored);
+      return stored;
+    });
+    const controller = createController({
+      runtime: createRuntime(),
+      acceptance: createAcceptanceResults({ milestones: [], goals: [] }),
+      trajectoryStore: {
+        append,
+        appendNext,
+        async appendIfAbsent(runId, publicationKey, event) {
+          const stored = {
+            ...event,
+            runId,
+            sequence: recordedEvents.length + 41,
+            payload: { ...event.payload, publicationKey },
+          };
+          recordedEvents.push(stored);
+          return { appended: true, event: stored };
+        },
+        async list(runId) {
+          return recordedEvents.filter((event) => event.runId === runId);
+        },
+      },
+    });
+
+    await expect(controller.markCompletedUnverified("goal_1")).resolves.toMatchObject({
+      status: "completed_unverified",
+    });
+
+    expect(append).not.toHaveBeenCalled();
+    expect(appendNext).toHaveBeenCalledTimes(1);
+    expect(recordedEvents[0]).toMatchObject({
+      type: "acceptance_manual_completion_requested",
+      sequence: 41,
+    });
   });
 
   it("rejects manual completion outside acceptance waiting", async () => {
@@ -4381,7 +4430,7 @@ describe("agent goal controller", () => {
     goalStore?: AgentGoalStore;
     trajectoryStore?: Pick<
       AgentTrajectoryStore,
-      "append" | "appendIfAbsent" | "list"
+      "append" | "appendNext" | "appendIfAbsent" | "list"
     >;
     planner?: { replan(goal: Goal, reason: string): Promise<Milestone[]> };
     stallThreshold?: number;

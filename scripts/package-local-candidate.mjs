@@ -16,6 +16,7 @@ import {
   computeLocalCandidateSourceManifest,
   computeTreeManifest,
 } from "./local-candidate-source-manifest.mjs";
+import { inspectSafeFsHelper } from "./inspect-safe-fs-helper.mjs";
 
 if (process.argv.includes("--self-test-failure-preservation")) {
   verifyFailurePreservationSelfTest();
@@ -162,6 +163,10 @@ if (
 }
 const asar = readFileSync(asarPath);
 const appTree = await computeTreeManifest(appPath);
+const safeFsHelper = inspectSafeFsHelper(path.join(
+  appPath,
+  "Contents/Resources/safe-fs/zerox-safe-fs",
+), { requireSignature: true });
 const receipt = {
   schemaVersion: 1,
   kind: "v3.9.2-local-candidate-package",
@@ -177,6 +182,10 @@ const receipt = {
   appAsarSha256: `sha256:${createHash("sha256").update(asar).digest("hex")}`,
   appTreeEntryCount: appTree.entryCount,
   appTreeSha256: appTree.digest,
+  safeFsHelper: {
+    ...safeFsHelper,
+    path: path.relative(root, safeFsHelper.path),
+  },
 };
 writeFileSync(
   path.join(

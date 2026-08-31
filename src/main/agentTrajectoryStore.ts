@@ -16,13 +16,20 @@ import {
   readRecoverableJsonl,
   readRecoverableJsonlPage,
 } from "./jsonlRecovery";
+import { highestAgentTrajectorySequence } from "./agentTrajectorySequence";
 import {
   createFailureVisibleSerialQueue,
   type PersistenceQueueDrainOptions,
 } from "./failureVisibleSerialQueue";
+import { assertSafeStoreEntityId } from "./storeEntityId";
 
 export type AgentTrajectoryStore = {
   append(
+    runId: string,
+    event: AgentTrajectoryEvent,
+    options?: { signal?: AbortSignal },
+  ): Promise<AgentTrajectoryEvent>;
+  appendNext?(
     runId: string,
     event: AgentTrajectoryEvent,
     options?: { signal?: AbortSignal },
@@ -58,6 +65,7 @@ export function createAgentTrajectoryStore(
   const trajectoriesDir = path.join(options.configDir, "agent-trajectories");
 
   function trajectoryPath(runId: string): string {
+    assertSafeStoreEntityId(runId, "Agent trajectory run id");
     return path.join(trajectoriesDir, `${runId}.jsonl`);
   }
 
@@ -68,6 +76,7 @@ export function createAgentTrajectoryStore(
   // --- legacy JSON implementation (unchanged) ---
   const jsonImpl: AgentTrajectoryStore = {
     async append(runId, event, appendOptions) {
+      assertTrajectoryEventOwner(runId, event);
       throwIfAborted(appendOptions?.signal);
       await mkdir(trajectoriesDir, { recursive: true });
       throwIfAborted(appendOptions?.signal);
@@ -78,6 +87,21 @@ export function createAgentTrajectoryStore(
       });
       throwIfAborted(appendOptions?.signal);
       return event;
+    },
+    async appendNext(runId, event, appendOptions) {
+      const filePath = trajectoryPath(runId);
+      return serializeTrajectoryMutation(filePath, async () => {
+        throwIfAborted(appendOptions?.signal);
+        const trajectory =
+          await readRecoverableJsonl<AgentTrajectoryEvent>(filePath);
+        const stored = {
+          ...event,
+          runId,
+          sequence: highestAgentTrajectorySequence(trajectory) + 1,
+        };
+        await jsonImpl.append(runId, stored, appendOptions);
+        return stored;
+      });
     },
     async appendIfAbsent(runId, publicationKey, event, appendOptions) {
       const filePath = trajectoryPath(runId);
@@ -92,8 +116,7 @@ export function createAgentTrajectoryStore(
         if (existing) return { appended: false, event: existing };
         const stored = {
           ...createPublicationEvent(runId, publicationKey, event),
-          sequence:
-            Math.max(0, ...trajectory.map((candidate) => candidate.sequence)) + 1,
+          sequence: highestAgentTrajectorySequence(trajectory) + 1,
         };
         await jsonImpl.append(runId, stored, appendOptions);
         return { appended: true, event: stored };
@@ -160,6 +183,8 @@ export function createAgentTrajectoryStore(
 
   return {
     async append(runId, event, appendOptions) {
+      assertSafeStoreEntityId(runId, "Agent trajectory run id");
+      assertTrajectoryEventOwner(runId, event);
       throwIfAborted(appendOptions?.signal);
       shadowQueue.assertOpen();
       repo.appendTrajectory(runId, event); // sync hot path
@@ -168,7 +193,19 @@ export function createAgentTrajectoryStore(
       }
       return event;
     },
+    async appendNext(runId, event, appendOptions) {
+      assertSafeStoreEntityId(runId, "Agent trajectory run id");
+      assertTrajectoryEventOwner(runId, event);
+      throwIfAborted(appendOptions?.signal);
+      shadowQueue.assertOpen();
+      const stored = repo.appendTrajectoryNext(runId, event);
+      if (backend === "dual") {
+        void shadowQueue.enqueue(() => appendJsonEventExact(runId, stored));
+      }
+      return stored;
+    },
     async appendIfAbsent(runId, publicationKey, event, appendOptions) {
+      assertSafeStoreEntityId(runId, "Agent trajectory run id");
       throwIfAborted(appendOptions?.signal);
       shadowQueue.assertOpen();
       const result = repo.appendTrajectoryPublication(
@@ -188,9 +225,11 @@ export function createAgentTrajectoryStore(
       return result;
     },
     async list(runId) {
+      assertSafeStoreEntityId(runId, "Agent trajectory run id");
       return repo.getTrajectory(runId);
     },
     async getPage(runId, pageOptions) {
+      assertSafeStoreEntityId(runId, "Agent trajectory run id");
       try {
         return repo.getTrajectoryPage(runId, pageOptions);
       } catch (error) {
@@ -326,6 +365,15 @@ function parseJsonlRevision(value: string) {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function assertTrajectoryEventOwner(
+  runId: string,
+  event: AgentTrajectoryEvent,
+): void {
+  if (event.runId !== runId) {
+    throw new Error("Agent trajectory event does not belong to the target run.");
+  }
 }
 
 function createPublicationEvent(

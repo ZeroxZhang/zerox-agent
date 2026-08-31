@@ -58,7 +58,7 @@ describe("chat stream reducer", () => {
       expect.objectContaining({ id: "chat-disclosure:operations:request_1:workspace" }),
       expect.objectContaining({ id: "chat-disclosure:operations:request_1:model" }),
       expect.objectContaining({
-        id: "chat-disclosure:operations:invocation_1",
+        id: "chat-disclosure:operations:tool-invocation:invocation_1",
         label: "file_read 返回",
         summary: "Read complete",
         sequence: 5,
@@ -68,6 +68,28 @@ describe("chat stream reducer", () => {
       id: "result",
       expandedByDefault: true,
     });
+  });
+
+  it("keeps equal text identifiers from different authority domains distinct", () => {
+    const groups = projectChatDisclosureGroups([
+      createStatusEvent({
+        state: "tool_invocation",
+        sequence: 1,
+        toolInvocationId: "shared_id",
+        message: "Tool started",
+      }),
+      createStatusEvent({
+        state: "checkpoint_boundary",
+        sequence: 2,
+        checkpointId: "shared_id",
+        message: "Checkpoint created",
+      }),
+    ]);
+
+    expect(groups[0]?.rows.map((row) => row.id)).toEqual([
+      "chat-disclosure:operations:tool-invocation:shared_id",
+      "chat-disclosure:operations:checkpoint:shared_id",
+    ]);
   });
 
   it("keeps failures prominent and honors explicit user expansion state", () => {
@@ -346,6 +368,22 @@ describe("chat stream reducer", () => {
           type: "tool_call",
           toolCallId: "tool_old",
           toolName: "file_read",
+          createdAt: "2026-06-23T08:00:00.000Z",
+        },
+      }),
+      activeStream,
+    );
+    state = applyChatStreamEvent(
+      state,
+      createStreamEvent({
+        type: "output_part",
+        attempt: 1,
+        part: {
+          id: "tool_result_old",
+          type: "tool_result",
+          toolCallId: "tool_old",
+          ok: true,
+          resultPreview: "rejected evidence",
           createdAt: "2026-06-23T08:00:00.000Z",
         },
       }),

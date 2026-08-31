@@ -235,7 +235,9 @@ export async function readRecoverableJsonlPage<T>(
       complete,
       malformedLineCount,
       status,
-      ...(!complete ? { nextOffset: consumedOffset } : {}),
+      ...(!complete && consumedOffset > offset
+        ? { nextOffset: consumedOffset }
+        : {}),
       ...(reasonCode ? { reasonCode } : {}),
     };
   } finally {

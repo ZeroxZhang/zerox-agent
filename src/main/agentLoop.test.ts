@@ -648,6 +648,7 @@ describe("agent loop", () => {
     const largeContent = "x".repeat(1000);
     const requests: ChatCompletionRequest[] = [];
     const store = createRecordingOffloadStore();
+    let observedToolEventRunId: string | undefined;
     const chatClient: ChatClient = {
       async complete(request) {
         requests.push(request);
@@ -684,6 +685,8 @@ describe("agent loop", () => {
       [{ role: "user", content: "检查这个目录并告诉我结果" }],
       modelProfile,
       {
+        taskId: "task_shared_offload",
+        runId: "run_isolated_offload",
         chatClient,
         toolExecutor: createToolExecutor(() => undefined, {
           content: largeContent,
@@ -692,6 +695,9 @@ describe("agent loop", () => {
         tools: testTools,
         toolResultOffloadStore: store,
         toolResultOffloadThreshold: 120,
+        onToolResult(_toolName, _ok, _result, event) {
+          observedToolEventRunId = event.runId;
+        },
       },
     );
 
@@ -701,6 +707,52 @@ describe("agent loop", () => {
     });
     expect(store.writes).toHaveLength(1);
     expect(store.writes[0].content).toContain(largeContent);
+    expect(store.writes[0].runId).toBe("run_isolated_offload");
+    expect(observedToolEventRunId).toBe("run_isolated_offload");
+  });
+
+  it("does not infer cross-run ref authority from the parent task id", async () => {
+    let requestCount = 0;
+    let observedReadScope: Parameters<AgentToolExecutor["execute"]>[1];
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "读取本次运行的离线结果" }],
+      modelProfile,
+      {
+        taskId: "task_shared",
+        runId: "run_isolated",
+        chatClient: {
+          async complete() {
+            requestCount += 1;
+            return requestCount === 1
+              ? toolCallResponse("tool_result_read_call")
+              : {
+                  content: "读取完成。",
+                  toolCalls: [],
+                  finishReason: "stop",
+                };
+          },
+        },
+        toolExecutor: {
+          async execute(_request, executionOptions) {
+            observedReadScope = executionOptions;
+            return { ok: true, result: { value: "isolated" } };
+          },
+          getRegistry() {
+            return createBuiltInSourceRegistry();
+          },
+          hasTool() {
+            return true;
+          },
+        },
+        tools: testTools,
+      },
+    );
+
+    expect(result.status).toBe("succeeded");
+    expect(observedReadScope?.toolResultReadScope).toEqual({
+      runId: "run_isolated",
+    });
   });
 
   it("finalizes instead of executing a repeated identical tool call", async () => {
@@ -2999,6 +3051,92 @@ describe("agent loop", () => {
     expect(JSON.stringify(result)).toContain("[redacted]");
     expect(JSON.stringify(result)).not.toContain(noticeCanary);
     expect(completeCalls).toBe(0);
+  });
+
+  it("automatically continues an interactive response across provider output chunks", async () => {
+    let streamCalls = 0;
+    let completeCalls = 0;
+    const checkpoints: AgentLoopCheckpoint[] = [];
+    const requests: ChatCompletionRequest[] = [];
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        throw new Error("streaming client must not fall back to complete");
+      },
+      async *streamComplete(request) {
+        streamCalls += 1;
+        requests.push(request);
+        if (streamCalls === 1) {
+          yield { type: "content_delta", text: "first output chunk " };
+          yield { type: "done", finishReason: "length" };
+          return;
+        }
+        yield { type: "content_delta", text: "continued to completion" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "write a long answer" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        autoContinueOutputLimit: true,
+        onCheckpoint(checkpoint) {
+          checkpoints.push(checkpoint);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      summary: "first output chunk continued to completion",
+    });
+    expect(result.continuation).toBeUndefined();
+    expect(result.modelServiceNotice).toBeUndefined();
+    expect(streamCalls).toBe(2);
+    expect(completeCalls).toBe(0);
+    expect(JSON.stringify(requests[1].messages)).toContain(
+      "请从截断点直接继续",
+    );
+    expect(checkpoints).toEqual([
+      expect.objectContaining({
+        nextAction: expect.stringContaining("continuing automatically"),
+      }),
+    ]);
+  });
+
+  it("pauses recoverably when output-limit continuations make no progress", async () => {
+    let calls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "continue safely" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            calls += 1;
+            return {
+              content: null,
+              toolCalls: [],
+              finishReason: "length",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        autoContinueOutputLimit: true,
+        maxStalledOutputLimitContinuations: 1,
+      },
+    );
+
+    expect(calls).toBe(2);
+    expect(result).toMatchObject({
+      status: "paused",
+      continuation: { reason: "provider_output_limit" },
+      modelServiceNotice: { kind: "output_limit" },
+    });
   });
 
   it("does not fall back or auto-retry when a stream is rate limited", async () => {

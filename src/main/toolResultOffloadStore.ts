@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
+  link,
   readFile,
-  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -13,6 +13,7 @@ const TOOL_RESULT_REF_READ_CAPABILITY = Symbol("tool_result_ref_read_capability"
 
 export type ToolResultOffloadWriteInput = {
   runId?: string;
+  continuationOwnerId?: string;
   sessionId?: string;
   requestId?: string;
   workspaceRunId?: string;
@@ -29,6 +30,8 @@ export type ToolResultRefReadCapability = {
 };
 
 export type ToolResultOffloadReadScope = ToolResultRefReadScope & {
+  /** Main-process-only stable owner for checkpoint continuation across runs. */
+  continuationOwnerId?: string;
   capability?: unknown;
 };
 
@@ -123,6 +126,7 @@ type ToolResultOffloadMetadata = {
   contentSha256?: string;
   bytesWritten?: number;
   runId?: string;
+  continuationOwnerId?: string;
   sessionId?: string;
   requestId?: string;
   workspaceRunId?: string;
@@ -139,6 +143,9 @@ async function commitRefPair(
     contentSha256: hashContent(input.content),
     bytesWritten: Buffer.byteLength(input.content, "utf8"),
     ...(input.runId ? { runId: input.runId } : {}),
+    ...(input.continuationOwnerId
+      ? { continuationOwnerId: input.continuationOwnerId }
+      : {}),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.requestId ? { requestId: input.requestId } : {}),
     ...(input.workspaceRunId ? { workspaceRunId: input.workspaceRunId } : {}),
@@ -170,9 +177,9 @@ async function commitRefPair(
 
   let metadataCommitted = false;
   try {
-    await rename(metadataTempPath, metadataPath(absolutePath));
+    await link(metadataTempPath, metadataPath(absolutePath));
     metadataCommitted = true;
-    await rename(contentTempPath, absolutePath);
+    await link(contentTempPath, absolutePath);
   } catch (error) {
     if (metadataCommitted) {
       await rm(metadataPath(absolutePath), { force: true });
@@ -191,7 +198,10 @@ function canReadRef(
   if (!metadata) {
     return scope === undefined;
   }
-  if (scope?.capability && capabilityAllowsRef(scope.capability, relativePath)) {
+  if (
+    scope?.capability
+    && capabilityAllowsRef(scope.capability, relativePath, metadata)
+  ) {
     return true;
   }
 
@@ -231,6 +241,7 @@ function isToolResultOffloadMetadata(
   for (
     const key of [
       "runId",
+      "continuationOwnerId",
       "sessionId",
       "requestId",
       "workspaceRunId",
@@ -280,6 +291,7 @@ function hashContent(content: string): string {
 function capabilityAllowsRef(
   capability: unknown,
   relativePath: string,
+  metadata: ToolResultOffloadMetadata,
 ): boolean {
   if (!capability || typeof capability !== "object") {
     return false;
@@ -289,6 +301,8 @@ function capabilityAllowsRef(
   return (
     candidate.kind === "tool_result_ref_read" &&
     candidate.ref === relativePath &&
+    typeof candidate.issuedByRunId === "string" &&
+    candidate.issuedByRunId === metadata.runId &&
     candidate[TOOL_RESULT_REF_READ_CAPABILITY] === true
   );
 }
@@ -297,6 +311,19 @@ function matchesScope(
   metadata: ToolResultOffloadMetadata,
   scope: ToolResultOffloadReadScope | undefined,
 ): boolean {
+  if (metadata.continuationOwnerId !== undefined) {
+    if (metadata.continuationOwnerId !== scope?.continuationOwnerId) {
+      return false;
+    }
+    // A stable, internally supplied continuation owner deliberately spans
+    // physical runs. Keep the remaining durable owner dimensions strict.
+    for (const key of ["sessionId", "requestId", "workspaceRunId"] as const) {
+      if (metadata[key] && metadata[key] !== scope?.[key]) {
+        return false;
+      }
+    }
+    return true;
+  }
   const keys = ["runId", "sessionId", "requestId", "workspaceRunId"] as const;
   for (const key of keys) {
     if (metadata[key] && metadata[key] !== scope?.[key]) {
@@ -311,19 +338,26 @@ function createRefId(
   input: ToolResultOffloadWriteInput,
   suffix: string,
 ): string {
-  return [
+  const identityParts = [
     input.runId,
+    input.continuationOwnerId,
     input.sessionId,
     input.requestId,
     input.workspaceRunId,
     input.toolCallId,
     input.toolName,
     suffix,
-  ]
-    .filter(Boolean)
-    .map((part) => sanitizeRefSegment(String(part)))
-    .join("_")
-    .slice(0, 180);
+  ].filter(Boolean).map(String);
+  const readable = identityParts
+    .map(sanitizeRefSegment)
+    .join("_");
+  if (readable.length <= 180) return readable;
+  const digest = createHash("sha256")
+    .update(JSON.stringify(identityParts), "utf8")
+    .digest("hex")
+    .slice(0, 24);
+  const readableLimit = 180 - digest.length - 1;
+  return `${readable.slice(0, readableLimit)}_${digest}`;
 }
 
 function sanitizeRefSegment(value: string): string {

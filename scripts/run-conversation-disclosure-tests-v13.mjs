@@ -182,26 +182,40 @@ async function restoreRoundAdmission(fixture, round) {
     fixture,
     ".zerox/conversation-disclosure-program.json",
   );
-  const program = JSON.parse(await readFile(programPath, "utf8"));
+  const currentProgram = JSON.parse(await readFile(programPath, "utf8"));
+  const historicalProgramRoot =
+    policy.closedWorld?.programRootDefinition;
+  if (!historicalProgramRoot || typeof historicalProgramRoot !== "object") {
+    throw new Error(`Round${round} policy misses its frozen Program root`);
+  }
   const historicalWorkstreams =
-    policy.closedWorld?.programRootDefinition?.workstreams;
+    historicalProgramRoot.workstreams;
   if (!Array.isArray(historicalWorkstreams)) {
     throw new Error(`Round${round} policy misses its frozen workstream roster`);
   }
   const admissionIndex = historicalWorkstreams.findIndex(
     (entry) => entry.id === policy.workstreamId,
   );
-  program.workstreams = historicalWorkstreams.map((entry, index) => ({
-    ...entry,
-    state:
-      index < admissionIndex
-        ? "completed"
-        : index === admissionIndex
-          ? "in_progress"
-          : "planned",
-  }));
-  program.activeFeatureId = policy.featureId;
-  program.nextFeatureId = policy.featureId;
+  const program = {
+    ...structuredClone(historicalProgramRoot),
+    updatedAt: currentProgram.updatedAt,
+    status: "active",
+    activeFeatureId: policy.featureId,
+    nextFeatureId: policy.featureId,
+    scenarioMatrix: historicalProgramRoot.scenarioMatrix.map((scenario) => ({
+      ...scenario,
+      acceptanceEvidence: [],
+    })),
+    workstreams: historicalWorkstreams.map((entry, index) => ({
+      ...entry,
+      state:
+        index < admissionIndex
+          ? "completed"
+          : index === admissionIndex
+            ? "in_progress"
+            : "planned",
+    })),
+  };
   await writeFile(programPath, `${JSON.stringify(program, null, 2)}\n`);
 }
 

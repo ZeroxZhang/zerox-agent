@@ -226,6 +226,7 @@ export function createAgentRunnerService(options: {
   async function executeToolCalls(
     toolCalls: ToolCall[],
     taskId: string,
+    runId: string,
     events: AgentRunEvent[],
     signal: AbortSignal | undefined,
   ): Promise<ChatMessage[]> {
@@ -281,7 +282,7 @@ export function createAgentRunnerService(options: {
           },
           executionOptions: {
             ...(signal ? { signal } : {}),
-            toolResultReadScope: { runId: taskId },
+            toolResultReadScope: { runId },
           },
           onStage(event) {
             if (event.stage === "dispatching") {
@@ -336,7 +337,7 @@ export function createAgentRunnerService(options: {
         await serializeToolObservationWithOffload(observation, {
           store: options.toolResultOffloadStore,
           thresholdChars: options.toolResultOffloadThreshold,
-          runId: taskId,
+          runId,
         });
 
       toolMessages.push({
@@ -708,6 +709,7 @@ export function createAgentRunnerService(options: {
             const toolMessages = await executeToolCalls(
               response.toolCalls,
               taskId,
+              runId,
               events,
               signal,
             );
@@ -867,6 +869,7 @@ export function createAgentRunnerService(options: {
             const toolMessages = await executeToolCalls(
               response.toolCalls,
               taskId,
+              runId,
               events,
               signal,
             );

@@ -17,6 +17,7 @@ import {
   resolveConversationAgentRunExecutionRevision,
   sanitizeToolApprovalIntentLabel,
   sanitizeToolApprovalIntentSummary,
+  hasConsistentToolApprovalInvocationIdentity,
   resolveConversationRequestFingerprintVersion,
   type CausalMutationDisposition,
   type ConversationCausalAttempt,
@@ -450,8 +451,15 @@ export function createConversationCausalStore(options: {
             value: structuredClone(existing),
           };
         }
+        const foreignOwner = state.records.some((record) =>
+          record.requestId !== existing.requestId
+          && (record.agentRunAdmissions ?? []).some(
+            (admission) => admission.runId === input.runId,
+          ),
+        );
         if (
-          !input.runId.trim()
+          foreignOwner
+          || !input.runId.trim()
           || !input.taskId.trim()
           || !Number.isSafeInteger(input.executionRevision ?? 1)
           || (input.executionRevision ?? 1) !== 1
@@ -505,6 +513,14 @@ export function createConversationCausalStore(options: {
         ) {
           return { disposition: "conflict", value: structuredClone(existing) };
         }
+        const lifecycleFieldsAreValid = input.state === "started"
+          ? input.finalStatus === undefined && input.failureCode === undefined
+          : input.state === "settled"
+            ? input.finalStatus !== undefined && input.failureCode === undefined
+            : input.finalStatus === undefined && input.failureCode !== undefined;
+        if (!lifecycleFieldsAreValid) {
+          return { disposition: "conflict", value: structuredClone(existing) };
+        }
         const exact = target.state === input.state
           && resolveConversationAgentRunExecutionRevision(target)
             === expectedExecutionRevision
@@ -517,9 +533,6 @@ export function createConversationCausalStore(options: {
             ? input.state === "settled" || input.state === "aborted"
             : false;
         if (!legal) return { disposition: "conflict", value: structuredClone(existing) };
-        if (input.state === "settled" && !input.finalStatus) {
-          return { disposition: "conflict", value: structuredClone(existing) };
-        }
         const timestamp = now().toISOString();
         const settled: ConversationAgentRunAdmission = {
           ...target,
@@ -617,6 +630,15 @@ export function createConversationCausalStore(options: {
     ): Promise<{ reconciled: number; settled: number; aborted: number }> {
       return mutate(async (state) => {
         const timestamp = now().toISOString();
+        const owningRequestsByRun = new Map<string, Set<string>>();
+        for (const record of state.records) {
+          for (const admission of record.agentRunAdmissions ?? []) {
+            const requestIds = owningRequestsByRun.get(admission.runId)
+              ?? new Set<string>();
+            requestIds.add(record.requestId);
+            owningRequestsByRun.set(admission.runId, requestIds);
+          }
+        }
         let reconciled = 0;
         let settled = 0;
         let aborted = 0;
@@ -629,7 +651,10 @@ export function createConversationCausalStore(options: {
             const ownerRevision = owner
               ? resolveConversationAgentRunExecutionRevision(owner)
               : 0;
-            const validOwner = owner?.taskId === admission.taskId
+            const hasUniqueRequestOwner =
+              owningRequestsByRun.get(admission.runId)?.size === 1;
+            const validOwner = hasUniqueRequestOwner
+              && owner?.taskId === admission.taskId
               ? owner
               : undefined;
 
@@ -654,7 +679,9 @@ export function createConversationCausalStore(options: {
                 state: "aborted" as const,
                 failureCode: validOwner
                   ? "AGENT_RUN_REVISION_GAP" as const
-                  : "AGENT_RUN_OWNER_MISSING" as const,
+                  : owner
+                    ? "AGENT_RUN_OWNER_CONFLICT" as const
+                    : "AGENT_RUN_OWNER_MISSING" as const,
                 createdAt: admission.createdAt,
                 updatedAt: timestamp,
               };
@@ -678,9 +705,11 @@ export function createConversationCausalStore(options: {
                 ...admission,
                 executionRevision: admissionRevision,
                 state: "aborted" as const,
-                failureCode: !validOwner
+                failureCode: !owner
                   ? "AGENT_RUN_OWNER_MISSING" as const
-                  : ownerRevision !== admissionRevision
+                  : !validOwner
+                    ? "AGENT_RUN_OWNER_CONFLICT" as const
+                    : ownerRevision !== admissionRevision
                     ? "AGENT_RUN_REVISION_GAP" as const
                     : "AGENT_RUN_OWNER_CONFLICT" as const,
                 createdAt: admission.createdAt,
@@ -1249,8 +1278,7 @@ export function createConversationCausalStore(options: {
         if (existing) {
           return {
             disposition:
-              existing.requestFingerprint === safeIntent.requestFingerprint
-              && existing.state === safeIntent.state
+              isDeepStrictEqual(existing, safeIntent)
                 ? "duplicate"
                 : "conflict",
             value: structuredClone(existing),
@@ -1260,6 +1288,7 @@ export function createConversationCausalStore(options: {
           safeIntent.schemaVersion !== CONVERSATION_CAUSAL_SCHEMA_VERSION
           || safeIntent.state !== "pending"
           || safeIntent.revision !== 1
+          || !hasConsistentToolApprovalInvocationIdentity(safeIntent.causalRef)
         ) {
           return { disposition: "conflict" };
         }
@@ -1292,6 +1321,7 @@ export function createConversationCausalStore(options: {
           || safeIntent.state !== "pending"
           || safeIntent.revision !== 1
           || safeIntent.causalRef.requestId !== input.requestId
+          || !hasConsistentToolApprovalInvocationIdentity(safeIntent.causalRef)
         ) {
           return { disposition: "conflict" };
         }

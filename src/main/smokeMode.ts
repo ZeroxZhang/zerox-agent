@@ -419,7 +419,7 @@ export function getSmokeRendererPerformanceScript(
       }
       return {
         p95: percentile(frameDurations, 0.95),
-        max: frameDurations.length ? Math.max(...frameDurations) : 0,
+        max: frameDurations.reduce((maximum, value) => Math.max(maximum, value), 0),
         average: frameDurations.reduce((total, value) => total + value, 0) /
           Math.max(1, frameDurations.length),
       };
@@ -511,7 +511,7 @@ export function getSmokeRendererPerformanceScript(
       }
       const alternateSessionSwitchMs = switchDurations[1] ?? 0;
       const sessionSwitchMs =
-        switchDurations.length > 0 ? Math.max(...switchDurations) : 0;
+        switchDurations.reduce((maximum, value) => Math.max(maximum, value), 0);
       const inputFrames = await measureInputFrames();
       mark("inputMeasured");
       const renderedMessageCount = document.querySelectorAll(".chat-message").length;
@@ -529,7 +529,7 @@ export function getSmokeRendererPerformanceScript(
         inputMaxFrameMs: round(inputFrames.max),
         inputAverageFrameMs: round(inputFrames.average),
         longTaskCount: longTasks.length,
-        longTaskMaxMs: round(longTasks.length ? Math.max(...longTasks) : 0),
+        longTaskMaxMs: round(longTasks.reduce((maximum, value) => Math.max(maximum, value), 0)),
         archivedSessionCount,
         archiveExpanded,
         visibleSessionCount: visibleSessionIds.length,
@@ -614,7 +614,7 @@ export function getSmokeRendererPerformanceScript(
           inputMaxFrameMs: 0,
           inputAverageFrameMs: 0,
           longTaskCount: longTasks.length,
-          longTaskMaxMs: round(longTasks.length ? Math.max(...longTasks) : 0),
+          longTaskMaxMs: round(longTasks.reduce((maximum, value) => Math.max(maximum, value), 0)),
           archivedSessionCount: 0,
           archiveExpanded: false,
           visibleSessionCount: 0,

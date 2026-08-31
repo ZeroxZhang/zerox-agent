@@ -22,7 +22,14 @@ export type ToolResultRefReadScope = {
   workspaceRunId?: string;
 };
 
-export type ReadToolResultRefOptions = ToolResultRefReadScope;
+export type ReadToolResultRefOptions = ToolResultRefReadScope & {
+  /**
+   * Renderer evidence reads bind to a persisted trajectory event. The main
+   * process resolves the complete offload owner scope from this trusted event
+   * instead of asking the renderer to reconstruct request/workspace owners.
+   */
+  trajectoryEventId?: string;
+};
 
 export function extractToolResultRef(value: unknown): string | null {
   if (!value || typeof value !== "object") {

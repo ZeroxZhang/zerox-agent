@@ -7,6 +7,7 @@ export const READ_CODE_ALLOWED_TOOLS = new Set([
   "file_search",
   "file_inventory",
   "file_move_plan",
+  "file_move_transaction_read",
   "file_verify_moves",
   "file_read",
   "tool_result_read",

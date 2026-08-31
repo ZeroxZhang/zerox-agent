@@ -313,6 +313,18 @@ describe("conversation causal store", () => {
     })).disposition).toBe("conflict");
   });
 
+  it("rejects approval id reuse unless every sanitized intent field is identical", async () => {
+    const { store } = await createFixture();
+    const intent = approvalIntent("approval:exact", "epoch:1");
+    await expect(store.createApprovalIntent(intent)).resolves.toMatchObject({
+      disposition: "applied",
+    });
+    await expect(store.createApprovalIntent({
+      ...intent,
+      risk: { ...intent.risk, level: "critical", requiresConfirmation: true },
+    })).resolves.toMatchObject({ disposition: "conflict" });
+  });
+
   it("never persists raw approval args or secret-shaped values", async () => {
     const { configDir, store } = await createFixture();
     const intent = approvalIntent("approval:secret", "epoch:1");
@@ -817,6 +829,123 @@ describe("conversation causal store", () => {
       state: "settled",
       finalStatus: "failed",
     })).resolves.toMatchObject({ disposition: "applied" });
+  });
+
+  it("rejects assigning one AgentRun owner to two different requests", async () => {
+    const { store } = await createFixture();
+    for (const suffix of ["first", "second"] as const) {
+      await store.claimRequest({
+        requestId: `request:agent-run-${suffix}`,
+        turnId: `turn:agent-run-${suffix}`,
+        inputFingerprint: `input:agent-run-${suffix}`,
+      });
+    }
+    await expect(store.admitAgentRun({
+      requestId: "request:agent-run-first",
+      runId: "run:single-owner",
+      taskId: "task:single-owner",
+    })).resolves.toMatchObject({ disposition: "applied" });
+
+    await expect(store.admitAgentRun({
+      requestId: "request:agent-run-second",
+      runId: "run:single-owner",
+      taskId: "task:single-owner",
+    })).resolves.toMatchObject({ disposition: "conflict" });
+    const second = await store.getRequest("request:agent-run-second");
+    expect(second?.agentRunAdmissions ?? []).toEqual([]);
+    expect(second?.refs).toEqual([]);
+  });
+
+  it("aborts every legacy lease when one AgentRun was persisted under multiple requests", async () => {
+    const { configDir, store } = await createFixture();
+    for (const suffix of ["first", "second"] as const) {
+      await store.claimRequest({
+        requestId: `request:legacy-duplicate-${suffix}`,
+        turnId: `turn:legacy-duplicate-${suffix}`,
+        inputFingerprint: `input:legacy-duplicate-${suffix}`,
+      });
+    }
+    await store.admitAgentRun({
+      requestId: "request:legacy-duplicate-first",
+      runId: "run:legacy-duplicate-owner",
+      taskId: "task:legacy-duplicate-owner",
+    });
+    const statePath = path.join(configDir, "conversation-causal", "state.json");
+    const diskState = JSON.parse(await readFile(statePath, "utf8")) as {
+      records: Array<{
+        requestId: string;
+        revision: number;
+        agentRunAdmissions?: Array<Record<string, unknown>>;
+        refs: Array<Record<string, unknown>>;
+      }>;
+    };
+    const first = diskState.records.find((record) =>
+      record.requestId === "request:legacy-duplicate-first",
+    )!;
+    const second = diskState.records.find((record) =>
+      record.requestId === "request:legacy-duplicate-second",
+    )!;
+    second.revision += 1;
+    second.agentRunAdmissions = structuredClone(first.agentRunAdmissions);
+    second.refs = [{ kind: "agent_run", id: "run:legacy-duplicate-owner" }];
+    await writeFile(statePath, `${JSON.stringify(diskState, null, 2)}\n`, "utf8");
+    const reopened = createConversationCausalStore({ configDir });
+
+    await expect(reopened.reconcileAgentRunAdmissions(new Map([
+      ["run:legacy-duplicate-owner", {
+        runId: "run:legacy-duplicate-owner",
+        taskId: "task:legacy-duplicate-owner",
+        executionRevision: 1,
+        status: "succeeded",
+      }],
+    ]))).resolves.toEqual({ reconciled: 2, settled: 0, aborted: 2 });
+    for (const suffix of ["first", "second"] as const) {
+      await expect(reopened.getRequest(
+        `request:legacy-duplicate-${suffix}`,
+      )).resolves.toMatchObject({
+        agentRunAdmissions: [expect.objectContaining({
+          state: "aborted",
+          failureCode: "AGENT_RUN_OWNER_CONFLICT",
+        })],
+      });
+    }
+  });
+
+  it("rejects AgentRun lifecycle fields that contradict the target state", async () => {
+    const { store } = await createFixture();
+    await store.claimRequest({
+      requestId: "request:agent-run-shape",
+      turnId: "turn:agent-run-shape",
+      inputFingerprint: "input:agent-run-shape",
+    });
+    await store.admitAgentRun({
+      requestId: "request:agent-run-shape",
+      runId: "run:shape",
+      taskId: "task:shape",
+    });
+    await expect(store.settleAgentRunAdmission({
+      requestId: "request:agent-run-shape",
+      runId: "run:shape",
+      state: "started",
+      finalStatus: "succeeded",
+    })).resolves.toMatchObject({ disposition: "conflict" });
+    await expect(store.settleAgentRunAdmission({
+      requestId: "request:agent-run-shape",
+      runId: "run:shape",
+      state: "started",
+    })).resolves.toMatchObject({ disposition: "applied" });
+    await expect(store.settleAgentRunAdmission({
+      requestId: "request:agent-run-shape",
+      runId: "run:shape",
+      state: "settled",
+      finalStatus: "failed",
+      failureCode: "AGENT_RUN_OWNER_CONFLICT",
+    })).resolves.toMatchObject({ disposition: "conflict" });
+    await expect(store.settleAgentRunAdmission({
+      requestId: "request:agent-run-shape",
+      runId: "run:shape",
+      state: "aborted",
+    })).resolves.toMatchObject({ disposition: "conflict" });
   });
 
   it("fences paused AgentRun resume by a monotonic execution revision", async () => {

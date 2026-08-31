@@ -13,7 +13,7 @@ export const conversationDisclosureScenarioDigests = {
   "S12-retry-attempt": "sha256:49d4fb731a204d7b797ede14668b357e45234789b55325523987a21b05d43ef7",
   "S13-legacy-coverage": "sha256:1da0ad6ff0d434ad92845f1cea5d528fd01a1737ad0f443d1c45ef43687cf53f",
   "S14-guided-input": "sha256:3c9874af0ecbbb0423379639f72878eaf8861332e3c49791c79eb05abfc98dfd",
-  "S15-goal-acceptance": "sha256:bb3c64effbd049e402244e4e26203a037d7fb43fb4d509cb17077874a0a4e7af",
+  "S15-goal-acceptance": "sha256:9fe6e0e486a9911753026a3e062c00e9ff43e114acd8c7860df6e184e16e5e72",
   "S16-plan-confirmation": "sha256:b629d2c39b858f620076e3b26976ba7261d6f4d04db51565df665f1ff1b3c432",
   "S17-cancel-interruption": "sha256:e06c224ecc01de33bc483eb90f0ef0c4367d475b5a4dd4d86c3d53bb5c92e52f",
   "S18-context-usage": "sha256:92d314124b29cb75fc76cfde7e01c1f0db84def2db643209a4b9fcfff2112514",
@@ -113,9 +113,9 @@ export const conversationDisclosureScenarioActions: Readonly<
     "settle_guided_continuation_once",
   ],
   "S15-goal-acceptance": [
-    "review_goal",
-    "observe_completed_unverified",
-    "resolve_acceptance_and_reload",
+    "verify_shared_preacceptance_source",
+    "complete_unverified_branch",
+    "certify_parallel_branch_and_reload",
   ],
   "S16-plan-confirmation": [
     "reload_awaiting_confirmation",
@@ -173,6 +173,7 @@ export type ConversationDisclosureScenarioReceipt = {
   scenarioDigest: string;
   executionId: string;
   processEpochs: string[];
+  attemptNonces: string[];
   productionMain: true;
   productionPreload: true;
   demoDataUsed: false;

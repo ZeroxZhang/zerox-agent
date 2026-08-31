@@ -87,6 +87,19 @@ describe("preload bridge", () => {
     );
   });
 
+  it("exposes source-bound trajectory paging instead of requiring full-history UI reads", () => {
+    expect(preloadSource).toContain("getAgentRunTrajectoryPage");
+    expect(preloadSource).toContain(
+      'ipcRenderer.invoke("agentRuns:getTrajectoryPage", runId, options)',
+    );
+    const runsPanelSource = readFileSync(
+      path.join(process.cwd(), "src/renderer/components/RunsPanel.tsx"),
+      "utf8",
+    );
+    expect(runsPanelSource).toContain("getAgentRunTrajectoryPage");
+    expect(runsPanelSource).not.toContain(".listAgentRunTrajectory(");
+  });
+
   it("exposes a pull snapshot for subscribe-first tool approval recovery", () => {
     expect(preloadSource).toContain("getPendingToolApprovals");
     expect(preloadSource).toContain(

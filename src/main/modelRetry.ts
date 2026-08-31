@@ -25,18 +25,38 @@ export async function completeWithModelRetry(
   options: ModelRetryOptions | undefined,
   onRetry?: (event: ModelRetryEvent) => void | Promise<void>,
 ): Promise<ChatCompletionResponse> {
+  return retryModelOperation(
+    () => chatClient.complete(request),
+    options,
+    request.signal,
+    onRetry,
+  );
+}
+
+/**
+ * Shared retry contract for model boundaries that do not expose a ChatClient
+ * directly (for example Plan structured generation and cold review). Keeping
+ * the classifier and cancellation semantics here prevents planning, Chat, and
+ * Goal execution from drifting into different transport behavior.
+ */
+export async function retryModelOperation<T>(
+  operation: () => Promise<T>,
+  options: ModelRetryOptions | undefined,
+  signal?: AbortSignal,
+  onRetry?: (event: ModelRetryEvent) => void | Promise<void>,
+): Promise<T> {
   const maxRetries = Math.max(0, Math.floor(options?.maxRetries ?? 2));
   const baseDelayMs = Math.max(0, Math.floor(options?.baseDelayMs ?? 1000));
   const maxDelayMs = Math.max(baseDelayMs, Math.floor(options?.maxDelayMs ?? 8000));
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    throwIfCanceled(request.signal);
+    throwIfCanceled(signal);
     try {
-      return await chatClient.complete(request);
+      return await operation();
     } catch (error) {
       if (
         attempt === maxRetries ||
-        isCancellationError(error, request.signal) ||
+        isCancellationError(error, signal) ||
         !isRetryableModelError(error)
       ) {
         throw error;
@@ -49,7 +69,7 @@ export async function completeWithModelRetry(
         delayMs,
         error: formatError(error),
       });
-      await sleep(delayMs, options?.sleep, request.signal);
+      await sleep(delayMs, options?.sleep, signal);
     }
   }
 

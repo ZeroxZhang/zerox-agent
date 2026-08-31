@@ -106,6 +106,7 @@ import type {
 } from "../shared/agentRuns";
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import type { ConversationSourcePage } from "../shared/conversationEvidence";
 import type { Goal, GoalBudget } from "../shared/agentGoal";
 import type {
   GoalReviewDecision,
@@ -376,6 +377,11 @@ const buildingAgent = {
     ipcRenderer.invoke("multiAgentSessions:list"),
   listAgentRunTrajectory: (runId: string): Promise<AgentTrajectoryEvent[]> =>
     ipcRenderer.invoke("agentRuns:listTrajectory", runId),
+  getAgentRunTrajectoryPage: (
+    runId: string,
+    options?: { cursor?: string; limit?: number },
+  ): Promise<ConversationSourcePage<AgentTrajectoryEvent>> =>
+    ipcRenderer.invoke("agentRuns:getTrajectoryPage", runId, options),
   openAgentRunSession: (
     runId: string,
   ): Promise<OpenAgentRunSessionResult> =>

@@ -86,6 +86,38 @@ describe("structured model boundary protocol", () => {
     expect(calls[0]?.maxTokens).toBe(4096);
   });
 
+  it("retries a transient transport timeout inside the same logical boundary", async () => {
+    const calls: Call[] = [];
+    const retryErrors: string[] = [];
+    const result = await completeStructuredBoundary({
+      complete: fakeComplete(
+        [new Error("temporary network timeout"), ok('{"title":"重试恢复"}')],
+        calls,
+      ),
+      contract: makeContract(),
+      initialMaxTokens: 4096,
+      transportRetry: {
+        maxRetries: 2,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+        sleep: async () => undefined,
+      },
+      onTransportRetry(event) {
+        retryErrors.push(event.error);
+      },
+    });
+
+    expect(result.output).toEqual({ title: "重试恢复" });
+    expect(calls).toHaveLength(2);
+    expect(result.diagnostics).toMatchObject({
+      completionCount: 1,
+      transportRetryCount: 1,
+      repairAttempted: false,
+      outputLimitRecovered: false,
+    });
+    expect(retryErrors).toEqual(["temporary network timeout"]);
+  });
+
   it("continues a truncated response once with an escalated budget", async () => {
     const calls: Call[] = [];
     const full = '{"title":"续写恢复","extra":"done"}';

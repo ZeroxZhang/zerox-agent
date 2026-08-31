@@ -138,6 +138,13 @@ function mapChatEventToWorkStatus(
   if (event.state === "completed") return "completed";
   if (event.state === "failed") return "failed";
   if (event.state === "canceled") return "canceled";
+  if (
+    event.state === "tool_invocation" &&
+    (event.invocationStatus === "waiting_approval" ||
+      event.invocationStatus === "waiting_for_approval")
+  ) {
+    return "waiting_for_approval";
+  }
   if (event.state === "paused" || event.state === "waiting_for_input") {
     return "paused";
   }

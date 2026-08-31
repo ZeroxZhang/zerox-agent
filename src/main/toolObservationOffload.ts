@@ -28,6 +28,7 @@ export async function serializeToolObservationWithOffload(
     store?: ToolResultOffloadStore;
     thresholdChars?: number;
     runId?: string;
+    continuationOwnerId?: string;
     sessionId?: string;
     requestId?: string;
     workspaceRunId?: string;
@@ -55,6 +56,7 @@ export async function serializeToolObservationWithOffload(
   try {
     const ref = await options.store.write({
       runId: options.runId,
+      continuationOwnerId: options.continuationOwnerId,
       sessionId: options.sessionId,
       requestId: options.requestId,
       workspaceRunId: options.workspaceRunId,

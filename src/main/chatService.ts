@@ -285,6 +285,11 @@ type CachedHistoryAttachmentPayload = {
   lastAccessedAtMs: number;
 };
 
+// Electron enforces one main-process instance. Keep the per-session turn
+// authority at process scope so independently constructed service adapters
+// cannot concurrently consume the same persisted continuation.
+const processChatSessionRequestTails = new Map<string, Promise<void>>();
+
 type HistoryAttachmentReplayBudget = {
   remainingBytes: number;
   remainingCount: number;
@@ -563,7 +568,6 @@ export function createChatService(options: {
     CachedHistoryAttachmentPayload
   >();
   const inFlightSkillInputResponses = new Set<string>();
-  const sessionRequestTails = new Map<string, Promise<void>>();
 
   function cachePendingSkillInput(
     inputRequestId: string,
@@ -1791,9 +1795,26 @@ export function createChatService(options: {
             message: "已持久化回复与因果收据冲突，未重放执行。",
           };
         }
-        const persistedWorkspaceRunId = accepted?.value?.refs.find(
-          (ref) => ref.kind === "workspace_run",
-        )?.id;
+        const acceptedAttempt = accepted?.value?.attempts.find((attempt) =>
+          attempt.acceptedSettlement?.acceptedMessageId === persistedAssistant.id
+          || attempt.assistantAcceptance?.acceptedSettlement.acceptedMessageId
+            === persistedAssistant.id,
+        );
+        const expectedWorkspaceRunId =
+          acceptedAttempt?.assistantAcceptance?.workspaceRunId
+          ?? createChatWorkspaceRunId(sessionId, requestId);
+        const persistedWorkspaceRunId = accepted?.value?.refs.some(
+          (ref) =>
+            ref.kind === "workspace_run"
+            && ref.id === expectedWorkspaceRunId,
+        )
+          ? expectedWorkspaceRunId
+          : undefined;
+        const expectsWorkspaceReconciliation = Boolean(
+          options.workspaceRunStore
+          || acceptedAttempt?.assistantAcceptance?.workspaceRunId
+          || accepted?.value?.refs.some((ref) => ref.kind === "workspace_run"),
+        );
         if (
           persistedWorkspaceRunId
           && options.workspaceRunStore
@@ -1831,6 +1852,23 @@ export function createChatService(options: {
               },
             }).catch(() => undefined);
           }
+        } else if (
+          replaySettlementStatus === "succeeded"
+          && accepted?.value
+          && expectsWorkspaceReconciliation
+        ) {
+          await options.conversationCausalStore?.addRefs({
+            requestId,
+            refs: [],
+            coverage: {
+              state: "degraded",
+              reasonCodes: [
+                persistedWorkspaceRunId
+                  ? "workspace_accept_reconcile_unavailable"
+                  : "workspace_owner_ref_missing",
+              ],
+            },
+          }).catch(() => undefined);
         } else if (replaySettlementStatus === "unknown") {
           await options.conversationCausalStore?.addRefs({
             requestId,
@@ -3061,9 +3099,9 @@ export function createChatService(options: {
             continuationToResume?.toolCallsExecuted ?? 0;
           const actorToolTasks = new Map<string, string>();
           const emittedActorSpawnIds = new Set<string>();
+          const parentEvidenceRunId = continuationToResume?.evidenceRunId;
           const evidence = createChatAgentEvidenceRecorder({
             trajectoryStore: options.trajectoryStore,
-            runId: continuationToResume?.evidenceRunId,
             ...(agentRunContext ? { runContext: agentRunContext } : {}),
             createId,
             now: options.now,
@@ -3108,6 +3146,12 @@ export function createChatService(options: {
               strategy: options.compactionStrategy ? "rebuild" : "summarize",
               preserveToolPairs: true,
               protectSkillLoads: true,
+              ...(parentEvidenceRunId
+                ? {
+                    checkpointId: parentEvidenceRunId,
+                    boundaryId: requestId,
+                  }
+                : {}),
             },
             trajectory: {
               ...(workspaceRunRecorder?.workspaceRunId
@@ -3127,6 +3171,14 @@ export function createChatService(options: {
             {
               runtimeContextSnapshot,
               runtimeContextSnapshotSummary,
+              ...(parentEvidenceRunId
+                ? {
+                    continuationLineage: {
+                      parentEvidenceRunId,
+                      continuationRequestId: requestId,
+                    },
+                  }
+                : {}),
             },
             {
               containsApiKey: false,
@@ -3185,6 +3237,7 @@ export function createChatService(options: {
               tools: toolDefinitions,
               toolResultOffloadStore: options.toolResultOffloadStore,
               toolResultOffloadThreshold: options.toolResultOffloadThreshold,
+              toolResultContinuationOwnerId: `chat:${sessionId}`,
               requestId,
               ...(workspaceRunRecorder?.workspaceRunId
                 ? { workspaceRunId: workspaceRunRecorder.workspaceRunId }
@@ -3194,6 +3247,7 @@ export function createChatService(options: {
                 : {}),
               pauseOnTurnLimit: false,
               pauseOnFailureLoop: true,
+              autoContinueOutputLimit: true,
               ...(options.maxMode && isMaxModeEnabled()
                 ? {
                     modelRequestExecutor: async (request: import("./openAiCompatibleClient").ChatCompletionRequest) => {
@@ -3413,12 +3467,13 @@ export function createChatService(options: {
                     );
                   }
                 }
-                void evidence.append("tool_invocation", {
+                await evidence.append("tool_invocation", {
                   toolInvocationId: record.id,
                   toolCallId: record.toolCallId,
                   toolName: record.toolName,
                   toolSource: record.source,
                   invocationStatus: record.status,
+                  ...(record.approvalId ? { approvalId: record.approvalId } : {}),
                   args: record.args,
                   ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
                   ...(record.resultRef ? { resultRef: record.resultRef } : {}),
@@ -4612,13 +4667,14 @@ export function createChatService(options: {
       return executeMessageWithKernel(input, runtimeOptions, internalOptions);
     }
 
-    const previous = sessionRequestTails.get(sessionKey) ?? Promise.resolve();
+    const previous = processChatSessionRequestTails.get(sessionKey)
+      ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     const tail = previous.catch(() => undefined).then(() => gate);
-    sessionRequestTails.set(sessionKey, tail);
+    processChatSessionRequestTails.set(sessionKey, tail);
     try {
       const ready = await waitForTurnOrAbort(previous, runtimeOptions.signal);
       if (!ready) {
@@ -4632,8 +4688,8 @@ export function createChatService(options: {
     } finally {
       release();
       void tail.finally(() => {
-        if (sessionRequestTails.get(sessionKey) === tail) {
-          sessionRequestTails.delete(sessionKey);
+        if (processChatSessionRequestTails.get(sessionKey) === tail) {
+          processChatSessionRequestTails.delete(sessionKey);
         }
       });
     }
@@ -5805,9 +5861,10 @@ async function createChatWorkspaceRunRecorder(options: {
   }
 
   const workspaceRunStore = options.workspaceRunStore;
-  const workspaceRunId = `chat_run_${sanitizeRuntimeId(
+  const workspaceRunId = createChatWorkspaceRunId(
     options.sessionId,
-  )}_${sanitizeRuntimeId(options.requestId)}`;
+    options.requestId,
+  );
   let pendingCompletedEvent: ChatTaskStatusEvent | null = null;
   let lastWorkspaceStatus: WorkspaceRunStatus = "running";
 
@@ -6453,6 +6510,10 @@ export function buildDefaultChatShellTemplates(): string[] {
 
 function sanitizeRuntimeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "run";
+}
+
+function createChatWorkspaceRunId(sessionId: string, requestId: string): string {
+  return `chat_run_${sanitizeRuntimeId(sessionId)}_${sanitizeRuntimeId(requestId)}`;
 }
 
 function uniqueStrings(values: string[]): string[] {

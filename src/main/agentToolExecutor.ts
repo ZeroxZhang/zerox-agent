@@ -18,7 +18,9 @@ import { runNativeTestCommand } from "./nativeTestRunTool";
 import {
   applyLocalFileOrganization,
   previewLocalFileOrganization,
+  readLocalFileOrganizationTransaction,
   rollbackLocalFileOrganization,
+  verifyLocalFileOrganization,
   type LocalFileOrganizationPreview,
   type LocalFileOrganizationTransaction,
 } from "./localFileOrganizer";
@@ -361,6 +363,8 @@ function getToolExecutionPathChecks(
       return pathChecks([request.args.root], "read");
     case "file_move_plan":
       return pathChecks([request.args.targetDir], "read");
+    case "file_move_transaction_read":
+      return pathChecks([request.args.logPath], "read");
     case "code_search":
     case "git_status":
     case "git_diff":
@@ -454,6 +458,38 @@ function registerBuiltinTools(
     },
     async (args) => statLocalPath(String(args.path ?? "")),
     "built-in",
+  );
+
+  registry.register(
+    {
+      type: "function",
+      function: {
+        name: "file_move_transaction_read",
+        description:
+          "从事务日志恢复文件整理事务；可用于崩溃或中断后的验证与回滚。",
+        parameters: {
+          type: "object",
+          properties: {
+            logPath: {
+              type: "string",
+              description: "file_apply_moves 创建的事务日志绝对路径",
+            },
+          },
+          required: ["logPath"],
+        },
+      },
+    },
+    async (args) => readLocalFileMoveTransaction(String(args.logPath ?? "")),
+    "built-in",
+    defineNativeToolDescriptor({
+      id: "file_move_transaction_read",
+      kind: "file",
+      label: "File Move Transaction Read",
+      description: "Recover an interrupted file organization transaction from its journal.",
+      riskLevel: "low",
+      permissionScope: { files: "read", shell: "none", web: "none" },
+      observableEvents: ["native_tool_invocation", "native_tool_observation"],
+    }),
   );
 
   registry.register(
@@ -1353,6 +1389,23 @@ async function applyLocalFileMoves(
   };
 }
 
+async function readLocalFileMoveTransaction(
+  logPath: string,
+): Promise<AgentToolExecutionResult> {
+  if (!logPath) {
+    return {
+      ok: false,
+      error: "file_move_transaction_read requires logPath.",
+    };
+  }
+  return {
+    ok: true,
+    result: {
+      transaction: await readLocalFileOrganizationTransaction(logPath),
+    },
+  };
+}
+
 async function verifyLocalFileMoves(
   transaction: unknown,
 ): Promise<AgentToolExecutionResult> {
@@ -1363,25 +1416,9 @@ async function verifyLocalFileMoves(
     };
   }
 
-  const missingTargets: string[] = [];
-  const unmovedSources: string[] = [];
-  for (const move of transaction.moves) {
-    if (!(await pathExists(move.to))) {
-      missingTargets.push(move.to);
-    }
-    if (await pathExists(move.from)) {
-      unmovedSources.push(move.from);
-    }
-  }
-
   return {
     ok: true,
-    result: {
-      verified: missingTargets.length === 0 && unmovedSources.length === 0,
-      checked: transaction.moves.length,
-      missingTargets,
-      unmovedSources,
-    },
+    result: await verifyLocalFileOrganization(transaction),
   };
 }
 

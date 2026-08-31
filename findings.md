@@ -1,5 +1,169 @@
 # Findings and Decisions: Zerox Agent v3.9.2 Conversation Disclosure
 
+## 2026-08-31 - Goal planning review timeout incident
+
+- The latest failed Goal is session `807ccce9-d632-416e-9c38-ffd084941c25`
+  and plan `plan_f9419efa-7819-42b9-935f-b0d9632f58a0`. The Direct candidate
+  generation completed in `23845 ms`; only its review stage failed with
+  `LLM connection timed out after 30000 ms.` The captured run used about
+  `7.2%` of its context budget, so this was neither plan-content rejection nor
+  context exhaustion.
+- The global transport helper treated the time until `fetch()` returned
+  response headers as a TCP/TLS connection interval. For a non-streaming model
+  completion that interval also includes provider queueing and generation, so
+  the separate 30-second timer could terminate a healthy completion. The
+  existing 300-second total deadline already supplied the correct finite
+  safety bound.
+- Structured planning called model clients directly while interactive Chat
+  used the shared transient retry helper. This contract split made a single
+  reset or timeout terminal specifically at generation/review/repair
+  boundaries.
+- Review retry also invalidated the already successful generation stage and
+  Direct round. That contradicted the UI claim that completed plan content was
+  retained and spent model time and tokens regenerating unchanged work.
+- The transport now has one truthful end-to-end deadline, structured
+  boundaries share bounded transient retry and cancellation semantics, and a
+  failed review resumes from the exact preserved candidate. Genuine provider
+  failure after the bounded retries remains a recoverable paused plan rather
+  than an infinite wait or unbounded-cost loop.
+- Focused transport/structured/orchestrator coverage passes `197` tests;
+  strict test typing passes `433/433`; full verify passes `324` files and
+  `3865` current tests plus all historical lanes and evals; production smoke,
+  governed Electron acceptance `19/19`, audit, and whitespace checks pass.
+- Dedicated packaged-app acceptance replayed the exact failed plan in an
+  isolated SQLite copy. The fake provider reset the first review connection,
+  then returned approval after `35000 ms`; the application recovered in two
+  calls, reached `awaiting_confirmation`, retained exactly one Direct round
+  and one generation stage with the original run id, invalidated the failed
+  review, and completed the replacement review. The machine-readable receipt
+  is `.zerox/verification/plan-resilience-local-package.json`.
+
+## 2026-08-31 - Chat output-limit and IME incident
+
+- The reported model warning was not a context-window overflow: the captured
+  UI showed about `11%` current-context use, while the configured response
+  ceiling was `8192` tokens. The provider returned `finish_reason=length` after
+  `23` Tool calls, so a single response chunk ended before the task did.
+- The old interactive AgentLoop converted every provider service notice,
+  including a productive output-length boundary, directly into `paused`. It
+  therefore required a manual “继续” even though the application already had
+  the partial transcript and all Tool results needed to continue safely.
+- The following manual continuation failed before a new model request. Its
+  Workspace run reached model-config resolution and its causal record reused
+  the prior trajectory run, but no new `run_context_created` or
+  `model_request` event was committed. The old design coupled a new request to
+  an already finalized evidence-run identity instead of expressing lineage.
+- Interactive Chat now automatically chains distinct output chunks, preserves
+  the combined reply, and reissues incomplete Tool calls from a clean boundary.
+  Repeated/empty no-progress responses still pause recoverably; rate, quota,
+  and provider-stop notices are unchanged.
+- A resumed request now owns a fresh evidence run. Its runtime snapshot records
+  the previous evidence run as `checkpointId` and the new request as
+  `boundaryId`; cross-run Tool-result access requires the explicit stable
+  `chat:<sessionId>` continuation owner rather than task/run identity leakage.
+- Composer Enter previously ignored IME state and always called
+  `requestSubmit()`. The repaired gate requires a bare Enter outside the
+  tracked composition lifecycle, outside `nativeEvent.isComposing`, and
+  outside the Chromium/WebKit `229` fallback.
+- Dedicated packaged-app acceptance passed against an isolated SQLite profile:
+  two local provider calls (`length` then `stop`) yielded one `completed`
+  combined reply with no provider pause; a trusted IME Enter had
+  `isComposing=true`, retained “测试输入法”, retained focus, and produced zero
+  form submissions.
+
+## 2026-08-31 - Comprehensive review result
+
+- The finite review covered every `main...codex/3.9.2` production delta and
+  its authority, persistence/recovery, IPC, renderer, acceptance, and
+  governance callers. It confirmed and repaired `22` defect groups. No known
+  Critical or Major product finding remains in the declared review model.
+- Final verification found and repaired two additional closure defects outside
+  that product count: V13 historical orchestration had coupled current code to
+  a frozen V12 input, and S17 could pass while the visible sidebar remained in
+  the stale `执行中` projection. V13 now reconstructs the frozen historical
+  roots itself; S17 reloads the canonical projection and requires `已完成` plus
+  the recovered response before acceptance.
+- Authority and ownership repairs: exact Workspace-run settlement ownership;
+  consistent causal admission terminal shapes; semantic approval-intent
+  deduplication; global AgentRun owner collision rejection; and run/event
+  ownership enforcement in JSON and SQLite trajectory stores.
+- Persistence and recovery repairs: advancing-only JSONL cursors; resumed
+  evidence sequence recovery; `runId` rather than task identity for Tool
+  result persistence in both AgentRunner and AgentLoop; collision-resistant
+  hashed result refs; atomic no-overwrite publication; stale async trajectory
+  selection suppression; complete superseded-attempt cleanup; and linear
+  large-trajectory sequence calculation without spread-stack overflow.
+- Path-boundary repairs: one shared safe entity-id contract now protects
+  execution, Goal, trajectory, episode export, replay, temporary workspace,
+  file-organizer transaction, and Plan artifact paths. Unsafe historical
+  filenames or embedded foreign owners are ignored/quarantined instead of
+  being adopted across stores.
+- Projection repairs: cross-domain renderer row identities are namespaced;
+  scheduled, bootstrap, run, overview, and Chat status labels preserve queued,
+  waiting, paused, canceled, and failed distinctions; pending Tool approval
+  now restores as paused and projects as `waiting_for_approval` with visible
+  `等待授权` in both the main conversation and sidebar.
+- Acceptance repairs: CD09 requires explicit mode plus a scenario-bound system
+  temporary `user-data` directory; scenario ids are path-safe; bounded retry
+  resets non-restart state and snapshots restart baselines so a killed process
+  cannot contaminate the next attempt; S05 now machine-checks the backend work
+  projection and actual sidebar label as one cross-surface contract.
+- Rejected false positives were also traced: main startup already has a
+  top-level sanitized failure boundary; scheduled terminal Chat projection is
+  protected by upstream terminal guards; best-effort derivative scheduler
+  writes match the recorded ADR; and inspected adapter assertions do not
+  create an unchecked production authority path.
+- Final local evidence: strict type coverage `432/432`; current suite `323`
+  passed files / `3855` passed tests with the declared `1` file / `6` tests
+  skipped; every Round2-Round12 compatibility lane; build; Agent eval `26/26`;
+  Memory eval `2/2`; production Electron `42.9.0` / ABI `146` smoke with seven
+  migrations, eight authority domains, and Node ABI `137` restoration; all
+  `19/19` isolated real-app scenarios; zero production audit vulnerabilities;
+  complete dependency tree; Program/Harness; and `git diff --check`.
+- The final CD09 acceptance receipt passes `19/19` and has file digest
+  `sha256:601b4f503a453735a37c99255e1053de31327982a44cd3fc1f47a9f186f29f84`.
+  S17's canonical receipt digest is
+  `sha256:c7144e989f98031071ea83e6f0aeaa090f9194c74e8406dc20e1bd2de72be00f`;
+  its reloaded renderer observes `listedWorkStatus=completed`,
+  `sidebarBadgeText=已完成`, and the recovered session response.
+- The real S05 receipt records `listedWorkStatus=waiting_for_approval` and
+  `sidebarBadgeText=等待授权` before and after renderer reload. Manual screenshot
+  inspection confirms the approval dialog, warning banner, and sidebar agree.
+- Residual release boundary: Program reports `releaseReady=false`, P113/CD09
+  stays active, and the Harness receipt is explicitly non-authoritative and
+  not signed. P113 currently owns `65` files. A fresh package and signed
+  independent reviews are still needed for release closure; no commit, push,
+  tag, publish, or existing package
+  overwrite was performed.
+- Completeness limit: no finite review can prove that every future bug is
+  absent. Closure here means the declared branch delta and risk model were
+  completely traversed, every confirmed issue was repaired with regression
+  coverage, and no known release-blocking product defect remains.
+
+## 2026-08-31 - Comprehensive post-completion review baseline
+
+- Live scope is `main..codex/3.9.2` at HEAD `e4bd602`; prior generated CD05-CD09
+  evidence and local release directories were already dirty/untracked and are
+  preserved as user-owned historical outputs.
+- The previous P113/CD09 completion is reopened before product edits. The old
+  external acceptance anchor remains historical evidence but cannot authorize
+  any changed candidate bytes.
+- Baseline `npm test` passes all current and historical lanes (`3765` current
+  tests passed, `6` skipped); strict test type coverage is `425/425`, and
+  `npm audit --omit=dev --audit-level=high` reports zero vulnerabilities.
+- Ordinary `./init.sh` fails closed because completed-state verification needs
+  caller-pinned external CD04 and acceptance identities. Sourcing the existing
+  caller pin environment makes the authoritative Harness pass. This is a
+  reproducibility/documentation concern to assess, not evidence of a runtime
+  product failure.
+- The suspected unhandled startup-recovery rejection is rejected as a finding:
+  `main.ts` already terminates the top-level `app.whenReady()` chain with a
+  sanitized log and `app.exit(1)`.
+- Active candidate CBR-01: message-first Chat recovery derives a Workspace run
+  owner from the first sorted causal reference. A receipt containing more than
+  one `workspace_run` reference may therefore settle a non-owning run. This
+  must be confirmed with a distractor-reference regression before repair.
+
 ## CD05 Chat surface findings
 
 - CD05 cannot add a new main-process authority boundary: its declared surface

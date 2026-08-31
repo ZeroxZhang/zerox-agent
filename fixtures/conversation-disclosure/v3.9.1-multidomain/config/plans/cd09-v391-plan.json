@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "id": "cd09-v391-plan",
+  "sessionId": "cd09-v391-session",
+  "workspaceId": "cd09-v391-workspace",
+  "workspaceRoot": "/tmp/cd09-v391-workspace",
+  "sourceMessage": "Complete one bounded compatibility milestone.",
+  "mode": "direct",
+  "status": "canceled",
+  "actionGate": "blocked",
+  "revision": 1,
+  "taskContract": {
+    "objective": "Complete one bounded compatibility milestone.",
+    "audience": "local user",
+    "inScope": [
+      "v3.9.1 local stores"
+    ],
+    "outOfScope": [
+      "external publishing"
+    ],
+    "constraints": [
+      "preserve local source authority"
+    ],
+    "successCriteria": [
+      "The linked run remains reviewable after upgrade."
+    ],
+    "assumptions": []
+  },
+  "purpose": "initial",
+  "goalId": "cd09-v391-goal",
+  "goalPlanVersion": 1,
+  "trigger": {
+    "kind": "initial_request",
+    "summary": "Create the bounded compatibility plan.",
+    "evidenceRefs": [
+      "cd09-v391-request"
+    ],
+    "at": "2026-08-20T08:00:00.000Z"
+  },
+  "evidence": [],
+  "requestedModelAssignments": {},
+  "frozenModelAssignments": {},
+  "rounds": [],
+  "createdAt": "2026-08-20T08:00:00.000Z",
+  "updatedAt": "2026-08-20T08:00:00.000Z",
+  "goalContractSnapshot": {
+    "schemaVersion": 1,
+    "id": "goal_contract_cd09-v391-plan",
+    "revision": 1,
+    "source": {
+      "kind": "plan",
+      "ref": "cd09-v391-plan"
+    },
+    "objective": "Complete one bounded compatibility milestone.",
+    "deliverables": [],
+    "scope": {
+      "in": [
+        "v3.9.1 local stores"
+      ],
+      "out": [
+        "external publishing"
+      ]
+    },
+    "assumptions": [],
+    "constraints": [
+      {
+        "id": "constraint_1",
+        "dimension": "permission",
+        "strength": "hard",
+        "description": "preserve local source authority"
+      }
+    ],
+    "successCriteria": [
+      {
+        "id": "criterion_1",
+        "description": "The linked run remains reviewable after upgrade."
+      }
+    ],
+    "stopPolicy": {
+      "onSuccess": "acceptance_certificate",
+      "onUserCancel": "cancel",
+      "onExternalBlock": "await_input",
+      "onImpossible": "propose_goal_amendment",
+      "onSafetyBlock": "request_confirmation"
+    },
+    "riskPolicy": {
+      "ordinaryOperations": "auto_decide",
+      "highRiskOperations": "request_confirmation",
+      "irreversibleOperations": "request_confirmation"
+    },
+    "createdAt": "2026-08-20T08:00:00.000Z"
+  },
+  "goalContractRef": {
+    "id": "goal_contract_cd09-v391-plan",
+    "revision": 1,
+    "sha256": "f30b91fe3f30409753474043c09c105671a2fae1e1ed3347a58ebe880b8b9490"
+  }
+}

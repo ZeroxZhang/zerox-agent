@@ -19,6 +19,7 @@ import {
   computeReviewCandidateManifest,
   computeTreeManifest,
 } from "./local-candidate-source-manifest.mjs";
+import { inspectSafeFsHelper } from "./inspect-safe-fs-helper.mjs";
 import { validateProductionScenarioReceipt } from "./conversation-disclosure-acceptance-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -49,7 +50,7 @@ const expectedSuccessorFeatures = new Map([
   }],
   ["P113-v3.9.2-disclosure-adversarial-acceptance", {
     priority: 144,
-    digest: "sha256:eb42066c2d3df1aa5ff3e845b5942f83c510ff5bb3c5a5321e1da3d59afd3be5",
+    digest: "sha256:195ef4130a4a25e8bfefb41ffb2b97d39392360f7fb4a42dd15d8dbf288f495e",
   }],
 ]);
 const expectedScenarioIds = Array.from(
@@ -77,7 +78,7 @@ const expectedScenarioIds = Array.from(
   ][index]}`,
 );
 const expectedScenarioMatrixDigest =
-  "sha256:1a50664c840de063f0147bbc20108e017c121fee4930cbe2b587396c9ea3eea8";
+  "sha256:6f7d6618e08ea2d647e7f99c65b8329a60d93184f393403d3f1de2eab65399d7";
 const expectedWorkstreamIds = [
   "CD01", "CD02", "CD03", "CD03A", "CD04",
   "CD05", "CD06", "CD07", "CD08", "CD09",
@@ -232,6 +233,37 @@ const expectedFinalVerification = {
   packagedLaunch: "passed",
   packageSecretScan: "passed",
 };
+const releaseAttestationPath =
+  ".zerox/verification/conversation-disclosure/CD09-release-attestation.json";
+const expectedAcceptedCd04AnchorDigest =
+  "sha256:99b8b7af27e24d2c44e2bb3b2433ada877fd68aeac2d1de80427931de15c01ef";
+const expectedReleaseAttestationKeys = [
+  "schemaVersion",
+  "kind",
+  "version",
+  "status",
+  "identityAssurance",
+  "acceptanceAnchorDigest",
+  "acceptedGitHead",
+  "acceptedGitTree",
+  "cd04AnchorDigest",
+  "sourceDigest",
+  "sourceFileCount",
+  "reviewPins",
+  "evidenceDigests",
+  "verification",
+  "digest",
+].sort();
+const releaseAttestationEvidencePaths = Object.freeze({
+  codeReview: ".zerox/reviews/CD09-code-review.json",
+  securityReview: ".zerox/reviews/CD09-security-review.json",
+  realAppAcceptance:
+    ".zerox/verification/conversation-disclosure/CD09-real-app-acceptance.json",
+  localPackage:
+    ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+  chatResilience: ".zerox/verification/chat-resilience-local-package.json",
+  planResilience: ".zerox/verification/plan-resilience-local-package.json",
+});
 const expectedExternalControlFiles = [
   "package.json",
   "package-lock.json",
@@ -394,12 +426,6 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
     ?? process.env.ZEROX_CD04_DELTA_ANCHOR;
   const expectedAnchorDigest = options.expectedDeltaAnchorDigest
     ?? process.env.ZEROX_CD04_DELTA_ANCHOR_DIGEST;
-  if (
-    !path.isAbsolute(anchorPath ?? "")
-    || !/^sha256:[0-9a-f]{64}$/.test(expectedAnchorDigest ?? "")
-  ) {
-    errors.push("caller-pinned CD04 anchor path and digest are required");
-  }
 
   const [canonicalRoot, snapshotCapture, manifestCapture, program, featureList] =
     await Promise.all([
@@ -412,7 +438,24 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
       ),
       readCanonicalJson(path.join(root, ".zerox/feature_list.json"), errors),
     ]);
-  const anchorCapture = path.isAbsolute(anchorPath ?? "")
+  const releaseReady = program?.value?.status === "completed";
+  const useReleaseAttestation = releaseReady && !hasCallerPinMaterial(options);
+  const releaseAttestation = useReleaseAttestation
+    ? await validateReleaseAttestation(canonicalRoot, errors)
+    : null;
+  const validationOptions = releaseAttestation
+    ? withReleaseAttestationPins(options, releaseAttestation)
+    : options;
+  if (
+    !useReleaseAttestation
+    && (
+      !path.isAbsolute(anchorPath ?? "")
+      || !/^sha256:[0-9a-f]{64}$/.test(expectedAnchorDigest ?? "")
+    )
+  ) {
+    errors.push("caller-pinned CD04 anchor path and digest are required");
+  }
+  const anchorCapture = !useReleaseAttestation && path.isAbsolute(anchorPath ?? "")
     ? await readCanonicalJson(anchorPath, errors, true)
     : null;
   const snapshot = snapshotCapture?.value;
@@ -425,16 +468,19 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
   if (manifest?.digest !== expectedCd04.manifestDigest) {
     errors.push("CD04 manifest canonical digest changed");
   }
-  if (anchor?.digest !== expectedAnchorDigest) {
+  if (!useReleaseAttestation && anchor?.digest !== expectedAnchorDigest) {
     errors.push("CD04 external anchor self-digest differs from the caller pin");
   }
-  if (anchor?.repositoryRealpath !== canonicalRoot) {
+  if (!useReleaseAttestation && anchor?.repositoryRealpath !== canonicalRoot) {
     errors.push("CD04 external anchor repository identity changed");
   }
   if (
-    anchor?.snapshotDigest !== expectedCd04.snapshotDigest
-    || anchor?.manifestDigest !== expectedCd04.manifestDigest
-    || anchor?.parentAnchorDigest !== expectedCd04.parentAnchorDigest
+    !useReleaseAttestation
+    && (
+      anchor?.snapshotDigest !== expectedCd04.snapshotDigest
+      || anchor?.manifestDigest !== expectedCd04.manifestDigest
+      || anchor?.parentAnchorDigest !== expectedCd04.parentAnchorDigest
+    )
   ) {
     errors.push("CD04 external anchor lineage changed");
   }
@@ -450,10 +496,14 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
     featureList?.value,
     errors,
   );
-  await validateLifecycle(program?.value, featureList?.value, errors, options);
-  const releaseReady = program?.value?.status === "completed";
-  const finalAnchor = releaseReady
-    ? await validateFinalAcceptanceAnchor(options, canonicalRoot, errors)
+  await validateLifecycle(
+    program?.value,
+    featureList?.value,
+    errors,
+    validationOptions,
+  );
+  const finalAnchor = releaseReady && !useReleaseAttestation
+    ? await validateFinalAcceptanceAnchor(validationOptions, canonicalRoot, errors)
     : null;
   if (errors.length > 0) {
     throw new Error(
@@ -469,11 +519,158 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
     nextFeatureId: program.value.nextFeatureId,
     cd04SnapshotDigest: expectedCd04.snapshotDigest,
     cd04ManifestDigest: expectedCd04.manifestDigest,
-    cd04AnchorDigest: expectedAnchorDigest,
+    cd04AnchorDigest: releaseAttestation?.cd04AnchorDigest
+      ?? expectedAnchorDigest,
     releaseReady,
-    ...(finalAnchor ? { acceptanceAnchorDigest: finalAnchor.digest } : {}),
+    ...(
+      finalAnchor || releaseAttestation
+        ? {
+            acceptanceAnchorDigest: finalAnchor?.digest
+              ?? releaseAttestation.acceptanceAnchorDigest,
+          }
+        : {}
+    ),
+    ...(releaseAttestation
+      ? { releaseAttestationDigest: releaseAttestation.digest }
+      : {}),
   };
   return { ...receipt, digest: hashCanonicalV13(receipt) };
+}
+
+async function validateReleaseAttestation(canonicalRoot, errors) {
+  const capture = await readCanonicalJson(
+    path.join(root, releaseAttestationPath),
+    errors,
+  );
+  const attestation = capture?.value;
+  if (!attestation) return null;
+  const source = await computeLocalCandidateSourceManifest(root);
+  const evidenceCaptures = await Promise.all(
+    Object.values(releaseAttestationEvidencePaths).map((relativePath) =>
+      readBoundRegularFile(
+        path.join(root, relativePath),
+        errors,
+        "release attestation evidence",
+      )),
+  );
+  const evidenceDigests = Object.fromEntries(
+    Object.keys(releaseAttestationEvidencePaths).map((name, index) => [
+      name,
+      evidenceCaptures[index]
+        ? sha256BytesV13(evidenceCaptures[index].bytes)
+        : null,
+    ]),
+  );
+  let acceptedTree = null;
+  let acceptedIsAncestor = false;
+  try {
+    acceptedTree = execFileSync(
+      "/usr/bin/git",
+      ["rev-parse", "--verify", `${attestation.acceptedGitHead}^{tree}`],
+      { cwd: canonicalRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    execFileSync(
+      "/usr/bin/git",
+      ["merge-base", "--is-ancestor", attestation.acceptedGitHead, "HEAD"],
+      { cwd: canonicalRoot, stdio: "ignore" },
+    );
+    acceptedIsAncestor = true;
+  } catch {
+    // Reported through the single attestation identity error below.
+  }
+  const evidenceKeys = Object.keys(attestation.evidenceDigests ?? {});
+  const expectedEvidenceKeys = Object.keys(releaseAttestationEvidencePaths);
+  if (
+    JSON.stringify(Object.keys(attestation).sort())
+      !== JSON.stringify(expectedReleaseAttestationKeys)
+    || attestation.schemaVersion !== 1
+    || attestation.kind !== "v3.9.2-release-attestation"
+    || attestation.version !== "3.9.2"
+    || attestation.status !== "accepted"
+    || attestation.identityAssurance
+      !== "caller-promoted-external-anchor-not-signed"
+    || !/^sha256:[0-9a-f]{64}$/.test(attestation.acceptanceAnchorDigest ?? "")
+    || !/^[0-9a-f]{40}$/.test(attestation.acceptedGitHead ?? "")
+    || !/^[0-9a-f]{40}$/.test(attestation.acceptedGitTree ?? "")
+    || attestation.acceptedGitTree !== acceptedTree
+    || !acceptedIsAncestor
+    || attestation.cd04AnchorDigest !== expectedAcceptedCd04AnchorDigest
+    || attestation.sourceDigest !== source.digest
+    || attestation.sourceFileCount !== source.fileCount
+    || !expectedReviewPins(withReleaseAttestationPins({}, attestation))
+    || JSON.stringify(evidenceKeys) !== JSON.stringify(expectedEvidenceKeys)
+    || JSON.stringify(attestation.evidenceDigests)
+      !== JSON.stringify(evidenceDigests)
+    || JSON.stringify(attestation.verification)
+      !== JSON.stringify(expectedFinalVerification)
+  ) {
+    errors.push("tracked v3.9.2 release attestation is invalid or stale");
+    return null;
+  }
+  return attestation;
+}
+
+function withReleaseAttestationPins(options, attestation) {
+  return {
+    ...options,
+    releaseAttestation: attestation,
+    expectedCodeReviewAgentId: attestation?.reviewPins?.code?.reviewerAgentId,
+    expectedCodeReviewChallenge: attestation?.reviewPins?.code?.challenge,
+    expectedCodeReviewReceiptDigest: attestation?.reviewPins?.code?.receiptDigest,
+    expectedSecurityReviewAgentId:
+      attestation?.reviewPins?.security?.reviewerAgentId,
+    expectedSecurityReviewChallenge:
+      attestation?.reviewPins?.security?.challenge,
+    expectedSecurityReviewReceiptDigest:
+      attestation?.reviewPins?.security?.receiptDigest,
+  };
+}
+
+function hasCallerPinMaterial(options) {
+  return [
+    options.deltaAnchor,
+    options.expectedDeltaAnchorDigest,
+    options.acceptanceAnchor,
+    options.expectedAcceptanceAnchorDigest,
+    options.acceptanceRunner,
+    options.expectedAcceptanceRunnerDigest,
+    options.expectedNodeDigest,
+    options.npmCli,
+    options.expectedNpmCliDigest,
+    options.electronCacheArchive,
+    options.expectedElectronCacheDigest,
+    options.electronHeadersArchive,
+    options.expectedElectronHeadersDigest,
+    options.expectedGitHead,
+    options.expectedGitTree,
+    options.expectedCodeReviewAgentId,
+    options.expectedCodeReviewChallenge,
+    options.expectedCodeReviewReceiptDigest,
+    options.expectedSecurityReviewAgentId,
+    options.expectedSecurityReviewChallenge,
+    options.expectedSecurityReviewReceiptDigest,
+    process.env.ZEROX_CD04_DELTA_ANCHOR,
+    process.env.ZEROX_CD04_DELTA_ANCHOR_DIGEST,
+    process.env.ZEROX_V392_ACCEPTANCE_ANCHOR,
+    process.env.ZEROX_V392_ACCEPTANCE_ANCHOR_DIGEST,
+    process.env.ZEROX_V392_ACCEPTANCE_RUNNER,
+    process.env.ZEROX_V392_ACCEPTANCE_RUNNER_DIGEST,
+    process.env.ZEROX_V392_ACCEPTANCE_NODE_DIGEST,
+    process.env.ZEROX_V392_ACCEPTANCE_NPM_CLI,
+    process.env.ZEROX_V392_ACCEPTANCE_NPM_CLI_DIGEST,
+    process.env.ZEROX_V392_ELECTRON_CACHE_ARCHIVE,
+    process.env.ZEROX_V392_ELECTRON_CACHE_DIGEST,
+    process.env.ZEROX_V392_ELECTRON_HEADERS_ARCHIVE,
+    process.env.ZEROX_V392_ELECTRON_HEADERS_DIGEST,
+    process.env.ZEROX_V392_ACCEPTANCE_GIT_HEAD,
+    process.env.ZEROX_V392_ACCEPTANCE_GIT_TREE,
+    process.env.ZEROX_V392_CODE_REVIEW_AGENT_ID,
+    process.env.ZEROX_V392_CODE_REVIEW_CHALLENGE,
+    process.env.ZEROX_V392_CODE_REVIEW_RECEIPT_DIGEST,
+    process.env.ZEROX_V392_SECURITY_REVIEW_AGENT_ID,
+    process.env.ZEROX_V392_SECURITY_REVIEW_CHALLENGE,
+    process.env.ZEROX_V392_SECURITY_REVIEW_RECEIPT_DIGEST,
+  ].some((value) => value !== undefined && value !== null && value !== "");
 }
 
 async function validateFinalAcceptanceAnchor(options, canonicalRoot, errors) {
@@ -1014,54 +1211,65 @@ async function validateCompletionArtifact(
       ) {
         errors.push("CD09 local package source manifest is stale");
       }
-      const appPath = path.resolve(root, value.appPath ?? "");
-      const expectedAppRoot = path.join(root, "release-local");
-      if (
-        !appPath.startsWith(`${expectedAppRoot}${path.sep}`)
-        || !appPath.endsWith(".app")
-      ) {
-        errors.push("CD09 local package path is outside release-local");
-      } else {
-        const asarPath = path.join(appPath, "Contents/Resources/app.asar");
-        try {
-          const [asar, appMetadata, canonicalAppPath] = await Promise.all([
-            readFile(asarPath),
-            lstat(appPath),
-            realpath(appPath),
-          ]);
-          if (
-            !appMetadata.isDirectory()
-            || appMetadata.isSymbolicLink()
-            || canonicalAppPath !== appPath
-          ) {
-            errors.push("CD09 local package app root is not a real directory");
-          }
-          const appTree = await computeTreeManifest(appPath);
-          const packagedNativeCache =
-            "node_modules/better-sqlite3/bin/";
-          const embeddedPackage = JSON.parse(
-            extractFile(asarPath, "package.json").toString("utf8"),
-          );
-          if (
-            value.appAsarBytes !== asar.byteLength
-            || value.appAsarSha256 !== sha256BytesV13(asar)
-            || value.appTreeEntryCount !== appTree.entryCount
-            || value.appTreeSha256 !== appTree.digest
-            || embeddedPackage.version !== "3.9.2"
-            || embeddedPackage.buildCommit !== `workspace-${value.sourceDigest}`
-            || embeddedPackage.releaseMode !== "local-candidate"
-            || listPackage(asarPath).some((entry) =>
-              entry.replaceAll("\\", "/").includes(packagedNativeCache))
-            || existsSync(path.join(
+      if (!options.releaseAttestation) {
+        const appPath = path.resolve(root, value.appPath ?? "");
+        const expectedAppRoot = path.join(root, "release-local");
+        if (
+          !appPath.startsWith(`${expectedAppRoot}${path.sep}`)
+          || !appPath.endsWith(".app")
+        ) {
+          errors.push("CD09 local package path is outside release-local");
+        } else {
+          const asarPath = path.join(appPath, "Contents/Resources/app.asar");
+          try {
+            const [asar, appMetadata, canonicalAppPath] = await Promise.all([
+              readFile(asarPath),
+              lstat(appPath),
+              realpath(appPath),
+            ]);
+            if (
+              !appMetadata.isDirectory()
+              || appMetadata.isSymbolicLink()
+              || canonicalAppPath !== appPath
+            ) {
+              errors.push("CD09 local package app root is not a real directory");
+            }
+            const appTree = await computeTreeManifest(appPath);
+            const safeFsHelper = inspectSafeFsHelper(path.join(
               appPath,
-              "Contents/Resources/app.asar.unpacked",
-              packagedNativeCache,
-            ))
-          ) {
-            errors.push("CD09 local package app tree digest changed");
+              "Contents/Resources/safe-fs/zerox-safe-fs",
+            ), { requireSignature: true });
+            const safeFsReceipt = {
+              ...safeFsHelper,
+              path: path.relative(root, safeFsHelper.path),
+            };
+            const packagedNativeCache =
+              "node_modules/better-sqlite3/bin/";
+            const embeddedPackage = JSON.parse(
+              extractFile(asarPath, "package.json").toString("utf8"),
+            );
+            if (
+              value.appAsarBytes !== asar.byteLength
+              || value.appAsarSha256 !== sha256BytesV13(asar)
+              || value.appTreeEntryCount !== appTree.entryCount
+              || value.appTreeSha256 !== appTree.digest
+              || JSON.stringify(value.safeFsHelper) !== JSON.stringify(safeFsReceipt)
+              || embeddedPackage.version !== "3.9.2"
+              || embeddedPackage.buildCommit !== `workspace-${value.sourceDigest}`
+              || embeddedPackage.releaseMode !== "local-candidate"
+              || listPackage(asarPath).some((entry) =>
+                entry.replaceAll("\\", "/").includes(packagedNativeCache))
+              || existsSync(path.join(
+                appPath,
+                "Contents/Resources/app.asar.unpacked",
+                packagedNativeCache,
+              ))
+            ) {
+              errors.push("CD09 local package app tree digest changed");
+            }
+          } catch {
+            errors.push("CD09 local package app.asar is missing");
           }
-        } catch {
-          errors.push("CD09 local package app.asar is missing");
         }
       }
     }

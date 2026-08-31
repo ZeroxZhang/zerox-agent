@@ -28,7 +28,9 @@ describe("agent tool executor", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "building-agent-tools-"));
+    tempDir = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "building-agent-tools-")),
+    );
   });
 
   afterEach(async () => {
@@ -623,10 +625,33 @@ describe("agent tool executor", () => {
     await expect(
       readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"),
     ).resolves.toBe("image");
+    const recoveredResult = await executor.execute({
+      toolName: "file_move_transaction_read",
+      args: {
+        logPath: (applyResult.result.transaction as { logPath: string }).logPath,
+      },
+    });
+    expect(recoveredResult).toMatchObject({
+      ok: true,
+      result: {
+        transaction: {
+          status: "applied",
+          logIdentity: {
+            dev: expect.stringMatching(/^\d+$/),
+            ino: expect.stringMatching(/^\d+$/),
+            size: expect.stringMatching(/^\d+$/),
+            uid: expect.stringMatching(/^\d+$/),
+          },
+        },
+      },
+    });
+    if (!recoveredResult.ok) {
+      throw new Error(recoveredResult.error);
+    }
     await expect(
       executor.execute({
         toolName: "file_verify_moves",
-        args: { transaction: applyResult.result.transaction },
+        args: { transaction: recoveredResult.result.transaction },
       }),
     ).resolves.toMatchObject({
       ok: true,
@@ -639,7 +664,7 @@ describe("agent tool executor", () => {
     await expect(
       executor.execute({
         toolName: "file_rollback_moves",
-        args: { transaction: applyResult.result.transaction },
+        args: { transaction: recoveredResult.result.transaction },
       }),
     ).resolves.toMatchObject({
       ok: true,
@@ -1062,6 +1087,7 @@ describe("agent tool executor", () => {
         { id: "markdown_report_write", kind: "report", enabled: true },
         { id: "file_inventory", kind: "file", enabled: true },
         { id: "file_move_plan", kind: "file", enabled: true },
+        { id: "file_move_transaction_read", kind: "file", enabled: true },
         { id: "file_apply_moves", kind: "file", enabled: true },
         { id: "file_verify_moves", kind: "file", enabled: true },
         { id: "file_rollback_moves", kind: "file", enabled: true },

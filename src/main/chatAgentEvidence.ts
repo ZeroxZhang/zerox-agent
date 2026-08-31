@@ -6,6 +6,7 @@ import type {
 } from "../shared/agentTrajectory";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import { redactCredentials } from "../shared/credentialRedaction";
+import { highestAgentTrajectorySequence } from "./agentTrajectorySequence";
 
 export type ChatAgentEvidenceRecorder = {
   runId: string;
@@ -27,7 +28,8 @@ export function createChatAgentEvidenceRecorder(options: {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
   const runId = options.runId ?? createId();
-  let sequence = 0;
+  let fallbackSequence = 0;
+  let fallbackSequenceInitialized = false;
   let mutationQueue: Promise<void> = Promise.resolve();
 
   return {
@@ -37,27 +39,44 @@ export function createChatAgentEvidenceRecorder(options: {
         return null;
       }
 
-      sequence += 1;
-      const event: AgentTrajectoryEvent = {
-        id: createId(),
-        runId,
-        type,
-        sequence,
-        ...(options.runContext ? { runContext: options.runContext } : {}),
-        payload: redactCredentials(payload) as Record<string, unknown>,
-        redaction:
-          redaction ??
-          {
-            containsApiKey: false,
-            containsFileContent: type === "tool_result",
-            containsUserText:
-              type === "model_request" || type === "model_response",
-          },
-        createdAt: now().toISOString(),
-      };
-      const result = mutationQueue.then(() =>
-        options.trajectoryStore!.append(runId, event),
-      );
+      const result = mutationQueue.then(async () => {
+        const event: AgentTrajectoryEvent = {
+          id: createId(),
+          runId,
+          type,
+          // The store replaces this placeholder while holding the per-run
+          // mutation authority. Recorder-local counters cannot coordinate
+          // separate continuations that share one evidence run.
+          sequence: 0,
+          ...(options.runContext ? { runContext: options.runContext } : {}),
+          payload: redactCredentials(payload) as Record<string, unknown>,
+          redaction:
+            redaction ??
+            {
+              containsApiKey: false,
+              containsFileContent: type === "tool_result",
+              containsUserText:
+                type === "model_request" || type === "model_response",
+            },
+          createdAt: now().toISOString(),
+        };
+        if (options.trajectoryStore!.appendNext) {
+          return options.trajectoryStore!.appendNext(runId, event);
+        }
+        // Narrow compatibility path for injected legacy stores. Production
+        // stores expose appendNext and allocate under durable store authority.
+        if (!fallbackSequenceInitialized) {
+          fallbackSequence = highestAgentTrajectorySequence(
+            await options.trajectoryStore!.list(runId),
+          );
+          fallbackSequenceInitialized = true;
+        }
+        fallbackSequence += 1;
+        return options.trajectoryStore!.append(runId, {
+          ...event,
+          sequence: fallbackSequence,
+        });
+      });
       mutationQueue = result.then(() => undefined, () => undefined);
       return result;
     },

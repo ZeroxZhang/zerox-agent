@@ -40,6 +40,10 @@ import {
   writeStoreJsonAtomically,
 } from "./storage/authoritativeStore";
 import { createGoalRepository } from "./storage/repositories/goalRepository";
+import {
+  assertSafeStoreEntityId,
+  isSafeStoreEntityId,
+} from "./storeEntityId";
 
 export type { ProgressLedgerEvent } from "../shared/agentGoal";
 
@@ -159,10 +163,12 @@ export function createAgentGoalStore(
     : null;
 
   function goalPath(goalId: string): string {
+    assertSafeStoreEntityId(goalId, "Agent goal id");
     return path.join(goalsDir, `${goalId}.json`);
   }
 
   function ledgerPath(goalId: string): string {
+    assertSafeStoreEntityId(goalId, "Agent goal id");
     return path.join(goalsDir, `${goalId}.ledger.jsonl`);
   }
 
@@ -170,11 +176,20 @@ export function createAgentGoalStore(
     try {
       const filePath = goalPath(goalId);
       const raw = await readFile(filePath, "utf8");
-      const parsed = JSON.parse(raw) as Goal;
-      const normalized = normalizeGoal(parsed);
+      const parsed = JSON.parse(raw) as unknown;
       if (
-        parsed.selectedSkill &&
-        JSON.stringify(parsed.selectedSkill) !==
+        typeof parsed !== "object" ||
+        parsed === null ||
+        (parsed as { id?: unknown }).id !== goalId
+      ) {
+        await quarantineCorruptJsonFile(filePath);
+        return null;
+      }
+      const parsedGoal = parsed as Goal;
+      const normalized = normalizeGoal(parsedGoal);
+      if (
+        parsedGoal.selectedSkill &&
+        JSON.stringify(parsedGoal.selectedSkill) !==
           JSON.stringify(normalized.selectedSkill)
       ) {
         await writeJsonFileAtomically(
@@ -217,6 +232,7 @@ export function createAgentGoalStore(
     const goals = await Promise.all(
       files
         .filter((file) => file.endsWith(".json"))
+        .filter((file) => isSafeStoreEntityId(path.basename(file, ".json")))
         .map((file) => readGoal(path.basename(file, ".json"))),
     );
 
@@ -227,6 +243,7 @@ export function createAgentGoalStore(
     goal: Goal,
     expectedStatus?: GoalStatus,
   ): Promise<GoalConditionalSaveResult> {
+    assertSafeStoreEntityId(goal.id, "Agent goal id");
     return serializeMutation(goalsDir, async () => {
       const existing = await readRawGoal(goal.id);
       if (expectedStatus !== undefined && existing?.status !== expectedStatus) {
@@ -263,6 +280,7 @@ export function createAgentGoalStore(
     },
 
     async saveIfPlanVersion(goal, expectedPlanVersion, expectedActivePlanId) {
+      assertSafeStoreEntityId(goal.id, "Agent goal id");
       return serializeMutation(goalsDir, async () => {
         const existing = await readRawGoal(goal.id);
         if (
@@ -296,6 +314,9 @@ export function createAgentGoalStore(
     },
 
     async getMany(goalIds) {
+      goalIds.forEach((goalId) =>
+        assertSafeStoreEntityId(goalId, "Agent goal id"),
+      );
       const goalsById = new Map(
         (await readAllGoals()).map((goal) => [goal.id, goal]),
       );
@@ -458,6 +479,7 @@ export function createAgentGoalStore(
 
   return {
     async save(goal) {
+      assertSafeStoreEntityId(goal.id, "Agent goal id");
       authoritativeBackend.assertWritable();
       const existing = readSqliteGoal(goal.id);
       const prepared = prepareGoalSave(existing, goal);
@@ -477,6 +499,7 @@ export function createAgentGoalStore(
     },
 
     async saveIfStatus(goal, expectedStatus) {
+      assertSafeStoreEntityId(goal.id, "Agent goal id");
       authoritativeBackend.assertWritable();
       const existing = readSqliteGoal(goal.id);
       if (existing?.status !== expectedStatus) {
@@ -501,6 +524,7 @@ export function createAgentGoalStore(
       expectedPlanVersion,
       expectedActivePlanId,
     ) {
+      assertSafeStoreEntityId(goal.id, "Agent goal id");
       authoritativeBackend.assertWritable();
       const existing = readSqliteGoal(goal.id);
       if (
@@ -531,11 +555,15 @@ export function createAgentGoalStore(
     },
 
     async get(goalId) {
+      assertSafeStoreEntityId(goalId, "Agent goal id");
       const goal = readSqliteGoal(goalId);
       return goal ? sanitizeGoalForRead(goal) : null;
     },
 
     async getMany(goalIds) {
+      goalIds.forEach((goalId) =>
+        assertSafeStoreEntityId(goalId, "Agent goal id"),
+      );
       return repository
         .getMany(goalIds)
         .map(normalizeGoal)
@@ -560,12 +588,14 @@ export function createAgentGoalStore(
     },
 
     async appendLedger(goalId, event) {
+      assertSafeStoreEntityId(goalId, "Agent goal id");
       authoritativeBackend.assertWritable();
       repository.appendLedger(goalId, event);
       enqueueLedgerShadow(goalId, event);
     },
 
     async appendLedgerIfAbsent(goalId, publicationKey, event) {
+      assertSafeStoreEntityId(goalId, "Agent goal id");
       authoritativeBackend.assertWritable();
       const appended = repository.appendLedgerIfAbsent(
         goalId,
@@ -579,10 +609,12 @@ export function createAgentGoalStore(
     },
 
     async readLedger(goalId) {
+      assertSafeStoreEntityId(goalId, "Agent goal id");
       return repository.readLedger(goalId);
     },
 
     async delete(goalId) {
+      assertSafeStoreEntityId(goalId, "Agent goal id");
       authoritativeBackend.assertWritable();
       const deleted = repository.delete(goalId);
       if (deleted) enqueueGoalDeleteShadow(goalId);

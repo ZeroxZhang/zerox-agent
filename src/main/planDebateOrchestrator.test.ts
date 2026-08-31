@@ -853,6 +853,83 @@ describe("plan debate orchestrator", () => {
     ).toMatchObject({ status: "failed" });
   });
 
+  it("retries only a failed review while preserving the completed generated plan", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      {
+        profileDirect: [
+          artifact("Preserved review candidate"),
+          new Error("review fixture unavailable"),
+        ],
+        replacementReview: [{ approved: true, issues: [] }],
+      },
+      calls,
+    );
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: createPlanStore({
+        configDir: path.join(tempDir, "config-review-stage-retry"),
+      }),
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      enableDirectReview: true,
+    });
+
+    const paused = await orchestrator.createPlan({
+      sessionId: "session-review-stage-retry",
+      workspaceRoot,
+      sourceMessage: "实现本地功能并运行测试。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+    const completedRound = paused.rounds.find(
+      (round) => round.kind === "direct" && round.status === "completed",
+    );
+    expect(paused.status).toBe("paused");
+    expect(completedRound?.output).toMatchObject({
+      title: "Preserved review candidate",
+    });
+
+    const result = await orchestrator.retryFailedRound(
+      paused.id,
+      "replacementReview",
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.plan.status).toBe("awaiting_confirmation");
+    expect(result.message).toContain("复用此前生成的计划");
+    expect(calls.map((call) => call.profileId)).toEqual([
+      "profileDirect",
+      "profileDirect",
+      "replacementReview",
+    ]);
+    expect(
+      result.plan.rounds.filter(
+        (round) => round.kind === "direct" && round.status === "completed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      (result.plan.planningStages ?? []).filter(
+        (stage) => stage.kind === "generation" && stage.status === "completed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      [...(result.plan.planningStages ?? [])]
+        .reverse()
+        .find((stage) => stage.kind === "review"),
+    ).toMatchObject({
+      status: "completed",
+      reviewApproved: true,
+      modelBinding: { profileId: "replacementReview" },
+    });
+    expect(
+      (result.plan.planningStages ?? []).find(
+        (stage) => stage.kind === "review" && stage.status === "invalidated",
+      ),
+    ).toBeDefined();
+  });
+
   it("continues a truncated round with an escalated output budget instead of pausing", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
       [];

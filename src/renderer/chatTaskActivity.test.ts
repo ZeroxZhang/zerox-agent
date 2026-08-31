@@ -302,11 +302,17 @@ describe("chat task activity", () => {
 
     expect(events.map(getWorkPhaseFromChatStatusEvent)).toEqual([
       "planning",
-      "tool",
+      "paused",
       "memory",
       "memory",
       "memory",
     ]);
+    expect(getChatStatusKindFromStatusEvent(events[1]!)).toBe("paused");
+    expect(buildTaskActivityFromStatusEvent(events[1]!)).toMatchObject({
+      kind: "paused",
+      title: "等待工具授权",
+      detail: "工具等待授权：skill_load",
+    });
     expect(buildTaskProcessItems(events).map((item) => item.label)).toEqual([
       "检查点",
     ]);

@@ -6,6 +6,7 @@ const configDir = readString(args["config-dir"]);
 const runId = readString(args["run-id"]);
 const outDir = readString(args.out);
 const latestValidation = args["latest-validation"] === true;
+const backend = readString(args.backend);
 
 if (args.help || !configDir || (!runId && !latestValidation)) {
   console.log([
@@ -29,6 +30,7 @@ try {
     configDir,
     ...(runId ? { runId } : {}),
     ...(outDir ? { outDir } : {}),
+    ...(backend ? { backend } : {}),
     latestValidation,
   });
 

@@ -34,6 +34,7 @@ import type {
 } from "../../shared/scheduledTasks";
 import type { ToolCallRequest } from "../../shared/toolPermissions";
 import type { ReadToolResultRefOptions } from "../../shared/toolResultRefs";
+import type { ConversationSourcePageOptions } from "../../shared/conversationEvidence";
 import type {
   CreateMemoryResult,
   DeleteMemoryResult,
@@ -420,8 +421,13 @@ function registerToolsIpcHandlers(container: AppContainer): void {
   handleTrustedIpc("toolAudit:list", () => container.toolAuditLog().list({ limit: 50 }));
   handleTrustedIpc(
     "toolResults:readRef",
-    async (_event, ref: string, options?: unknown) =>
-      container.readToolResultRef(ref, sanitizeReadToolResultRefOptions(options)),
+    async (_event, ref: string, options?: unknown) => {
+      const trustedEvidence = sanitizeReadToolResultRefOptions(options);
+      if (!trustedEvidence?.runId || !trustedEvidence.trajectoryEventId) {
+        return { ok: false as const, message: "工具结果引用缺少受信轨迹证据。" };
+      }
+      return container.readToolResultRef(ref, trustedEvidence);
+    },
   );
 }
 
@@ -439,6 +445,7 @@ function sanitizeReadToolResultRefOptions(
     "sessionId",
     "requestId",
     "workspaceRunId",
+    "trajectoryEventId",
   ] as const) {
     if (typeof input[key] === "string") {
       sanitized[key] = input[key];
@@ -456,6 +463,16 @@ function registerRunsIpcHandlers(container: AppContainer): void {
   handleTrustedIpc(
     "agentRuns:listTrajectory",
     (_event, runId: string) => container.agentTrajectoryStore().list(runId),
+  );
+  handleTrustedIpc(
+    "agentRuns:getTrajectoryPage",
+    (_event, runId: string, options?: unknown) => {
+      const store = container.agentTrajectoryStore();
+      if (!store.getPage) {
+        throw new Error("Agent trajectory paging is unavailable.");
+      }
+      return store.getPage(runId, sanitizeTrajectoryPageOptions(options));
+    },
   );
   handleTrustedIpc(
     "agentRuns:openSession",
@@ -532,6 +549,21 @@ function registerRunsIpcHandlers(container: AppContainer): void {
     async (_event, runId: string): Promise<PauseAgentRunResult> =>
       container.pauseAgentRun(runId),
   );
+}
+
+function sanitizeTrajectoryPageOptions(
+  options: unknown,
+): ConversationSourcePageOptions | undefined {
+  if (!options || typeof options !== "object") return undefined;
+  const input = options as Record<string, unknown>;
+  const sanitized: ConversationSourcePageOptions = {};
+  if (typeof input.cursor === "string") {
+    sanitized.cursor = input.cursor;
+  }
+  if (typeof input.limit === "number" && Number.isFinite(input.limit)) {
+    sanitized.limit = input.limit;
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
 function registerWorkspacesIpcHandlers(container: AppContainer): void {

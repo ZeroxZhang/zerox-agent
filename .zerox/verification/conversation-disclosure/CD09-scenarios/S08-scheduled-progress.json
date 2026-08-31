@@ -3,9 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S08-scheduled-progress",
   "scenarioDigest": "sha256:d6f3755be71fea9927b72ba5edef0f4a1a7b0e721accf24ac278843d53143bda",
-  "executionId": "4757dc14-5093-478e-8ef2-43a7077e9d2d",
+  "executionId": "8067fa7b-5e51-43f6-bd45-ab6f493d0348",
   "processEpochs": [
-    "main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
+    "main_f5f042b2-a6a1-4ab1-ae95-656bcaf3c59b"
+  ],
+  "attemptNonces": [
+    "254e2f78-461d-4641-89d6-1e0008c3a11d"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,11 +29,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "eff888db-8733-4dc4-8aa8-4162e157ff4f",
+        "0c535797-283c-40f0-996c-cc816355f2d6",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "1f22684a-3e6a-4cfb-8f71-94dcb3b93e10",
-        "process:main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
+        "f9e180aa-baf2-4e5a-9c45-ec3260e4d6d4",
+        "process:main_f5f042b2-a6a1-4ab1-ae95-656bcaf3c59b"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -39,8 +42,10 @@
         "trajectoryLoaded": true,
         "scheduledTaskFound": true,
         "streamEventCount": 5,
-        "actualRunId": "fe481f7c-553c-4222-8c48-3ae2350cc920",
-        "runError": "none"
+        "actualRunId": "1855fea8-f17c-47ea-a13d-7bc147e4bfdf",
+        "runError": "none",
+        "fullSnapshotRefreshCount": 0,
+        "streamRefreshBounded": true
       }
     },
     {
@@ -49,11 +54,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "eff888db-8733-4dc4-8aa8-4162e157ff4f",
+        "0c535797-283c-40f0-996c-cc816355f2d6",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "1f22684a-3e6a-4cfb-8f71-94dcb3b93e10",
-        "process:main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
+        "f9e180aa-baf2-4e5a-9c45-ec3260e4d6d4",
+        "process:main_f5f042b2-a6a1-4ab1-ae95-656bcaf3c59b"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,11 +77,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "eff888db-8733-4dc4-8aa8-4162e157ff4f",
+        "0c535797-283c-40f0-996c-cc816355f2d6",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "1f22684a-3e6a-4cfb-8f71-94dcb3b93e10",
-        "process:main_b6edc16f-6b51-479d-8e46-1bb91d3c8271"
+        "f9e180aa-baf2-4e5a-9c45-ec3260e4d6d4",
+        "process:main_f5f042b2-a6a1-4ab1-ae95-656bcaf3c59b"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,7 +101,7 @@
       "requirement": "progress arrives before the blocking result",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:0e731674e772a15fb9675213bf29705a4e94db91cada896fb332c8222edbb95e",
+        "action:0:sha256:735ce151daff33113ef8b1a2afa30e53c217047a3e829b93b3116b9f20f32ebb",
         "screenshot:sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
       ]
     },
@@ -114,7 +119,7 @@
       "requirement": "snapshot or delta updates remain bounded and do not trigger full refetch per event",
       "ok": true,
       "evidenceIds": [
-        "action:2:sha256:b52a9c1e794406b636a2813804c3918af27f32ddc4f2fd460347db8a4c32e607",
+        "action:0:sha256:735ce151daff33113ef8b1a2afa30e53c217047a3e829b93b3116b9f20f32ebb",
         "screenshot:sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
       ]
     }
@@ -192,42 +197,42 @@
     },
     {
       "ordinal": 15,
-      "channel": "skills:list",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
       "ordinal": 16,
-      "channel": "scheduledTasks:list",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 17,
-      "channel": "agentRuns:list",
-      "ok": true
-    },
-    {
-      "ordinal": 18,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 19,
+      "ordinal": 18,
       "channel": "chatSessions:get",
       "ok": true
     },
     {
-      "ordinal": 20,
+      "ordinal": 19,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 21,
+      "ordinal": 20,
       "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
-      "ordinal": 22,
+      "ordinal": 21,
       "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 22,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -257,7 +262,7 @@
     },
     {
       "ordinal": 28,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
@@ -337,17 +342,17 @@
     },
     {
       "ordinal": 44,
-      "channel": "chatSessions:list",
+      "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
       "ordinal": 45,
-      "channel": "chatSessions:get",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 46,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
@@ -380,5 +385,5 @@
     "sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
   ],
   "status": "passed",
-  "digest": "sha256:732fa7426a188a1e82860d1efe2df9d1a03604adc401e5360d5720669049e9f1"
+  "digest": "sha256:cb0257538415c2cbf5f345880d72c8e9022ff5436bdcb000b56ec17298929b92"
 }

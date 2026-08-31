@@ -23,7 +23,7 @@ describe("agent workflow catalog", () => {
         "file_apply_moves",
         "file_verify_moves",
       ],
-      recoveryTools: ["file_rollback_moves"],
+      recoveryTools: ["file_move_transaction_read", "file_rollback_moves"],
     });
   });
 

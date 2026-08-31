@@ -68,8 +68,9 @@ export const TASK_SCHEDULER_INTERVAL_MS = 60 * 1000; // 1 minute
 /** Token budget safety margin as fraction of model maxTokens. */
 export const CONTEXT_TOKEN_BUDGET_RATIO = 0.7;
 
-/** Network connect timeout in ms (separate from body timeout, NET-01). */
-export const NETWORK_CONNECT_TIMEOUT_MS = 30_000;
-
-/** Network body timeout in ms for large responses (NET-01). */
+/**
+ * End-to-end network request timeout in ms. WHATWG fetch does not expose the
+ * TCP/TLS handshake boundary, so time-to-response-headers must not be treated
+ * as a shorter "connect" phase for model completions.
+ */
 export const NETWORK_BODY_TIMEOUT_MS = 300_000;

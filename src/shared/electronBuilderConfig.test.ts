@@ -16,8 +16,11 @@ type ElectronBuilderConfig = {
   mac?: {
     category?: string;
     icon?: string;
+    sign?: string;
+    binaries?: string[];
     target?: string[];
   };
+  extraResources?: Array<{ from?: string; to?: string }>;
 };
 
 describe("electron-builder config", () => {
@@ -38,6 +41,8 @@ describe("electron-builder config", () => {
       mac: {
         category: "public.app-category.productivity",
         icon: "build/icon.icns",
+        sign: "./scripts/mac-sign.mjs",
+        binaries: ["Contents/Resources/safe-fs/zerox-safe-fs"],
         target: ["dmg", "zip"],
       },
     });
@@ -49,5 +54,11 @@ describe("electron-builder config", () => {
         "package.json",
       ]),
     );
+    expect(config.extraResources).toEqual(expect.arrayContaining([
+      {
+        from: "dist-native/darwin-${arch}/zerox-safe-fs",
+        to: "safe-fs/zerox-safe-fs",
+      },
+    ]));
   });
 });

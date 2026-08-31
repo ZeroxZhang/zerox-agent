@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.1"><img src="https://img.shields.io/badge/current_release-v3.9.1-242428" alt="current release: v3.9.1" /></a>
+  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.2"><img src="https://img.shields.io/badge/current_release-v3.9.2-242428" alt="current release: v3.9.2" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20arm64-242428" alt="macOS arm64" />
   <img src="https://img.shields.io/badge/data-local--first-2f9d65" alt="local-first" />
   <img src="https://img.shields.io/badge/license-ISC-8a6d3b" alt="ISC" />
@@ -19,7 +19,7 @@
 <p align="center">
   <a href="#中文">中文</a> ·
   <a href="#english">English</a> ·
-  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.1">下载 v3.9.1</a> ·
+  <a href="https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.2">下载 v3.9.2</a> ·
   <a href="docs/product/zerox-positioning.md">产品定位</a>
 </p>
 
@@ -45,7 +45,7 @@ Zerox Agent 是一个面向 macOS 的本地桌面智能体控制台。它把模�
 
 Zerox Agent 的重点不是“让模型无限自主”，而是让真实工作具备清晰的目标、受控的权限、可见的过程、可恢复的状态和有证据的完成判断。
 
-> 当前版本是 **v3.9.1**。当前发布面向 Apple Silicon Mac，采用非 Apple 公证的兼容打包方式；安装说明见[下载与安装](#下载与安装)。
+> 当前版本是 **v3.9.2**。当前发布面向 Apple Silicon Mac，采用非 Apple 公证的兼容打包方式；安装说明见[下载与安装](#下载与安装)。
 
 ## 产品边界
 
@@ -76,6 +76,18 @@ Zerox Agent：
 3. **审核与质量**：学习、评测、系统状态。
 
 旧版本中的独立 Goal 页面已经并入会话。目标的创建、规划、执行、验收、恢复和历史都发生在同一个 session-native Goal Mode 中。
+
+## v3.9.2 会话披露与运行韧性
+
+v3.9.2 让长任务的过程既保持可读，也不丢失可审计证据：
+
+- 会话默认呈现阶段、阻塞点和结果，技术步骤与原始证据按需展开，并能跳转到对应 Run 或 Trajectory。
+- Chat、Goal、Plan、任务与审批共享一致的持久化状态投影；暂停、失败、授权和恢复不会被前端折叠成错误成功。
+- 模型单次输出达到长度上限时，Chat 会保留部分内容并自动续写；连续无进展才进入可恢复暂停。
+- 中文输入法组合阶段的 Enter 只确认候选文字，不会误发消息。
+- Plan 生成和独立审查共享有界瞬时网络重试；模型生成时间不会再被错误的 30 秒连接计时器截断，审查重试会复用已经完成的计划。
+- 长会话使用有界分页与重放；未知或旧版本事件保持可见并明确标记。
+- 本地文件、运行所有权、轨迹序列、工具结果和跨重启恢复增加了失败关闭与幂等校验。
 
 ## v3.9.1 上下文编排修复
 
@@ -362,17 +374,17 @@ SQLite 是正式运行时的默认存储权威。Chat、Run、Trajectory、Task�
 
 ### 下载当前版本
 
-- [Zerox Agent v3.9.1 发布页](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.1)
-- [Zerox-Agent-3.9.1-arm64.dmg](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.9.1/Zerox-Agent-3.9.1-arm64.dmg)
+- [Zerox Agent v3.9.2 发布页](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.2)
+- [Zerox-Agent-3.9.2-arm64.dmg](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.9.2/Zerox-Agent-3.9.2-arm64.dmg)
 
-当前包适用于 Apple Silicon Mac。v3.9.1 使用 `legacy-adhoc` 兼容发布模式，没有 Apple Developer ID 公证。macOS 可能阻止首次打开。
+当前包适用于 Apple Silicon Mac。v3.9.2 使用 `legacy-adhoc` 兼容发布模式，没有 Apple Developer ID 公证。macOS 可能阻止首次打开。
 
 只应对从本项目 GitHub Release 下载且你信任的文件执行以下命令。移除 quarantine 会绕过这份文件的 Gatekeeper 隔离检查。
 
 下载 DMG 后：
 
 ~~~bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.9.1-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.9.2-arm64.dmg"
 ~~~
 
 如果已经把应用拖到“应用程序”：
@@ -524,7 +536,7 @@ renderer 只展示和发起操作；Plan 采用、Goal 状态、工具授权、�
 ## 当前限制
 
 - 公开测试包当前仅提供 macOS arm64。
-- v3.9.1 未经过 Apple Developer ID 签名与公证。
+- v3.9.2 未经过 Apple Developer ID 签名与公证。
 - 用户需要自备模型服务商账号、API Key 或本地 Ollama。
 - 浏览器预览只用于 UI 演示，不能执行桌面任务。
 - Zerox Agent 不提供云端 worker、远程托管 Agent 或未经审核的自我修改。
@@ -540,7 +552,7 @@ renderer 只展示和发起操作；Plan 采用、Goal 状态、工具授权、�
 
 Zerox Agent is a local-first desktop control plane for personal AI agents on macOS. It turns natural-language work into observable, permissioned, recoverable agent runs across local files, tools, memory, scheduled tasks, and user-reviewed learning.
 
-The current release: v3.9.1.
+The current release: v3.9.2.
 
 Zerox Agent is not a hosted agent cloud, an unbounded autonomous loop, or a generic chat wrapper. Durable state lives on the Mac, execution is scoped to a workspace, high-risk actions remain gated, and completion is decided from acceptance evidence rather than an assistant's claim.
 
@@ -556,6 +568,18 @@ External model calls still send the context required for a request to the provid
 | **Settings** | Model connections, tools, memory, Skills, learning, evals, and system health |
 
 The primary app flow is Chat, Runs, Tasks, and Settings. Diagnostics, skills, tools, memory, learning, and evals live under Settings instead of competing with the core workflow.
+
+## What changed in v3.9.2
+
+v3.9.2 makes long-running work readable without discarding its audit trail:
+
+- Chat shows phases, blockers, and outcomes by default while keeping bounded technical evidence available on demand and addressable in Runs or Trajectory.
+- Chat, Goal, Plan, Tasks, and approvals share durable status projections, so pause, failure, authorization, and recovery cannot be rendered as false success.
+- Productive model output-limit responses continue automatically from the preserved partial answer; repeated no-progress responses still pause safely.
+- Enter during IME composition confirms the candidate text instead of submitting the message.
+- Plan generation and cold review share bounded transient transport retries. Model generation time is no longer mislabeled as a 30-second connection timeout, and review retry reuses the completed candidate.
+- Long sessions use bounded paging and replay while unknown or legacy events remain visibly represented.
+- Local file, run ownership, trajectory sequence, Tool-result, and restart recovery paths use stricter fail-closed and idempotency checks.
 
 ## What changed in v3.9.1
 
@@ -681,12 +705,12 @@ Memory supports core, session, semantic, episodic, and procedural records with l
 
 ## Download and install
 
-Download [Zerox Agent v3.9.1](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.1) or the [arm64 DMG](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.9.1/Zerox-Agent-3.9.1-arm64.dmg).
+Download [Zerox Agent v3.9.2](https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.9.2) or the [arm64 DMG](https://github.com/ZeroxZhang/zerox-agent/releases/download/v3.9.2/Zerox-Agent-3.9.2-arm64.dmg).
 
 This compatibility build is not notarized by Apple. Only for a package downloaded from the trusted project release, remove quarantine with:
 
 ~~~bash
-xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.9.1-arm64.dmg"
+xattr -dr com.apple.quarantine ~/Downloads/"Zerox-Agent-3.9.2-arm64.dmg"
 ~~~
 
 After copying the app to Applications:

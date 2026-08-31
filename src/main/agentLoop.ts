@@ -113,6 +113,8 @@ export type AgentLoopOptions = {
   tools?: ReturnType<typeof buildToolDefinitions>;
   toolResultOffloadStore?: ToolResultOffloadStore;
   toolResultOffloadThreshold?: number;
+  /** Main-process-only stable owner for an explicitly resumable execution. */
+  toolResultContinuationOwnerId?: string;
   requestId?: string;
   workspaceRunId?: string;
   /** @deprecated Ignored. maxTurns is a checkpoint interval, never a stop. */
@@ -125,6 +127,10 @@ export type AgentLoopOptions = {
   initialTokensEstimated?: boolean;
   maxParallelToolCalls?: number;
   pauseOnFailureLoop?: boolean;
+  /** Interactive Chat may transparently continue across provider output chunks. */
+  autoContinueOutputLimit?: boolean;
+  /** Pause after this many repeated or empty output-limit continuations. */
+  maxStalledOutputLimitContinuations?: number;
   contextManager?: ContextManager;
   /** @deprecated Kept for caller compatibility. Token usage is telemetry-only. */
   tokenBudget?: number;
@@ -301,6 +307,7 @@ export async function runAgentLoop(
     tools: customTools,
     toolResultOffloadStore,
     toolResultOffloadThreshold,
+    toolResultContinuationOwnerId,
     requestId,
     workspaceRunId,
     pauseOnStrategyGuard = false,
@@ -311,6 +318,8 @@ export async function runAgentLoop(
     initialTokensEstimated = false,
     maxParallelToolCalls = 4,
     pauseOnFailureLoop = false,
+    autoContinueOutputLimit = false,
+    maxStalledOutputLimitContinuations = 2,
     contextManager = createContextManager(),
     compactionStrategy,
     systemReminderRegistry,
@@ -332,6 +341,13 @@ export async function runAgentLoop(
     modelRequestExecutor,
   } = options;
   const signal = parentSignal;
+  const executionRunId =
+    runId
+    ?? taskId
+    ?? workspaceRunId
+    ?? requestId
+    ?? runContext?.runId
+    ?? "agent_loop";
   const checkpointInterval = Math.max(1, Math.floor(maxTurns));
   let answerAttempt = 0;
 
@@ -437,6 +453,13 @@ export async function runAgentLoop(
   } | null = null;
   let continuation: AgentLoopContinuation | undefined;
   let modelServiceNotice: ModelServiceNotice | undefined;
+  let lastOutputLimitPartial: string | null = null;
+  let stalledOutputLimitContinuations = 0;
+  const automaticallyContinuedContent: string[] = [];
+  const allowedStalledOutputLimitContinuations = Math.max(
+    0,
+    Math.floor(maxStalledOutputLimitContinuations),
+  );
   let lastExecutedToolSignature: string | null =
     findLastExecutedToolSignature(messages);
   let toolFailureStreak: {
@@ -1057,38 +1080,86 @@ export async function runAgentLoop(
         ? sanitizeModelServiceNotice(responseModelServiceNotice)
         : undefined;
       if (modelServiceNotice) {
+        if (
+          modelServiceNotice.kind === "output_limit"
+          && autoContinueOutputLimit
+        ) {
+          const replayablePartial = redactCredentialString(
+            response.content ?? "",
+          );
+          const comparablePartial = replayablePartial.trim();
+          const madeDistinctProgress = Boolean(
+            comparablePartial
+            && comparablePartial !== lastOutputLimitPartial,
+          );
+          stalledOutputLimitContinuations = madeDistinctProgress
+            ? 0
+            : stalledOutputLimitContinuations + 1;
+
+          if (madeDistinctProgress) {
+            appendMessage({ role: "assistant", content: replayablePartial });
+            automaticallyContinuedContent.push(replayablePartial);
+          }
+
+          if (
+            stalledOutputLimitContinuations
+            <= allowedStalledOutputLimitContinuations
+          ) {
+            lastOutputLimitPartial = comparablePartial || lastOutputLimitPartial;
+            appendMessage({
+              role: "user",
+              content: buildOutputLimitContinuationPrompt({
+                hasPartialContent: Boolean(replayablePartial),
+                hasIncompleteToolCall: response.toolCalls.length > 0,
+              }),
+            });
+            await emitCheckpoint(
+              "Provider output chunk reached its limit; continuing automatically from the truncation boundary.",
+            );
+            continue;
+          }
+        }
+
         const partialContent = redactCredentialString(
           response.content?.trim() ||
           response.reasoningContent?.trim() ||
           modelServiceNotice.message,
         );
-        appendMessage({ role: "assistant", content: partialContent });
+        const accumulatedPartial = automaticallyContinuedContent.join("");
+        if (!accumulatedPartial) {
+          appendMessage({ role: "assistant", content: partialContent });
+        }
         status = "paused";
         continuation = {
           reason: continuationReasonForNotice(modelServiceNotice),
           maxTurns: checkpointInterval,
           toolCallsExecuted,
         };
-        summary = partialContent;
+        summary = accumulatedPartial || partialContent;
         break;
       }
 
+      lastOutputLimitPartial = null;
+      stalledOutputLimitContinuations = 0;
+
       // No tool calls + content → final
       if (!response.toolCalls.length && response.content) {
-        summary = redactCredentialString(response.content);
+        const finalContent = redactCredentialString(response.content);
+        summary = `${automaticallyContinuedContent.join("")}${finalContent}`;
         status = "succeeded";
-        appendMessage({ role: "assistant", content: summary });
+        appendMessage({ role: "assistant", content: finalContent });
         break;
       }
 
       if (!response.toolCalls.length && response.reasoningContent?.trim()) {
-        summary = redactCredentialString(
+        const finalContent = redactCredentialString(
           buildFinalReplyFromReasoningContent(response.reasoningContent),
         );
+        summary = `${automaticallyContinuedContent.join("")}${finalContent}`;
         status = "succeeded";
         appendMessage({
           role: "assistant",
-          content: summary,
+          content: finalContent,
         });
         break;
       }
@@ -1267,14 +1338,17 @@ export async function runAgentLoop(
             }, {
               store: toolResultOffloadStore,
               thresholdChars: toolResultOffloadThreshold,
-              runId: taskId,
+              runId: executionRunId,
+              ...(toolResultContinuationOwnerId
+                ? { continuationOwnerId: toolResultContinuationOwnerId }
+                : {}),
               sessionId: runContext?.sessionId,
               requestId,
               workspaceRunId,
             });
           const toolResultEvent = buildToolEvent({
             toolCallId: toolCall.id,
-            runId: taskId,
+            runId: executionRunId,
             sessionId: runContext?.sessionId,
             requestId,
             workspaceRunId,
@@ -1446,7 +1520,7 @@ export async function runAgentLoop(
               const { toolCall, toolName } = prepared;
               const toolEventBase = buildToolEvent({
                 toolCallId: toolCall.id,
-                runId: taskId,
+                runId: executionRunId,
                 sessionId: runContext?.sessionId,
                 requestId,
                 workspaceRunId,
@@ -1468,13 +1542,7 @@ export async function runAgentLoop(
                   prepared.registeredToolSource;
                 const toolSource =
                   registeredToolSource ?? "built-in";
-                const toolInvocationRunId =
-                  runId ??
-                  taskId ??
-                  workspaceRunId ??
-                  requestId ??
-                  runContext?.runId ??
-                  "agent_loop";
+                const toolInvocationRunId = executionRunId;
                 let toolInvocation = createToolInvocation({
                   id: createConversationToolInvocationId({
                     runId: toolInvocationRunId,
@@ -1538,6 +1606,14 @@ export async function runAgentLoop(
                         ...(workspaceRunId ? { workspaceRunId } : {}),
                         toolInvocationId: toolInvocation.id,
                         toolInvocationRunId: toolInvocation.runId,
+                        toolInvocationIdentity: {
+                          id: toolInvocation.id,
+                          runId: toolInvocation.runId,
+                          toolCallId: toolInvocation.toolCallId,
+                          toolName: toolInvocation.toolName,
+                          source: toolInvocation.source,
+                          createdAt: toolInvocation.createdAt,
+                        },
                       },
                       onApprovalRequested: async (request) => {
                         toolInvocation = transitionToolInvocation(
@@ -1574,7 +1650,13 @@ export async function runAgentLoop(
                         );
                       },
                       toolResultReadScope: {
-                        ...(taskId ? { runId: taskId } : {}),
+                        runId: toolInvocationRunId,
+                        ...(toolResultContinuationOwnerId
+                          ? {
+                              continuationOwnerId:
+                                toolResultContinuationOwnerId,
+                            }
+                          : {}),
                         ...(runContext?.sessionId
                           ? { sessionId: runContext.sessionId }
                           : {}),
@@ -1912,6 +1994,21 @@ function continuationReasonForNotice(
     case "provider_stop":
       return "provider_stop";
   }
+}
+
+function buildOutputLimitContinuationPrompt(options: {
+  hasPartialContent: boolean;
+  hasIncompleteToolCall: boolean;
+}): string {
+  return [
+    "系统检测到上一段回复仅因服务商的单次输出长度上限而被截断。这不是用户的新任务。",
+    options.hasPartialContent
+      ? "请从截断点直接继续，不要重复已经输出的内容。"
+      : "请继续完成当前步骤，并尽快产生可验证的进展。",
+    options.hasIncompleteToolCall
+      ? "上一段工具调用可能不完整；不要续接残缺参数，请从头重新发出一个完整、有效的工具调用。"
+      : "保留已有上下文和工具结果，继续推进原任务。",
+  ].join("\n");
 }
 
 function normalizeStreamToolCallIndex(value: unknown): number | undefined {

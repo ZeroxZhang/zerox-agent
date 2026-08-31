@@ -54,7 +54,8 @@ const expectedScenarioActions = Object.freeze({
     "settle_guided_continuation_once",
   ],
   "S15-goal-acceptance": [
-    "review_goal", "observe_completed_unverified", "resolve_acceptance_and_reload",
+    "verify_shared_preacceptance_source", "complete_unverified_branch",
+    "certify_parallel_branch_and_reload",
   ],
   "S16-plan-confirmation": [
     "reload_awaiting_confirmation", "confirm_plan_once", "inspect_blocked_plan",
@@ -115,22 +116,35 @@ const expectedObservationKeys = Object.freeze({
       "terminalRunStatus"],
   ],
   "S07-plan-progress": [
-    ["persistedPlanLoaded", "planStatus", "runningStagePersisted"],
+    ["persistedPlanLoaded", "planStatus", "stageCount",
+      "generationStagePersisted", "runningReviewPersisted",
+      "productionModelCallCount"],
     ["revisionStable", "actionGate"],
     ["authoritativePlanStatus", "blockedDecisionVisible",
-      "goalSemanticsUnchanged"],
+      "goalSemanticsUnchanged", "reviewRejectedPersisted",
+      "qualityFailurePersisted", "productionModelCallCount"],
   ],
   "S08-scheduled-progress": [
-    ["scheduledTaskFound", "streamEventCount", "actualRunId", "runError"],
+    ["scheduledTaskFound", "streamEventCount", "actualRunId", "runError",
+      "fullSnapshotRefreshCount", "streamRefreshBounded"],
     ["sharedRunIdentity", "runVisibleAcrossSurface",
       "trajectoryEventCount", "boundedTrajectory"],
     ["sharedRunIdentity", "runVisibleAcrossSurface",
       "trajectoryEventCount", "boundedTrajectory"],
   ],
   "S09-long-session": [
-    ["tailMessageCount", "tailBounded", "hasOlderPage"],
-    ["olderMessageCount", "olderPageBounded", "pagesDoNotOverlap"],
-    ["streamUpdateSucceeded", "renderedRowCount", "renderedRowsBounded"],
+    ["tailMessageCount", "tailBounded", "totalMessageCount",
+      "tailPayloadBytes", "hasOlderPage", "trajectoryPageCount",
+      "trajectoryPageBounded", "trajectoryHasNextPage"],
+    ["olderMessageCount", "olderPageBounded", "pagesDoNotOverlap",
+      "olderTrajectoryCount", "trajectoryPagesDoNotOverlap",
+      "trajectoryRevisionPinned"],
+    ["streamUpdateSucceeded", "streamEventCount", "renderedRowCount",
+      "renderedRowsBounded", "renderDurationMs", "postUpdateTailCount",
+      "performanceBounded", "rendererMetricsAvailable",
+      "cpuTaskDurationMs", "heapBeforeBytes", "heapAfterBytes",
+      "heapGrowthBytes", "domNodeCount", "domNodeGrowth",
+      "cpuHeapDomBounded"],
   ],
   "S10-accessibility": [
     [
@@ -169,9 +183,13 @@ const expectedObservationKeys = Object.freeze({
     ],
   ],
   "S11-secret-safety": [
-    ["defaultSummarySafe", "redactedMarkerVisible"],
+    ["defaultSummarySafe", "redactedMarkerVisible", "canaryInjected",
+      "toolBoundaryTraversed", "canaryAbsentFromPersistence",
+      "configuredKeyAbsentFromPersistence", "persistedSecretValuesAbsent",
+      "actualRunId"],
     ["technicalEvidenceOpened", "technicalEvidenceRedacted"],
-    ["visualArtifactsSafe", "persistedArtifactsSafe"],
+    ["visualArtifactsSafe", "persistedArtifactsSafe", "episodeExported",
+      "episodeExportRunId", "episodeExportFileCount"],
   ],
   "S12-retry-attempt": [
     ["firstAttemptRejected", "rejectedPartialObserved",
@@ -180,12 +198,17 @@ const expectedObservationKeys = Object.freeze({
     ["acceptedAttemptPersisted", "rejectedPartialPersisted"],
   ],
   "S13-legacy-coverage": [
-    ["disclosureMode", "sessionReadable", "availableTrajectoryCount",
-      "coveragePartial"],
-    ["disclosureMode", "sessionReadable", "availableTrajectoryCount",
-      "coveragePartial"],
-    ["disclosureMode", "sessionReadable", "availableTrajectoryCount",
-      "coveragePartial"],
+    ["disclosureMode", "sessionReadable", "goalSummaryLinked",
+      "compatibilityIdStable", "authorityLinkageValid", "fixtureDigest",
+      "sourceCutId", "sourceNotMutated"],
+    ["disclosureMode", "runReadable", "trajectoryReadable", "goalReadable",
+      "planReadable", "technicalEvidenceOpen", "availableTrajectoryCount",
+      "coveragePartial", "intentionalAbsenceCount", "authorityRecordCount",
+      "authorityLinkageValid", "fixtureDigest", "sourceCutId",
+      "sourceNotMutated"],
+    ["disclosureMode", "sessionReadable", "runReadable", "trajectoryReadable",
+      "compatibilityIdStable", "authorityLinkageValid", "fixtureDigest",
+      "sourceCutId", "sourceNotMutated"],
   ],
   "S14-guided-input": [
     ["guidedInputRequired", "inputRequestId", "waitingEventObserved",
@@ -194,10 +217,13 @@ const expectedObservationKeys = Object.freeze({
     ["continuationSettled", "staleResponseRejected"],
   ],
   "S15-goal-acceptance": [
-    ["goalLoaded", "reviewGateStatus", "acceptancePhase"],
-    ["manualCompletionApplied", "completedUnverified", "certifiedAsAchieved"],
-    ["terminalReviewIdempotent", "terminalStatus",
-      "unverifiedNarrativeVisible"],
+    ["goalLoaded", "reviewGateStatus", "acceptancePhase",
+      "branchSourceMatched"],
+    ["manualCompletionApplied", "completedUnverifiedStatus",
+      "acceptanceCertificateAbsent", "successNarrativeVisible"],
+    ["certifiedBranchApplied", "terminalStatus",
+      "acceptanceCertificatePersisted", "unverifiedBranchRemainedTerminal",
+      "achievedNarrativeVisible"],
   ],
   "S16-plan-confirmation": [
     ["confirmationRecovered", "confirmationStatus", "actionGate"],
@@ -208,9 +234,15 @@ const expectedObservationKeys = Object.freeze({
   ],
   "S17-cancel-interruption": [
     ["cancelAccepted", "canceledResult", "canceledCode"],
-    ["pendingApprovalCount", "priorPrivilegeRecovered"],
+    ["pendingApprovalCount", "priorPrivilegeRecovered",
+      "waitingInvocationPersisted", "invocationIdentityFrozen",
+      "approvalBoundToInvocation"],
     ["coldStartPendingCount", "canceledAuthorityPersisted",
-      "explicitNewAttemptRequired"],
+      "explicitNewAttemptRequired", "interruptedApprovalPersisted",
+      "trajectoryInvocationAborted", "workspaceInvocationAborted",
+      "chatInvocationAborted", "newAttemptSucceeded", "distinctAttemptPersisted",
+      "projectionReloaded", "listedWorkStatus", "sidebarBadgeText",
+      "recoveredSessionVisible"],
   ],
   "S18-context-usage": [
     ["preCompressionMessages", "cumulativeTokens",
@@ -247,6 +279,7 @@ export function validateProductionScenarioReceipt(
     "scenarioDigest",
     "executionId",
     "processEpochs",
+    "attemptNonces",
     "productionMain",
     "productionPreload",
     "demoDataUsed",
@@ -291,6 +324,16 @@ export function validateProductionScenarioReceipt(
     )
   ) {
     errors.push("process epochs are invalid");
+  }
+  if (
+    !Array.isArray(receipt?.attemptNonces)
+    || receipt.attemptNonces.length !== receipt.processEpochs?.length
+    || new Set(receipt.attemptNonces).size !== receipt.attemptNonces.length
+    || receipt.attemptNonces.some(
+      (entry) => !/^[0-9a-f-]{36}$/.test(entry ?? ""),
+    )
+  ) {
+    errors.push("attempt nonces are invalid");
   }
   if (
     !Array.isArray(receipt?.actions)
@@ -409,14 +452,22 @@ export function validateProductionScenarioReceipt(
     || !receipt.ipcInvocations.some(
       (entry) => entry.channel === "chatSessions:list",
     )
-    || !receipt.ipcInvocations.some(
-      (entry) => entry.channel === "chatSessions:get",
+    || !receipt.ipcInvocations.some((entry) =>
+      entry.channel === (
+        scenario?.id === "S09-long-session"
+          ? "chatSessions:getTranscriptPage"
+          : "chatSessions:get"
+      )
     )
     || !receipt.ipcInvocations.some(
       (entry) => entry.channel === "agentRuns:list",
     )
-    || !receipt.ipcInvocations.some(
-      (entry) => entry.channel === "agentRuns:listTrajectory",
+    || !receipt.ipcInvocations.some((entry) =>
+      entry.channel === (
+        scenario?.id === "S09-long-session"
+          ? "agentRuns:getTrajectoryPage"
+          : "agentRuns:listTrajectory"
+      )
     )
   ) {
     errors.push("production preload IPC trace is incomplete");
@@ -493,16 +544,42 @@ function validateActionObservations(actions, scenarioId) {
       return value(0, "checkpointStatus") === "paused"
         && value(2, "terminalRunStatus") === "succeeded";
     case "S07-plan-progress":
-      return value(0, "planStatus") === "paused"
+      return value(0, "planStatus") === "drafting"
+        && value(0, "stageCount") >= 6
+        && value(0, "generationStagePersisted") === true
+        && value(0, "runningReviewPersisted") === true
+        && value(0, "productionModelCallCount") === 2
         && value(1, "actionGate") === "blocked"
-        && value(2, "authoritativePlanStatus") === "paused";
+        && value(2, "authoritativePlanStatus") === "awaiting_input"
+        && value(2, "reviewRejectedPersisted") === true
+        && value(2, "qualityFailurePersisted") === true
+        && value(2, "productionModelCallCount") === 2;
     case "S08-scheduled-progress":
       return value(0, "streamEventCount") > 0
+        && value(0, "fullSnapshotRefreshCount") <= 1
+        && value(0, "fullSnapshotRefreshCount") < value(0, "streamEventCount")
         && value(1, "trajectoryEventCount") > 0;
     case "S09-long-session":
-      return value(0, "tailMessageCount") <= 50
+      return value(0, "tailMessageCount") === 50
+        && value(0, "totalMessageCount") >= 320
+        && value(0, "tailPayloadBytes") > 50 * 1024
+        && value(0, "trajectoryPageCount") === 75
         && value(1, "olderMessageCount") <= 50
-        && value(2, "renderedRowCount") <= 160;
+        && value(1, "olderTrajectoryCount") === 75
+        && value(1, "trajectoryPagesDoNotOverlap") === true
+        && value(1, "trajectoryRevisionPinned") === true
+        && value(2, "streamEventCount") > 0
+        && value(2, "renderedRowCount") > 0
+        && value(2, "renderedRowCount") <= 160
+        && value(2, "renderDurationMs") < 5_000
+        && value(2, "rendererMetricsAvailable") === true
+        && value(2, "cpuTaskDurationMs") < 5_000
+        && value(2, "heapBeforeBytes") > 0
+        && value(2, "heapAfterBytes") > 0
+        && value(2, "heapGrowthBytes") < 32 * 1024 * 1024
+        && value(2, "domNodeCount") > 0
+        && value(2, "domNodeCount") < 20_000
+        && value(2, "domNodeGrowth") < 2_000;
     case "S10-accessibility":
       return value(1, "blockingStateExposed") === true
         && value(1, "selectedRunStateExposed") === true
@@ -513,21 +590,50 @@ function validateActionObservations(actions, scenarioId) {
     case "S13-legacy-coverage":
       return value(0, "disclosureMode") === "projected"
         && value(1, "disclosureMode") === "projected"
-        && value(2, "disclosureMode") === "legacy";
+        && value(2, "disclosureMode") === "legacy"
+        && value(0, "compatibilityIdStable") === true
+        && value(0, "goalSummaryLinked") === true
+        && value(1, "availableTrajectoryCount") === 1
+        && value(1, "coveragePartial") === true
+        && value(1, "intentionalAbsenceCount") > 0
+        && value(1, "authorityRecordCount") === 5
+        && value(1, "authorityLinkageValid") === true
+        && value(2, "sourceNotMutated") === true
+        && value(0, "fixtureDigest") === value(2, "fixtureDigest")
+        && value(0, "sourceCutId") === value(2, "sourceCutId");
     case "S14-guided-input":
       return value(0, "inputRequestId") === value(0, "recoveredInputRequestId")
         && value(1, "responseCode") === "success";
     case "S15-goal-acceptance":
       return value(0, "reviewGateStatus") === "waiting_for_acceptance"
-        && value(1, "completedUnverified") === true
-        && value(2, "terminalStatus") === "completed_unverified";
+        && value(0, "branchSourceMatched") === true
+        && value(1, "completedUnverifiedStatus") === true
+        && value(1, "acceptanceCertificateAbsent") === true
+        && value(1, "successNarrativeVisible") === false
+        && value(2, "terminalStatus") === "achieved"
+        && value(2, "acceptanceCertificatePersisted") === true
+        && value(2, "unverifiedBranchRemainedTerminal") === true;
     case "S16-plan-confirmation":
       return value(0, "confirmationStatus") === "awaiting_confirmation"
         && value(0, "actionGate") === "ready";
     case "S17-cancel-interruption":
       return value(0, "canceledCode") === "CANCELED"
-        && value(1, "pendingApprovalCount") === 0
-        && value(2, "coldStartPendingCount") === 0;
+        && value(1, "pendingApprovalCount") === 1
+        && value(1, "priorPrivilegeRecovered") === false
+        && value(1, "waitingInvocationPersisted") === true
+        && value(1, "invocationIdentityFrozen") === true
+        && value(1, "approvalBoundToInvocation") === true
+        && value(2, "coldStartPendingCount") === 0
+        && value(2, "interruptedApprovalPersisted") === true
+        && value(2, "trajectoryInvocationAborted") === true
+        && value(2, "workspaceInvocationAborted") === true
+        && value(2, "chatInvocationAborted") === true
+        && value(2, "newAttemptSucceeded") === true
+        && value(2, "distinctAttemptPersisted") === true
+        && value(2, "projectionReloaded") === true
+        && value(2, "listedWorkStatus") === "completed"
+        && value(2, "sidebarBadgeText") === "已完成"
+        && value(2, "recoveredSessionVisible") === true;
     case "S18-context-usage":
       return value(0, "preCompressionMessages") >= 18
         && value(1, "compactionCount") > 0
@@ -539,7 +645,6 @@ function validateActionObservations(actions, scenarioId) {
 }
 
 const negativeObservationKeys = new Set([
-  "certifiedAsAchieved",
   "credentialMaterialVisible",
   "priorPrivilegeRecovered",
   "rejectedPartialPersisted",
@@ -561,6 +666,9 @@ function expectedRequirementActionIndex(
 ) {
   if (scenarioId === "S10-accessibility") {
     return [1, 0, 2][requirementIndex] ?? actionCount - 1;
+  }
+  if (scenarioId === "S08-scheduled-progress") {
+    return [0, 1, 0][requirementIndex] ?? actionCount - 1;
   }
   return Math.min(requirementIndex, actionCount - 1);
 }

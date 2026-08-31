@@ -79,6 +79,21 @@ describe("agent workspace service", () => {
     await expect(access(workspace.rootPath)).resolves.toBeUndefined();
   });
 
+  it("rejects an unsafe temporary workspace id before creating a directory", async () => {
+    const store = createAgentWorkspaceStore({ configDir });
+    const service = createAgentWorkspaceService({
+      workspaceStore: store,
+      workspaceRoot,
+      createId: () => "../outside",
+    });
+
+    await expect(service.createTemporaryWorkspace()).rejects.toThrow(
+      "workspace id is invalid",
+    );
+    await expect(access(path.join(workspaceRoot, "outside"))).rejects
+      .toMatchObject({ code: "ENOENT" });
+  });
+
   it("registers an existing project folder as a selectable workspace", async () => {
     const projectRoot = path.join(workspaceRoot, "client-project");
     await mkdir(projectRoot);

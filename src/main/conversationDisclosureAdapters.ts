@@ -1,6 +1,9 @@
 import type { AgentExecutionCheckpoint, AgentExecutionStatus } from "../shared/agentExecution";
 import type { AgentRunRecord } from "../shared/agentRuns";
-import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import {
+  agentTrajectoryEventTypes,
+  type AgentTrajectoryEvent,
+} from "../shared/agentTrajectory";
 import type { Goal, ProgressLedgerEvent } from "../shared/agentGoal";
 import type {
   ChatMessageRecord,
@@ -1076,6 +1079,8 @@ export function adaptConversationDisclosureSources(
   }
 
   const trajectoryFacts: ConversationDisclosureFact<"trajectory">[] = [];
+  const unknownTrajectoryFacts: ConversationUnknownFact[] = [];
+  const knownTrajectoryTypes = new Set<string>(agentTrajectoryEventTypes);
   const acceptedTrajectoryReads = new Set<ConversationTrajectoryRead>();
   for (const trajectory of input.trajectory ?? []) {
     const storeOwner = agentRuns.get(trajectory.runId);
@@ -1129,6 +1134,26 @@ export function adaptConversationDisclosureSources(
           requiredness: "optional",
           status: "incompatible",
           reasonCode: "source_identity_conflict",
+        });
+        continue;
+      }
+      const eventType = String(event.type);
+      if (!knownTrajectoryTypes.has(eventType)) {
+        unknownTrajectoryFacts.push({
+          schemaVersion: 1,
+          originalKind: "trajectory_event_unknown",
+          authorityRef: event.id,
+          scope,
+          domainRevision: String(event.sequence),
+          domainStatus: "unknown",
+          requiredness: event.payload.requiredness === "optional"
+            ? "optional"
+            : "required",
+          durability: "durable",
+          sensitivity: "technical",
+          occurredAt: event.createdAt,
+          semanticSlot: `trajectory:${event.runId}:${event.id}`,
+          safeSummary: "Unknown trajectory evidence",
         });
         continue;
       }
@@ -1772,7 +1797,10 @@ export function adaptConversationDisclosureSources(
 
   return {
     seeds: structuredClone(seeds),
-    unknownFacts: structuredClone([...(input.unknownFacts ?? [])]),
+    unknownFacts: structuredClone([
+      ...(input.unknownFacts ?? []),
+      ...unknownTrajectoryFacts,
+    ]),
     sourceCuts: structuredClone(sourceCuts),
     diagnostics: structuredClone(diagnostics),
   };

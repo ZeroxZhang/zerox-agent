@@ -50,6 +50,7 @@ const supportedTools = new Set<AgentToolName>([
   "file_search",
   "file_inventory",
   "file_move_plan",
+  "file_move_transaction_read",
   "file_apply_moves",
   "file_verify_moves",
   "file_rollback_moves",
@@ -174,6 +175,24 @@ export function buildToolDefinitions(): ToolDefinition[] {
             },
           },
           required: ["targetDir"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "file_move_transaction_read",
+        description:
+          "从事务日志恢复文件整理事务，用于崩溃或中断后的验证与回滚。",
+        parameters: {
+          type: "object",
+          properties: {
+            logPath: {
+              type: "string",
+              description: "file_apply_moves 创建的事务日志绝对路径",
+            },
+          },
+          required: ["logPath"],
         },
       },
     },

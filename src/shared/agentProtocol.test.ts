@@ -195,13 +195,14 @@ describe("agent JSON protocol", () => {
   it("builds tool definitions with JSON Schema for built-in tools", () => {
     const definitions = buildToolDefinitions();
 
-    expect(definitions).toHaveLength(25);
+    expect(definitions).toHaveLength(26);
     const names = definitions.map((d) => d.function.name);
     expect(names).toContain("file_list");
     expect(names).toContain("file_stat");
     expect(names).toContain("file_search");
     expect(names).toContain("file_inventory");
     expect(names).toContain("file_move_plan");
+    expect(names).toContain("file_move_transaction_read");
     expect(names).toContain("file_apply_moves");
     expect(names).toContain("file_verify_moves");
     expect(names).toContain("file_rollback_moves");

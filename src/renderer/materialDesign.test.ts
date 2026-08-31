@@ -213,8 +213,10 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(styles).toContain("bottom: var(--composer-action-inset);");
   });
 
-  it("lets modifier Enter insert composer newlines while bare Enter submits", () => {
-    expect(chatPanelSource).toContain('event.key === "Enter" && !event.shiftKey && !event.altKey');
+  it("lets IME and modifier Enter stay in the composer while bare Enter submits", () => {
+    expect(chatPanelSource).toContain("shouldSubmitComposerOnKeyDown(");
+    expect(chatPanelSource).toContain("onCompositionStart");
+    expect(chatPanelSource).toContain("onCompositionEnd");
     expect(chatPanelSource).toContain("Shift+Enter 或 Option+Enter 换行");
     expect(chatPanelSource).toContain("const content = rawContent;");
     expect(chatPanelSource).toContain("if (!content.trim())");

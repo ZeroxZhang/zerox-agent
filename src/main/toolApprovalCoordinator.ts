@@ -106,11 +106,18 @@ export function createToolApprovalCoordinator(options: {
     return state;
   }
 
-  async function initialize(): Promise<number> {
+  async function initialize(
+    reconcileInterrupted?: (
+      approvals: readonly ToolApprovalIntent[],
+    ) => Promise<unknown>,
+  ): Promise<number> {
     const interrupted = await options.store.interruptPriorProcessPending({
       currentProcessEpoch: options.processEpoch,
       decidedAt: now(),
     });
+    if (interrupted.length > 0) {
+      await reconcileInterrupted?.(interrupted);
+    }
     return interrupted.length;
   }
 

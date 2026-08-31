@@ -9,8 +9,124 @@ authority, permissions, recoverability, and session lifecycle truth.
 
 ## Current Phase
 
-Phase 6 active — P113/CD09 final adversarial acceptance and local package
-closure
+Phase 7 review and the Chat resilience incident repair are locally complete.
+P113/CD09 intentionally remains active because the final bytes do not yet have
+fresh signed independent review receipts; the old acceptance anchor cannot
+authorize this candidate.
+
+### Goal planning transport incident repair — 2026-08-31
+
+- [x] Reconstruct the latest failed Goal directly from its SQLite plan,
+  stages, rounds, profile revisions, and timestamps without mutating it.
+- [x] Replace the false 30-second `fetch()` connection timer with one honest
+  bounded end-to-end request deadline; keep streaming response-idle handling
+  separate.
+- [x] Apply the shared bounded transient-transport retry policy to structured
+  planning boundaries as well as AgentLoop model calls.
+- [x] Resume a failed review from the preserved generated candidate instead
+  of invalidating and regenerating the completed direct round.
+- [x] Pass focused regressions, strict test typing, full verify, production
+  smoke, all `19/19` governed Electron scenarios, audit, and whitespace gates.
+- [x] Rebuild the local package and pass the dedicated isolated packaged-app
+  review recovery with an injected transport reset and a response delayed
+  beyond the old 30-second threshold.
+- [x] Confirm the ordinary Program/Harness gates fail closed on the changed
+  P113 definition and stale external CD04 identity/lineage instead of
+  admitting the previous candidate's caller-held anchor.
+- [ ] Obtain fresh signed independent code/security review receipts and a new
+  caller-held acceptance anchor before any P113/CD09 release-completion claim.
+
+### Chat resilience incident repair — 2026-08-31
+
+- [x] Reconstruct the reported production failure from the packaged app's
+  SQLite Chat, Workspace-run, causal-reference, and trajectory evidence.
+- [x] Treat provider `finish_reason=length` as a resumable output chunk in
+  interactive Chat, preserving partial output and transparently continuing.
+- [x] Retain a recoverable pause only when repeated or empty output-limit
+  continuations make no progress; rate/quota/provider-stop semantics remain
+  explicitly user-recoverable rather than auto-retried.
+- [x] Give every manual continuation request a fresh trajectory run while
+  recording its parent evidence run as a checkpoint boundary; share only the
+  explicit per-session Tool-result continuation capability.
+- [x] Prevent composer submission during IME composition using the component
+  lifecycle ref, `nativeEvent.isComposing`, and Chromium/WebKit key code `229`.
+- [x] Pass focused regressions, strict test typing, full verify, production
+  smoke, all `19/19` governed Electron scenarios, local packaging, and a
+  dedicated packaged-app output-limit plus trusted IME acceptance.
+- [ ] Obtain fresh signed independent code/security review receipts and a new
+  caller-held acceptance anchor before any P113/CD09 release-completion claim.
+
+### Phase 7: Comprehensive Review and Repair — 2026-08-31
+
+#### Scope and execution path
+
+- [x] Freeze the live baseline: branch, HEAD, dirty evidence, untracked release
+  outputs, and caller-held verification pins.
+- [x] Reopen P113/CD09 as the only unfinished Feature/workstream before product
+  edits; preserve all prior acceptance artifacts as historical evidence.
+- [x] Map the v3.9.2 delta across authority, persistence, recovery, IPC,
+  renderer projection, acceptance tooling, packaging, and governance.
+- [x] Run baseline tests, strict test type coverage, dependency audit, build,
+  Program/Harness checks, and whitespace checks; distinguish standard
+  fail-closed pin requirements from product failures.
+- [x] Review every changed production file and its trust/lifecycle callers;
+  use mutation, crash-boundary, duplicate/reorder, ownership-conflict,
+  cancellation, restart, malformed-input, and secret-safety probes.
+- [x] Convert each confirmed defect into a failing regression before changing
+  production behavior. Group repairs by shared root cause and authority
+  contract rather than patching symptoms one at a time.
+- [x] Repeat focused tests, full `npm run verify`, production Electron smoke,
+  all 19 governed real-app scenarios, audit, dependency-tree, Program/Harness,
+  ABI-restoration, and whitespace gates.
+- [x] Repair two verification/governance closure defects found during final
+  review: isolate the V13 historical runner from frozen V12 inputs, and require
+  S17 to reload the canonical renderer projection and visibly settle the
+  sidebar to `已完成` after restart recovery.
+- [x] Perform a final diff/security review and record residual risks.
+- [ ] Obtain signed independent review receipts before restoring P113/CD09
+  completion. A fresh local package is now authorized and produced for this
+  incident repair, but it is not a published or independently signed release.
+
+#### Acceptance standard
+
+- Review coverage is traceable from every v3.9.2 production delta to its
+  authority, persistence/recovery behavior, public projection, and tests.
+- Every confirmed Critical/Major/Minor defect has a reproducer, a systemic
+  fix, and a passing regression; no known Critical or Major finding remains.
+- Crash/retry/reload/concurrency and malformed/forged/unauthorized negative
+  cases fail closed without cross-owner state mutation or secret disclosure.
+- `npm run verify`, `npm run smoke:prod`, `npm audit --omit=dev`, dependency
+  integrity, Program/Harness, package identity/launch, all 19 real-app
+  scenarios, strict type coverage, and `git diff --check` pass on the same
+  candidate bytes.
+- The final report states the unavoidable limit explicitly: finite review
+  cannot prove the absence of every possible bug; closure means complete
+  declared risk-model coverage, no unresolved known release blocker, and
+  reproducible evidence for the reviewed candidate.
+- No commit, push, tag, publish, or release occurs without separate user
+  authorization.
+
+#### Final local evidence
+
+- Strict type coverage: `432/432`.
+- Current suite: `323` passed files / `3855` passed tests, with the declared
+  `1` file / `6` tests skipped; every Round2-Round12 historical lane, build,
+  Agent eval `26/26`, and Memory eval `2/2` passed.
+- Production smoke: Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration passed.
+- CD09 real-app acceptance: `19/19`, receipt file digest
+  `sha256:601b4f503a453735a37c99255e1053de31327982a44cd3fc1f47a9f186f29f84`.
+  S17 canonical receipt digest is
+  `sha256:c7144e989f98031071ea83e6f0aeaa090f9194c74e8406dc20e1bd2de72be00f`
+  and requires a reloaded `completed` projection, sidebar text `已完成`, and
+  visible recovered session.
+- Production audit reports zero vulnerabilities; `npm ls --all`, caller-pinned
+  Program/Harness, and `git diff --check` pass.
+- P113 owns `65` files and remains `in_progress`; CD09 remains `in_progress`.
+  The passed Harness receipt is intentionally `authoritative=false`,
+  `identityAssurance=not-signed`, and
+  `independenceClaim=not-claimed-during-active-development`.
 
 ### P113 Electron profile review remediation — 2026-08-28
 

@@ -81,9 +81,11 @@ import {
   loadPreviewValidationSnapshot,
   savePreviewValidationSnapshot,
 } from "../agentValidationPreviewStore";
+import { translateRunStatus } from "../runStatusPresentation";
 import { buildAgentWorkSteps, type AgentWorkPhase, type AgentWorkStep } from "../agentWorkStatus";
 import { parseInlineMarkdown, parseMarkdownBlocks, type MarkdownBlock } from "../chatMarkdown";
 import { createMarkdownPreview, shouldRenderMarkdownPreview } from "../chatMarkdownPreview";
+import { shouldSubmitComposerOnKeyDown } from "../composerKeyboard";
 import {
   isChatSessionSelectionCurrent,
   rollbackFailedAttachmentTurn,
@@ -429,6 +431,7 @@ export function AgentChatPanel({
     scrollTop: number;
   } | null>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
+  const messageInputComposingRef = useRef(false);
   const sessionIdRef = useRef<string | null>(sessionId);
   const sessionSelectionGenerationRef = useRef(0);
   const sessionListRefreshSequenceRef = useRef(0);
@@ -4110,8 +4113,17 @@ export function AgentChatPanel({
                   }
                 }}
                 onClick={updateDraftCursor}
+                onCompositionStart={() => {
+                  messageInputComposingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  messageInputComposingRef.current = false;
+                }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
+                  if (shouldSubmitComposerOnKeyDown(
+                    event,
+                    messageInputComposingRef.current,
+                  )) {
                     event.preventDefault();
                     if (skillMentionMenuVisible && skillMentionMatches[0]) {
                       handleSelectSkillMention(skillMentionMatches[0]);
@@ -7089,12 +7101,6 @@ function shouldHideGoalEventReply(goalEventRef: string): boolean {
     !goalEventRef.startsWith("goal-terminal:") &&
     goalEventRef !== "goal_canceled"
   );
-}
-
-function translateRunStatus(status: AgentRunRecord["status"]): string {
-  if (status === "succeeded") return "成功";
-  if (status === "canceled") return "已取消";
-  return "失败";
 }
 
 function translateGoalStatus(status: ChatSessionGoalSummary["status"]): string {

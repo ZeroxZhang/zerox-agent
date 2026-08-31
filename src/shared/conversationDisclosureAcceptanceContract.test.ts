@@ -180,6 +180,52 @@ describe("conversation disclosure production scenario receipt", () => {
       expect(source).toContain("aria-current");
     }
   });
+
+  it("uses production Plan lifecycle and measurable paged long-session evidence", () => {
+    const driverSource = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/main/conversationDisclosureAcceptanceDriver.ts",
+      ),
+      "utf8",
+    );
+    expect(driverSource).toContain("createPlanDebateOrchestrator");
+    expect(driverSource).toContain("prepareLivePlanProgressScenario");
+    expect(driverSource).not.toContain("advanceAcceptancePlanProgress");
+    expect(driverSource).toContain("getAgentRunTrajectoryPage");
+    expect(driverSource).toContain("Performance.getMetrics");
+    expect(driverSource).toContain("rendererMetricsAvailable");
+    expect(driverSource).not.toContain("performance.memory");
+  });
+
+  it("binds S17 recovery to the settled canonical sidebar projection", () => {
+    const driverSource = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/main/conversationDisclosureAcceptanceDriver.ts",
+      ),
+      "utf8",
+    );
+    expect(driverSource).toContain("inspectSettledS17Projection");
+    expect(driverSource).toContain('listedWorkStatus === "completed"');
+    expect(driverSource).toContain('sidebarBadgeText === "已完成"');
+
+    const contractSource = readFileSync(
+      path.join(
+        process.cwd(),
+        "scripts/conversation-disclosure-acceptance-contract.mjs",
+      ),
+      "utf8",
+    );
+    for (const observation of [
+      "projectionReloaded",
+      "listedWorkStatus",
+      "sidebarBadgeText",
+      "recoveredSessionVisible",
+    ]) {
+      expect(contractSource).toContain(observation);
+    }
+  });
 });
 
 function createReceipt() {
@@ -217,6 +263,7 @@ function createReceipt() {
     scenarioDigest: contract.hashCanonical(scenario),
     executionId: "11111111-1111-4111-8111-111111111111",
     processEpochs: ["main_11111111-1111-4111-8111-111111111111"],
+    attemptNonces: ["11111111-1111-4111-8111-111111111111"],
     productionMain: true,
     productionPreload: true,
     demoDataUsed: false,

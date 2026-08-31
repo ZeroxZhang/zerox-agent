@@ -37,6 +37,16 @@ describe("credential redaction", () => {
     );
   });
 
+  it("redacts nested unquoted assignments after non-secret prose labels", () => {
+    const canary = "cd09_0123456789abcdef0123456789abcdef";
+    const redacted = redactCredentialString(
+      `Path does not exist: api_key=${canary}`,
+    );
+
+    expect(redacted).toBe("Path does not exist: api_key=[redacted]");
+    expect(redacted).not.toContain(canary);
+  });
+
   it("redacts every Authorization header scheme and credential body", () => {
     const values = [
       "Authorization: ApiKey api-key-canary",
@@ -194,6 +204,18 @@ describe("credential redaction", () => {
       expect(serialized).toContain("[redacted]");
       expect(serialized).not.toContain(canary);
     }
+  });
+
+  it("decodes credential keys to a fixed point instead of a fixed depth", () => {
+    const canary = "deep-recursive-key-canary";
+    const deeplyEncodedKey = "api%252525255fkey";
+
+    expect(
+      redactCredentialText(`error: ${deeplyEncodedKey}=${canary}`),
+    ).not.toContain(canary);
+    expect(redactCredentials({ [deeplyEncodedKey]: canary })).toEqual({
+      [deeplyEncodedKey]: "[redacted]",
+    });
   });
 
   it("preserves recursively encoded numeric token telemetry", () => {

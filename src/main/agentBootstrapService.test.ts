@@ -173,6 +173,42 @@ describe("agent bootstrap service", () => {
     expect(runTaskIds).toEqual(["task_existing"]);
   });
 
+  it.each([
+    ["queued", "排队中"],
+    ["running", "运行中"],
+    ["waiting_for_approval", "等待授权"],
+    ["paused", "已暂停"],
+    ["failed", "失败"],
+    ["canceled", "已取消"],
+  ] as const)("reports a %s validation run without calling it failed", async (
+    status,
+    label,
+  ) => {
+    const existingTask = createTask({ id: "task_existing" });
+    const service = createAgentBootstrapService({
+      modelSettingsStore: createModelSettingsStore({
+        chatModel: "agent-model",
+        hasApiKey: true,
+      }),
+      taskStore: createTaskStore([existingTask], []),
+      discoverSkills: async () => createSkillResult(),
+      testModelConnection: async () => createConnectionResult({ ok: true }),
+      runScheduledTask: async (taskId) => ({
+        ok: true,
+        run: createRun({ taskId, status }),
+      }),
+    });
+
+    await expect(service.validate()).resolves.toMatchObject({
+      ready: false,
+      run: {
+        ready: false,
+        message: `默认文件整理任务运行结果：${label}。`,
+        run: { status },
+      },
+    });
+  });
+
   it("does not validate connection or run task when preparation is incomplete", async () => {
     const connectionChecks: string[] = [];
     const runTaskIds: string[] = [];

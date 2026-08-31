@@ -15,6 +15,7 @@ import { createAgentEvalCandidateStore } from "./agentEvalCandidateStore";
 import { createAgentEvalCandidateService } from "./agentEvalCandidateService";
 import { createAgentWorkspaceStore } from "./agentWorkspaceStore";
 import { createWorkspaceRunStore } from "./workspaceRunStore";
+import { reconcileInterruptedToolApprovals } from "./interruptedToolApprovalReconciler";
 import type { WorkspaceRunEvent } from "../shared/workspaceRunLedger";
 import {
   createConversationCausalStore,
@@ -104,6 +105,7 @@ import { createHistoryIndexStore } from "./historyIndexStore";
 import { createMemoryIngestionService } from "./memoryIngestionService";
 import {
   createToolResultOffloadStore,
+  issueToolResultRefReadCapability,
   type ToolResultOffloadReadScope,
 } from "./toolResultOffloadStore";
 import {
@@ -275,8 +277,10 @@ import {
 import type { AgentEvalReport } from "../shared/agentEval";
 import { buildDesktopRuntimeInfo, type DesktopRuntimeInfo } from "../shared/desktopRuntime";
 import {
+  extractToolResultRef,
   isSafeToolResultRef,
   summarizeToolResultContent,
+  type ReadToolResultRefOptions,
   type ReadToolResultRefResult,
 } from "../shared/toolResultRefs";
 import { projectChatSessionForTranscript } from "../shared/chatSessionProjection";
@@ -579,6 +583,17 @@ export function createAppContainer(options: {
       }
     }
     return conversationCausalStore().reconcileAgentRunAdmissions(owners);
+  }
+
+  async function reconcileInterruptedApprovals(
+    approvals: readonly ToolApprovalIntent[],
+  ) {
+    return reconcileInterruptedToolApprovals({
+      approvals,
+      trajectoryStore: agentTrajectoryStore(),
+      workspaceRunStore: workspaceRunStore(),
+      chatSessionStore: chatSessionStore(),
+    });
   }
 
   const modelSettingsStore = createModelSettingsStore({
@@ -2893,6 +2908,9 @@ export function createAppContainer(options: {
   }
 
   async function getGoalModelProfile(goal: Goal) {
+    if (options.modelProfileOverride) {
+      return structuredClone(options.modelProfileOverride);
+    }
     return toRuntimeModelProfile(await resolveGoalModelSettings(goal));
   }
 
@@ -3237,7 +3255,14 @@ export function createAppContainer(options: {
           trajectoryStore: agentTrajectoryStore(),
           toolResultOffloadStore: toolResultOffloadStore(),
           goalContext: createAgentGoalContext({
-            trajectoryStore: agentTrajectoryStore(),
+            trajectoryStore: {
+              append(runId, event, appendOptions) {
+                const store = agentTrajectoryStore();
+                return store.appendNext
+                  ? store.appendNext(runId, event, appendOptions)
+                  : store.append(runId, event, appendOptions);
+              },
+            },
             createId: () => `goal_context_${randomUUID()}`,
             now: () => new Date().toISOString(),
           }),
@@ -3328,7 +3353,14 @@ export function createAppContainer(options: {
               toolExecutor,
               toolAuthorizationService: toolAuthorizationService(),
             }),
-            trajectoryStore: agentTrajectoryStore(),
+            trajectoryStore: {
+              append(runId, event, appendOptions) {
+                const store = agentTrajectoryStore();
+                return store.appendNext
+                  ? store.appendNext(runId, event, appendOptions)
+                  : store.append(runId, event, appendOptions);
+              },
+            },
             ...(modelProfile
               ? {
                   chatClient: goalChatClient(goal),
@@ -5889,7 +5921,7 @@ export function createAppContainer(options: {
 
   async function readToolResultRef(
     ref: string,
-    options?: ToolResultOffloadReadScope,
+    options?: ReadToolResultRefOptions & Pick<ToolResultOffloadReadScope, "capability">,
   ): Promise<ReadToolResultRefResult> {
     if (!isSafeToolResultRef(ref)) {
       return {
@@ -5898,7 +5930,30 @@ export function createAppContainer(options: {
       };
     }
 
-    const content = await toolResultOffloadStore().read(ref, options);
+    let readScope: ToolResultOffloadReadScope | undefined = options;
+    if (options?.trajectoryEventId) {
+      if (!options.runId) {
+        return { ok: false, message: "工具结果引用缺少受信轨迹归属。" };
+      }
+      const event = (await agentTrajectoryStore().list(options.runId)).find(
+        (candidate) => candidate.id === options.trajectoryEventId,
+      );
+      if (
+        !event
+        || event.runId !== options.runId
+        || extractToolResultRef(event.payload) !== ref
+      ) {
+        return { ok: false, message: "工具结果引用与轨迹证据不匹配。" };
+      }
+      readScope = {
+        capability: issueToolResultRefReadCapability({
+          ref,
+          issuedByRunId: event.runId,
+        }),
+      };
+    }
+
+    const content = await toolResultOffloadStore().read(ref, readScope);
     if (!content) {
       return {
         ok: false,
@@ -6056,6 +6111,7 @@ export function createAppContainer(options: {
     appMeta,
     initializeStorageConvergence,
     reconcileAgentRunAdmissions,
+    reconcileInterruptedApprovals,
     getNavigationSections,
     buildDesktopRuntimeInfo: () =>
       buildDesktopRuntimeInfo({

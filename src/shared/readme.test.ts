@@ -19,8 +19,8 @@ describe("README", () => {
       '<img src="build/icon.svg" width="88" alt="Zerox Agent" />',
     );
     expect(existsSync(path.join(process.cwd(), "logo.png"))).toBe(true);
-    expect(readme).toContain("当前版本是 **v3.9.1**");
-    expect(readme).toContain("The current release: v3.9.1");
+    expect(readme).toContain("当前版本是 **v3.9.2**");
+    expect(readme).toContain("The current release: v3.9.2");
     expect(readme).toContain("local-first desktop control plane");
     expect(readme).toContain("recoverable agent runs");
     expect(readme).toContain("workspace");
@@ -42,6 +42,24 @@ describe("README", () => {
     expect(readme).not.toContain("v3.2.2 interface system");
     expect(readme).not.toContain("25 built-in tools");
     expect(readme).not.toContain("A fixed local resource budget");
+  });
+
+  it("documents the v3.9.2 disclosure and runtime resilience release", () => {
+    const readme = readReadme();
+
+    for (const statement of [
+      "## v3.9.2 会话披露与运行韧性",
+      "模型单次输出达到长度上限",
+      "中文输入法组合阶段",
+      "有界瞬时网络重试",
+      "30 秒连接计时器",
+      "## What changed in v3.9.2",
+      "IME composition",
+      "bounded transient transport retries",
+      "unknown or legacy events",
+    ]) {
+      expect(readme).toContain(statement);
+    }
   });
 
   it("documents the v3.9.1 automatic context-window hotfix", () => {
@@ -207,7 +225,7 @@ describe("README", () => {
       expect(readme).toContain(command);
     }
 
-    expect(readme).toContain("Zerox-Agent-3.9.1-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-3.9.2-arm64.dmg");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
     expect(readme).toContain("legacy-adhoc");
     expect(readme).toContain("未经过 Apple Developer ID 签名与公证");

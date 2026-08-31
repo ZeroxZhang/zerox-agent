@@ -109,7 +109,7 @@ export function createAgentGoalController(options: {
   planner: Pick<AgentGoalPlanner, "replan">;
   trajectoryStore: Pick<
     AgentTrajectoryStore,
-    "append" | "appendIfAbsent" | "list"
+    "append" | "appendNext" | "appendIfAbsent" | "list"
   >;
   createAcceptanceContext?: (
     goal: Goal,
@@ -2079,7 +2079,9 @@ export function createAgentGoalController(options: {
       createdAt: currentTime(),
     };
     throwIfPublicationAborted(signal);
-    const append = options.trajectoryStore.append(runId, event, { signal });
+    const append = options.trajectoryStore.appendNext
+      ? options.trajectoryStore.appendNext(runId, event, { signal })
+      : options.trajectoryStore.append(runId, event, { signal });
     void append.catch(() => {
       // A canceled append may reject after the controller has moved on.
     });
@@ -2685,7 +2687,7 @@ function boundManualCompletionStrings(values: unknown): string[] {
     .slice(0, 64);
 }
 
-function finalAcceptanceEvidenceFingerprint(
+export function finalAcceptanceEvidenceFingerprint(
   goal: Goal,
   result: AcceptanceResult,
 ): string {

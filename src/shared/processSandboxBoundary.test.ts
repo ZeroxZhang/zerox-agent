@@ -92,16 +92,20 @@ describe("production process sandbox boundary", () => {
   it("keeps scoped tool-result refs behind committed metadata", () => {
     const offloadStore = read("src/main/toolResultOffloadStore.ts");
     const metadataCommit = offloadStore.indexOf(
-      "await rename(metadataTempPath, metadataPath(absolutePath));",
+      "await link(metadataTempPath, metadataPath(absolutePath));",
     );
     const contentCommit = offloadStore.indexOf(
-      "await rename(contentTempPath, absolutePath);",
+      "await link(contentTempPath, absolutePath);",
     );
 
     expect(offloadStore).toContain("Promise.allSettled([");
     expect(offloadStore).toContain("contentSha256: hashContent(input.content)");
     expect(metadataCommit).toBeGreaterThan(-1);
     expect(contentCommit).toBeGreaterThan(metadataCommit);
+    expect(offloadStore).toContain("if (metadataCommitted)");
+    expect(offloadStore).toContain(
+      "await rm(metadataPath(absolutePath), { force: true });",
+    );
     expect(offloadStore).toContain("return scope === undefined;");
   });
 

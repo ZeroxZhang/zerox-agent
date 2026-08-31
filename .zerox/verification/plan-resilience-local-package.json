@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "kind": "plan-resilience-local-package-acceptance",
+  "status": "passed",
+  "accepted": true,
+  "package": {
+    "path": "release-local/mac-arm64/Zerox Agent.app",
+    "appAsarSha256": "sha256:2301b35b113212a078966b9fc5b4aac99736e6044f411042a30ac145b83219d8"
+  },
+  "source": {
+    "planId": "plan_f9419efa-7819-42b9-935f-b0d9632f58a0",
+    "failedReviewRunId": "plan_review_976a7396-2006-4250-9e00-04847d64fc17",
+    "completedGenerationRunId": "plan_run_3ff319b4-1067-4200-ad42-30f7a196e8bc",
+    "completedRoundRunId": "plan_run_3ff319b4-1067-4200-ad42-30f7a196e8bc"
+  },
+  "transportRecovery": {
+    "modelCallCount": 2,
+    "injectedFailureCount": 1,
+    "slowSuccessCount": 1,
+    "responseDelayMs": 35000,
+    "elapsedMs": 41441
+  },
+  "resumedPlan": {
+    "exitCode": 0,
+    "status": "awaiting_confirmation",
+    "completedDirectRoundCount": 1,
+    "completedGenerationStageCount": 1,
+    "generatedPlanReused": true,
+    "failedReviewInvalidated": true,
+    "latestReviewStatus": "completed",
+    "latestReviewApproved": true
+  },
+  "replayLogObserved": true
+}

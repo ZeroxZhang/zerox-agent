@@ -98,6 +98,16 @@ const program = JSON.parse(await readFile(
   path.join(root, ".zerox/conversation-disclosure-program.json"),
   "utf8",
 ));
+if (
+  !Array.isArray(program.scenarioMatrix)
+  || program.scenarioMatrix.some(
+    (scenario) =>
+      typeof scenario?.id !== "string"
+      || !/^S\d{2}-[a-z0-9-]+$/.test(scenario.id),
+  )
+) {
+  fail("CD09 scenario ids must be safe file identifiers.");
+}
 const scenarioReceiptRoot = path.join(verificationRoot, "CD09-scenarios");
 const scenarioReceipts = new Map(await Promise.all(
   program.scenarioMatrix.map(async (scenario) => {

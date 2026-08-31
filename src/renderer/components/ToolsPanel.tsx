@@ -282,6 +282,9 @@ function defaultArgsJson(toolName: AgentToolName): string {
     file_search: { root: "~/Downloads", query: "report", mode: "both" },
     file_inventory: { path: "~/Downloads" },
     file_move_plan: { targetDir: "~/Downloads" },
+    file_move_transaction_read: {
+      logPath: "~/Downloads/.zerox-organize-transactions/transaction_id.json",
+    },
     file_apply_moves: { preview: { id: "preview_id", root: "~/Downloads", moves: [] } },
     file_verify_moves: { transaction: { id: "transaction_id", root: "~/Downloads", moves: [] } },
     file_rollback_moves: {

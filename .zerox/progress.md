@@ -1,5 +1,30 @@
 # Zerox Harness Progress
 
+## 2026-08-31 - Goal planning review timeout repaired in source
+
+- The latest real plan's Direct generation completed, but its review was
+  killed by `LLM connection timed out after 30000 ms.` The plan used only
+  `7.2%` of the available context.
+- `fetch()` response-header latency is no longer mislabeled as a connection
+  handshake. One bounded 300-second end-to-end deadline now covers ordinary
+  completions, while streaming body-idle handling remains independent.
+- Structured planning now shares bounded transient retries with interactive
+  model calls. Review retry preserves the completed candidate and reruns only
+  review/quality instead of regenerating the Direct round.
+- Focused tests pass `197`, strict type coverage passes `433/433`, standard
+  verify passes `324` files / `3865` current tests plus historical lanes and
+  evals, and production smoke, governed acceptance `19/19`, audit, and
+  whitespace checks pass.
+- The rebuilt unsigned local package passed isolated acceptance against a copy
+  of the exact failed plan: the first review connection was reset, the second
+  completed after `35000 ms`, and the plan reached `awaiting_confirmation`
+  while retaining one original Direct round and generation stage. The receipt
+  is `.zerox/verification/plan-resilience-local-package.json`. P113 remains
+  `in_progress`; no signed release claim is made.
+- Ordinary Program/Harness checks correctly reject the changed P113 definition
+  and stale external CD04 identity/lineage until a new caller-pinned anchor is
+  supplied; the prior candidate is not reused as authorization.
+
 ## 2026-08-26 - P113/CD09 final verification resumed
 
 - Resumed without resetting the dirty worktree. Node ABI is `137`, and no
@@ -13378,3 +13403,141 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   re-run (gen11) and all caller pins re-synced before this evidence was
   committed (commit 4) and the round-12 anchor run. The round-12 anchor
   path/digest are recorded in `/private/tmp/zerox-v392-pins/checker-env.sh`.
+
+## 2026-08-31 - P113/CD09 reopened for comprehensive review
+
+- User requested a complete v3.9.2 branch review and repair pass. The previous
+  completion claim is intentionally reopened before product edits because any
+  changed source byte invalidates the old caller-held acceptance anchor.
+- P113/CD09 is again the only unfinished Feature/workstream. Existing review,
+  scenario, package, and external-anchor outputs are retained as historical
+  evidence; none is treated as acceptance of this new candidate.
+- Review phases and release acceptance criteria are recorded in
+  `task_plan.md`. Baseline current/historical tests pass, strict test type
+  coverage is `425/425`, the production dependency audit reports zero
+  vulnerabilities, and the caller-pinned active-state Harness passes.
+- Ordinary `./init.sh` still fails closed without caller-owned external pins;
+  that developer-startup reproducibility boundary is under review and is not
+  being bypassed by discovering or trusting repository-controlled pins.
+- First causal-chain candidate: message-first Chat recovery may select an
+  unrelated first `workspace_run` reference instead of the request's exact
+  canonical Workspace run. A negative regression is required before repair.
+
+## 2026-08-31 - P113 comprehensive review repair evidence
+
+- Traversed the v3.9.2 branch delta across owning authority, causal admission,
+  JSON/SQLite persistence, restart/retry, IPC, renderer projections, path
+  boundaries, Tool-result publication, and CD09 acceptance. `22` confirmed
+  defect groups were repaired with focused regressions; no known Critical or
+  Major product finding remains in the declared review model.
+- Final standard verify passes strict test coverage `428/428`, current-state
+  `319` files / `3818` tests with the declared `1` file / `6` test skips,
+  every historical lane, production build, Agent eval `26/26`, and Memory
+  eval `2/2`.
+- Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`,
+  seven migrations, eight authority domains, actual renderer startup, and
+  final Node ABI `137` restoration.
+- A clean system-temporary worktree/user-data run passes the strengthened
+  seven-command CD09 acceptance with all `19/19` real Electron scenarios.
+  S05 now proves both `listedWorkStatus=waiting_for_approval` and the rendered
+  sidebar text `等待授权`; manual screenshot inspection confirms visual parity.
+- Audit reports zero production vulnerabilities. `npm ls --all`, caller-pinned
+  Program/Harness, and global whitespace validation pass. Program correctly
+  reports `releaseReady=false`; Harness correctly reports non-authoritative,
+  caller-attested, and not-signed.
+- P113/CD09 remains active because fresh signed independent review receipts
+  and a new local package were not authorized or produced. No lifecycle
+  completion, commit, push, tag, publish, deletion, or overwrite of existing
+  user-owned package outputs occurred.
+
+## 2026-08-31 - P113 final local review and verification closure
+
+- The current candidate fixes `22` confirmed product defect groups plus two
+  verification/governance closure defects. The latter isolate V13 historical
+  reconstruction from frozen V12 inputs and prevent S17 from passing while the
+  visible renderer remains on stale `执行中` state.
+- Final standard `npm run verify` passes strict type coverage `432/432`, current
+  suite `323` files / `3855` tests with the declared `1` file / `6` test skips,
+  every Round2-Round12 historical lane, build, Agent eval `26/26`, and Memory
+  eval `2/2`.
+- Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and final Node ABI
+  `137` restoration.
+- The governed real-app acceptance passes `19/19`; its receipt file digest is
+  `sha256:601b4f503a453735a37c99255e1053de31327982a44cd3fc1f47a9f186f29f84`.
+  S17's canonical receipt digest is
+  `sha256:c7144e989f98031071ea83e6f0aeaa090f9194c74e8406dc20e1bd2de72be00f`
+  and the production renderer reload observes `listedWorkStatus=completed`,
+  `sidebarBadgeText=已完成`, and `recoveredSessionVisible=true`.
+- Production dependency audit reports zero vulnerabilities. `npm ls --all`,
+  `git diff --check`, and caller-pinned Program/Harness pass. Their receipt
+  digests are
+  `sha256:555f38d7da8653b7cbeda3d1297fd3ac6210b7f492e231722ca3887955ef6afa`
+  and
+  `sha256:0338b7273974a8002384e9e76cffae322a52b8536ed0dab80ac458794c514d8e`.
+- P113 declares `56` owned files and remains `in_progress`; CD09 remains
+  `in_progress`, `releaseReady=false`, and the Harness is explicitly
+  `authoritative=false`, `identityAssurance=not-signed`, and
+  `independenceClaim=not-claimed-during-active-development`.
+- This entry records evidence after the runtime acceptance run. It is an
+  evidence-only source change and therefore deliberately does not claim a
+  new exact-byte authoritative release anchor. Fresh signed independent review,
+  local-package generation, and final authoritative anchoring remain separate
+  release-closure work. No existing package output was overwritten and no
+  commit, push, tag, publish, or lifecycle completion was performed.
+## 2026-08-31 - Chat output-limit and IME incident repair
+
+- Production evidence distinguishes two failures in session
+  `c44eb53a-c2b7-46b5-beb7-e3bec7e03d2d`: the first request reached the
+  provider's single-response output limit at only about `11%` context use; the
+  manual continuation then failed before any new `model_request` while bound
+  to the finalized parent evidence run.
+- Interactive Chat now chains productive `output_limit` chunks automatically,
+  pauses only after repeated/empty no-progress chunks, and leaves rate/quota/
+  provider-stop recovery semantics unchanged. Manual continuations create a
+  fresh evidence run with explicit parent checkpoint lineage and a scoped
+  per-session Tool-result continuation capability.
+- Composer Enter now checks the tracked IME composition lifecycle,
+  `nativeEvent.isComposing`, and key code `229` before any Skill selection or
+  form submission.
+- Focused tests passed `4/4` files and `335/335` tests; strict type coverage is
+  `433/433`; full verify passed `324/324` current files and `3862/3862` current
+  tests plus all historical lanes, build, Agent `26/26`, and Memory `2/2`.
+  Production smoke and all governed real-app scenarios passed `19/19`.
+- The fresh unsigned local package passed dedicated isolated acceptance:
+  provider `length` then `stop` completed after exactly two calls with one
+  combined reply and no pause; trusted IME Enter reported `isComposing=true`,
+  kept “测试输入法” focused in the textarea, and submitted the form zero times.
+- Ordinary Harness remains fail-closed without caller-private CD04 pins and
+  after the P113 source-definition change. P113/CD09 stays `in_progress` until
+  fresh signed independent receipts authorize the final bytes. No commit,
+  push, tag, publish, or release claim was made.
+
+## 2026-08-31 - v3.9.2 release-candidate governance preflight
+
+- The release path now preserves two distinct trust phases: active P113 still
+  requires caller-private CD04 and execution anchors, while a completed P113
+  may use only a tracked release attestation promoted from that private anchor.
+  The attestation is bound to the exact source manifest, accepted Git commit
+  and tree, both independent review pins, six evidence-file byte digests, and
+  the complete local acceptance result.
+- Release/tag CI may consume that promoted attestation without access to this
+  Mac's private paths. It does not re-label the local package as reproducible:
+  the checker skips the absent local app tree only after its receipt bytes have
+  been captured by the promoted attestation; source, review, scenario, and
+  lifecycle checks remain fail-closed.
+- `scripts/check-release-program.mjs` and its tests now support the explicit
+  v3.9.1-history to v3.9.2-release transition. P114 is not registered while
+  P113 is active, preserving the one-unfinished-Feature invariant.
+- Pre-freeze verification passes: strict test type coverage `433/433`, current
+  suite `324` passed files / `3866` passed tests plus all historical lanes,
+  production build, Agent eval `26/26`, Memory eval `2/2`, production Electron
+  smoke with ABI `146` and Node ABI `137` restoration, release-program check,
+  and global `git diff --check`.
+- Files added or changed for this boundary include
+  `scripts/promote-v392-release-attestation.mjs`,
+  `scripts/check-conversation-disclosure-successor-program.mjs`,
+  `scripts/check-release-program.mjs`,
+  `scripts/build-v392-acceptance-anchor.mjs`, release documentation, focused
+  tests, and generated-output ignore rules. Independent code/security review
+  and the fresh caller-private authoritative run remain mandatory next gates.

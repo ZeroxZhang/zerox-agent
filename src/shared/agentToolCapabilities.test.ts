@@ -72,6 +72,12 @@ describe("agent tool capabilities", () => {
       requiresConfirmation: true,
       preferredFor: ["files:apply_moves"],
     });
+    expect(getToolCapability("file_move_transaction_read")).toMatchObject({
+      name: "file_move_transaction_read",
+      sideEffect: "local_read",
+      requiresConfirmation: false,
+      preferredFor: ["files:recover_move_transaction"],
+    });
     expect(getToolCapability("file_rollback_moves")).toMatchObject({
       name: "file_rollback_moves",
       sideEffect: "local_write",

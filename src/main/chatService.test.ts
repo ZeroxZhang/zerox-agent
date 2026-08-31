@@ -4092,6 +4092,7 @@ describe("chat service", () => {
 
   it("emits and persists approval request output parts for tool invocations waiting on approval", async () => {
     const streamEvents: ChatStreamEvent[] = [];
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
     const chatSessionStore = createChatSessionStore([]);
     const service = createChatService({
       chatClient: {
@@ -4103,6 +4104,7 @@ describe("chat service", () => {
       memoryStore: createMemoryStore(),
       chatSessionStore,
       toolExecutor: createToolExecutor(),
+      trajectoryStore: createMemoryTrajectoryStore(trajectoryEvents),
       async runAgentLoop(messages, _profile, options) {
         await options.onToolInvocation?.({
           id: "approval_1",
@@ -4110,6 +4112,7 @@ describe("chat service", () => {
           toolCallId: "tool_approval_1",
           toolName: "shell_exec",
           source: "native",
+          approvalId: "approval_1",
           args: {
             command: "npm test",
             apiKey: "secret-value",
@@ -4195,6 +4198,18 @@ describe("chat service", () => {
       toolName: "shell_exec",
     });
     expect(persistedLedgerPart).toEqual(ledgerStreamPart);
+    expect(trajectoryEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "tool_invocation",
+          payload: expect.objectContaining({
+            toolInvocationId: "approval_1",
+            invocationStatus: "waiting_approval",
+            approvalId: "approval_1",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("redacts chunked tool-call argument previews until they become valid JSON", async () => {
@@ -9839,7 +9854,10 @@ describe("chat service", () => {
       await causalStore.beginAttempt({ requestId: "repair_request", attempt: 1 });
       await causalStore.addRefs({
         requestId: "repair_request",
-        refs: [{ kind: "workspace_run", id: "chat_run_repair_session_repair_request" }],
+        refs: [
+          { kind: "workspace_run", id: "aaa_unrelated_workspace_run" },
+          { kind: "workspace_run", id: "chat_run_repair_session_repair_request" },
+        ],
       });
       const workspaceEvents: WorkspaceRunEventInput[] = [];
       const workspaceFinishes: Array<{
@@ -9856,6 +9874,11 @@ describe("chat service", () => {
         workspaceRunId: "chat_run_repair_session_repair_request",
         sessionId: "repair_session",
         requestId: "repair_request",
+      });
+      await workspaceStore.ensureRun({
+        workspaceRunId: "aaa_unrelated_workspace_run",
+        sessionId: "unrelated_session",
+        requestId: "unrelated_request",
       });
       let modelCalls = 0;
       const service = createChatService({
@@ -9895,6 +9918,98 @@ describe("chat service", () => {
           status: "succeeded",
         }),
       ]);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not settle an unrelated Workspace run when replay ownership evidence is missing", async () => {
+    const configDir = await mkdtemp(path.join(os.tmpdir(), "chat-causal-owner-gap-"));
+    try {
+      const causalStore = createConversationCausalStore({ configDir });
+      const chatStore = createChatSessionStore([]);
+      const user = await chatStore.appendMessage({
+        sessionId: "owner_gap_session",
+        requestId: "owner_gap_request",
+        role: "user",
+        content: "replay safely",
+      });
+      await chatStore.appendMessage({
+        sessionId: "owner_gap_session",
+        requestId: "owner_gap_request",
+        turnId: "turn-owner_gap_request",
+        causalAttempt: 1,
+        causalAttemptId: createConversationCausalAttemptId({
+          requestId: "owner_gap_request",
+          turnId: "turn-owner_gap_request",
+          attempt: 1,
+        }),
+        role: "assistant",
+        content: "already durable",
+        turnSettlementStatus: "succeeded",
+      });
+      await causalStore.claimRequest({
+        requestId: "owner_gap_request",
+        turnId: "turn-owner_gap_request",
+        inputFingerprint: createChatRequestClaimFingerprint({
+          input: { message: "replay safely" },
+          userMessage: "replay safely",
+          validatedAttachments: [],
+        }),
+      });
+      await causalStore.bindRequest({
+        requestId: "owner_gap_request",
+        sessionId: "owner_gap_session",
+        userMessageId: user.message.id,
+      });
+      await causalStore.beginAttempt({ requestId: "owner_gap_request", attempt: 1 });
+      await causalStore.addRefs({
+        requestId: "owner_gap_request",
+        refs: [{ kind: "workspace_run", id: "unrelated_workspace_run" }],
+      });
+      const workspaceFinishes: Array<{
+        workspaceRunId: string;
+        status: WorkspaceRunTerminalStatus;
+        summary?: string;
+      }> = [];
+      const workspaceStore = createMemoryWorkspaceRunStore({
+        creates: [],
+        events: [],
+        finishes: workspaceFinishes,
+      });
+      await workspaceStore.ensureRun({
+        workspaceRunId: "unrelated_workspace_run",
+        sessionId: "unrelated_session",
+        requestId: "unrelated_request",
+      });
+      const service = createChatService({
+        chatClient: {
+          async complete() {
+            throw new Error("model must not run during replay");
+          },
+        },
+        getModelProfile: createCompleteProfile,
+        memoryStore: createMemoryStore(),
+        chatSessionStore: chatStore,
+        conversationCausalStore: causalStore,
+        workspaceRunStore: workspaceStore,
+      });
+
+      await expect(service.sendMessage({
+        sessionId: "owner_gap_session",
+        requestId: "owner_gap_request",
+        message: "replay safely",
+      })).resolves.toMatchObject({
+        ok: true,
+        reply: "already durable",
+      });
+      expect(workspaceFinishes).toEqual([]);
+      await expect(causalStore.getRequest("owner_gap_request")).resolves.toMatchObject({
+        coverage: {
+          state: "degraded",
+          reasonCodes: expect.arrayContaining(["workspace_owner_ref_missing"]),
+        },
+      });
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }
@@ -10002,6 +10117,139 @@ describe("chat service", () => {
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }
+  });
+
+  it("finishes an interactive task by transparently continuing provider output chunks", async () => {
+    let modelCalls = 0;
+    const service = createChatService({
+      chatClient: {
+        async complete() {
+          modelCalls += 1;
+          return modelCalls === 1
+            ? {
+                content: "服务商单次输出的前半段，",
+                toolCalls: [],
+                finishReason: "length",
+              }
+            : chatReply("自动续写后完成。 ");
+        },
+      },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore([]),
+      toolExecutor: createToolExecutor(),
+    });
+
+    await expect(service.sendMessage({
+      sessionId: "automatic_output_continuation",
+      requestId: "automatic_output_continuation_request",
+      message: "执行一个长任务",
+    })).resolves.toMatchObject({
+      ok: true,
+      reply: expect.stringContaining(
+        "服务商单次输出的前半段，自动续写后完成。",
+      ),
+      agentStatus: {
+        state: "completed",
+      },
+    });
+    expect(modelCalls).toBe(2);
+  });
+
+  it("starts a new evidence run when resuming a persisted continuation", async () => {
+    const storedMessages: AppendChatMessageInput[] = [];
+    const store = createChatSessionStore(storedMessages);
+    const trajectoryEvents: AgentTrajectoryEvent[] = [];
+    const trajectoryStore = createMemoryTrajectoryStore(trajectoryEvents);
+    const createId = createSequentialId("continuation_evidence");
+    let firstLoopRunId = "";
+    const firstService = createChatService({
+      chatClient: { async complete() { return chatReply("unused"); } },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      trajectoryStore,
+      toolExecutor: createToolExecutor(),
+      createId,
+      async runAgentLoop(messages, _profile, options) {
+        firstLoopRunId = options.runId ?? "";
+        return {
+          status: "paused",
+          summary: "等待继续",
+          turns: 1,
+          messages: [...messages, { role: "assistant", content: "阶段结果" }],
+          toolCallsExecuted: 1,
+          continuation: {
+            reason: "provider_output_limit",
+            maxTurns: 4,
+            toolCallsExecuted: 1,
+          },
+        };
+      },
+    });
+
+    await expect(firstService.sendMessage({
+      sessionId: "evidence_resume_session",
+      requestId: "evidence_resume_first",
+      message: "执行长任务",
+    })).resolves.toMatchObject({
+      ok: true,
+      agentStatus: { state: "paused" },
+    });
+
+    let resumedLoopRunId = "";
+    const restartedService = createChatService({
+      chatClient: { async complete() { return chatReply("unused"); } },
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: store,
+      trajectoryStore,
+      toolExecutor: createToolExecutor(),
+      createId,
+      async runAgentLoop(messages, _profile, options) {
+        resumedLoopRunId = options.runId ?? "";
+        expect(options.toolResultContinuationOwnerId).toBe(
+          "chat:evidence_resume_session",
+        );
+        return {
+          status: "succeeded",
+          summary: "续跑完成",
+          turns: 1,
+          messages,
+          toolCallsExecuted: 1,
+        };
+      },
+    });
+
+    await expect(restartedService.sendMessage({
+      sessionId: "evidence_resume_session",
+      requestId: "evidence_resume_second",
+      message: "继续",
+    })).resolves.toMatchObject({
+      ok: true,
+      reply: expect.stringContaining("续跑完成"),
+      agentStatus: { state: "completed" },
+    });
+
+    expect(firstLoopRunId).not.toBe("");
+    expect(resumedLoopRunId).not.toBe(firstLoopRunId);
+    const resumedContext = trajectoryEvents.find((event) =>
+      event.runId === resumedLoopRunId && event.type === "run_context_created"
+    );
+    expect(resumedContext).toMatchObject({
+      payload: {
+        runtimeContextSnapshot: {
+          checkpoint: {
+            checkpointId: firstLoopRunId,
+            boundaryId: "evidence_resume_second",
+          },
+        },
+        continuationLineage: {
+          parentEvidenceRunId: firstLoopRunId,
+          continuationRequestId: "evidence_resume_second",
+        },
+      },
+    });
   });
 
   it("recovers a provider-paused agent continuation from the session store after restart", async () => {

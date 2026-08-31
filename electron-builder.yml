@@ -23,6 +23,8 @@ afterSign: ./scripts/after-sign-mac.mjs
 extraResources:
   - from: build/update-signing-public-key.pem
     to: update-signing-public-key.pem
+  - from: dist-native/darwin-${arch}/zerox-safe-fs
+    to: safe-fs/zerox-safe-fs
 publish:
   provider: github
   owner: ZeroxZhang
@@ -34,6 +36,9 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  sign: ./scripts/mac-sign.mjs
+  binaries:
+    - Contents/Resources/safe-fs/zerox-safe-fs
   target:
     - dmg
     - zip

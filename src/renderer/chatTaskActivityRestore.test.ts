@@ -207,4 +207,40 @@ describe("chat task activity restore", () => {
     });
     expect(restored?.pendingInputRequest).toBeUndefined();
   });
+
+  it.each(["waiting_approval", "waiting_for_approval"])(
+    "restores a %s tool approval as paused instead of interrupted",
+    (invocationStatus) => {
+    const waitingApproval = {
+      sessionId: "session_approval",
+      requestId: "request_approval",
+      state: "tool_invocation" as const,
+      message: "工具等待授权：file_list",
+      invocationStatus,
+      approvalId: "approval_1",
+      toolInvocationId: "invocation_1",
+      toolCallId: "tool_call_1",
+      toolName: "file_list",
+      createdAt: "2026-08-31T00:00:02.000Z",
+      elapsedMs: 2_000,
+    };
+
+    const restored = restoreChatTaskActivity({
+      updatedAt: waitingApproval.createdAt,
+      statusEvents: [waitingApproval],
+    });
+
+    expect(restored).toMatchObject({
+      status: {
+        kind: "paused",
+        message: "工具等待授权：file_list",
+      },
+      workPhase: "paused",
+      taskActivity: {
+        kind: "paused",
+        title: "等待工具授权",
+      },
+    });
+    },
+  );
 });

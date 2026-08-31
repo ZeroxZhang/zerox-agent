@@ -3,7 +3,10 @@
 .worktrees/
 dist/
 dist-electron/
+dist-native/
 release/
+release-local/
+release-test-*/
 node_modules/
 session_recording/
 npm-debug.log*

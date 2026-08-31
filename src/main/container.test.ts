@@ -2670,6 +2670,34 @@ describe("app container goal drafts", () => {
       ok: true,
       content: expect.stringContaining("scoped UI content"),
     });
+    await container.agentTrajectoryStore().append("run_owner", {
+      id: "event_owner_ref",
+      runId: "run_owner",
+      type: "tool_result",
+      sequence: 1,
+      payload: { resultRef: written.relativePath },
+      redaction: {
+        containsApiKey: false,
+        containsFileContent: true,
+        containsUserText: false,
+      },
+      createdAt: "2026-08-31T00:00:00.000Z",
+    });
+    await expect(
+      container.readToolResultRef(written.relativePath, {
+        runId: "run_owner",
+        trajectoryEventId: "event_owner_ref",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("scoped UI content"),
+    });
+    await expect(
+      container.readToolResultRef(written.relativePath, {
+        runId: "run_owner",
+        trajectoryEventId: "event_foreign",
+      }),
+    ).resolves.toMatchObject({ ok: false });
     await expect(
       container.readToolResultRef(written.relativePath, {
         capability: {
@@ -2696,6 +2724,14 @@ describe("app container goal drafts", () => {
     expect(ipcReadRef).toBeTypeOf("function");
     await expect(
       ipcReadRef?.({}, written.relativePath, { runId: "run_owner" }),
+    ).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(
+      ipcReadRef?.({}, written.relativePath, {
+        runId: "run_owner",
+        trajectoryEventId: "event_owner_ref",
+      }),
     ).resolves.toMatchObject({
       ok: true,
       content: expect.stringContaining("scoped UI content"),

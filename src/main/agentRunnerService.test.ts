@@ -980,6 +980,7 @@ describe("agent runner service", () => {
       }),
     );
     expect(store.writes[0].content).toContain(largeContent);
+    expect(store.writes[0].runId).toBe("run_offload_fallback");
   });
 
   it("lets the owning legacy runner read its scoped offloaded tool result ref", async () => {
@@ -1047,7 +1048,7 @@ describe("agent runner service", () => {
       ok: true,
     });
     expect(store.reads.at(-1)?.scope).toMatchObject({
-      runId: "task_123",
+      runId: "run_legacy_scope",
     });
   });
 

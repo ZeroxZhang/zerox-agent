@@ -1289,10 +1289,14 @@ function getSessionWorkBadge(
     string
   > = {
     working: "执行中",
+    waiting_for_approval: "等待授权",
     paused: "等待继续",
     completed: "已完成",
     failed: "执行失败",
     canceled: "已取消",
   };
-  return { label: labels[work.status], tone: work.status };
+  return {
+    label: labels[work.status],
+    tone: work.status === "waiting_for_approval" ? "paused" : work.status,
+  };
 }

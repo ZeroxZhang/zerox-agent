@@ -147,6 +147,23 @@ describe("bounded recoverable JSONL pages", () => {
     });
     expect(RECOVERABLE_JSONL_PAGE_MAX_BYTES).toBe(8 * 1024 * 1024);
   });
+
+  it("does not emit a non-advancing cursor when the first record exceeds the page byte ceiling", async () => {
+    const file = await createFile([{ payload: "a".repeat(2_048) }]);
+    const page = await readRecoverableJsonlPage(file, {
+      limit: 20,
+      maxBytes: 1_100,
+      maxRecordBytes: 4_096,
+    });
+
+    expect(page).toMatchObject({
+      records: [],
+      complete: false,
+      status: "partial",
+      reasonCode: "page_byte_limit",
+    });
+    expect(page.nextOffset).toBeUndefined();
+  });
 });
 
 async function createRoot() {

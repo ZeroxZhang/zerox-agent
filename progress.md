@@ -1,5 +1,115 @@
 # Progress Log: Zerox Agent v3.9.2 Conversation Disclosure
 
+## 2026-08-31 - Goal planning review timeout repaired in source
+
+- Reconstructed the newest paused Plan from the production SQLite profile.
+  Generation completed in `23845 ms`; review alone was terminated by the
+  application's false `30000 ms` connection timer.
+- Removed the misleading response-header timer, reused the shared bounded
+  transient retry contract for structured planning, and changed review retry
+  to preserve the successful generation stage and Direct round.
+- Added regressions for a response arriving after 35 seconds, one transient
+  structured transport failure followed by success, and review-only retry with
+  a replacement model binding while reusing the original candidate.
+- Focused validation passed `197` tests, strict type coverage `433/433`, full
+  verify `324` files / `3865` tests plus all historical lanes and evals,
+  production smoke, governed Electron acceptance `19/19`, zero-vulnerability
+  audit, and whitespace checks.
+- The rebuilt unsigned package passed the dedicated isolated acceptance: one
+  injected connection reset was retried, the next response completed after
+  `35000 ms`, the plan reached `awaiting_confirmation`, and the original
+  Direct round/generation run was reused exactly once. The machine-readable
+  receipt is `.zerox/verification/plan-resilience-local-package.json`. No
+  original Goal data was mutated.
+- Ordinary Program/Harness checks remain intentionally fail-closed because
+  this repair changed the P113 definition and no fresh caller-pinned CD04
+  anchor authorizes the new source. This is a release-governance boundary, not
+  a product-runtime failure.
+
+## 2026-08-31 - Chat resilience incident repaired and locally accepted
+
+- Reconstructed the reported package failure from session
+  `c44eb53a-c2b7-46b5-beb7-e3bec7e03d2d`: request
+  `d7f45cd3-e3bc-4930-b53d-2b9bf4e5353c` paused on provider output length;
+  continuation request `e74dd178-9b99-49d3-8aa5-c2cfda3fbc33` failed before
+  its first model request after binding the prior trajectory identity.
+- Added automatic progressive output continuation for interactive Chat,
+  isolated continuation evidence runs with explicit checkpoint lineage, a
+  stable per-session Tool-result continuation owner, and IME-safe Enter
+  handling with composition lifecycle plus browser compatibility guards.
+- Focused validation passed `4` files / `335` tests. Strict type coverage
+  passed `433/433`. Full `npm run verify` passed `324` files / `3862` current
+  tests with the declared `1` file / `6` skips, Round2-Round12, build, Agent
+  `26/26`, and Memory `2/2`.
+- Production Electron/SQLite smoke passed, as did the governed P113 acceptance
+  at `19/19` scenarios. The ordinary Harness remains correctly fail-closed
+  without caller-private CD04 pins and because P113's source definition has
+  changed; no stale external anchor is treated as authorizing these bytes.
+- `npm run pack:local` produced the unsigned local v3.9.2 application. The
+  dedicated isolated packaged-app receipt
+  `.zerox/verification/chat-resilience-local-package.json` passed both the
+  two-call output-limit recovery and trusted IME composition Enter checks.
+- No commit, push, tag, publication, or release-completion claim was made.
+
+## 2026-08-31 - Comprehensive v3.9.2 review started
+
+- Planned the review path and acceptance standard in `task_plan.md` before
+  product edits.
+- Preserved the dirty verification evidence and untracked local release
+  outputs; no cleanup, commit, push, tag, publish, or release was performed.
+- Reopened P113/CD09 as the only unfinished Feature/workstream so prior
+  completion evidence cannot be mistaken for acceptance of future repairs.
+- Baseline current/historical tests, strict test typing, dependency audit, and
+  caller-pinned Harness are green. Ordinary `./init.sh` remains fail-closed
+  without external pins and is tracked as a reproducibility review item.
+- Global causal/recovery review rejected one false positive (startup already
+  has controlled failure handling) and identified a Workspace ownership
+  ambiguity that is now being converted into a regression test.
+
+## 2026-08-31 - Comprehensive v3.9.2 review locally completed
+
+- Completed the planned authority, persistence/recovery, path, IPC, renderer,
+  acceptance-tooling, and governance review. Confirmed and repaired `22`
+  defect groups; the full categorized record is in `findings.md`.
+- The final adversarial pass also repaired two verification/governance closure
+  defects: V13 no longer mutates or depends on frozen V12 test inputs, and S17
+  can no longer pass with a stale visible `执行中` sidebar projection.
+- Added focused negative regressions for cross-owner settlement/admission,
+  duplicate semantic conflicts, unsafe ids and embedded owners, non-advancing
+  cursors, result-ref collisions, evidence sequence restart, stale renderer
+  loads, attempt reset, large trajectories, and status-projection parity.
+- Strengthened CD09 isolation and retry semantics. A signal-killed attempt can
+  no longer reuse partial single/initial state; restart retries clone one
+  persisted baseline before each attempt. Final S05 acceptance also requires
+  `waiting_for_approval` plus the rendered `等待授权` sidebar badge.
+- Final `npm run verify` passes type coverage `432/432`, current `323/3855`
+  with the declared `1` file / `6` test skips, all historical lanes, build,
+  Agent `26/26`, and Memory `2/2`.
+- Final `npm run smoke:prod` passes real Electron `42.9.0`, ABI `146`, SQLite
+  `3.53.2`, seven migrations, eight authority domains, rendered UI, and Node
+  ABI `137` restoration.
+- The stricter isolated seven-command acceptance passes `19/19` production
+  main/preload/IPC/SQLite scenarios. Manual inspection of S01, S05, S10, S16,
+  and S17 screenshots found both a prior S05 mismatch and the final S17 stale
+  projection gap. The repaired S17 reload observes `completed`, renders `已完成`
+  in the sidebar, and shows the recovered response. The final acceptance file
+  digest is
+  `sha256:601b4f503a453735a37c99255e1053de31327982a44cd3fc1f47a9f186f29f84`;
+  S17's canonical receipt digest is
+  `sha256:c7144e989f98031071ea83e6f0aeaa090f9194c74e8406dc20e1bd2de72be00f`.
+- `npm audit --omit=dev --audit-level=high` reports zero vulnerabilities;
+  `npm ls --all`, caller-pinned Program/Harness, and `git diff --check` pass.
+- P113/CD09 remains active by design: the current repair candidate has no
+  fresh signed independent review receipt or local-package publication.
+  P113 now declares all `56` current ownership files. Caller-pinned Program
+  and Harness receipts pass with digests
+  `sha256:555f38d7da8653b7cbeda3d1297fd3ac6210b7f492e231722ca3887955ef6afa`
+  and
+  `sha256:0338b7273974a8002384e9e76cffae322a52b8536ed0dab80ac458794c514d8e`;
+  the Harness remains non-authoritative and not signed.
+  Existing release outputs and historical verification state were preserved;
+  no commit, push, tag, publish, or cleanup was performed.
+
 ## Session: 2026-08-26 - P113/CD09 final verification resumed
 
 - Resumed from the post-review-remediation checkpoint without resetting or

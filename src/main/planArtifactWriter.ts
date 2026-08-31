@@ -13,6 +13,7 @@ import type {
   PlanProjection,
   PlanRecord,
 } from "../shared/planMode";
+import { assertSafePlanId } from "./planStore";
 
 export type PlanArtifactWriter = {
   write(plan: PlanRecord, artifact: PlanArtifact): Promise<PlanProjection>;
@@ -29,7 +30,7 @@ export function createPlanArtifactWriter(options?: {
       if (!plan.workspaceRoot) {
         throw new Error("计划没有绑定工作区，无法生成 Markdown 投影。");
       }
-      validatePlanId(plan.id);
+      assertSafePlanId(plan.id);
       const root = await realpath(plan.workspaceRoot);
       const zeroxDir = path.join(root, ".zerox");
       const plansDir = path.join(zeroxDir, "plans");
@@ -261,12 +262,6 @@ export function renderPlanMarkdown(
 
 function bullets(values: string[]): string[] {
   return values.length ? values.map((value) => `- ${value}`) : ["- 无"];
-}
-
-function validatePlanId(planId: string) {
-  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(planId)) {
-    throw new Error("计划 ID 非法。");
-  }
 }
 
 function assertInside(root: string, target: string) {

@@ -18,6 +18,7 @@ export type AgentToolName =
   | "file_search"
   | "file_inventory"
   | "file_move_plan"
+  | "file_move_transaction_read"
   | "file_apply_moves"
   | "file_verify_moves"
   | "file_rollback_moves"
@@ -257,6 +258,13 @@ export function authorizeToolCall(
         String(request.args.targetDir ?? ""),
         normalized.files.read,
         "file_move_plan 目标目录不在已授权可读目录内。",
+        env,
+      );
+    case "file_move_transaction_read":
+      return authorizeFilePath(
+        String(request.args.logPath ?? ""),
+        normalized.files.read,
+        "file_move_transaction_read 日志不在已授权可读目录内。",
         env,
       );
     case "file_apply_moves":
@@ -627,6 +635,7 @@ function authorizeWorkspaceFileRequest(
     request.toolName !== "file_search" &&
     request.toolName !== "file_inventory" &&
     request.toolName !== "file_move_plan" &&
+    request.toolName !== "file_move_transaction_read" &&
     request.toolName !== "file_apply_moves" &&
     request.toolName !== "file_verify_moves" &&
     request.toolName !== "file_rollback_moves" &&
@@ -688,6 +697,10 @@ function getWorkspaceFileRequestPaths(request: ToolCallRequest): string[] {
 
   if (request.toolName === "file_move_plan") {
     return compactStringList([request.args.targetDir]);
+  }
+
+  if (request.toolName === "file_move_transaction_read") {
+    return compactStringList([request.args.logPath]);
   }
 
   if (

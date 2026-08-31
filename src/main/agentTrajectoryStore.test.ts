@@ -39,7 +39,10 @@ describe("agent trajectory store", () => {
   it("keeps trajectories isolated by run id", async () => {
     const store = createAgentTrajectoryStore({ configDir });
     const runOne = createEvent("model_request", "event_run_1");
-    const runTwo = createEvent("model_response", "event_run_2");
+    const runTwo = {
+      ...createEvent("model_response", "event_run_2"),
+      runId: "run_2",
+    };
 
     await store.append("run_1", runOne);
     await store.append("run_2", runTwo);
@@ -47,6 +50,30 @@ describe("agent trajectory store", () => {
     await expect(store.list("run_1")).resolves.toEqual([runOne]);
     await expect(store.list("run_2")).resolves.toEqual([runTwo]);
   });
+
+  it.each(["json", "sqlite"] as const)(
+    "rejects unsafe %s run ids and cross-owner events at the store boundary",
+    async (backend) => {
+      const storage = backend === "sqlite"
+        ? await createInMemoryStorage()
+        : undefined;
+      const store = createAgentTrajectoryStore({
+        configDir,
+        backend,
+        storage,
+      });
+
+      await expect(store.list("../outside")).rejects.toThrow("run id is invalid");
+      await expect(
+        store.append("run_owner", {
+          ...createEvent("tool_call", "event_foreign"),
+          runId: "run_foreign",
+        }),
+      ).rejects.toThrow("does not belong");
+      await expect(store.list("run_owner")).resolves.toEqual([]);
+      storage?.close();
+    },
+  );
 
   it("does not append when the supplied signal is already aborted", async () => {
     const store = createAgentTrajectoryStore({ configDir });

@@ -63,8 +63,10 @@ export function redactCredentials(value: unknown): unknown {
 }
 
 export function redactCredentialText(value: string): string {
-  return redactOverlappingQuotedCredentialAssignments(
-    redactYamlBlockCredentialScalars(value),
+  return redactOverlappingUnquotedCredentialAssignments(
+    redactOverlappingQuotedCredentialAssignments(
+      redactYamlBlockCredentialScalars(value),
+    ),
   )
     .replace(
       /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi,
@@ -151,6 +153,33 @@ export function redactCredentialText(value: string): string {
       /\b(?:sk-(?:proj-)?[a-z\d_-]{6,}|gh[pousr]_[a-z\d_]{8,}|github_pat_[a-z\d_]{8,}|AKIA[A-Z\d]{16}|ASIA[A-Z\d]{16}|AIza[A-Za-z\d_-]{20,}|xox[baprs]-[A-Za-z\d-]{8,}|eyJ[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,}\.[A-Za-z\d_-]{8,})\b/g,
       "[redacted]",
     );
+}
+
+function redactOverlappingUnquotedCredentialAssignments(value: string): string {
+  let redacted = value;
+  const assignment =
+    /((?:[a-z\d_.-]|[\uFF01-\uFF5E]|\\u[0-9a-f]{4}|%[0-9a-f]{2})+)(\s*(?:\+?=|＋?＝|:|：|%3d|\\u003d|\\u003a)\s*)([^?&#\s,;}"']+)/iy;
+  const boundary = /[?&;,\s{"'(:：\[（/]/;
+
+  // Scan from right to left so a natural-language assignment such as
+  // "error: path api_key=..." cannot consume the nested credential before
+  // the secret key is considered.
+  for (let index = redacted.length - 1; index >= 0; index -= 1) {
+    if (index > 0 && !boundary.test(redacted[index - 1] ?? "")) {
+      continue;
+    }
+    assignment.lastIndex = index;
+    const match = assignment.exec(redacted);
+    if (!match || !isSecretKey(match[1])) {
+      continue;
+    }
+    const valueStart = index + match[1].length + match[2].length;
+    if (/^\\+["']/.test(redacted.slice(valueStart))) {
+      continue;
+    }
+    redacted = `${redacted.slice(0, index)}${match[1]}${match[2]}[redacted]${redacted.slice(index + match[0].length)}`;
+  }
+  return redacted;
 }
 
 function redactOverlappingQuotedCredentialAssignments(value: string): string {
@@ -304,8 +333,14 @@ function isSecretKey(key: string): boolean {
 }
 
 function normalizeSecretKey(key: string): string {
+  // Credential keys are expected to be tiny. Treat an attacker-controlled,
+  // unbounded key as sensitive instead of spending unbounded work trying to
+  // prove it safe.
+  if (key.length > 4_096) {
+    return "credential";
+  }
   let normalized = key.normalize("NFKC");
-  for (let depth = 0; depth < 4; depth += 1) {
+  while (true) {
     const decoded = normalized
       .replace(/\\u([0-9a-f]{4})/gi, (_match, hex: string) =>
         String.fromCharCode(Number.parseInt(hex, 16))

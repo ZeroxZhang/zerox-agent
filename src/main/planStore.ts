@@ -450,11 +450,15 @@ function writeSqlitePlanAndEvent(
   }
 }
 
-function safePlanId(planId: string): string {
-  const normalized = planId.trim();
-  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(normalized)) {
+export function assertSafePlanId(planId: string): void {
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(planId)) {
     throw new Error("计划 ID 非法。");
   }
+}
+
+function safePlanId(planId: string): string {
+  const normalized = planId.trim();
+  assertSafePlanId(normalized);
   return normalized;
 }
 

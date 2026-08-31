@@ -7,6 +7,13 @@ import type { AgentBootstrapValidationSnapshot } from "../shared/agentBootstrap"
 import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import { createStorageImpl } from "./storage/storageDb";
+import { createCheckpointRepository } from "./storage/repositories/checkpointRepository";
+import {
+  createLearningRepository,
+  createValidationRepository,
+} from "./storage/repositories";
+import { createRunRepository } from "./storage/repositories/runRepository";
 
 const timestamp = "2026-06-17T00:00:00.000Z";
 
@@ -74,6 +81,7 @@ describe("exportAgentEpisodeFromConfig", () => {
       configDir,
       outDir,
       latestValidation: true,
+      backend: "json",
       exportedAt: timestamp,
     });
 
@@ -96,6 +104,97 @@ describe("exportAgentEpisodeFromConfig", () => {
     );
     await expect(readFile(path.join(outDir, "metadata.json"), "utf8"))
       .resolves.toContain("\"fileCount\": 8");
+  });
+
+  it("rejects an unsafe run id before reading run-scoped files or creating output", async () => {
+    const unsafeRunId = "../outside";
+    await writeFile(
+      path.join(configDir, "agent-runs.jsonl"),
+      `${JSON.stringify(createRun(unsafeRunId))}\n`,
+    );
+
+    await expect(
+      exportAgentEpisodeFromConfig({
+        configDir,
+        outDir,
+        runId: unsafeRunId,
+        backend: "json",
+        exportedAt: timestamp,
+      }),
+    ).rejects.toThrow("run id is invalid");
+    await expect(readFile(path.join(rootDir, "outside.json"), "utf8")).rejects
+      .toMatchObject({ code: "ENOENT" });
+  });
+
+  it("exports the authoritative SQLite run graph without JSON shadows", async () => {
+    const storage = createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
+    const run = createRun("run_1");
+    const event = trajectory("event_summary", 1, "final_summary", {
+      status: "failed",
+      summary: "SQLite authority.",
+    });
+    createRunRepository(storage).create(run);
+    createRunRepository(storage).appendTrajectory(run.id, event);
+    createCheckpointRepository(storage).writeRuntime(createCheckpoint());
+    createLearningRepository(storage).create({
+      id: "learning_1",
+      sourceRunId: run.id,
+      type: "failure_lesson",
+      sourceTrajectoryEventIds: [event.id],
+      claim: "SQLite candidate",
+      recommendedAction: "Keep authority aligned.",
+      risk: "low",
+      status: "pending_review",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    createValidationRepository(storage).save(
+      createValidationSnapshot(run).latest,
+    );
+    storage.close();
+
+    const result = await exportAgentEpisodeFromConfig({
+      configDir,
+      outDir,
+      latestValidation: true,
+      backend: "sqlite",
+      exportedAt: timestamp,
+    });
+
+    expect(result.runId).toBe(run.id);
+    await expect(readFile(path.join(outDir, "trajectory.jsonl"), "utf8"))
+      .resolves.toContain("SQLite authority.");
+    await expect(
+      readFile(path.join(outDir, "learning-candidates.json"), "utf8"),
+    ).resolves.toContain("SQLite candidate");
+  });
+
+  it("exports an exact SQLite trajectory authority without fabricating a stored run", async () => {
+    const storage = createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
+    const event = trajectory("event_summary", 1, "final_summary", {
+      status: "succeeded",
+      summary: "Chat trajectory completed.",
+    });
+    createRunRepository(storage).appendTrajectory(event.runId, event);
+    storage.close();
+
+    const result = await exportAgentEpisodeFromConfig({
+      configDir,
+      outDir,
+      runId: event.runId,
+      backend: "sqlite",
+      exportedAt: timestamp,
+    });
+
+    expect(result.runId).toBe(event.runId);
+    const metadata = await readJson(path.join(outDir, "metadata.json"));
+    expect(metadata.sourceAuthority).toBe("trajectory_run");
+    const run = await readJson(path.join(outDir, "run.json"));
+    expect(run).toMatchObject({
+      id: event.runId,
+      taskName: "Chat trajectory episode",
+      status: "succeeded",
+    });
   });
 });
 

@@ -1,8 +1,4 @@
 export const defaultRequestTimeoutMs = 300_000;
-// v3.6.0: Separate connect timeout from body timeout (NET-01, S2-27).
-// The connect timeout applies to the initial TCP/TLS handshake; the body
-// timeout covers the full request including response streaming.
-export const defaultConnectTimeoutMs = 30_000;
 
 export async function readResponseTextWithLimit(
   response: Response,
@@ -61,14 +57,11 @@ export async function fetchWithTimeout(
   timeoutMs: number,
   label: string,
   externalSignal?: AbortSignal,
-  connectTimeoutMs?: number,
 ): Promise<Response> {
   const effectiveTimeoutMs = Math.max(1, Math.floor(timeoutMs));
-  const effectiveConnectTimeoutMs = Math.max(1, Math.floor(connectTimeoutMs ?? defaultConnectTimeoutMs));
   const controller = new AbortController();
   const initSignal = init.signal instanceof AbortSignal ? init.signal : undefined;
   let timeout: ReturnType<typeof setTimeout> | null = null;
-  let connectTimeout: ReturnType<typeof setTimeout> | null = null;
   let rejectAbortable: ((error: Error) => void) | null = null;
 
   const abortWith = (error: Error) => {
@@ -97,18 +90,11 @@ export async function fetchWithTimeout(
     timeout = setTimeout(() => {
       abortWith(new Error(`${label} request timed out after ${effectiveTimeoutMs} ms.`));
     }, effectiveTimeoutMs);
-    // v3.6.0: Separate connect timeout — if the TCP/TLS handshake hangs,
-    // this fires before the full body timeout (NET-01).
-    connectTimeout = setTimeout(() => {
-      abortWith(new Error(`${label} connection timed out after ${effectiveConnectTimeoutMs} ms.`));
-    }, effectiveConnectTimeoutMs);
   });
 
   const cleanup = () => {
     if (timeout) clearTimeout(timeout);
-    if (connectTimeout) clearTimeout(connectTimeout);
     timeout = null;
-    connectTimeout = null;
     externalSignal?.removeEventListener("abort", abortFromExternalSignal);
     initSignal?.removeEventListener("abort", abortFromInitSignal);
     rejectAbortable = null;
@@ -128,10 +114,12 @@ export async function fetchWithTimeout(
       fetchPromise,
       abortable,
     ]);
-    // v3.6.0: Connection succeeded — clear the connect timeout since we're
-    // now in the body/streaming phase (NET-01).
-    if (connectTimeout) clearTimeout(connectTimeout);
-    connectTimeout = null;
+    // WHATWG fetch resolves only after response headers arrive. For a
+    // non-streaming model endpoint that interval includes provider queueing
+    // and generation, not just TCP/TLS setup. A former 30-second "connect"
+    // timer therefore killed valid slow completions before their headers were
+    // available. Keep one honest end-to-end deadline here; streaming callers
+    // enforce a separate idle timeout while consuming the body.
     // Once headers arrive the caller no longer awaits `abortable`; body reads
     // observe the controller abort directly.
     rejectAbortable = null;

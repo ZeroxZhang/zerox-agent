@@ -27,6 +27,7 @@ export async function computeReviewCandidateManifest(root) {
     || isPlanningPath(relativePath)
     || relativePath === ".zerox/conversation-disclosure-program.json"
     || relativePath === ".zerox/feature_list.json"
+    || relativePath === ".zerox/release-program.json"
     || relativePath.startsWith(".zerox/reviews/CD09-"));
 }
 
@@ -182,6 +183,7 @@ function isGeneratedOrPlanningPath(relativePath) {
     || relativePath.startsWith("release-test-")
     || relativePath.startsWith("dist/")
     || relativePath.startsWith("dist-electron/")
+    || relativePath.startsWith("dist-native/")
     || relativePath.startsWith(".zerox/")
     || isPlanningPath(relativePath);
 }
@@ -200,6 +202,7 @@ function isAcceptanceInputExcluded(relativePath) {
     || relativePath.startsWith("release-test-")
     || relativePath.startsWith("dist/")
     || relativePath.startsWith("dist-electron/")
+    || relativePath.startsWith("dist-native/")
   ) {
     return true;
   }

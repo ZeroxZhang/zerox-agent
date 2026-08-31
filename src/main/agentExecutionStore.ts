@@ -23,6 +23,10 @@ import {
   writeStoreJsonAtomically,
 } from "./storage/authoritativeStore";
 import { createCheckpointRepository } from "./storage/repositories/checkpointRepository";
+import {
+  assertSafeStoreEntityId,
+  isSafeStoreEntityId,
+} from "./storeEntityId";
 
 export type AgentExecutionStore = {
   save(
@@ -55,6 +59,7 @@ export function createAgentExecutionStore(
     : null;
 
   function checkpointPath(runId: string): string {
+    assertSafeStoreEntityId(runId, "Agent execution run id");
     return path.join(executionsDir, `${runId}.json`);
   }
 
@@ -63,7 +68,16 @@ export function createAgentExecutionStore(
   ): Promise<AgentExecutionCheckpoint | null> {
     try {
       const raw = await readFile(checkpointPath(runId), "utf8");
-      return JSON.parse(raw) as AgentExecutionCheckpoint;
+      const parsed = JSON.parse(raw) as unknown;
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        (parsed as { runId?: unknown }).runId !== runId
+      ) {
+        await quarantineCorruptCheckpoint(runId);
+        return null;
+      }
+      return parsed as AgentExecutionCheckpoint;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -97,6 +111,7 @@ export function createAgentExecutionStore(
     runId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
+    assertSafeStoreEntityId(runId, "Agent execution run id");
     const previous = mutationQueues.get(runId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(operation);
     const settled = current.then(
@@ -158,6 +173,7 @@ export function createAgentExecutionStore(
           .filter(
             (file) => file.endsWith(".json") && !file.includes(".corrupt-"),
           )
+          .filter((file) => isSafeStoreEntityId(path.basename(file, ".json")))
           .map((file) => {
             const runId = path.basename(file, ".json");
             return withRunMutation(runId, () => readCheckpoint(runId));
@@ -226,6 +242,7 @@ export function createAgentExecutionStore(
 
   return {
     async save(checkpoint) {
+      assertSafeStoreEntityId(checkpoint.runId, "Agent execution run id");
       authoritativeBackend.assertWritable();
       const saved = repository.writeRuntime(checkpoint);
       enqueueCheckpointShadow(saved);
@@ -233,6 +250,7 @@ export function createAgentExecutionStore(
     },
 
     async get(runId) {
+      assertSafeStoreEntityId(runId, "Agent execution run id");
       return repository.latestRuntime(runId);
     },
 
@@ -248,6 +266,7 @@ export function createAgentExecutionStore(
     },
 
     async delete(runId) {
+      assertSafeStoreEntityId(runId, "Agent execution run id");
       authoritativeBackend.assertWritable();
       const deleted = repository.deleteRuntime(runId);
       if (deleted) enqueueCheckpointDeleteShadow(runId);

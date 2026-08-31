@@ -72,6 +72,8 @@ import {
   runConversationDisclosureScenario,
 } from "./conversationDisclosureAcceptanceDriver";
 import { createConversationDisclosureScriptedClient } from "./conversationDisclosureScriptedClient";
+import { assertSafeStoreEntityId } from "./storeEntityId";
+import { assertSafePlanId } from "./planStore";
 
 app.setName("Zerox Agent");
 applyUserDataDirOverride({
@@ -146,6 +148,7 @@ const container = createAppContainer({
     ? {
         chatClientOverride: createConversationDisclosureScriptedClient(
           disclosureAcceptanceMode.scenarioId,
+          { secretCanary: disclosureAcceptanceMode.secretCanary },
         ),
         modelProfileOverride: {
           baseUrl: "http://127.0.0.1/unused",
@@ -736,6 +739,7 @@ function startAppUpdateScheduler() {
 function startGoalReplayDriver() {
   const goalId = process.env.ZEROX_AGENT_REPLAY_GOAL_ID?.trim();
   if (!goalId) return;
+  assertSafeStoreEntityId(goalId, "Agent replay goal id");
   const timeoutMs = Math.max(
     60_000,
     Number(process.env.ZEROX_AGENT_REPLAY_TIMEOUT_MS ?? 600_000) || 600_000,
@@ -849,6 +853,7 @@ function startGoalReplayDriver() {
 function startPlanReplayDriver() {
   const planId = process.env.ZEROX_AGENT_REPLAY_PLAN_ID?.trim();
   if (!planId) return;
+  assertSafePlanId(planId);
   const timeoutMs = Math.max(
     60_000,
     Number(process.env.ZEROX_AGENT_REPLAY_TIMEOUT_MS ?? 600_000) || 600_000,
@@ -961,7 +966,9 @@ app.whenReady().then(async () => {
         workspaceRunStore: container.workspaceRunStore(),
       }),
     reconcileAgentRunAdmissions: () => container.reconcileAgentRunAdmissions(),
-    interruptPriorProcessApprovals: () => toolApprovalCoordinator.initialize(),
+    interruptPriorProcessApprovals: () => toolApprovalCoordinator.initialize(
+      (approvals) => container.reconcileInterruptedApprovals(approvals),
+    ),
     interruptActiveCausalAttempts: () =>
       conversationCausalStore.interruptActiveAttempts(),
   });

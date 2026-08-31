@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "sessions": [
+    {
+      "id": "cd09-v391-session",
+      "title": "Resume the v3.9…",
+      "summary": "The v3.9.1 run was canceled and remains reviewable.",
+      "messages": [
+        {
+          "id": "cd09-v391-user-message",
+          "requestId": "cd09-v391-request",
+          "role": "user",
+          "content": "Resume the v3.9.1 multidomain compatibility task.",
+          "createdAt": "2026-08-20T08:00:00.000Z"
+        },
+        {
+          "id": "cd09-v391-assistant-message",
+          "requestId": "cd09-v391-request",
+          "role": "assistant",
+          "content": "The v3.9.1 run was canceled and remains reviewable.",
+          "executedRunId": "cd09-v391-run",
+          "goalId": "cd09-v391-goal",
+          "createdAt": "2026-08-20T08:00:00.000Z"
+        }
+      ],
+      "workspaceId": "cd09-v391-workspace",
+      "createdAt": "2026-08-20T08:00:00.000Z",
+      "updatedAt": "2026-08-20T08:00:00.000Z",
+      "goalIds": [
+        "cd09-v391-goal"
+      ],
+      "goalSummaries": [
+        {
+          "id": "cd09-v391-goal",
+          "description": "v3.9.1 multidomain compatibility Goal",
+          "status": "canceled",
+          "updatedAt": "2026-08-20T08:00:00.000Z"
+        }
+      ],
+      "activity": {
+        "updatedAt": "2026-08-20T08:00:00.000Z",
+        "statusEvents": [
+          {
+            "sessionId": "cd09-v391-session",
+            "requestId": "cd09-v391-request",
+            "sequence": 1,
+            "turnId": "cd09-v391-turn",
+            "state": "canceled",
+            "message": "Legacy request canceled by the user.",
+            "createdAt": "2026-08-20T08:00:00.000Z",
+            "elapsedMs": 100
+          }
+        ]
+      }
+    }
+  ]
+}

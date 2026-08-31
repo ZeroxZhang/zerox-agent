@@ -110,6 +110,16 @@ describe("package scripts", () => {
       "!node_modules/better-sqlite3/bin{,/**/*}",
     );
     expect(builderConfig).toContain("from: build/update-signing-public-key.pem");
+    expect(builderConfig).toContain("from: dist-native/darwin-${arch}/zerox-safe-fs");
+    expect(builderConfig).toContain("sign: ./scripts/mac-sign.mjs");
+    expect(builderConfig).toContain("Contents/Resources/safe-fs/zerox-safe-fs");
+
+    const macSigner = readFileSync(
+      path.join(process.cwd(), "scripts", "mac-sign.mjs"),
+      "utf8",
+    );
+    expect(macSigner).toContain("entitlements.safe-fs.plist");
+    expect(macSigner).toContain("hardenedRuntime: true");
 
     const signScript = readFileSync(
       path.join(process.cwd(), "scripts", "sign-update-manifest.mjs"),
@@ -172,8 +182,8 @@ describe("package scripts", () => {
     // declared package version once dependencies are installed.
     expect(packageLock.version).toBe("3.9.2");
     expect(packageLock.packages?.[""]?.version).toBe("3.9.2");
-    expect(readme).toContain("current release: v3.9.1");
-    expect(readme).toContain("当前版本是 **v3.9.1**");
+    expect(readme).toContain("current release: v3.9.2");
+    expect(readme).toContain("当前版本是 **v3.9.2**");
   });
 
   it("keeps the local candidate bound to one source snapshot", () => {
@@ -236,11 +246,15 @@ describe("package scripts", () => {
     );
 
     expect(helper).toContain('relativePath.startsWith("release-test-")');
+    expect(helper).toContain('relativePath.startsWith("dist-native/")');
     expect(helper).toContain(
       'relativePath === ".zerox/conversation-disclosure-program.json"',
     );
     expect(helper).toContain(
       'relativePath === ".zerox/feature_list.json"',
+    );
+    expect(helper).toContain(
+      'relativePath === ".zerox/release-program.json"',
     );
     await expect(computeLocalCandidateSourceManifest(process.cwd()))
       .resolves.toMatchObject({
@@ -540,9 +554,39 @@ describe("package scripts", () => {
     );
     expect(checker).toContain("value.reviewOutput !== expectedOutput");
     expect(checker).toContain("text === expectedText");
+    expect(checker).toContain("validateReleaseAttestation(canonicalRoot, errors)");
+    expect(checker).toContain(
+      '"caller-promoted-external-anchor-not-signed"',
+    );
+    expect(checker).toContain("attestation.acceptedGitTree !== acceptedTree");
+    expect(checker).toContain("!acceptedIsAncestor");
+    expect(checker).toContain("if (!options.releaseAttestation)");
     expect(checker).not.toContain(
       'value.reviewOutput.includes("FINAL_VERDICT: PASS")',
     );
+  });
+
+  it("promotes a private acceptance anchor into a source-bound release attestation", () => {
+    const promoter = readFileSync(
+      path.join(
+        process.cwd(),
+        "scripts",
+        "promote-v392-release-attestation.mjs",
+      ),
+      "utf8",
+    );
+
+    expect(promoter).toContain("anchor.repositoryRealpath !== canonicalRoot");
+    expect(promoter).toContain("anchor.gitHead !== gitHead");
+    expect(promoter).toContain("anchor.gitTree !== gitTree");
+    expect(promoter).toContain("!validReviewPins(anchor.reviewPins)");
+    expect(promoter).toContain("canonicalPath.startsWith(`${root}${path.sep}`)");
+    expect(promoter).toContain("before.nlink !== 1");
+    expect(promoter).toContain(
+      'identityAssurance: "caller-promoted-external-anchor-not-signed"',
+    );
+    expect(promoter).toContain("source.digest !== anchor.sourceDigest");
+    expect(promoter).toContain("evidenceValues.codeReview.digest");
   });
 
   it("rejects chained app symlinks that escape the package root", async () => {
@@ -575,7 +619,7 @@ describe("package scripts", () => {
         process.cwd(),
         ".github",
         "release-notes",
-        "v3.9.1.md",
+        "v3.9.2.md",
       ),
       "utf8",
     );
@@ -591,8 +635,8 @@ describe("package scripts", () => {
     expect(workflow).toContain("npm run eval:memory:built");
     expect(workflow).toContain("npm run release:mac");
     expect(workflow).toContain("npm run release:publish");
-    expect(releaseNotes).toContain("# Zerox Agent v3.9.1");
-    expect(releaseNotes).toContain("Zerox-Agent-3.9.1-arm64.dmg");
+    expect(releaseNotes).toContain("# Zerox Agent v3.9.2");
+    expect(releaseNotes).toContain("Zerox-Agent-3.9.2-arm64.dmg");
     expect(releaseNotes).toContain("xattr -dr com.apple.quarantine");
   });
 
@@ -1329,7 +1373,7 @@ describe("package scripts", () => {
     ) as PackageJson;
 
     expect(packageJson.scripts).toMatchObject({
-      start: "electron .",
+      start: "npm run native:build && electron .",
       "start:prod": "npm run build && electron .",
     });
   });
@@ -1464,7 +1508,8 @@ describe("package scripts", () => {
       "node scripts/run-conversation-disclosure-tests-v12.mjs",
     );
     expect(packageJson.scripts).toMatchObject({
-      "test": "node scripts/run-conversation-disclosure-tests-v13.mjs",
+      "test":
+        "npm run native:build && node scripts/run-conversation-disclosure-tests-v13.mjs",
       "harness:check": "node scripts/check-harness-state.mjs",
       "program:check":
         "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs && node scripts/check-conversation-disclosure-successor-program.mjs && node scripts/check-harness-state.mjs",

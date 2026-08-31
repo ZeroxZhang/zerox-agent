@@ -68,19 +68,19 @@ const EXPECTED_GENERATED_NATIVE_CACHE = Object.freeze({
 });
 const CONTROL_DIGESTS = Object.freeze({
   "package.json":
-    "sha256:cf65a47efbc34d00f877af5579f7be6bb766a84696eff038b9784ee539df9900",
+    "sha256:61869c59a56cbba80cfe4fc327c0e5b542db4b01a06e3d4deec2ae350872e3ef",
   "package-lock.json":
     "sha256:c5cd81cff944c33d2a1bcd785cba49fd3a34f0c7279a701989e6fa9e3c448beb",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:01d37403c31ee0d157dddd3085ed407ea2a2673c0c85a18be784570af093d5f2",
+    "sha256:0b150a5ea75b924b16808012668d6235db671362de63f5a5cea6d2fbc5427a21",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
-    "sha256:02333833a556ff61cb3c383df31f1667dba1df5c8691ddf68e1f64512b0eee3d",
+    "sha256:79c2e3034d86ca44d8cb15f3d6817edce0a36d77aaf4a4ac5e2e47a40dd5a02b",
   "scripts/run-conversation-disclosure-real-app.mjs":
-    "sha256:280a841dfff58b54bbe22f6b3b9c872c7a552aec55776c5db5954a5a7a46c038",
+    "sha256:8f8570d53afa1bb6489c6d50466a1944d02dc68eed0d11b5b279e6ae95e87ef8",
   "scripts/conversation-disclosure-acceptance-contract.mjs":
-    "sha256:546cc6cc3b09018b5a6751b33511ea56644572ae733df9b804b104533fd75914",
+    "sha256:a4e57f3b768e95690bb116deb5b98887d4afbb6475d111ebf595a18d76cd4d45",
   "scripts/capture-cd05-chat-browser.mjs":
     "sha256:e6e66bb1c3329b6db2f01e238a0ced4f1cf0e0e833aff1cddaefb17ac48e2c54",
   "scripts/capture-cd06-cross-surface-browser.mjs":
@@ -94,9 +94,9 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/probe-native-sqlite.mjs":
     "sha256:41925fe9c348540d46abb43f275ffbf40ea86139304a27e33da465b4f220f34b",
   "scripts/package-local-candidate.mjs":
-    "sha256:04b23e2bd9e3d7a3bec6840598ef768e451855d06c06fe85f2e5ec413e8c59a6",
+    "sha256:5dc447b6e7822e36b35b222f125e070db2ca8268f39d7640568839beacdef329",
   "scripts/local-candidate-source-manifest.mjs":
-    "sha256:58fa2bd9c7814b0c4bbb8b3ab16f9445dd48443ef0075571d4f8b1c5ec3bf563",
+    "sha256:62198db25f2246fa45baba16534a4d912437e253d5d135690d3eb940a7ccbc91",
 });
 const CD09_SCENARIO_IDS = Object.freeze(
   Array.from({ length: 19 }, (_, index) => `S${
@@ -1064,6 +1064,24 @@ async function verifyCompletedOutputs(
   ) {
     fail("post-commit local package tree drifted");
   }
+  const safeFsRelativePath =
+    "release-local/mac-arm64/Zerox Agent.app/Contents/Resources/safe-fs/zerox-safe-fs";
+  const safeFsCapture = await captureRepositoryFile(
+    targetRepositoryRoot,
+    safeFsRelativePath,
+  );
+  if (
+    packageReceipt.safeFsHelper?.path !== safeFsRelativePath
+    || packageReceipt.safeFsHelper?.bytes !== safeFsCapture.bytes.length
+    || packageReceipt.safeFsHelper?.sha256 !== safeFsCapture.digest
+    || packageReceipt.safeFsHelper?.mode !== "0755"
+    || (safeFsCapture.metadata.mode & 0o777) !== 0o755
+    || packageReceipt.safeFsHelper?.signatureVerified !== true
+    || packageReceipt.safeFsHelper?.hardenedRuntime !== true
+    || packageReceipt.safeFsHelper?.entitlements !== "empty"
+  ) {
+    fail("post-commit safe-fs helper receipt drifted");
+  }
   const anchorCapture = await captureRegularFile(
     outputPath,
     "post-commit acceptance anchor",
@@ -1183,7 +1201,7 @@ async function completeExecutionLifecycle(repositoryRoot) {
   ) {
     fail("v3.9.2 lifecycle is not at the reviewed completion boundary");
   }
-  const completedAt = "2026-08-27T17:00:00.000+08:00";
+  const completedAt = "2026-08-31T23:30:00.000+08:00";
   program.status = "completed";
   program.activeFeatureId = null;
   program.nextFeatureId = null;

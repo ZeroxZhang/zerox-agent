@@ -134,11 +134,13 @@ function projectChatDisclosureRow(
 ): ChatDisclosureRow {
   const group = disclosureGroupForStatus(event.state);
   const stableSubject =
-    event.toolInvocationId
-    ?? event.toolCallId
-    ?? event.approvalId
-    ?? event.checkpointId
-    ?? event.settlementId
+    (event.toolInvocationId
+      ? `tool-invocation:${event.toolInvocationId}`
+      : undefined)
+    ?? (event.toolCallId ? `tool-call:${event.toolCallId}` : undefined)
+    ?? (event.approvalId ? `approval:${event.approvalId}` : undefined)
+    ?? (event.checkpointId ? `checkpoint:${event.checkpointId}` : undefined)
+    ?? (event.settlementId ? `settlement:${event.settlementId}` : undefined)
     ?? `${event.requestId ?? event.turnId ?? "legacy"}:${event.state}`;
   const summary = redactCredentialString(event.message);
   const blocking = [
@@ -389,9 +391,7 @@ function clearTransientAttemptState(
         ? {
             ...message,
             content: "",
-            outputParts: message.outputParts?.filter(
-              (part) => part.type !== "text" && part.type !== "tool_call",
-            ),
+            outputParts: [],
             isStreaming: true,
           }
         : message,

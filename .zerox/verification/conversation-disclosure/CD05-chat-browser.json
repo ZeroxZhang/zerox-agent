@@ -12,7 +12,7 @@
       "operationCount": 4,
       "rowIds": [
         "chat-disclosure:narrative:preview-disclosure-request:started",
-        "chat-disclosure:result:preview-settlement"
+        "chat-disclosure:result:settlement:preview-settlement"
       ],
       "duplicateRowCount": 0,
       "horizontalOverflow": false,
@@ -25,10 +25,10 @@
       "rowIds": [
         "chat-disclosure:narrative:preview-disclosure-request:started",
         "chat-disclosure:operations:preview-disclosure-request:workspace",
-        "chat-disclosure:operations:preview-tool-1",
-        "chat-disclosure:operations:preview-tool-2",
+        "chat-disclosure:operations:tool-invocation:preview-tool-1",
+        "chat-disclosure:operations:tool-invocation:preview-tool-2",
         "chat-disclosure:operations:preview-disclosure-request:model",
-        "chat-disclosure:result:preview-settlement"
+        "chat-disclosure:result:settlement:preview-settlement"
       ],
       "duplicateRowCount": 0,
       "horizontalOverflow": false,
@@ -40,7 +40,7 @@
       "operationCount": 4,
       "rowIds": [
         "chat-disclosure:narrative:preview-disclosure-request:started",
-        "chat-disclosure:result:preview-settlement"
+        "chat-disclosure:result:settlement:preview-settlement"
       ],
       "duplicateRowCount": 0,
       "horizontalOverflow": false,
@@ -52,7 +52,7 @@
       "operationCount": 4,
       "rowIds": [
         "chat-disclosure:narrative:preview-disclosure-request:started",
-        "chat-disclosure:result:preview-settlement"
+        "chat-disclosure:result:settlement:preview-settlement"
       ],
       "duplicateRowCount": 0,
       "horizontalOverflow": false,

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,6 +33,33 @@ afterEach(async () => {
 });
 
 describe.each(backends)("SC03 %s contract", (backend) => {
+  it("rejects unsafe store entity ids before authoritative mutation", async () => {
+    const fixture = await createFixture(backend);
+    const goalStore = createAgentGoalStore(fixture);
+    const executionStore = createAgentExecutionStore(fixture);
+
+    await expect(
+      goalStore.save(createGoal("../outside", "planning")),
+    ).rejects.toThrow("goal id is invalid");
+    await expect(goalStore.get("../outside")).rejects.toThrow(
+      "goal id is invalid",
+    );
+    await expect(goalStore.readLedger("../outside")).rejects.toThrow(
+      "goal id is invalid",
+    );
+    await expect(
+      executionStore.save(createCheckpoint("../outside", "running")),
+    ).rejects.toThrow("run id is invalid");
+    await expect(executionStore.get("../outside")).rejects.toThrow(
+      "run id is invalid",
+    );
+
+    await expect(goalStore.listActive()).resolves.toEqual([]);
+    await expect(executionStore.listActive()).resolves.toEqual([]);
+    await expect(access(path.join(fixture.configDir, "outside.json"))).rejects
+      .toMatchObject({ code: "ENOENT" });
+  });
+
   it("preserves Goal CAS, certificate, ledger, and canonical shadow semantics", async () => {
     const fixture = await createFixture(backend);
     const store = createAgentGoalStore(fixture);

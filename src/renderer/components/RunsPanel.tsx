@@ -27,6 +27,7 @@ import {
   type RunRecordAction,
 } from "../../shared/runRecordViewModel";
 import { demoRuns } from "../demoAgentData";
+import { translateRunStatus } from "../runStatusPresentation";
 import { Icon } from "./Icon";
 import { RunTrajectoryPanel } from "./RunTrajectoryPanel";
 
@@ -56,6 +57,8 @@ export function RunsPanel(props: {
   >("action");
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [trajectoryEvents, setTrajectoryEvents] = useState<AgentTrajectoryEvent[]>([]);
+  const [trajectoryNextCursor, setTrajectoryNextCursor] = useState<string>();
+  const [trajectoryPageLoading, setTrajectoryPageLoading] = useState(false);
   const [kernelEvents, setKernelEvents] = useState<KernelEvent[]>([]);
   const [status, setStatus] = useState<RunsStatus>({
     kind: "loading",
@@ -133,10 +136,17 @@ export function RunsPanel(props: {
       return;
     }
 
-    return window.buildingAgent.onAgentStreamEvent(() => {
-      void refreshRunsSnapshot(false);
+    return window.buildingAgent.onAgentStreamEvent((event) => {
+      // Stream events are an incremental observation channel. Persisted run
+      // changes arrive separately through onAgentRunsChanged; refetching all
+      // Runs/Executions/Eval snapshots for every token or phase event turns a
+      // bounded stream into an O(events × snapshots) query storm.
+      setStatus({
+        kind: event.level === "error" ? "error" : "idle",
+        message: event.message,
+      });
     });
-  }, [refreshRunsSnapshot]);
+  }, []);
 
   useEffect(() => {
     if (!window.buildingAgent) {
@@ -235,19 +245,75 @@ export function RunsPanel(props: {
   useEffect(() => {
     if (!selectedRun) {
       setTrajectoryEvents([]);
+      setTrajectoryNextCursor(undefined);
       return;
     }
 
     if (!window.buildingAgent) {
       setTrajectoryEvents(createDemoTrajectoryEvents(selectedRun.id));
+      setTrajectoryNextCursor(undefined);
       return;
     }
-
+    let active = true;
+    setTrajectoryPageLoading(true);
     window.buildingAgent
-      .listAgentRunTrajectory(selectedRun.id)
-      .then(setTrajectoryEvents)
-      .catch(() => setTrajectoryEvents([]));
+      .getAgentRunTrajectoryPage(selectedRun.id, { limit: 100 })
+      .then((page) => {
+        if (!active) return;
+        setTrajectoryEvents(page.records);
+        setTrajectoryNextCursor(page.nextCursor);
+      })
+      .catch(() => {
+        if (!active) return;
+        setTrajectoryEvents([]);
+        setTrajectoryNextCursor(undefined);
+      })
+      .finally(() => {
+        if (active) setTrajectoryPageLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [selectedRun]);
+
+  async function loadMoreTrajectoryEvents(): Promise<void> {
+    if (
+      !window.buildingAgent
+      || !selectedRun
+      || !trajectoryNextCursor
+      || trajectoryPageLoading
+    ) {
+      return;
+    }
+    setTrajectoryPageLoading(true);
+    try {
+      const page = await window.buildingAgent.getAgentRunTrajectoryPage(
+        selectedRun.id,
+        { cursor: trajectoryNextCursor, limit: 100 },
+      );
+      if (page.status === "incompatible") {
+        const fresh = await window.buildingAgent.getAgentRunTrajectoryPage(
+          selectedRun.id,
+          { limit: 100 },
+        );
+        setTrajectoryEvents(fresh.records);
+        setTrajectoryNextCursor(fresh.nextCursor);
+        return;
+      }
+      setTrajectoryEvents((current) => {
+        const known = new Set(current.map((event) => event.id));
+        return [
+          ...current,
+          ...page.records.filter((event) => !known.has(event.id)),
+        ];
+      });
+      setTrajectoryNextCursor(page.nextCursor);
+    } catch {
+      setTrajectoryNextCursor(undefined);
+    } finally {
+      setTrajectoryPageLoading(false);
+    }
+  }
 
   async function handleRetrySelectedRun() {
     if (!selectedRun) {
@@ -733,6 +799,9 @@ export function RunsPanel(props: {
                       handleGenerateEvalCandidateForSelectedRun
                     }
                     run={selectedRun}
+                    trajectoryHasMore={Boolean(trajectoryNextCursor)}
+                    trajectoryLoading={trajectoryPageLoading}
+                    onLoadMoreTrajectory={() => void loadMoreTrajectoryEvents()}
                     trajectoryEvents={trajectoryEvents}
                   />
                 ) : (
@@ -952,7 +1021,10 @@ function RunInspector(props: {
   isBusy: boolean;
   kernelEvents: KernelEvent[];
   onGenerateEvalCandidate: () => void;
+  onLoadMoreTrajectory: () => void;
   run: AgentRunRecord | null;
+  trajectoryHasMore: boolean;
+  trajectoryLoading: boolean;
   trajectoryEvents: AgentTrajectoryEvent[];
 }) {
   const handoffCards = useMemo(
@@ -1274,6 +1346,9 @@ function RunInspector(props: {
 
       <RunTrajectoryPanel
         events={props.trajectoryEvents}
+        hasMore={props.trajectoryHasMore}
+        loadingMore={props.trajectoryLoading}
+        onLoadMore={props.onLoadMoreTrajectory}
         runId={props.run?.id ?? "unselected"}
       />
     </aside>
@@ -1530,34 +1605,6 @@ function translateEvalCandidateStatus(
   }
 
   return "已拒绝";
-}
-
-function translateRunStatus(status: AgentRunRecord["status"]): string {
-  if (status === "queued") {
-    return "排队中";
-  }
-
-  if (status === "running") {
-    return "运行中";
-  }
-
-  if (status === "waiting_for_approval") {
-    return "等待授权";
-  }
-
-  if (status === "paused") {
-    return "可恢复";
-  }
-
-  if (status === "succeeded") {
-    return "成功";
-  }
-
-  if (status === "canceled") {
-    return "已取消";
-  }
-
-  return "失败";
 }
 
 function translateTimelineKind(kind: RunTimelineItem["kind"]): string {

@@ -15,6 +15,7 @@ import {
   buildPrimaryRunContext,
 } from "../shared/agentWorkspace";
 import type { AgentWorkspaceStore } from "./agentWorkspaceStore";
+import { assertSafeStoreEntityId } from "./storeEntityId";
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -157,6 +158,7 @@ export function createAgentWorkspaceService(options: {
 
     async createTemporaryWorkspace(input) {
       const id = createId();
+      assertSafeStoreEntityId(id, "Temporary workspace id");
       const rootPath = path.join(options.workspaceRoot, "temporary", id);
       await mkdir(rootPath, { recursive: true });
 

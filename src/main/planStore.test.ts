@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PlanRecord } from "../shared/planMode";
-import { createPlanStore, PlanVersionConflictError } from "./planStore";
+import {
+  assertSafePlanId,
+  createPlanStore,
+  PlanVersionConflictError,
+} from "./planStore";
 import { createStorageImpl } from "./storage/storageDb";
 import { ensurePlanGoalContract } from "./goalPlanContractService";
 
@@ -16,6 +20,11 @@ describe("plan store parity", () => {
 
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("rejects unsafe plan ids used by stores and replay drivers", () => {
+    expect(() => assertSafePlanId("plan-safe_1")).not.toThrow();
+    expect(() => assertSafePlanId("../outside")).toThrow("计划 ID 非法");
   });
 
   it("keeps JSON and SQLite backends behaviorally equivalent", async () => {

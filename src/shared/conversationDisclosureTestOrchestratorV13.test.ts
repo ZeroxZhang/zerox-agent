@@ -29,8 +29,10 @@ describe("conversation disclosure test orchestrator v13", () => {
     expect(source).toContain("2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12");
     expect(source).toContain("postRound12FeatureIds.has(entry.id)");
     expect(source).toContain(
-      "policy.closedWorld?.programRootDefinition?.workstreams",
+      "policy.closedWorld?.programRootDefinition",
     );
+    expect(source).toContain("structuredClone(historicalProgramRoot)");
+    expect(source).toContain("acceptanceEvidence: []");
     expect(source).toContain("{ testTimeoutMs: 15_000 }");
     expect(source).toContain(
       "validates the exact production policy in both pre-publish and published post-transition states",

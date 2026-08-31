@@ -1669,6 +1669,44 @@ describe("conversation disclosure domain adapters", () => {
 
     expect(batch.unknownFacts[0]?.safeSummary).toBe("future");
   });
+
+  it("classifies unregistered trajectory event types before projection", () => {
+    const run = makeRun({ id: "run_1" });
+    const optional = makeTrajectory("run_1", "event_optional", 1, {
+      requiredness: "optional",
+    });
+    const required = makeTrajectory("run_1", "event_required", 2, {});
+    optional.type = "unregistered_optional" as AgentTrajectoryEvent["type"];
+    required.type = "unregistered_required" as AgentTrajectoryEvent["type"];
+
+    const batch = adaptConversationDisclosureSources({
+      scope,
+      agentRuns: [run],
+      trajectory: [{
+        runId: run.id,
+        events: trajectoryPage(run.id, [optional, required]),
+      }],
+    });
+
+    expect(batch.seeds.some(
+      (seed) => seed.primary.authorityRef === optional.id
+        || seed.primary.authorityRef === required.id,
+    )).toBe(false);
+    expect(batch.unknownFacts).toMatchObject([
+      {
+        authorityRef: optional.id,
+        originalKind: "trajectory_event_unknown",
+        requiredness: "optional",
+        safeSummary: "Unknown trajectory evidence",
+      },
+      {
+        authorityRef: required.id,
+        originalKind: "trajectory_event_unknown",
+        requiredness: "required",
+        safeSummary: "Unknown trajectory evidence",
+      },
+    ]);
+  });
 });
 
 function itemFor(

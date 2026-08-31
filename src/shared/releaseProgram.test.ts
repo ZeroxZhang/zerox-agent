@@ -9,7 +9,7 @@ function readJson(relativePath: string) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
 }
 
-describe("v3.9.1 release program", () => {
+describe("v3.9.2 release transition", () => {
   it("passes the machine-readable release checker", () => {
     expect(
       execFileSync(
@@ -20,70 +20,44 @@ describe("v3.9.1 release program", () => {
     ).toContain("Release program check passed");
   });
 
-  it("starts only after the accepted P102 source baseline", () => {
+  it("preserves v3.9.1 history until P113 promotes the v3.9.2 release", () => {
     const program = readJson(".zerox/release-program.json");
     const features = readJson(".zerox/feature_list.json").features;
-    const storageProgram = readJson(
-      ".zerox/storage-convergence-program.json",
-    );
-
-    expect(program).toMatchObject({
-      version: "3.9.1",
-      tag: "v3.9.1",
-      sourceBaseline: {
-        commit: "546129c7681de81c2a200b915ccd0c32ba97930a",
-        verifyRun: "31953402750",
-      },
-    });
-    expect(storageProgram).toMatchObject({
-      status: "completed",
-      activeFeatureId: null,
-      activeWorkstreamId: null,
-    });
-    expect(features).toContainEqual(
-      expect.objectContaining({
-        id: "P97-sqlite-domain-storage-convergence",
-        status: "done",
-      }),
-    );
-    expect(features).toContainEqual(
-      expect.objectContaining({
-        id: "P102-adaptive-context-orchestration",
-        status: "done",
-      }),
-    );
-    expect(features).toContainEqual(
-      expect.objectContaining({
-        id: "P103-v3.9.1-context-orchestration-hotfix-release",
-        status: program.status === "completed" ? "done" : "in_progress",
-      }),
-    );
-  });
-
-  it("allows the governed local v3.9.2 successor without rewriting v3.9.1 history", () => {
-    const program = readJson(".zerox/release-program.json");
     const conversationProgram = readJson(
       ".zerox/conversation-disclosure-program.json",
     );
-    const packageJson = readJson("package.json");
-    const features = readJson(".zerox/feature_list.json").features;
-    const hasLocalV392Candidate = features.some(
+    const p113 = features.find(
       (feature: { id: string }) =>
         feature.id === "P113-v3.9.2-disclosure-adversarial-acceptance",
     );
-
-    expect(program).toMatchObject({ version: "3.9.1", status: "completed" });
-    expect(packageJson.version).toBe(
-      hasLocalV392Candidate ? "3.9.2" : "3.9.1",
+    const p114 = features.find(
+      (feature: { id: string }) =>
+        feature.id === "P114-v3.9.2-resilience-release",
     );
-    if (hasLocalV392Candidate) {
-      expect(conversationProgram).toMatchObject({
-        programId: "conversation-progressive-disclosure-v3.9.2-2026-08",
+
+    expect(["3.9.1", "3.9.2"]).toContain(program.version);
+    expect(program.tag).toBe(`v${program.version}`);
+    if (program.version === "3.9.1") {
+      expect(program).toMatchObject({
+        programId: "v3.9.1-context-hotfix-release-2026-08",
+        status: "completed",
       });
-      expect([
-        "P113-v3.9.2-disclosure-adversarial-acceptance",
-        null,
-      ]).toContain(conversationProgram.activeFeatureId);
+      expect(p113.status).toBe("in_progress");
+      expect(p114).toBeUndefined();
+    } else {
+      expect(conversationProgram).toMatchObject({
+        status: "completed",
+        activeFeatureId: null,
+        nextFeatureId: null,
+      });
+      expect(p113.status).toBe("done");
+      expect(p114.status).toBe(
+        program.status === "completed" ? "done" : "in_progress",
+      );
+      expect(program.sourceBaseline).toMatchObject({
+        commit: expect.stringMatching(/^[a-f0-9]{40}$/),
+        releaseAttestationDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      });
     }
   });
 

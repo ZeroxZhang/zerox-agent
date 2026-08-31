@@ -41,7 +41,7 @@ export const workflowCatalog: WorkflowDefinition[] = [
       "file_apply_moves",
       "file_verify_moves",
     ],
-    recoveryTools: ["file_rollback_moves"],
+    recoveryTools: ["file_move_transaction_read", "file_rollback_moves"],
     confirmationRisks: ["moves_data", "deletes_data"],
     guardrails: [
       "Resolve user path references before execution.",

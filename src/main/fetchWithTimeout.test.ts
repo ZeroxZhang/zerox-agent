@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchWithTimeout,
   readResponseJsonWithLimit,
@@ -6,6 +6,10 @@ import {
 } from "./fetchWithTimeout";
 
 describe("fetchWithTimeout", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("keeps the total timeout active while the response body is pending", async () => {
     let requestSignal: AbortSignal | undefined;
     const fetchImpl = (async (_url: string, init?: RequestInit) => {
@@ -26,7 +30,6 @@ describe("fetchWithTimeout", () => {
       15,
       "fixture",
       undefined,
-      100,
     );
     await expect(response.text()).rejects.toBeDefined();
     expect(requestSignal?.aborted).toBe(true);
@@ -48,11 +51,29 @@ describe("fetchWithTimeout", () => {
       1_000,
       "fixture",
       controller.signal,
-      100,
     );
     controller.abort();
 
     await expect(response.text()).rejects.toBeDefined();
+  });
+
+  it("allows model time-to-first-byte beyond the removed 30-second pseudo-connect deadline", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 35_000));
+      return new Response("slow but valid");
+    }) as typeof fetch;
+
+    const pending = fetchWithTimeout(
+      fetchImpl,
+      "https://example.test/slow-model",
+      {},
+      300_000,
+      "LLM",
+    ).then(async (response) => response.text());
+
+    await vi.advanceTimersByTimeAsync(35_000);
+    await expect(pending).resolves.toBe("slow but valid");
   });
 
   it("rejects declared and streamed bodies above the byte limit", async () => {

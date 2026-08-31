@@ -12,6 +12,11 @@ import {
   isRecoverableOutputLimit,
   OUTPUT_LIMIT_CONTINUATION_PREFIX_MAX_CHARS,
 } from "./structuredOutputBudget";
+import {
+  retryModelOperation,
+  type ModelRetryEvent,
+  type ModelRetryOptions,
+} from "./modelRetry";
 
 /**
  * Structured model boundary protocol — the single recovery ladder every
@@ -33,9 +38,11 @@ import {
  *      the accurate (unmasked) error and the broken text echoed back
  *   4. otherwise fail closed with diagnostics plus a bounded raw excerpt
  *
- * At most 3 model completions per invocation. The ladder never changes the
- * contract itself — salvaged and repaired output must still pass the same
- * `parse` before it is accepted.
+ * At most 3 logical model completions per invocation. Each logical completion
+ * also uses the shared bounded transport retry policy, so a transient timeout
+ * or connection reset does not turn a valid Plan into a manual recovery task.
+ * The ladder never changes the contract itself — salvaged and repaired output
+ * must still pass the same `parse` before it is accepted.
  */
 
 export type StructuredBoundaryResponse = Pick<
@@ -73,6 +80,7 @@ export type StructuredBoundaryContract<T> = {
 
 export type StructuredBoundaryDiagnostics = {
   completionCount: number;
+  transportRetryCount: number;
   repairAttempted: boolean;
   outputLimitRecovered: boolean;
   usage?: { inputTokens: number; outputTokens: number };
@@ -95,6 +103,10 @@ export async function completeStructuredBoundary<T>(options: {
   contract: StructuredBoundaryContract<T>;
   initialMaxTokens: number;
   signal?: AbortSignal;
+  transportRetry?: ModelRetryOptions;
+  onTransportRetry?: (
+    event: ModelRetryEvent,
+  ) => void | Promise<void>;
 }): Promise<StructuredBoundaryResult<T>> {
   const { contract } = options;
   let messages = contract.baseMessages;
@@ -106,16 +118,26 @@ export async function completeStructuredBoundary<T>(options: {
   let outputTokens = 0;
   let hasUsage = false;
   let completionCount = 0;
+  let transportRetryCount = 0;
 
   const diagnostics = (): StructuredBoundaryDiagnostics => ({
     completionCount,
+    transportRetryCount,
     repairAttempted,
     outputLimitRecovered,
     ...(hasUsage ? { usage: { inputTokens, outputTokens } } : {}),
   });
 
   for (let attempt = 0; attempt < MAX_BOUNDARY_COMPLETIONS; attempt += 1) {
-    const response = await options.complete({ maxTokens, messages });
+    const response = await retryModelOperation(
+      () => options.complete({ maxTokens, messages }),
+      options.transportRetry,
+      options.signal,
+      async (event) => {
+        transportRetryCount += 1;
+        await options.onTransportRetry?.(event);
+      },
+    );
     completionCount += 1;
     if (response.usage) {
       hasUsage = true;

@@ -6,11 +6,25 @@
   "releaseMode": "local-candidate",
   "publish": "never",
   "npmCliSha256": "sha256:8e5f6f3429f8cdbe693cdc29904e9d5a7b127a494bd15c804bd54c7403bfcbe7",
-  "sourceDigest": "sha256:1b94f725344d8f6a7fcd752ff3689df186b63a5481ec5a32cf0ac0029a2be039",
-  "sourceFileCount": 1185,
+  "sourceDigest": "sha256:92b17d6d514206206dc88b8c0915288a30ace09f90dfda3b202d20649d207c7c",
+  "sourceFileCount": 1217,
   "appPath": "release-local/mac-arm64/Zerox Agent.app",
-  "appAsarBytes": 46809748,
-  "appAsarSha256": "sha256:25efa9e17adbdf3b44801a7a09d8adf7885b8d4d705e8ca01a116f96f6df5abb",
-  "appTreeEntryCount": 617,
-  "appTreeSha256": "sha256:459491c26ee24792029b686949a98cfb4152bc61205ec468d1337051be3a8f50"
+  "appAsarBytes": 46948596,
+  "appAsarSha256": "sha256:2301b35b113212a078966b9fc5b4aac99736e6044f411042a30ac145b83219d8",
+  "appTreeEntryCount": 619,
+  "appTreeSha256": "sha256:36f0dd3a2be4cca03f66f76bc45de6d2f4ebf76338dfe8c8f54458811633a358",
+  "safeFsHelper": {
+    "path": "release-local/mac-arm64/Zerox Agent.app/Contents/Resources/safe-fs/zerox-safe-fs",
+    "bytes": 53680,
+    "sha256": "sha256:d077932cf22a1f29f3a06ce8a40340b35b0577961df51eb6c0986a991dd0995f",
+    "mode": "0755",
+    "architecture": "arm64",
+    "minimumSystemVersion": "12.0",
+    "linkedLibraries": [
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "signatureVerified": true,
+    "hardenedRuntime": true,
+    "entitlements": "empty"
+  }
 }

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { fsync, writeFile as writeFileDescriptor } from "node:fs";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { nativeImage, type BrowserWindow } from "electron";
 import {
@@ -16,6 +17,7 @@ import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { ChatOutputPart } from "../shared/chatOutput";
 import type { Goal } from "../shared/agentGoal";
 import type { PlanArtifact, PlanRecord } from "../shared/planMode";
+import type { ResolvedModelBinding } from "../shared/modelSettings";
 import type { AppContainer } from "./container";
 import type { ConversationDisclosureAcceptanceEnabledMode } from "./conversationDisclosureAcceptanceMode";
 import type { TrustedIpcInvocationObservation } from "./ipc";
@@ -25,16 +27,69 @@ import type {
   ToolUserApprovalResult,
 } from "./toolAuthorizationService";
 import type { ToolApprovalRequestPayload } from "../shared/toolApproval";
+import { finalAcceptanceEvidenceFingerprint } from "./agentGoalController";
+import { exportAgentEpisodeFromConfig } from "./agentEpisodeExportCli";
+import { createPlanDebateOrchestrator } from "./planDebateOrchestrator";
+import type { BoundModelClient, ModelRouter } from "./providers/modelRouter";
+
+type PlanAcceptanceResult =
+  | { ok: true; plan: PlanRecord }
+  | { ok: false; error: unknown };
+
+type PlanAcceptanceRuntime = {
+  planId: string;
+  releaseReview(): void;
+  result: Promise<PlanAcceptanceResult>;
+  modelCalls: string[];
+};
+
+type RendererPerformanceSample = {
+  taskDurationSeconds: number;
+  jsHeapUsedBytes: number;
+  nodeCount: number;
+};
+
+type RendererPerformanceSession = {
+  attachedByAcceptance: boolean;
+  before: RendererPerformanceSample;
+};
 
 type PreparedScenario = {
   sessionId: string;
   runId: string;
   scheduledTaskId?: string;
   goalId?: string;
+  unverifiedGoalId?: string;
   planId?: string;
   blockedPlanId?: string;
+  secretCanary?: string;
+  legacyFixtureDigest?: string;
+  legacySourceCutId?: string;
+  legacyIntentionalAbsenceCount?: number;
+  legacyAuthorityLinkageValid?: boolean;
+  legacyAuthorityRecordCount?: number;
+  legacySourceNotMutated?: boolean;
+  interruptedApprovalId?: string;
+  interruptedToolInvocationId?: string;
+  interruptedToolInvocationRunId?: string;
+  interruptedWorkspaceRunId?: string;
+  interruptedTrajectoryAborted?: boolean;
+  interruptedWorkspaceAborted?: boolean;
+  interruptedChatAborted?: boolean;
+  planRuntime?: PlanAcceptanceRuntime;
   evidenceIds: string[];
 };
+
+const legacyFixtureAuthorityFiles = Object.freeze([
+  "config/agent-goals/cd09-v391-goal.json",
+  "config/agent-goals/cd09-v391-goal.ledger.jsonl",
+  "config/agent-runs.jsonl",
+  "config/agent-trajectories/cd09-v391-run.jsonl",
+  "config/chat-sessions.json",
+  "config/plans/cd09-v391-plan.events.jsonl",
+  "config/plans/cd09-v391-plan.json",
+  "config/plans/session-index.json",
+]);
 
 type AcceptanceApprovalCoordinator = {
   requestUserApproval(
@@ -79,6 +134,22 @@ export async function prepareConversationDisclosureScenario(
   const timestamp = "2026-08-26T10:00:00.000Z";
   const state = scenarioState(scenarioId);
   const activityState = scenarioActivityState(scenarioId);
+  if (scenarioId === "S13-legacy-coverage") {
+    return prepareLegacyConversationDisclosureScenario(
+      container,
+      mode,
+      processEpoch,
+    );
+  }
+  if (
+    scenarioId === "S17-cancel-interruption"
+    && mode.phase === "restart"
+  ) {
+    return prepareRestartedApprovalInterruptionScenario(
+      container,
+      processEpoch,
+    );
+  }
   if (mode.phase === "restart") {
     const causalRecord = await container.conversationCausalStore().getRequest(
       `request-${scenarioId}`,
@@ -160,7 +231,7 @@ export async function prepareConversationDisclosureScenario(
         ? "canceled"
         : state === "paused" ? "paused" : "failed",
   });
-  await container.chatSessionStore().appendActivityEvent(sessionId, {
+    await container.chatSessionStore().appendActivityEvent(sessionId, {
     sessionId,
     requestId: `request-${scenarioId}`,
     sequence: 1,
@@ -182,11 +253,11 @@ export async function prepareConversationDisclosureScenario(
           toolName: "file_list",
           invocationStatus:
             scenarioId === "S05-approval-attention"
-              ? "waiting_for_approval"
+              ? "waiting_approval"
               : "succeeded",
         }
       : {}),
-  });
+    });
   if (scenarioId === "S10-accessibility") {
     await container.chatSessionStore().appendActivityEvent(sessionId, {
       sessionId,
@@ -218,17 +289,25 @@ export async function prepareConversationDisclosureScenario(
     || scenarioId === "S18-context-usage"
   ) {
     const messageCount =
-      scenarioId === "S09-long-session" ? 120 : 16;
+      scenarioId === "S09-long-session" ? 320 : 16;
     for (let index = 0; index < messageCount; index += 1) {
+      const role = index % 2 === 0 ? "user" : "assistant";
       await container.chatSessionStore().appendMessage({
         sessionId,
         requestId: `request-${scenarioId}-history-${index}`,
         turnId: `turn-${scenarioId}-history-${index}`,
-        role: index % 2 === 0 ? "user" : "assistant",
+        role,
         content:
           scenarioId === "S18-context-usage"
             ? `CD09 compaction history ${index} ${"context ".repeat(180)}`
-            : `CD09 bounded history row ${index}`,
+            : [
+                `CD09 bounded history row ${index}.`,
+                "This record exercises stable transcript identity, grouped output projection, and bounded historical retrieval.",
+                "projection evidence lifecycle ".repeat(48),
+              ].join(" "),
+        ...(scenarioId === "S09-long-session" && role === "assistant"
+          ? { outputParts: longSessionOutputParts(index, timestamp) }
+          : {}),
       });
     }
   }
@@ -255,6 +334,7 @@ export async function prepareConversationDisclosureScenario(
       })
     : null;
   let goalId: string | undefined;
+  let unverifiedGoalId: string | undefined;
   let planId: string | undefined;
   let blockedPlanId: string | undefined;
   if (scenarioId === "S15-goal-acceptance") {
@@ -264,10 +344,13 @@ export async function prepareConversationDisclosureScenario(
       description: "Verify one deterministic local result.",
       acceptanceChecks: [{
         id: "check-cd09",
-        kind: "assertion" as const,
-        description: "The local result is explicitly reviewed.",
-        params: { expected: true },
-        requiresEvidence: false,
+        kind: "model_review" as const,
+        description: "The bounded local trajectory proves completion.",
+        params: {
+          condition: "The bounded local trajectory proves completion.",
+          evidenceRefs: [`trajectory-${scenarioId}`],
+        },
+        requiresEvidence: true,
       }],
     };
     const goal: Goal = {
@@ -315,16 +398,82 @@ export async function prepareConversationDisclosureScenario(
       acceptanceRetryState: {
         cycle: 1,
         attempt: 1,
-        maxAttempts: 1,
-        lastCode: "CD09_ACCEPTANCE_REQUIRES_USER",
-        lastDetail: "Explicit user resolution is required.",
+        maxAttempts: 3,
+        lastCode: "judge_timeout",
+        lastDetail: "Final judge was temporarily unavailable.",
         evidenceFingerprint: "a".repeat(64),
         resumeFrom: "final_judge",
       },
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    await container.agentGoalStore().save(goal);
+    const sealUnavailableFinalJudge = async (candidate: Goal) => {
+      const unavailable = await container.agentGoalAcceptance().evaluateGoal(
+        candidate,
+        {
+        runId,
+        goalId: candidate.id,
+        workspacePath: process.cwd(),
+        toolExecutor: {
+          async execute() {
+            throw new Error("S15 sealed replay must not execute tools.");
+          },
+        },
+        trajectoryStore: {
+          async append(_runId, event) {
+            return event;
+          },
+        },
+        chatClient: {
+          async complete() {
+            throw Object.assign(new Error("S15 final judge unavailable."), {
+              status: 503,
+            });
+          },
+        },
+        modelProfile: {
+          baseUrl: "http://127.0.0.1/unused",
+          apiKey: "acceptance-not-a-secret",
+          model: "cd09-scripted",
+          temperature: 0,
+          maxTokens: 1024,
+        },
+        now: () => timestamp,
+        },
+      );
+      if (!unavailable.finalJudgeReplay) {
+        throw new Error("S15 could not seal its unavailable final judge replay.");
+      }
+      candidate.acceptanceRetryState = {
+        ...candidate.acceptanceRetryState!,
+        evidenceFingerprint: finalAcceptanceEvidenceFingerprint(
+          candidate,
+          unavailable,
+        ),
+        finalJudgeReplay: unavailable.finalJudgeReplay,
+      };
+      return candidate;
+    };
+    await sealUnavailableFinalJudge(goal);
+    unverifiedGoalId = `${goalId}-unverified`;
+    const unverifiedGoal = structuredClone(goal);
+    unverifiedGoal.id = unverifiedGoalId;
+    unverifiedGoal.description = "CD09 Goal unverified completion branch";
+    unverifiedGoal.acceptanceState!.recentFailures = unverifiedGoal
+      .acceptanceState!.recentFailures.map((failure) => ({
+        ...failure,
+        targetId: unverifiedGoalId!,
+      }));
+    unverifiedGoal.acceptanceRetryState = {
+      ...unverifiedGoal.acceptanceRetryState!,
+      evidenceFingerprint: "a".repeat(64),
+      finalJudgeReplay: undefined,
+    };
+    await sealUnavailableFinalJudge(unverifiedGoal);
+    await Promise.all([
+      container.agentGoalStore().save(goal),
+      container.agentGoalStore().save(unverifiedGoal),
+    ]);
     await container.chatSessionStore().attachGoal(sessionId, {
       id: goal.id,
       description: goal.description,
@@ -332,10 +481,12 @@ export async function prepareConversationDisclosureScenario(
       updatedAt: goal.updatedAt,
     });
   }
-  if (
-    scenarioId === "S07-plan-progress"
-    || scenarioId === "S16-plan-confirmation"
-  ) {
+  let planRuntime: PlanAcceptanceRuntime | undefined;
+  if (scenarioId === "S07-plan-progress") {
+    planRuntime = await prepareLivePlanProgressScenario(container, sessionId);
+    planId = planRuntime.planId;
+  }
+  if (scenarioId === "S16-plan-confirmation") {
     planId = `cd09-plan-${scenarioId}`;
     const artifact: PlanArtifact = {
       title: `CD09 ${scenarioId}`,
@@ -356,12 +507,8 @@ export async function prepareConversationDisclosureScenario(
       claimLedger: [],
       unresolvedQuestions: [],
       minorityOpinion: [],
-      actionGate:
-        scenarioId === "S16-plan-confirmation" ? "ready" : "blocked",
-      gateReason:
-        scenarioId === "S16-plan-confirmation"
-          ? "Ready for explicit confirmation."
-          : "Awaiting persisted review evidence.",
+      actionGate: "ready",
+      gateReason: "Ready for explicit confirmation.",
       markdown: "",
     };
     const planBase: PlanRecord = {
@@ -370,10 +517,7 @@ export async function prepareConversationDisclosureScenario(
       workspaceRoot: process.cwd(),
       sourceMessage: artifact.objective,
       mode: "direct",
-      status:
-        scenarioId === "S16-plan-confirmation"
-          ? "awaiting_confirmation"
-          : "paused",
+      status: "awaiting_confirmation",
       actionGate: artifact.actionGate,
       revision: 1,
       taskContract: {
@@ -391,17 +535,14 @@ export async function prepareConversationDisclosureScenario(
       rounds: [],
       finalArtifact: artifact,
       planningStages: [{
-        id: "stage-cd09",
-        kind: "generation",
-        runId,
-        status:
-          scenarioId === "S07-plan-progress" ? "running" : "completed",
-        evidenceRefs: [`trajectory-${scenarioId}`],
-        startedAt: timestamp,
-        ...(scenarioId === "S16-plan-confirmation"
-          ? { completedAt: timestamp }
-          : {}),
-      }],
+            id: "stage-cd09",
+            kind: "generation",
+            runId,
+            status: "completed",
+            evidenceRefs: [`trajectory-${scenarioId}`],
+            startedAt: timestamp,
+            completedAt: timestamp,
+          }],
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -410,21 +551,19 @@ export async function prepareConversationDisclosureScenario(
       artifact,
     );
     await container.planStore().create({ ...planBase, projection });
-    if (scenarioId === "S16-plan-confirmation") {
-      blockedPlanId = `${planId}-blocked`;
-      await container.planStore().create({
-        ...planBase,
-        id: blockedPlanId,
-        status: "paused",
+    blockedPlanId = `${planId}-blocked`;
+    await container.planStore().create({
+      ...planBase,
+      id: blockedPlanId,
+      status: "paused",
+      actionGate: "blocked",
+      projection: undefined,
+      finalArtifact: {
+        ...artifact,
         actionGate: "blocked",
-        projection: undefined,
-        finalArtifact: {
-          ...artifact,
-          actionGate: "blocked",
-          gateReason: "Blocked by deterministic acceptance evidence.",
-        },
-      });
-    }
+        gateReason: "Blocked by deterministic acceptance evidence.",
+      },
+    });
   }
   const run: AgentRunRecord = {
     id: runId,
@@ -535,6 +674,36 @@ export async function prepareConversationDisclosureScenario(
     createdAt: timestamp,
   };
   await container.agentTrajectoryStore().append(runId, trajectory);
+  if (scenarioId === "S09-long-session") {
+    for (let sequence = 2; sequence <= 240; sequence += 1) {
+      const type = sequence % 3 === 0
+        ? "tool_result"
+        : sequence % 3 === 1
+          ? "model_response"
+          : "state_transition";
+      await container.agentTrajectoryStore().append(runId, {
+        id: `trajectory-${scenarioId}-${sequence}`,
+        runId,
+        type,
+        sequence,
+        payload: {
+          scenarioId,
+          processEpoch,
+          publicationKey: `cd09:${scenarioId}:trajectory:${sequence}`,
+          groupId: `group-${Math.floor((sequence - 1) / 8)}`,
+          summary:
+            `Bounded trajectory record ${sequence}. `
+            + "projection evidence ".repeat(24),
+        },
+        redaction: {
+          containsApiKey: false,
+          containsFileContent: false,
+          containsUserText: false,
+        },
+        createdAt: new Date(Date.parse(timestamp) + sequence).toISOString(),
+      });
+    }
+  }
   if (scenarioId === "S19-unknown-coverage") {
     await container.agentTrajectoryStore().append(runId, {
       ...trajectory,
@@ -553,8 +722,6 @@ export async function prepareConversationDisclosureScenario(
       sequence: 3,
       payload: {
         requiredness: "required",
-        coverage: "degraded",
-        resetRequired: true,
       },
     });
   }
@@ -568,8 +735,11 @@ export async function prepareConversationDisclosureScenario(
     runId,
     ...(scheduledTask ? { scheduledTaskId: scheduledTask.id } : {}),
     ...(goalId ? { goalId } : {}),
+    ...(unverifiedGoalId ? { unverifiedGoalId } : {}),
     ...(planId ? { planId } : {}),
     ...(blockedPlanId ? { blockedPlanId } : {}),
+    ...(planRuntime ? { planRuntime } : {}),
+    ...(mode.secretCanary ? { secretCanary: mode.secretCanary } : {}),
     evidenceIds: [
       sessionId,
       runId,
@@ -583,6 +753,316 @@ export async function prepareConversationDisclosureScenario(
   };
 }
 
+async function prepareLivePlanProgressScenario(
+  container: AppContainer,
+  sessionId: string,
+): Promise<PlanAcceptanceRuntime> {
+  const planId = "plan_cd09_s07_1";
+  const modelCalls: string[] = [];
+  let releaseReviewGate: (() => void) | undefined;
+  let reviewReleased = false;
+  const reviewGate = new Promise<void>((resolve) => {
+    releaseReviewGate = resolve;
+  });
+  const binding = acceptancePlanBinding();
+  const client: BoundModelClient["client"] = {
+    async complete() {
+      const callKind = modelCalls.length === 0 ? "generation" : "review";
+      modelCalls.push(callKind);
+      if (callKind === "review") {
+        await reviewGate;
+      }
+      return {
+        content: JSON.stringify(
+          callKind === "generation"
+            ? acceptancePlanArtifact()
+            : {
+                approved: false,
+                issues: [{
+                  code: "CD09_FINAL_REVIEW_BLOCK",
+                  severity: "high",
+                  message:
+                    "The final review intentionally leaves one explicit adoption decision unresolved.",
+                  repairable: false,
+                  repairInstruction:
+                    "The user must explicitly resolve the adoption decision.",
+                }],
+              },
+        ),
+        toolCalls: [],
+        finishReason: "stop",
+        usage: { inputTokens: 32, outputTokens: 16 },
+      };
+    },
+    async *streamComplete() {
+      yield { type: "done" as const, finishReason: "stop" };
+    },
+  };
+  const bound = { binding, client };
+  const router: ModelRouter = {
+    async resolve() {
+      return bound;
+    },
+    async resolveFrozen() {
+      return bound;
+    },
+    invalidate() {},
+  };
+  let id = 0;
+  const orchestrator = createPlanDebateOrchestrator({
+    planStore: container.planStore(),
+    artifactWriter: container.planArtifactWriter(),
+    modelRouter: router,
+    now: () => "2026-08-26T10:00:00.000Z",
+    createId: () => `cd09_s07_${++id}`,
+    collectEvidence: async () => [{
+      id: "evidence_cd09_s07_user_request",
+      kind: "user",
+      title: "CD09 S07 acceptance request",
+      summary: "Observe persisted production planning stages and final review truth.",
+      sha256: `sha256:${"7".repeat(64)}`,
+    }],
+    enableDirectReview: true,
+  });
+  const result = orchestrator.createPlan({
+    sessionId,
+    workspaceRoot: process.cwd(),
+    sourceMessage: "Complete one bounded local milestone with persisted stage evidence.",
+    mode: "direct",
+    requestedSkillName: null,
+    modelAssignments: { direct: binding.profileId },
+  }).then(
+    (plan): PlanAcceptanceResult => ({ ok: true, plan }),
+    (error: unknown): PlanAcceptanceResult => ({ ok: false, error }),
+  );
+
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const plan = await container.planStore().get(planId);
+    if (
+      plan?.planningStages?.some(
+        (stage) => stage.kind === "review" && stage.status === "running",
+      )
+    ) {
+      return {
+        planId,
+        modelCalls,
+        result,
+        releaseReview() {
+          if (reviewReleased) return;
+          reviewReleased = true;
+          releaseReviewGate?.();
+        },
+      };
+    }
+    const settled = await Promise.race([
+      result.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+    ]);
+    if (settled) break;
+  }
+  const settled = await result;
+  if (!settled.ok) throw settled.error;
+  throw new Error(
+    `S07 plan did not persist a running review stage (status=${settled.plan.status}).`,
+  );
+}
+
+function acceptancePlanBinding(): ResolvedModelBinding {
+  return {
+    profileId: "cd09-s07-scripted",
+    connectionId: "cd09-s07-local",
+    providerKind: "openai",
+    modelId: "cd09-s07-scripted",
+    revision: 1,
+    connectionRevision: 1,
+    profileRevision: 1,
+    capabilities: {
+      tools: true,
+      vision: false,
+      pdf: false,
+      streaming: true,
+      parallelToolCalls: false,
+    },
+    generation: {
+      temperature: 0,
+      maxTokens: 4096,
+      thinkingEnabled: false,
+      thinkingBudgetTokens: 0,
+    },
+  };
+}
+
+function acceptancePlanArtifact(): Record<string, unknown> {
+  const objective =
+    "Complete one bounded local milestone with persisted stage evidence.";
+  return {
+    title: "CD09 S07 production plan",
+    summary: "A production-orchestrated plan whose review is deliberately gated.",
+    objective,
+    scope: { in: ["local acceptance"], out: ["external publishing"] },
+    assumptions: [],
+    milestones: [{
+      id: "milestone-cd09-s07",
+      title: "Validate persisted plan progress",
+      description: objective,
+      acceptanceCriteria: [objective],
+      dependencies: [],
+      targetRefs: ["src/"],
+      evidenceRefs: ["evidence_cd09_s07_user_request"],
+      actions: ["Run the bounded local verification command."],
+      toolNames: ["test_run"],
+      acceptanceChecks: [{
+        id: "check-cd09-s07",
+        kind: "test_passes",
+        description: "The bounded local harness passes.",
+        params: { command: "npm run harness:check", workspaceRoot: "." },
+        requiresEvidence: false,
+      }],
+    }],
+    dependencies: [],
+    risks: [],
+    acceptanceCriteria: [objective],
+    acceptanceChecks: [{
+      id: "review-cd09-s07",
+      kind: "model_review",
+      description: "Review the persisted production-stage evidence.",
+      params: {
+        condition: objective,
+        evidenceRefs: ["evidence_cd09_s07_user_request"],
+      },
+      requiresEvidence: true,
+    }],
+    claimLedger: [{
+      id: "claim-cd09-s07",
+      claim: "The plan stages are persisted by the production orchestrator.",
+      evidenceRefs: ["evidence_cd09_s07_user_request"],
+      counterexamples: [],
+      conditions: ["The review stage remains observable across reload."],
+      confidence: 1,
+      status: "verified",
+    }],
+    unresolvedQuestions: [],
+    minorityOpinion: [],
+    actionGate: "ready",
+    gateReason: "The candidate artifact is ready for independent review.",
+  };
+}
+
+function longSessionOutputParts(
+  index: number,
+  createdAt: string,
+): ChatOutputPart[] {
+  const toolCallId = `cd09-s09-tool-${index}`;
+  return [
+    {
+      id: `cd09-s09-text-${index}`,
+      type: "text",
+      text: `Persisted grouped result ${index}.`,
+      format: "plain",
+      createdAt,
+    },
+    {
+      id: `cd09-s09-call-${index}`,
+      type: "tool_call",
+      toolCallId,
+      toolName: "file_list",
+      argsPreview: { path: ".", limit: 20 },
+      createdAt,
+    },
+    {
+      id: `cd09-s09-result-${index}`,
+      type: "tool_result",
+      toolCallId,
+      ok: true,
+      resultPreview: {
+        count: 20,
+        summary: "bounded file metadata ".repeat(12),
+      },
+      createdAt,
+    },
+  ];
+}
+
+async function startRendererPerformanceSession(
+  window: BrowserWindow,
+): Promise<RendererPerformanceSession> {
+  const runtimeDebugger = window.webContents.debugger;
+  const attachedByAcceptance = !runtimeDebugger.isAttached();
+  if (attachedByAcceptance) runtimeDebugger.attach("1.3");
+  await runtimeDebugger.sendCommand("Performance.enable");
+  return {
+    attachedByAcceptance,
+    before: await readRendererPerformanceSample(window),
+  };
+}
+
+async function readRendererPerformanceSample(
+  window: BrowserWindow,
+): Promise<RendererPerformanceSample> {
+  const response = await window.webContents.debugger.sendCommand(
+    "Performance.getMetrics",
+  ) as { metrics?: Array<{ name?: string; value?: number }> };
+  const metrics = new Map(
+    (response.metrics ?? []).flatMap((entry) =>
+      typeof entry.name === "string" && Number.isFinite(entry.value)
+        ? [[entry.name, entry.value!]] as const
+        : [],
+    ),
+  );
+  const taskDurationSeconds = metrics.get("TaskDuration");
+  const jsHeapUsedBytes = metrics.get("JSHeapUsedSize");
+  const nodeCount = metrics.get("Nodes");
+  if (
+    taskDurationSeconds === undefined
+    || jsHeapUsedBytes === undefined
+    || nodeCount === undefined
+    || jsHeapUsedBytes <= 0
+    || nodeCount <= 0
+  ) {
+    throw new Error("S09 renderer CPU/heap/DOM metrics are unavailable.");
+  }
+  return { taskDurationSeconds, jsHeapUsedBytes, nodeCount };
+}
+
+async function finishRendererPerformanceSession(
+  window: BrowserWindow,
+  session: RendererPerformanceSession,
+): Promise<Record<string, number | boolean>> {
+  try {
+    const after = await readRendererPerformanceSample(window);
+    const cpuTaskDurationMs = Math.max(
+      0,
+      (after.taskDurationSeconds - session.before.taskDurationSeconds) * 1_000,
+    );
+    const heapGrowthBytes = Math.max(
+      0,
+      after.jsHeapUsedBytes - session.before.jsHeapUsedBytes,
+    );
+    const domNodeGrowth = Math.max(0, after.nodeCount - session.before.nodeCount);
+    return {
+      rendererMetricsAvailable: true,
+      cpuTaskDurationMs,
+      heapBeforeBytes: session.before.jsHeapUsedBytes,
+      heapAfterBytes: after.jsHeapUsedBytes,
+      heapGrowthBytes,
+      domNodeCount: after.nodeCount,
+      domNodeGrowth,
+      cpuHeapDomBounded:
+        cpuTaskDurationMs < 5_000
+        && heapGrowthBytes < 32 * 1024 * 1024
+        && after.nodeCount < 20_000
+        && domNodeGrowth < 2_000,
+    };
+  } finally {
+    if (
+      session.attachedByAcceptance
+      && window.webContents.debugger.isAttached()
+    ) {
+      window.webContents.debugger.detach();
+    }
+  }
+}
+
 export async function runConversationDisclosureScenario(options: {
   container: AppContainer;
   window: BrowserWindow;
@@ -594,13 +1074,7 @@ export async function runConversationDisclosureScenario(options: {
 }): Promise<ConversationDisclosureScenarioReceipt> {
   const { window, mode, prepared } = options;
   await waitForRenderer(window);
-  const approvalRuntime = (
-    mode.scenarioId === "S05-approval-attention"
-    || (
-      mode.scenarioId === "S17-cancel-interruption"
-      && mode.phase === "initial"
-    )
-  )
+  const approvalRuntime = mode.scenarioId === "S05-approval-attention"
     ? await startApprovalScenario(
         options.approvalCoordinator,
         prepared,
@@ -612,18 +1086,127 @@ export async function runConversationDisclosureScenario(options: {
   const actionCount =
     conversationDisclosureScenarioActionCounts[mode.scenarioId];
   for (let index = 0; index < actionCount; index += 1) {
-    actions.push(await executeScenarioAction({
-      window,
-      scenarioId: mode.scenarioId,
-      index,
-      prepared,
-      approvalRuntime,
-      phase: mode.phase,
-    }));
+    const ipcBefore = options.ipcInvocations();
+    const deferredS17PhaseAction =
+      mode.scenarioId === "S17-cancel-interruption"
+      && (
+        (mode.phase === "initial" && index === 2)
+        || (mode.phase === "restart" && index < 2)
+      );
+    let action: ConversationDisclosureScenarioActionReceipt =
+      deferredS17PhaseAction
+        ? {
+            index,
+            action: conversationDisclosureScenarioActions[mode.scenarioId][index]!,
+            executor: "production_main",
+            ok: true,
+            evidenceIds: [
+              `process:${options.processEpoch}`,
+              `phase-deferred:${mode.phase}:${index}`,
+            ],
+            observations: {
+              phaseDeferred:
+                mode.phase === "initial" ? "restart" : "initial",
+            },
+          }
+        : await executeScenarioAction({
+            container: options.container,
+            window,
+            scenarioId: mode.scenarioId,
+            index,
+            prepared,
+            approvalRuntime,
+            phase: mode.phase,
+          });
+    if (
+      mode.scenarioId === "S17-cancel-interruption"
+      && mode.phase === "restart"
+      && index === 2
+    ) {
+      await reloadRenderer(window);
+      const settledProjection = await inspectSettledS17Projection(
+        window,
+        prepared.sessionId,
+      );
+      if (
+        settledProjection.listedWorkStatus !== "completed"
+        || settledProjection.sidebarBadgeText !== "已完成"
+        || settledProjection.recoveredSessionVisible !== true
+      ) {
+        throw new Error(
+          "S17 settled attempt did not reach the canonical completed sidebar projection.",
+        );
+      }
+      action = {
+        ...action,
+        observations: {
+          ...action.observations,
+          ...settledProjection,
+        },
+      };
+    }
+    if (mode.scenarioId === "S08-scheduled-progress" && index === 0) {
+      const delta = options.ipcInvocations().slice(ipcBefore.length);
+      const runsCalls = delta.filter(
+        (entry) => entry.channel === "agentRuns:list",
+      ).length;
+      const activeCalls = delta.filter(
+        (entry) => entry.channel === "agentRuns:listActiveExecutions",
+      ).length;
+      const evalCalls = delta.filter(
+        (entry) => entry.channel === "agentEvalCandidates:list",
+      ).length;
+      const fullSnapshotRefreshCount = Math.min(
+        runsCalls,
+        activeCalls,
+        evalCalls,
+      );
+      const streamEventCount = Number(action.observations.streamEventCount);
+      if (
+        fullSnapshotRefreshCount > 1
+        || fullSnapshotRefreshCount >= streamEventCount
+      ) {
+        throw new Error(
+          "S08 stream events triggered an unbounded full snapshot refresh.",
+        );
+      }
+      action = {
+        ...action,
+        observations: {
+          ...action.observations,
+          fullSnapshotRefreshCount,
+          streamRefreshBounded: true,
+        },
+      };
+    }
+    actions.push(action);
     if (approvalRuntime && index === 1) {
       await waitForPaint(window);
       actionScreenshot = (await window.webContents.capturePage()).toPNG();
     }
+  }
+  if (mode.scenarioId === "S11-secret-safety") {
+    const actualRunId = String(actions[0]?.observations.actualRunId ?? "");
+    if (!actualRunId || actualRunId === "missing") {
+      throw new Error("S11 did not expose the exact production AgentRun id.");
+    }
+    const episodeExport = await exportAgentEpisodeFromConfig({
+      configDir: path.join(mode.userDataPath, "config"),
+      outDir: path.join(mode.userDataPath, "cd09-s11-episode-export"),
+      runId: actualRunId,
+      backend: "sqlite",
+      exportedAt: new Date().toISOString(),
+    });
+    const finalAction = actions.at(-1);
+    if (!finalAction || episodeExport.files.length === 0) {
+      throw new Error("S11 exact-run episode export produced no evidence.");
+    }
+    finalAction.observations = {
+      ...finalAction.observations,
+      episodeExported: true,
+      episodeExportRunId: episodeExport.runId,
+      episodeExportFileCount: episodeExport.files.length,
+    };
   }
   if (approvalRuntime && mode.scenarioId === "S05-approval-attention") {
     const result = await approvalRuntime.result;
@@ -652,7 +1235,6 @@ export async function runConversationDisclosureScenario(options: {
     );
   }
   await waitForPaint(window);
-  await mkdir(path.dirname(mode.screenshotPath), { recursive: true });
   const screenshot =
     actionScreenshot ?? (await window.webContents.capturePage()).toPNG();
   const screenshotImage = nativeImage.createFromBuffer(screenshot);
@@ -667,17 +1249,27 @@ export async function runConversationDisclosureScenario(options: {
   if (screenshotImage.isEmpty() || sampledColors.size < 8) {
     throw new Error("Production scenario screenshot is blank or near-uniform.");
   }
-  await writeFile(mode.screenshotPath, screenshot, { flag: "wx" });
+  await writeBoundArtifact(mode.screenshotFd, screenshot);
   const screenshotDigest = sha256(screenshot);
   const ipcInvocations = options.ipcInvocations();
   if (
     ipcInvocations.length === 0
     || ipcInvocations.some((entry, index) => entry.ordinal !== index + 1)
     || !ipcInvocations.some((entry) => entry.channel === "chatSessions:list")
-    || !ipcInvocations.some((entry) => entry.channel === "chatSessions:get")
+    || !ipcInvocations.some((entry) =>
+      entry.channel === (
+        mode.scenarioId === "S09-long-session"
+          ? "chatSessions:getTranscriptPage"
+          : "chatSessions:get"
+      )
+    )
     || !ipcInvocations.some((entry) => entry.channel === "agentRuns:list")
-    || !ipcInvocations.some(
-      (entry) => entry.channel === "agentRuns:listTrajectory",
+    || !ipcInvocations.some((entry) =>
+      entry.channel === (
+        mode.scenarioId === "S09-long-session"
+          ? "agentRuns:getTrajectoryPage"
+          : "agentRuns:listTrajectory"
+      )
     )
   ) {
     throw new Error("Scenario did not traverse the required production IPC path.");
@@ -705,6 +1297,7 @@ export async function runConversationDisclosureScenario(options: {
     scenarioDigest: mode.scenarioDigest,
     executionId: randomUUID(),
     processEpochs: [options.processEpoch],
+    attemptNonces: [mode.attemptNonce],
     productionMain: true as const,
     productionPreload: true as const,
     demoDataUsed: false as const,
@@ -720,11 +1313,83 @@ export async function runConversationDisclosureScenario(options: {
     ...receiptInput,
     digest: hashCanonical(receiptInput),
   };
-  await mkdir(path.dirname(mode.outputPath), { recursive: true });
-  await writeFile(mode.outputPath, `${JSON.stringify(receipt, null, 2)}\n`, {
-    flag: "wx",
-  });
+  await writeBoundArtifact(
+    mode.outputFd,
+    `${JSON.stringify(receipt, null, 2)}\n`,
+  );
   return receipt;
+}
+
+async function inspectSettledS17Projection(
+  window: BrowserWindow,
+  sessionId: string,
+): Promise<Record<string, string | boolean>> {
+  return window.webContents.executeJavaScript(`
+    (async () => {
+      const api = window.buildingAgent;
+      let listedWorkStatus = "missing";
+      let sidebarBadgeText = "missing";
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const sessions = await api.listChatSessions();
+        const listedSession = sessions.find(
+          (entry) => entry.id === ${JSON.stringify(sessionId)}
+        );
+        listedWorkStatus = listedSession?.work?.status ?? "missing";
+        const sessionButton = [...document.querySelectorAll(
+          "button[data-session-id]"
+        )].find(
+          (element) => element.getAttribute("data-session-id")
+            === ${JSON.stringify(sessionId)}
+        );
+        sidebarBadgeText = sessionButton
+          ?.querySelector(".goal-session-badge")
+          ?.textContent
+          ?.trim() ?? "missing";
+        if (
+          listedWorkStatus === "completed"
+          && sidebarBadgeText === "已完成"
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const settledSessionButton = [...document.querySelectorAll(
+        "button[data-session-id]"
+      )].find(
+        (element) => element.getAttribute("data-session-id")
+          === ${JSON.stringify(sessionId)}
+      );
+      settledSessionButton?.click();
+      let recoveredSessionVisible = false;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        recoveredSessionVisible = document.body.innerText.includes(
+          "Accepted production response for S17-cancel-interruption."
+        );
+        if (recoveredSessionVisible) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return {
+        projectionReloaded: true,
+        listedWorkStatus,
+        sidebarBadgeText,
+        recoveredSessionVisible
+      };
+    })()
+  `);
+}
+
+async function writeBoundArtifact(
+  fd: number,
+  content: string | Buffer,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    writeFileDescriptor(fd, content, (error) =>
+      error ? reject(error) : resolve()
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    fsync(fd, (error) => error ? reject(error) : resolve());
+  });
 }
 
 async function exerciseAccessibilityKeyboardAction(
@@ -744,8 +1409,8 @@ async function exerciseAccessibilityKeyboardAction(
       await new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))
       );
-      const sessionButton = [...document.querySelectorAll("button")].find(
-        (element) => element.textContent?.includes("CD09")
+      const sessionButton = [...document.querySelectorAll("button[data-session-id]")].find(
+        (element) => element.getAttribute("data-session-id") === ${JSON.stringify(sessionId)}
       );
       sessionButton?.click();
       await new Promise((resolve) =>
@@ -964,8 +1629,8 @@ async function exerciseReducedMotionAccessibilityAction(
       await new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))
       );
-      const sessionButton = [...document.querySelectorAll("button")].find(
-        (element) => element.textContent?.includes("CD09")
+      const sessionButton = [...document.querySelectorAll("button[data-session-id]")].find(
+        (element) => element.getAttribute("data-session-id") === ${JSON.stringify(sessionId)}
       );
       sessionButton?.click();
       await new Promise((resolve) =>
@@ -1005,16 +1670,16 @@ async function exerciseReducedMotionAccessibilityAction(
   return window.webContents.executeJavaScript(`
     (() => {
       const parseDurationMs = (value) =>
-        Math.max(...value.split(",").map((entry) => {
+        value.split(",").reduce((maximum, entry) => {
           const normalized = entry.trim();
           if (normalized.endsWith("ms")) {
-            return Number.parseFloat(normalized);
+            return Math.max(maximum, Number.parseFloat(normalized));
           }
           if (normalized.endsWith("s")) {
-            return Number.parseFloat(normalized) * 1000;
+            return Math.max(maximum, Number.parseFloat(normalized) * 1000);
           }
           return Number.POSITIVE_INFINITY;
-        }));
+        }, 0);
       const state = window.__cd09ReducedMotion;
       const disclosure = document.querySelector(
         '[data-testid="conversation-disclosure"]'
@@ -1051,6 +1716,7 @@ async function exerciseReducedMotionAccessibilityAction(
 }
 
 async function executeScenarioAction(options: {
+  container: AppContainer;
   window: BrowserWindow;
   scenarioId: ConversationDisclosureScenarioId;
   index: number;
@@ -1060,6 +1726,12 @@ async function executeScenarioAction(options: {
 }): Promise<ConversationDisclosureScenarioActionReceipt> {
   let preliminaryObservations: Record<string, string | number | boolean> = {};
   let guidedInputReloaded = false;
+  if (
+    options.scenarioId === "S07-plan-progress"
+    && options.index === 2
+  ) {
+    await completeAcceptancePlanRuntime(options.prepared);
+  }
   if (
     options.scenarioId === "S14-guided-input"
     && options.index === 0
@@ -1122,7 +1794,21 @@ async function executeScenarioAction(options: {
         options.prepared.sessionId,
       );
   }
-  const result = await options.window.webContents.executeJavaScript(`
+  const rendererPerformanceSession =
+    options.scenarioId === "S09-long-session" && options.index === 2
+      ? await startRendererPerformanceSession(options.window)
+      : null;
+  let result: {
+    ok?: boolean;
+    reason?: string;
+    sessionLoaded?: boolean;
+    sessionListed?: boolean;
+    runListed?: boolean;
+    trajectoryLoaded?: boolean;
+    actionObservations?: Record<string, string | number | boolean>;
+  };
+  try {
+    result = await options.window.webContents.executeJavaScript(`
     (async () => {
       const api = window.buildingAgent;
       if (!api || typeof api.getRuntimeInfo !== "function") {
@@ -1135,20 +1821,26 @@ async function executeScenarioAction(options: {
         requestAnimationFrame(() => requestAnimationFrame(resolve))
       );
       const sessions = await api.listChatSessions();
-      let session = await api.getChatSession(${
-        JSON.stringify(options.prepared.sessionId)
-      });
+      const isLongSession = ${JSON.stringify(options.scenarioId)} === "S09-long-session";
+      let session = isLongSession
+        ? null
+        : await api.getChatSession(${JSON.stringify(options.prepared.sessionId)});
       const runs = await api.listAgentRuns();
-      const trajectory = await api.listAgentRunTrajectory(${
-        JSON.stringify(options.prepared.runId)
-      });
+      let trajectory = isLongSession
+        ? (await api.getAgentRunTrajectoryPage(
+            ${JSON.stringify(options.prepared.runId)},
+            { limit: 200 }
+          )).records
+        : await api.listAgentRunTrajectory(${
+            JSON.stringify(options.prepared.runId)
+          });
       const scheduledTasks = await api.listScheduledTasks();
       let semanticOk = true;
       let actionObservations = ${
         JSON.stringify(preliminaryObservations)
       };
-      const sessionButton = [...document.querySelectorAll("button")].find(
-        (element) => element.textContent?.includes("CD09")
+      const sessionButton = [...document.querySelectorAll("button[data-session-id]")].find(
+        (element) => element.getAttribute("data-session-id") === ${JSON.stringify(options.prepared.sessionId)}
       );
       if (${JSON.stringify(routeForScenario(options.scenarioId, options.index))} === "#chat") {
         sessionButton?.click();
@@ -1156,6 +1848,9 @@ async function executeScenarioAction(options: {
           requestAnimationFrame(() => requestAnimationFrame(resolve))
         );
       }
+      const chatSurface = document.querySelector(
+        '[data-testid="agent-chat-panel"]'
+      );
       if (${JSON.stringify(options.scenarioId)} === "S01-default-narrative") {
         if (${options.index} === 0) {
           const streamEvents = [];
@@ -1573,29 +2268,151 @@ async function executeScenarioAction(options: {
               sendResult.ok === false ? sendResult.code ?? "missing" : "unexpected-success"
           };
         } else if (${options.index} === 1) {
-          const pending = await api.getPendingToolApprovals();
-          const expectedPending = ${
-            JSON.stringify(options.phase === "initial" ? 1 : 0)
-          };
-          semanticOk = pending.length === expectedPending;
-          actionObservations = {
-            pendingApprovalCount: pending.length,
-            priorPrivilegeRecovered: pending.length > 0
-          };
+          if (${JSON.stringify(options.phase)} === "initial") {
+            window.__cd09S17PendingCompletion = api.sendChatMessage({
+              sessionId: ${JSON.stringify(options.prepared.sessionId)},
+              requestId: "cd09-s17-pending-approval",
+              message: "Start a real approval-bound tool invocation."
+            }).catch((error) => error);
+            let pending = [];
+            for (let attempt = 0; attempt < 200; attempt += 1) {
+              pending = await api.getPendingToolApprovals();
+              if (pending.length === 1) break;
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            const approval = pending[0];
+            const identity = approval?.causalRef?.toolInvocationIdentity;
+            const invocationTrajectory = identity?.runId
+              ? await api.listAgentRunTrajectory(identity.runId)
+              : [];
+            const waitingInvocationPersisted = invocationTrajectory.some(
+              (event) =>
+                event.payload?.toolInvocationId === identity?.id
+                && event.payload?.invocationStatus === "waiting_approval"
+                && event.payload?.approvalId === approval?.id
+            );
+            const invocationIdentityFrozen = Boolean(
+              identity?.id
+              && identity?.runId
+              && identity?.toolCallId
+              && identity?.toolName === "shell_exec"
+              && identity?.source
+              && identity?.createdAt
+              && approval?.causalRef?.toolInvocationId === identity.id
+              && approval?.causalRef?.toolInvocationRunId === identity.runId
+            );
+            semanticOk =
+              pending.length === 1
+              && waitingInvocationPersisted
+              && invocationIdentityFrozen;
+            actionObservations = {
+              pendingApprovalCount: pending.length,
+              priorPrivilegeRecovered: false,
+              waitingInvocationPersisted,
+              invocationIdentityFrozen,
+              approvalBoundToInvocation:
+                approval?.id === "approval-S17-cancel-interruption"
+                && approval?.causalRef?.requestId
+                  === "cd09-s17-pending-approval"
+            };
+          } else {
+            const pending = await api.getPendingToolApprovals();
+            const waitingInvocationPersisted = trajectory.some(
+              (event) =>
+                event.payload?.toolInvocationId === ${JSON.stringify(
+                  options.prepared.interruptedToolInvocationId ?? "missing",
+                )}
+                && event.payload?.invocationStatus === "waiting_approval"
+            );
+            semanticOk = pending.length === 0 && waitingInvocationPersisted;
+            actionObservations = {
+              pendingApprovalCount: pending.length,
+              priorPrivilegeRecovered: false,
+              waitingInvocationPersisted,
+              invocationIdentityFrozen: Boolean(${JSON.stringify(
+                options.prepared.interruptedToolInvocationId ?? "",
+              )}),
+              approvalBoundToInvocation: ${JSON.stringify(
+                options.prepared.interruptedApprovalId
+                  === "approval-S17-cancel-interruption",
+              )}
+            };
+          }
         } else {
           session = await api.getChatSession(${
             JSON.stringify(options.prepared.sessionId)
           });
           const persisted = JSON.stringify(session);
           const pending = await api.getPendingToolApprovals();
+          const interruptedTrajectory = ${JSON.stringify(
+            options.phase === "restart",
+          )}
+            ? await api.listAgentRunTrajectory(${JSON.stringify(
+              options.prepared.interruptedToolInvocationRunId ?? "missing",
+            )})
+            : trajectory;
+          const nextAttempt = ${JSON.stringify(options.phase === "restart")}
+            ? await api.sendChatMessage({
+                sessionId: ${JSON.stringify(options.prepared.sessionId)},
+                requestId: "cd09-s17-new-attempt",
+                message: "Start a distinct post-recovery attempt."
+              })
+            : null;
+          const recovered = nextAttempt
+            ? await api.getChatSession(${JSON.stringify(options.prepared.sessionId)})
+            : session;
+          const distinctAttemptPersisted = Boolean(
+            recovered?.messages?.some(
+              (message) => message.requestId === "cd09-s17-new-attempt"
+            )
+          );
           semanticOk = ${JSON.stringify(options.phase === "restart")}
             ? pending.length === 0
               && persisted.includes("canceled")
+              && interruptedTrajectory.some(
+                (event) =>
+                  event.payload?.toolInvocationId === ${JSON.stringify(
+                    options.prepared.interruptedToolInvocationId ?? "missing",
+                  )}
+                  && event.payload?.invocationStatus === "aborted"
+              )
+              && ${JSON.stringify(
+                options.prepared.interruptedWorkspaceAborted === true,
+              )}
+              && ${JSON.stringify(
+                options.prepared.interruptedChatAborted === true,
+              )}
+              && nextAttempt?.ok === true
+              && distinctAttemptPersisted
             : pending.length === 1;
           actionObservations = {
             coldStartPendingCount: pending.length,
             canceledAuthorityPersisted: persisted.includes("canceled"),
-            explicitNewAttemptRequired: pending.length === 0
+            explicitNewAttemptRequired: pending.length === 0,
+            interruptedApprovalPersisted: ${JSON.stringify(
+              options.phase === "restart"
+                ? Boolean(options.prepared.interruptedApprovalId)
+                : "deferred_to_restart",
+            )},
+            trajectoryInvocationAborted: ${JSON.stringify(
+              options.phase === "restart"
+                ? options.prepared.interruptedTrajectoryAborted === true
+                : "deferred_to_restart",
+            )},
+            workspaceInvocationAborted: ${JSON.stringify(
+              options.phase === "restart"
+                ? options.prepared.interruptedWorkspaceAborted === true
+                : "deferred_to_restart",
+            )},
+            chatInvocationAborted: ${JSON.stringify(
+              options.phase === "restart"
+                ? options.prepared.interruptedChatAborted === true
+                : "deferred_to_restart",
+            )},
+            newAttemptSucceeded:
+              nextAttempt === null ? "deferred_to_restart" : nextAttempt.ok === true,
+            distinctAttemptPersisted:
+              nextAttempt === null ? "deferred_to_restart" : distinctAttemptPersisted
           };
         }
       }
@@ -1673,16 +2490,122 @@ async function executeScenarioAction(options: {
         const expectedMode = ${
           JSON.stringify(options.phase === "restart" ? "legacy" : "projected")
         };
-        semanticOk =
-          disclosureMode === expectedMode
-          && Boolean(session)
-          && trajectory.length > 0;
-        actionObservations = {
-          disclosureMode,
-          sessionReadable: Boolean(session),
-          availableTrajectoryCount: trajectory.length,
-          coveragePartial: trajectory.length === 1
-        };
+        const exactRun = runs.find(
+          (entry) => entry.id === ${JSON.stringify(options.prepared.runId)}
+        );
+        const exactTrajectory = trajectory.find(
+          (entry) => entry.id === "cd09-v391-trajectory-event"
+        );
+        const compatibilityIdStable =
+          session?.id === "cd09-v391-session"
+          && exactRun?.id === "cd09-v391-run"
+          && exactTrajectory?.runId === "cd09-v391-run";
+        const authorityLinkageValid = ${JSON.stringify(
+          options.prepared.legacyAuthorityLinkageValid === true,
+        )};
+        const sourceNotMutated = ${JSON.stringify(
+          options.prepared.legacySourceNotMutated === true,
+        )};
+        const fixtureDigest = ${JSON.stringify(
+          options.prepared.legacyFixtureDigest ?? "missing",
+        )};
+        const sourceCutId = ${JSON.stringify(
+          options.prepared.legacySourceCutId ?? "missing",
+        )};
+        if (${options.index} === 0) {
+          const goalSummaryLinked =
+            session?.goalIds?.includes("cd09-v391-goal") === true
+            && session?.messages?.some(
+              (message) =>
+                message.role === "assistant"
+                && message.executedRunId === "cd09-v391-run"
+                && message.goalId === "cd09-v391-goal"
+            );
+          semanticOk =
+            disclosureMode === expectedMode
+            && Boolean(session)
+            && goalSummaryLinked
+            && compatibilityIdStable
+            && authorityLinkageValid
+            && sourceNotMutated;
+          actionObservations = {
+            disclosureMode,
+            sessionReadable: Boolean(session),
+            goalSummaryLinked,
+            compatibilityIdStable,
+            authorityLinkageValid,
+            fixtureDigest,
+            sourceCutId,
+            sourceNotMutated
+          };
+        } else if (${options.index} === 1) {
+          const runButton = [...document.querySelectorAll(
+            ".task-record-row"
+          )].find((element) =>
+            element.textContent?.includes("v3.9.1 multidomain compatibility")
+          );
+          runButton?.click();
+          await new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve))
+          );
+          const technicalDetails = document.querySelector(
+            ".task-record-technical-details"
+          );
+          if (technicalDetails && !technicalDetails.open) {
+            technicalDetails.querySelector("summary")?.click();
+            await new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve))
+            );
+          }
+          const intentionalAbsenceCount = ${JSON.stringify(
+            options.prepared.legacyIntentionalAbsenceCount ?? 0,
+          )};
+          semanticOk =
+            disclosureMode === expectedMode
+            && Boolean(runButton)
+            && Boolean(technicalDetails?.open)
+            && Boolean(exactRun)
+            && Boolean(exactTrajectory)
+            && authorityLinkageValid
+            && intentionalAbsenceCount > 0
+            && sourceNotMutated;
+          actionObservations = {
+            disclosureMode,
+            runReadable: Boolean(exactRun),
+            trajectoryReadable: Boolean(exactTrajectory),
+            goalReadable: authorityLinkageValid,
+            planReadable: authorityLinkageValid,
+            technicalEvidenceOpen: Boolean(technicalDetails?.open),
+            availableTrajectoryCount: trajectory.length,
+            coveragePartial: intentionalAbsenceCount > 0,
+            intentionalAbsenceCount,
+            authorityRecordCount: ${JSON.stringify(
+              options.prepared.legacyAuthorityRecordCount ?? 0,
+            )},
+            authorityLinkageValid,
+            fixtureDigest,
+            sourceCutId,
+            sourceNotMutated
+          };
+        } else {
+          semanticOk =
+            disclosureMode === expectedMode
+            && Boolean(session)
+            && compatibilityIdStable
+            && authorityLinkageValid
+            && sourceNotMutated;
+          actionObservations = {
+            disclosureMode,
+            sessionReadable: Boolean(session),
+            runReadable: Boolean(exactRun),
+            trajectoryReadable: Boolean(exactTrajectory),
+            compatibilityIdStable,
+            authorityLinkageValid,
+            fixtureDigest,
+            sourceCutId,
+            sourceNotMutated
+          };
+        }
       }
       if (${JSON.stringify(options.scenarioId)} === "S14-guided-input") {
         if (${options.index} === 0) {
@@ -1768,19 +2691,31 @@ async function executeScenarioAction(options: {
             String(plan?.revision ?? -1)
           );
           semanticOk =
-            plan?.status === "paused"
+            plan?.status === "drafting"
+            && (plan.planningStages?.length ?? 0) >= 6
             && plan.planningStages?.some(
               (stage) =>
-                stage.kind === "generation"
-                && stage.status === "running"
+                stage.kind === "review" && stage.status === "running"
+            ) === true
+            && plan.planningStages?.some(
+              (stage) =>
+                stage.kind === "generation" && stage.status === "completed"
             ) === true;
           actionObservations = {
             persistedPlanLoaded: Boolean(plan),
             planStatus: plan?.status ?? "missing",
-            runningStagePersisted:
+            stageCount: plan?.planningStages?.length ?? 0,
+            generationStagePersisted:
               plan?.planningStages?.some(
-                (stage) => stage.status === "running"
-              ) === true
+                (stage) =>
+                  stage.kind === "generation" && stage.status === "completed"
+              ) === true,
+            runningReviewPersisted:
+              plan?.planningStages?.some(
+                (stage) =>
+                  stage.kind === "review" && stage.status === "running"
+              ) === true,
+            productionModelCallCount: ${options.prepared.planRuntime?.modelCalls.length ?? 0}
           };
         } else if (${options.index} === 1) {
           const expectedRevision = Number(
@@ -1795,60 +2730,118 @@ async function executeScenarioAction(options: {
           };
         } else {
           semanticOk =
-            plan?.status === "paused"
+            plan?.status === "awaiting_input"
             && plan?.actionGate === "blocked"
-            && plan?.executionGoalId === undefined;
+            && plan?.executionGoalId === undefined
+            && plan?.planningStages?.some(
+              (stage) =>
+                stage.kind === "review"
+                && stage.status === "completed"
+                && stage.reviewApproved === false
+            ) === true
+            && plan?.planningStages?.some(
+              (stage) => stage.kind === "quality" && stage.status === "failed"
+            ) === true;
           actionObservations = {
             authoritativePlanStatus: plan?.status ?? "missing",
             blockedDecisionVisible: plan?.actionGate === "blocked",
-            goalSemanticsUnchanged: plan?.executionGoalId === undefined
+            goalSemanticsUnchanged: plan?.executionGoalId === undefined,
+            reviewRejectedPersisted:
+              plan?.planningStages?.some(
+                (stage) =>
+                  stage.kind === "review"
+                  && stage.status === "completed"
+                  && stage.reviewApproved === false
+              ) === true,
+            qualityFailurePersisted:
+              plan?.planningStages?.some(
+                (stage) =>
+                  stage.kind === "quality" && stage.status === "failed"
+              ) === true,
+            productionModelCallCount: ${options.prepared.planRuntime?.modelCalls.length ?? 0}
           };
         }
       }
       if (${JSON.stringify(options.scenarioId)} === "S15-goal-acceptance") {
         const goalId = ${JSON.stringify(options.prepared.goalId ?? "")};
+        const unverifiedGoalId = ${
+          JSON.stringify(options.prepared.unverifiedGoalId ?? "")
+        };
         let goal = await api.getGoal(goalId);
         if (${options.index} === 0) {
+          const unverifiedGoal = await api.getGoal(unverifiedGoalId);
+          const certifiedReplay = goal?.acceptanceRetryState?.finalJudgeReplay;
+          const unverifiedReplay =
+            unverifiedGoal?.acceptanceRetryState?.finalJudgeReplay;
+          const branchSourceMatched =
+            Boolean(certifiedReplay)
+            && Boolean(unverifiedReplay)
+            && JSON.stringify(goal?.successCriteria)
+              === JSON.stringify(unverifiedGoal?.successCriteria)
+            && JSON.stringify(certifiedReplay?.deterministicCheckResults)
+              === JSON.stringify(unverifiedReplay?.deterministicCheckResults)
+            && JSON.stringify(certifiedReplay?.evidenceManifest)
+              === JSON.stringify(unverifiedReplay?.evidenceManifest);
           semanticOk =
             goal?.status === "waiting_for_acceptance"
-            && goal.acceptanceState?.phase === "awaiting_user";
+            && unverifiedGoal?.status === "waiting_for_acceptance"
+            && goal.acceptanceState?.phase === "awaiting_user"
+            && unverifiedGoal.acceptanceState?.phase === "awaiting_user"
+            && branchSourceMatched;
           actionObservations = {
             goalLoaded: Boolean(goal),
             reviewGateStatus: goal?.status ?? "missing",
             acceptancePhase:
-              goal?.acceptanceState?.phase ?? "missing"
+              goal?.acceptanceState?.phase ?? "missing",
+            branchSourceMatched
           };
         } else if (${options.index} === 1) {
-          const completed = await api.markGoalCompletedUnverified(goalId);
-          goal = await api.getGoal(goalId);
+          const completed = await api.markGoalCompletedUnverified(
+            unverifiedGoalId
+          );
+          const unverifiedGoal = await api.getGoal(unverifiedGoalId);
+          const successNarrativeVisible = document.body.innerText.includes(
+            "目标已达成"
+          );
           semanticOk =
             completed.ok === true
-            && goal?.status === "completed_unverified"
-            && goal?.acceptanceCertificate === undefined;
+            && unverifiedGoal?.status === "completed_unverified"
+            && !unverifiedGoal?.acceptanceCertificate
+            && !successNarrativeVisible;
           actionObservations = {
             manualCompletionApplied: completed.ok === true,
-            completionMessage: completed.message ?? "none",
-            completedUnverified:
-              goal?.status === "completed_unverified",
-            certifiedAsAchieved:
-              goal?.status === "achieved"
-              || Boolean(goal?.acceptanceCertificate)
+            completedUnverifiedStatus:
+              unverifiedGoal?.status === "completed_unverified",
+            acceptanceCertificateAbsent:
+              !unverifiedGoal?.acceptanceCertificate,
+            successNarrativeVisible
           };
         } else {
-          const review = await api.resolveGoalReview(
-            goalId,
-            { kind: "approve_continue" }
-          );
+          const review = await api.continueGoalAcceptance(goalId);
           goal = await api.getGoal(goalId);
+          const unverifiedGoal = await api.getGoal(unverifiedGoalId);
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (document.body.innerText.includes("目标已达成")) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          const achievedNarrativeVisible = document.body.innerText.includes(
+            "目标已达成"
+          );
           semanticOk =
             review.ok === true
-            && goal?.status === "completed_unverified"
-            && !document.body.innerText.includes("目标已达成");
+            && goal?.status === "achieved"
+            && Boolean(goal?.acceptanceCertificate)
+            && unverifiedGoal?.status === "completed_unverified"
+            && !unverifiedGoal?.acceptanceCertificate
+            && achievedNarrativeVisible;
           actionObservations = {
-            terminalReviewIdempotent: review.ok === true,
+            certifiedBranchApplied: review.ok === true,
             terminalStatus: goal?.status ?? "missing",
-            unverifiedNarrativeVisible:
-              !document.body.innerText.includes("目标已达成")
+            acceptanceCertificatePersisted:
+              Boolean(goal?.acceptanceCertificate),
+            unverifiedBranchRemainedTerminal:
+              unverifiedGoal?.status === "completed_unverified",
+            achievedNarrativeVisible
           };
         }
       }
@@ -1908,18 +2901,48 @@ async function executeScenarioAction(options: {
             ${JSON.stringify(options.prepared.sessionId)},
             { limit: 50 }
           );
+          const evidencePage = await api.getAgentRunTrajectoryPage(
+            ${JSON.stringify(options.prepared.runId)},
+            { limit: 75 }
+          );
+          session = page?.session ?? null;
           sessionStorage.setItem(
             "cd09:S09:beforeSequence",
             String(page?.page.startSequence ?? 0)
           );
+          sessionStorage.setItem(
+            "cd09:S09:trajectoryCursor",
+            evidencePage.nextCursor ?? ""
+          );
+          sessionStorage.setItem(
+            "cd09:S09:trajectoryRevision",
+            evidencePage.sourceRevision
+          );
+          sessionStorage.setItem(
+            "cd09:S09:trajectoryLastSequence",
+            String(evidencePage.records.at(-1)?.sequence ?? 0)
+          );
+          const tailPayloadBytes = new TextEncoder().encode(
+            JSON.stringify(page?.session.messages ?? [])
+          ).byteLength;
           semanticOk =
             Boolean(page)
-            && page.session.messages.length <= 50
-            && page.page.hasMoreBefore === true;
+            && page.session.messages.length === 50
+            && page.page.hasMoreBefore === true
+            && (page.page.totalMessages ?? 0) >= 320
+            && tailPayloadBytes > 50 * 1024
+            && evidencePage.status === "complete"
+            && evidencePage.records.length === 75
+            && Boolean(evidencePage.nextCursor);
           actionObservations = {
             tailMessageCount: page?.session.messages.length ?? -1,
             tailBounded: (page?.session.messages.length ?? 51) <= 50,
-            hasOlderPage: page?.page.hasMoreBefore === true
+            totalMessageCount: page?.page.totalMessages ?? -1,
+            tailPayloadBytes,
+            hasOlderPage: page?.page.hasMoreBefore === true,
+            trajectoryPageCount: evidencePage.records.length,
+            trajectoryPageBounded: evidencePage.records.length === 75,
+            trajectoryHasNextPage: Boolean(evidencePage.nextCursor)
           };
         } else if (${options.index} === 1) {
           const beforeSequence = Number(
@@ -1929,34 +2952,85 @@ async function executeScenarioAction(options: {
             ${JSON.stringify(options.prepared.sessionId)},
             { beforeSequence, limit: 50 }
           );
+          const trajectoryCursor = sessionStorage.getItem(
+            "cd09:S09:trajectoryCursor"
+          ) ?? "";
+          const evidencePage = await api.getAgentRunTrajectoryPage(
+            ${JSON.stringify(options.prepared.runId)},
+            { cursor: trajectoryCursor, limit: 75 }
+          );
+          session = older?.session ?? null;
+          const priorTrajectorySequence = Number(
+            sessionStorage.getItem("cd09:S09:trajectoryLastSequence") ?? "0"
+          );
+          const trajectoryPagesDoNotOverlap =
+            evidencePage.records.length > 0
+            && (evidencePage.records[0]?.sequence ?? 0)
+              > priorTrajectorySequence;
           semanticOk =
             Boolean(older)
             && older.session.messages.length > 0
             && older.session.messages.length <= 50
-            && older.page.endSequence < beforeSequence;
+            && older.page.endSequence < beforeSequence
+            && evidencePage.status === "complete"
+            && evidencePage.sourceRevision === sessionStorage.getItem(
+              "cd09:S09:trajectoryRevision"
+            )
+            && evidencePage.records.length === 75
+            && trajectoryPagesDoNotOverlap;
           actionObservations = {
             olderMessageCount: older?.session.messages.length ?? -1,
             olderPageBounded: (older?.session.messages.length ?? 51) <= 50,
             pagesDoNotOverlap:
-              Boolean(older) && older.page.endSequence < beforeSequence
+              Boolean(older) && older.page.endSequence < beforeSequence,
+            olderTrajectoryCount: evidencePage.records.length,
+            trajectoryPagesDoNotOverlap,
+            trajectoryRevisionPinned:
+              evidencePage.sourceRevision === sessionStorage.getItem(
+                "cd09:S09:trajectoryRevision"
+              )
           };
         } else {
+          const streamEvents = [];
+          const unsubscribe = api.onChatStreamEvent((event) => {
+            if (event.requestId === "cd09-s09-stream-update") {
+              streamEvents.push(event);
+            }
+          });
+          const startedAt = performance.now();
           const update = await api.sendChatMessage({
             sessionId: ${JSON.stringify(options.prepared.sessionId)},
             requestId: "cd09-s09-stream-update",
             message: "Append one bounded long-session update."
           });
+          unsubscribe();
           await new Promise((resolve) =>
             requestAnimationFrame(() => requestAnimationFrame(resolve))
           );
+          const tail = await api.getChatSessionTranscriptPage(
+            ${JSON.stringify(options.prepared.sessionId)},
+            { limit: 50 }
+          );
+          session = tail?.session ?? null;
+          const renderDurationMs = performance.now() - startedAt;
           const renderedRows = document.querySelectorAll(
             ".chat-message, .conversation-disclosure [data-disclosure-id]"
           ).length;
-          semanticOk = update.ok === true && renderedRows <= 160;
+          semanticOk =
+            update.ok === true
+            && streamEvents.length > 0
+            && renderedRows > 0
+            && renderedRows <= 160
+            && renderDurationMs < 5_000
+            && (tail?.session.messages.length ?? 51) <= 50;
           actionObservations = {
             streamUpdateSucceeded: update.ok === true,
+            streamEventCount: streamEvents.length,
             renderedRowCount: renderedRows,
-            renderedRowsBounded: renderedRows <= 160
+            renderedRowsBounded: renderedRows > 0 && renderedRows <= 160,
+            renderDurationMs,
+            postUpdateTailCount: tail?.session.messages.length ?? -1,
+            performanceBounded: renderDurationMs < 5_000
           };
         }
       }
@@ -2030,21 +3104,62 @@ async function executeScenarioAction(options: {
         }
       }
       if (${JSON.stringify(options.scenarioId)} === "S11-secret-safety") {
-        const bodyText = document.body.innerText;
-        const persisted = JSON.stringify({ session, trajectory });
-        const forbidden = [
-          "acceptance-not-a-secret",
+        const secretValues = [
+          ${JSON.stringify(options.prepared.secretCanary ?? "missing-canary")},
+          "acceptance-not-a-secret"
+        ];
+        const sensitiveLabels = [
           "api_key=",
           "authorization:"
         ];
+        const forbiddenVisual = [...secretValues, ...sensitiveLabels];
         if (${options.index} === 0) {
-          semanticOk = forbidden.every((value) => !bodyText.includes(value));
+          const streamEvents = [];
+          const unsubscribe = api.onChatStreamEvent((event) => {
+            if (event.requestId === "cd09-s11-secret-boundary") {
+              streamEvents.push(event);
+            }
+          });
+          const sent = await api.sendChatMessage({
+            sessionId: ${JSON.stringify(options.prepared.sessionId)},
+            requestId: "cd09-s11-secret-boundary",
+            message: "Exercise the production secret-redaction boundary."
+          });
+          unsubscribe();
+          session = await api.getChatSession(${
+            JSON.stringify(options.prepared.sessionId)
+          });
+          const bodyText = document.body.innerText;
+          const persisted = JSON.stringify(session);
+          const toolBoundaryTraversed = (session?.activity?.statusEvents ?? [])
+            .some(
+              (event) =>
+                event.requestId === "cd09-s11-secret-boundary"
+                && event.state === "tool_result"
+            );
+          semanticOk =
+            sent.ok === true
+            && toolBoundaryTraversed
+            && forbiddenVisual.every((value) => !bodyText.includes(value))
+            && secretValues.every((value) => !persisted.includes(value))
+            && (bodyText.includes("[redacted]") || persisted.includes("[redacted]"));
           actionObservations = {
             defaultSummarySafe:
-              forbidden.every((value) => !bodyText.includes(value)),
-            redactedMarkerVisible: bodyText.includes("[redacted]")
+              forbiddenVisual.every((value) => !bodyText.includes(value)),
+            redactedMarkerVisible:
+              bodyText.includes("[redacted]") || persisted.includes("[redacted]"),
+            canaryInjected: sent.ok === true,
+            toolBoundaryTraversed,
+            canaryAbsentFromPersistence:
+              !persisted.includes(secretValues[0]),
+            configuredKeyAbsentFromPersistence:
+              !persisted.includes(secretValues[1]),
+            persistedSecretValuesAbsent:
+              secretValues.every((value) => !persisted.includes(value)),
+            actualRunId: sent.agentStatus?.runId ?? "missing"
           };
         } else if (${options.index} === 1) {
+          const bodyText = document.body.innerText;
           const technicalDetails = document.querySelector(
             ".task-record-technical-details"
           );
@@ -2055,24 +3170,23 @@ async function executeScenarioAction(options: {
           const technicalText = technicalDetails?.textContent ?? "";
           semanticOk =
             Boolean(technicalDetails?.open)
-            && forbidden.every((value) => !technicalText.includes(value));
+            && forbiddenVisual.every((value) => !technicalText.includes(value));
           actionObservations = {
             technicalEvidenceOpened: Boolean(technicalDetails?.open),
             technicalEvidenceRedacted:
-              forbidden.every((value) => !technicalText.includes(value))
+              forbiddenVisual.every((value) => !technicalText.includes(value))
           };
         } else {
+          const bodyText = document.body.innerText;
+          const persisted = JSON.stringify({ session, trajectory });
           semanticOk =
-            forbidden.every(
-              (value) =>
-                !bodyText.includes(value)
-                && !persisted.includes(value)
-            );
+            forbiddenVisual.every((value) => !bodyText.includes(value))
+            && secretValues.every((value) => !persisted.includes(value));
           actionObservations = {
             visualArtifactsSafe:
-              forbidden.every((value) => !bodyText.includes(value)),
+              forbiddenVisual.every((value) => !bodyText.includes(value)),
             persistedArtifactsSafe:
-              forbidden.every((value) => !persisted.includes(value))
+              secretValues.every((value) => !persisted.includes(value))
           };
         }
       }
@@ -2174,14 +3288,21 @@ async function executeScenarioAction(options: {
             genericFallbackVisible: bodyText.includes("其他证据")
           };
         } else if (${options.index} === 1) {
+          const coverageAlert = document.querySelector(
+            '[data-testid="unknown-trajectory-coverage"]'
+          );
           semanticOk =
-            required?.payload?.coverage === "degraded"
-            && required?.payload?.resetRequired === true;
+            Boolean(required)
+            && required?.payload?.coverage === undefined
+            && required?.payload?.resetRequired === undefined
+            && coverageAlert?.getAttribute("data-coverage-state") === "degraded"
+            && coverageAlert?.getAttribute("data-reset-required") === "true";
           actionObservations = {
             requiredUnknownLoaded: Boolean(required),
             coverageDegraded:
-              required?.payload?.coverage === "degraded",
-            resetRequired: required?.payload?.resetRequired === true
+              coverageAlert?.getAttribute("data-coverage-state") === "degraded",
+            resetRequired:
+              coverageAlert?.getAttribute("data-reset-required") === "true"
           };
         } else {
           semanticOk = Boolean(optional && required);
@@ -2193,6 +3314,13 @@ async function executeScenarioAction(options: {
       }
       if (${JSON.stringify(options.scenarioId)} === "S05-approval-attention") {
         const pending = await api.getPendingToolApprovals();
+        const listedSession = sessions.find(
+          (entry) => entry.id === ${JSON.stringify(options.prepared.sessionId)}
+        );
+        const sidebarBadgeText = sessionButton
+          ?.querySelector(".goal-session-badge")
+          ?.textContent
+          ?.trim() ?? "missing";
         if (${options.index} < 2) {
           semanticOk =
             pending.length === 1 &&
@@ -2201,7 +3329,10 @@ async function executeScenarioAction(options: {
             } &&
             pending[0].revision === ${
               JSON.stringify(options.approvalRuntime?.revision ?? 0)
-            };
+            } &&
+            listedSession?.work?.source === "chat" &&
+            listedSession.work.status === "waiting_for_approval" &&
+            sidebarBadgeText === "等待授权";
           actionObservations = {
             pendingCount: pending.length,
             approvalIdStable:
@@ -2214,7 +3345,10 @@ async function executeScenarioAction(options: {
               },
             invocationIdStable:
               pending[0]?.causalRef?.toolInvocationId
-                === "invocation-S05-approval-attention"
+                === "invocation-S05-approval-attention",
+            listedWorkStatus:
+              listedSession?.work?.status ?? "missing",
+            sidebarBadgeText
           };
         } else {
           const first = await api.resolveToolApproval({
@@ -2249,7 +3383,7 @@ async function executeScenarioAction(options: {
           trajectory.length > 0 &&
           semanticOk &&
           (${JSON.stringify(routeForScenario(options.scenarioId, options.index))} !== "#chat" ||
-            Boolean(sessionButton)),
+            Boolean(chatSurface)),
         sessionLoaded: Boolean(session),
         sessionListed: sessions.some(
           (entry) => entry.id === ${JSON.stringify(options.prepared.sessionId)}
@@ -2261,16 +3395,36 @@ async function executeScenarioAction(options: {
         actionObservations,
       };
     })()
-  `, true) as {
-    ok?: boolean;
-    reason?: string;
-    sessionLoaded?: boolean;
-    sessionListed?: boolean;
-    runListed?: boolean;
-    trajectoryLoaded?: boolean;
-    actionObservations?: Record<string, string | number | boolean>;
-  };
+    `, true);
+  } catch (error) {
+    if (
+      rendererPerformanceSession?.attachedByAcceptance
+      && options.window.webContents.debugger.isAttached()
+    ) {
+      options.window.webContents.debugger.detach();
+    }
+    throw error;
+  }
+  if (rendererPerformanceSession) {
+    const measurements = await finishRendererPerformanceSession(
+      options.window,
+      rendererPerformanceSession,
+    );
+    result.actionObservations = {
+      ...(result.actionObservations ?? {}),
+      ...measurements,
+    };
+    result.ok = result.ok === true && measurements.cpuHeapDomBounded === true;
+  }
   if (!result?.ok) {
+    const goalLedger = options.prepared.goalId
+      ? (await options.container.agentGoalStore().readLedger(
+          options.prepared.goalId,
+        )).slice(-6).map((entry) => ({
+          kind: entry.kind,
+          summary: entry.summary,
+        }))
+      : undefined;
     throw new Error(
       `Scenario action ${options.scenarioId}/${options.index} failed: ${
         result?.reason ?? JSON.stringify({
@@ -2279,6 +3433,7 @@ async function executeScenarioAction(options: {
           runListed: result?.runListed,
           trajectoryLoaded: result?.trajectoryLoaded,
           actionObservations: result?.actionObservations,
+          ...(goalLedger ? { goalLedger } : {}),
         })
       }`,
     );
@@ -2308,6 +3463,21 @@ async function executeScenarioAction(options: {
       ...(result.actionObservations ?? {}),
     },
   };
+}
+
+async function completeAcceptancePlanRuntime(
+  prepared: PreparedScenario,
+): Promise<void> {
+  const runtime = prepared.planRuntime;
+  if (!runtime || runtime.planId !== prepared.planId) {
+    throw new Error("S07 production Plan runtime is unavailable.");
+  }
+  runtime.releaseReview();
+  const result = await runtime.result;
+  if (!result.ok) throw result.error;
+  if (result.plan.id !== runtime.planId) {
+    throw new Error("S07 production Plan runtime returned the wrong authority.");
+  }
 }
 
 async function establishGuidedInputBeforeReload(
@@ -2487,8 +3657,8 @@ function routeForScenario(
     scenarioId === "S03-evidence-handoff"
     || (scenarioId === "S04-failure-attention" && actionIndex > 0)
     || (scenarioId === "S11-secret-safety" && actionIndex > 0)
+    || (scenarioId === "S13-legacy-coverage" && actionIndex === 1)
     || scenarioId === "S19-unknown-coverage"
-    || scenarioId === "S09-long-session"
   ) {
     return "#runs";
   }
@@ -2592,6 +3762,230 @@ function scenarioLedgerStatus(
   return state === "paused" ? "waiting" : state;
 }
 
+async function prepareLegacyConversationDisclosureScenario(
+  container: AppContainer,
+  mode: ConversationDisclosureAcceptanceEnabledMode,
+  processEpoch: string,
+): Promise<PreparedScenario> {
+  const sessionId = "cd09-v391-session";
+  const goalId = "cd09-v391-goal";
+  const planId = "cd09-v391-plan";
+  const runId = "cd09-v391-run";
+  const trajectoryId = "cd09-v391-trajectory-event";
+  if (
+    !mode.legacyFixtureDigest
+    || !mode.legacySourceCutId
+    || !mode.legacyIntentionalAbsences?.length
+  ) {
+    throw new Error("S13 immutable fixture authority metadata is incomplete.");
+  }
+
+  const beforeDigest = await hashLegacyFixtureAuthority(mode.userDataPath);
+  if (beforeDigest !== mode.legacyFixtureDigest) {
+    throw new Error("S13 immutable multidomain fixture changed before product read.");
+  }
+  const [
+    session,
+    listedSessions,
+    goal,
+    sessionGoals,
+    goalLedger,
+    plan,
+    sessionPlans,
+    run,
+    listedRuns,
+    trajectory,
+  ] = await Promise.all([
+    container.chatSessionStore().get(sessionId),
+    container.chatSessionStore().list(),
+    container.agentGoalStore().get(goalId),
+    container.agentGoalStore().listByChatSession(sessionId),
+    container.agentGoalStore().readLedger(goalId),
+    container.planStore().get(planId),
+    container.planStore().listBySession(sessionId),
+    container.agentRunStore().get(runId),
+    container.agentRunStore().list({ limit: Number.MAX_SAFE_INTEGER }),
+    container.agentTrajectoryStore().list(runId),
+  ]);
+  const assistantMessage = session?.messages.find(
+    (message) => message.role === "assistant",
+  );
+  const trajectoryEvent = trajectory.find((event) => event.id === trajectoryId);
+  const authorityLinkageValid = Boolean(
+    session
+    && goal
+    && plan
+    && run
+    && trajectory.length === 1
+    && trajectoryEvent
+    && listedSessions.some((entry) => entry.id === sessionId)
+    && sessionGoals.some((entry) => entry.id === goalId)
+    && sessionPlans.some((entry) => entry.id === planId)
+    && listedRuns.some((entry) => entry.id === runId)
+    && session.goalIds?.includes(goalId)
+    && assistantMessage?.executedRunId === runId
+    && assistantMessage.goalId === goalId
+    && goal.chatSessionId === sessionId
+    && goal.activePlanRef?.planId === planId
+    && goal.planHistory?.some((entry) => entry.planId === planId) === true
+    && goal.milestones.some((milestone) =>
+      milestone.id === "cd09-v391-milestone"
+      && milestone.runIds.includes(runId)
+    )
+    && goalLedger.some((entry) => entry.evidenceRefs?.includes(runId))
+    && plan.sessionId === sessionId
+    && plan.goalId === goalId
+    && run.runContext?.sessionId === sessionId
+    && run.runContext.goalId === goalId
+    && trajectoryEvent.runId === runId
+    && trajectoryEvent.runContext?.sessionId === sessionId
+    && trajectoryEvent.runContext.goalId === goalId
+  );
+  if (!authorityLinkageValid) {
+    throw new Error("S13 v3.9.1 Chat/Goal/Plan/Run/Trajectory linkage is invalid.");
+  }
+  const afterDigest = await hashLegacyFixtureAuthority(mode.userDataPath);
+  if (afterDigest !== beforeDigest) {
+    throw new Error("S13 production readers mutated the immutable v3.9.1 fixture.");
+  }
+  return {
+    sessionId,
+    runId,
+    goalId,
+    planId,
+    legacyFixtureDigest: afterDigest,
+    legacySourceCutId: mode.legacySourceCutId,
+    legacyIntentionalAbsenceCount: mode.legacyIntentionalAbsences.length,
+    legacyAuthorityLinkageValid: true,
+    legacyAuthorityRecordCount: 5,
+    legacySourceNotMutated: true,
+    evidenceIds: [
+      sessionId,
+      goalId,
+      planId,
+      runId,
+      trajectoryId,
+      ...goalLedger.map((_, index) => `goal-ledger:${goalId}:${index + 1}`),
+      `source-cut:${mode.legacySourceCutId}`,
+      `fixture:${afterDigest}`,
+      `process:${processEpoch}`,
+      ...(mode.phase === "restart" ? ["restart:persisted-authority"] : []),
+    ],
+  };
+}
+
+async function prepareRestartedApprovalInterruptionScenario(
+  container: AppContainer,
+  processEpoch: string,
+): Promise<PreparedScenario> {
+  const approvalId = "approval-S17-cancel-interruption";
+  const approval = await container.conversationCausalStore().getApprovalIntent(
+    approvalId,
+  );
+  const identity = approval?.causalRef.toolInvocationIdentity;
+  const sessionId = approval?.causalRef.sessionId;
+  const workspaceRunId = approval?.causalRef.workspaceRunId;
+  if (
+    approval?.state !== "interrupted"
+    || approval.decision?.reasonCode !== "main_process_restarted"
+    || !identity
+    || !sessionId
+    || !workspaceRunId
+  ) {
+    throw new Error(
+      "S17 cold start did not recover exact interrupted approval authority.",
+    );
+  }
+  const [session, trajectory, workspaceRun, workspaceEvents, causalRecord] =
+    await Promise.all([
+      container.chatSessionStore().get(sessionId),
+      container.agentTrajectoryStore().list(identity.runId),
+      container.workspaceRunStore().getRun(workspaceRunId),
+      container.workspaceRunStore().listEvents(workspaceRunId),
+      approval.causalRef.requestId
+        ? container.conversationCausalStore().getRequest(
+            approval.causalRef.requestId,
+          )
+        : Promise.resolve(null),
+    ]);
+  const trajectoryAborted = trajectory.some((event) =>
+    event.payload.toolInvocationId === identity.id
+    && event.payload.invocationStatus === "aborted"
+    && event.payload.approvalId === approvalId
+  );
+  const workspaceAborted = workspaceRun?.status === "canceled"
+    && workspaceEvents.some((event) =>
+      event.type === "tool_invocation"
+      && event.toolInvocationId === identity.id
+      && event.invocationStatus === "aborted"
+      && event.approvalId === approvalId
+    );
+  const chatAborted = Boolean(session?.activity?.statusEvents.some((event) =>
+    event.toolInvocationId === identity.id
+    && event.invocationStatus === "aborted"
+    && event.approvalId === approvalId
+  ));
+  const causalAttemptInterrupted = Boolean(
+    causalRecord?.attempts.some((attempt) => attempt.state === "interrupted"),
+  );
+  if (
+    !session
+    || !trajectoryAborted
+    || !workspaceAborted
+    || !chatAborted
+    || !causalAttemptInterrupted
+  ) {
+    throw new Error(
+      "S17 interrupted ToolInvocation did not reconcile across durable domains.",
+    );
+  }
+  return {
+    sessionId,
+    runId: "cd09-run-S17-cancel-interruption",
+    interruptedApprovalId: approvalId,
+    interruptedToolInvocationId: identity.id,
+    interruptedToolInvocationRunId: identity.runId,
+    interruptedWorkspaceRunId: workspaceRunId,
+    interruptedTrajectoryAborted: true,
+    interruptedWorkspaceAborted: true,
+    interruptedChatAborted: true,
+    evidenceIds: [
+      sessionId,
+      approvalId,
+      identity.id,
+      identity.runId,
+      workspaceRunId,
+      `process:${processEpoch}`,
+      "restart:approval-interrupted",
+      "restart:tool-invocation-aborted",
+      "restart:causal-attempt-interrupted",
+    ],
+  };
+}
+
+async function hashLegacyFixtureAuthority(userDataPath: string): Promise<string> {
+  const records: string[] = [];
+  for (const relativePath of legacyFixtureAuthorityFiles) {
+    const absolutePath = path.join(userDataPath, relativePath);
+    const identity = await lstat(absolutePath);
+    if (
+      !identity.isFile()
+      || identity.isSymbolicLink()
+      || identity.nlink !== 1
+    ) {
+      throw new Error(`S13 fixture authority is unsafe: ${relativePath}`);
+    }
+    const bytes = await readFile(absolutePath);
+    const lineCount = bytes.length === 0
+      ? 0
+      : bytes.toString("utf8").split("\n").length - 1;
+    records.push(
+      `${relativePath}\0${sha256(bytes)}\0${bytes.length}\0${lineCount}\n`,
+    );
+  }
+  return sha256(Buffer.from(records.join("")));
+}
+
 function hashCanonical(value: unknown): string {
   return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 }
@@ -2609,6 +4003,9 @@ function expectedRequirementActionIndex(
 ): number {
   if (scenarioId === "S10-accessibility") {
     return [1, 0, 2][requirementIndex] ?? actionCount - 1;
+  }
+  if (scenarioId === "S08-scheduled-progress") {
+    return [0, 1, 0][requirementIndex] ?? actionCount - 1;
   }
   return Math.min(requirementIndex, actionCount - 1);
 }
@@ -2645,16 +4042,43 @@ function validateScenarioObservationValues(
       return value(0, "checkpointStatus") === "paused"
         && value(2, "terminalRunStatus") === "succeeded";
     case "S07-plan-progress":
-      return value(0, "planStatus") === "paused"
+      return value(0, "planStatus") === "drafting"
+        && Number(value(0, "stageCount")) >= 6
+        && value(0, "generationStagePersisted") === true
+        && value(0, "runningReviewPersisted") === true
+        && Number(value(0, "productionModelCallCount")) === 2
         && value(1, "actionGate") === "blocked"
-        && value(2, "authoritativePlanStatus") === "paused";
+        && value(2, "authoritativePlanStatus") === "awaiting_input"
+        && value(2, "reviewRejectedPersisted") === true
+        && value(2, "qualityFailurePersisted") === true
+        && Number(value(2, "productionModelCallCount")) === 2;
     case "S08-scheduled-progress":
       return Number(value(0, "streamEventCount")) > 0
+        && Number(value(0, "fullSnapshotRefreshCount")) <= 1
+        && Number(value(0, "fullSnapshotRefreshCount"))
+          < Number(value(0, "streamEventCount"))
         && Number(value(1, "trajectoryEventCount")) > 0;
     case "S09-long-session":
-      return Number(value(0, "tailMessageCount")) <= 50
+      return Number(value(0, "tailMessageCount")) === 50
+        && Number(value(0, "totalMessageCount")) >= 320
+        && Number(value(0, "tailPayloadBytes")) > 50 * 1024
+        && Number(value(0, "trajectoryPageCount")) === 75
         && Number(value(1, "olderMessageCount")) <= 50
-        && Number(value(2, "renderedRowCount")) <= 160;
+        && Number(value(1, "olderTrajectoryCount")) === 75
+        && value(1, "trajectoryPagesDoNotOverlap") === true
+        && value(1, "trajectoryRevisionPinned") === true
+        && Number(value(2, "streamEventCount")) > 0
+        && Number(value(2, "renderedRowCount")) > 0
+        && Number(value(2, "renderedRowCount")) <= 160
+        && Number(value(2, "renderDurationMs")) < 5_000
+        && value(2, "rendererMetricsAvailable") === true
+        && Number(value(2, "cpuTaskDurationMs")) < 5_000
+        && Number(value(2, "heapBeforeBytes")) > 0
+        && Number(value(2, "heapAfterBytes")) > 0
+        && Number(value(2, "heapGrowthBytes")) < 32 * 1024 * 1024
+        && Number(value(2, "domNodeCount")) > 0
+        && Number(value(2, "domNodeCount")) < 20_000
+        && Number(value(2, "domNodeGrowth")) < 2_000;
     case "S10-accessibility":
       return value(1, "blockingStateExposed") === true
         && value(1, "selectedRunStateExposed") === true
@@ -2665,21 +4089,50 @@ function validateScenarioObservationValues(
     case "S13-legacy-coverage":
       return value(0, "disclosureMode") === "projected"
         && value(1, "disclosureMode") === "projected"
-        && value(2, "disclosureMode") === "legacy";
+        && value(2, "disclosureMode") === "legacy"
+        && value(0, "compatibilityIdStable") === true
+        && value(0, "goalSummaryLinked") === true
+        && Number(value(1, "availableTrajectoryCount")) === 1
+        && value(1, "coveragePartial") === true
+        && Number(value(1, "intentionalAbsenceCount")) > 0
+        && Number(value(1, "authorityRecordCount")) === 5
+        && value(1, "authorityLinkageValid") === true
+        && value(2, "sourceNotMutated") === true
+        && value(0, "fixtureDigest") === value(2, "fixtureDigest")
+        && value(0, "sourceCutId") === value(2, "sourceCutId");
     case "S14-guided-input":
       return value(0, "inputRequestId") === value(0, "recoveredInputRequestId")
         && value(1, "responseCode") === "success";
     case "S15-goal-acceptance":
       return value(0, "reviewGateStatus") === "waiting_for_acceptance"
-        && value(1, "completedUnverified") === true
-        && value(2, "terminalStatus") === "completed_unverified";
+        && value(0, "branchSourceMatched") === true
+        && value(1, "completedUnverifiedStatus") === true
+        && value(1, "acceptanceCertificateAbsent") === true
+        && value(1, "successNarrativeVisible") === false
+        && value(2, "terminalStatus") === "achieved"
+        && value(2, "acceptanceCertificatePersisted") === true
+        && value(2, "unverifiedBranchRemainedTerminal") === true;
     case "S16-plan-confirmation":
       return value(0, "confirmationStatus") === "awaiting_confirmation"
         && value(0, "actionGate") === "ready";
     case "S17-cancel-interruption":
       return value(0, "canceledCode") === "CANCELED"
-        && value(1, "pendingApprovalCount") === 0
-        && value(2, "coldStartPendingCount") === 0;
+        && Number(value(1, "pendingApprovalCount")) === 1
+        && value(1, "priorPrivilegeRecovered") === false
+        && value(1, "waitingInvocationPersisted") === true
+        && value(1, "invocationIdentityFrozen") === true
+        && value(1, "approvalBoundToInvocation") === true
+        && value(2, "coldStartPendingCount") === 0
+        && value(2, "interruptedApprovalPersisted") === true
+        && value(2, "trajectoryInvocationAborted") === true
+        && value(2, "workspaceInvocationAborted") === true
+        && value(2, "chatInvocationAborted") === true
+        && value(2, "newAttemptSucceeded") === true
+        && value(2, "distinctAttemptPersisted") === true
+        && value(2, "projectionReloaded") === true
+        && value(2, "listedWorkStatus") === "completed"
+        && value(2, "sidebarBadgeText") === "已完成"
+        && value(2, "recoveredSessionVisible") === true;
     case "S18-context-usage":
       return Number(value(0, "preCompressionMessages")) >= 18
         && Number(value(1, "compactionCount")) > 0
@@ -2692,7 +4145,6 @@ function validateScenarioObservationValues(
 }
 
 const negativeObservationKeys = new Set([
-  "certifiedAsAchieved",
   "credentialMaterialVisible",
   "priorPrivilegeRecovered",
   "rejectedPartialPersisted",

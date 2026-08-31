@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "conversation-disclosure-v3.9.1-multidomain-json",
+  "sourceRelease": {
+    "tag": "v3.9.1",
+    "packageVersion": "3.9.1",
+    "annotatedTagObject": "698b1df05f5323fb3dd6fc4b1313f197f879bc3b",
+    "commit": "88503895b11c401eb1900d0eaf8026f1cd2ee00e",
+    "tree": "00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
+    "tagSignature": {
+      "present": false,
+      "verified": false
+    }
+  },
+  "generatedBackend": "json",
+  "releaseDefaultBackend": "sqlite",
+  "generator": {
+    "path": "scripts/generate-v391-conversation-fixture-from-stores.mjs",
+    "sha256": "sha256:368d547ffe5c75cfd78d08b54030e7263a65870961697855392f25b143cbd980",
+    "command": "node scripts/generate-v391-conversation-fixture-from-stores.mjs --dist-root <exact-v3.9.1-clone>/dist-electron --config-dir <output>/config",
+    "sourceBuild": "cd <exact-v3.9.1-clone> && npm ci && npm run build",
+    "nodeVersion": "v24.18.0",
+    "npmVersion": "11.16.0",
+    "deterministicGenerationCount": 2,
+    "byteForByteMatch": true,
+    "directFilesystemWrites": false
+  },
+  "sourceStores": [
+    {
+      "path": "src/main/chatSessionStore.ts",
+      "gitBlobOid": "79beaefb6440550b4efe270b19751dd9beb94077"
+    },
+    {
+      "path": "src/main/agentGoalStore.ts",
+      "gitBlobOid": "8a6577bc4066cfea67c8fb45acf750d71845f34d"
+    },
+    {
+      "path": "src/main/planStore.ts",
+      "gitBlobOid": "7bfac0353f03f7505f67d20d6cc37f7ca49e49de"
+    },
+    {
+      "path": "src/main/agentRunStore.ts",
+      "gitBlobOid": "5e4cf21d27447ecd98826f7ec5959daa1ce7747c"
+    },
+    {
+      "path": "src/main/agentTrajectoryStore.ts",
+      "gitBlobOid": "81d8f705dea40d57dce913a85ea2c2064a9d9186"
+    }
+  ],
+  "relationships": {
+    "sessionId": "cd09-v391-session",
+    "requestId": "cd09-v391-request",
+    "turnId": "cd09-v391-turn",
+    "goalId": "cd09-v391-goal",
+    "planId": "cd09-v391-plan",
+    "runId": "cd09-v391-run",
+    "milestoneId": "cd09-v391-milestone",
+    "workspaceId": "cd09-v391-workspace"
+  },
+  "intentionalAbsences": [
+    "conversation_causal_records",
+    "workspace_run_records",
+    "kernel_records",
+    "projection_cursors"
+  ],
+  "files": [
+    {
+      "path": "config/agent-goals/cd09-v391-goal.json",
+      "sha256": "sha256:4347941a8ce7096c1defd7c748b648d634b53236ed036aaee9bab9b6c1e72925",
+      "bytes": 4208,
+      "mediaType": "application/json",
+      "lineCount": 154
+    },
+    {
+      "path": "config/agent-goals/cd09-v391-goal.ledger.jsonl",
+      "sha256": "sha256:7422072c99f48dd6ef205d6449be4f5ea651c7e3197b610ed822ce3a1307aea7",
+      "bytes": 135,
+      "mediaType": "application/x-ndjson",
+      "lineCount": 1
+    },
+    {
+      "path": "config/agent-runs.jsonl",
+      "sha256": "sha256:77b8c3ad39af930d2298f6dff27b7aa7950e426b9d20eb7cafcace1c30b627c3",
+      "bytes": 806,
+      "mediaType": "application/x-ndjson",
+      "lineCount": 1
+    },
+    {
+      "path": "config/agent-trajectories/cd09-v391-run.jsonl",
+      "sha256": "sha256:ea7f2b9ee2f127abc4595423a77471b5636a486f43b2961bbeb99db140dcb18f",
+      "bytes": 658,
+      "mediaType": "application/x-ndjson",
+      "lineCount": 1
+    },
+    {
+      "path": "config/chat-sessions.json",
+      "sha256": "sha256:f54fd801148002a4be15ddcdc5d2df5edf8fb6a52bfac110ac836b4034bc222e",
+      "bytes": 1737,
+      "mediaType": "application/json",
+      "lineCount": 57
+    },
+    {
+      "path": "config/plans/cd09-v391-plan.events.jsonl",
+      "sha256": "sha256:3f62039b12e72b90b6ebcdcf3b1664a9637310bade1f499f22f04cefed2cedbe",
+      "bytes": 143,
+      "mediaType": "application/x-ndjson",
+      "lineCount": 1
+    },
+    {
+      "path": "config/plans/cd09-v391-plan.json",
+      "sha256": "sha256:531ba30cadbf65a1a5a7e5a4fae8bf8bf2e4e944ba53ecb467b3bff927d7fd32",
+      "bytes": 2610,
+      "mediaType": "application/json",
+      "lineCount": 98
+    },
+    {
+      "path": "config/plans/session-index.json",
+      "sha256": "sha256:3dab35213aa8fc51a3bbedae4d734de0c49c200e3eb1b73eaddaa2c72675f970",
+      "bytes": 153,
+      "mediaType": "application/json",
+      "lineCount": 9
+    }
+  ],
+  "fixtureDigest": "sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967"
+}

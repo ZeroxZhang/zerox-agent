@@ -200,7 +200,47 @@ export type ToolApprovalCausalRef = {
   kernelRunId?: string;
   toolInvocationId?: string;
   toolInvocationRunId?: string;
+  /**
+   * Secret-safe frozen identity for cold-start reconciliation. Tool arguments
+   * are deliberately excluded: startup only needs ownership and projection
+   * keys to terminate an interrupted invocation.
+   */
+  toolInvocationIdentity?: ToolApprovalInvocationIdentity;
 };
+
+export type ToolApprovalInvocationIdentity = Readonly<{
+  id: string;
+  runId: string;
+  toolCallId: string;
+  toolName: string;
+  source: string;
+  createdAt: string;
+}>;
+
+export function hasConsistentToolApprovalInvocationIdentity(
+  causalRef: ToolApprovalCausalRef,
+): boolean {
+  const identity = causalRef.toolInvocationIdentity;
+  if (!identity) return true;
+  const bounded = [
+    identity.id,
+    identity.runId,
+    identity.toolCallId,
+    identity.toolName,
+    identity.source,
+  ].every((value) => value.length <= 256);
+  return Boolean(
+    bounded
+    && identity.id.trim()
+    && identity.runId.trim()
+    && identity.toolCallId.trim()
+    && identity.toolName.trim()
+    && identity.source.trim()
+    && !Number.isNaN(Date.parse(identity.createdAt))
+    && causalRef.toolInvocationId === identity.id
+    && causalRef.toolInvocationRunId === identity.runId
+  );
+}
 
 export type ToolApprovalIntentDecision = {
   decisionId: string;

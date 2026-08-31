@@ -82,7 +82,13 @@ export type ChatSessionWorkSummary =
     }
   | {
       source: "chat";
-      status: "working" | "paused" | "completed" | "failed" | "canceled";
+      status:
+        | "working"
+        | "waiting_for_approval"
+        | "paused"
+        | "completed"
+        | "failed"
+        | "canceled";
       updatedAt: string;
     }
   | {

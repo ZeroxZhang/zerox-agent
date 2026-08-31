@@ -433,6 +433,7 @@ export function createGoalRuntimeEngine(options: {
                 toolName: record.toolName,
                 toolSource: record.source,
                 invocationStatus: record.status,
+                ...(record.approvalId ? { approvalId: record.approvalId } : {}),
                 args: record.args,
                 ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
                 ...(record.resultRef ? { resultRef: record.resultRef } : {}),
@@ -463,6 +464,39 @@ export function createGoalRuntimeEngine(options: {
               },
               authorizationOptions: {
                 runtimeTask: buildGoalMilestoneRuntimeTask(goal, runContext),
+                approvalContext: {
+                  ...(runContext.sessionId
+                    ? { sessionId: runContext.sessionId }
+                    : {}),
+                  agentRunId: runId,
+                  trajectoryRunId: runId,
+                  toolInvocationId: invocation.id,
+                  toolInvocationRunId: invocation.runId,
+                  toolInvocationIdentity: {
+                    id: invocation.id,
+                    runId: invocation.runId,
+                    toolCallId: invocation.toolCallId,
+                    toolName: invocation.toolName,
+                    source: invocation.source,
+                    createdAt: invocation.createdAt,
+                  },
+                },
+                onApprovalRequested: async (request) => {
+                  await transitionInvocation({
+                    status: "waiting_approval",
+                    reason: request.deniedReason,
+                    ...(request.approvalId
+                      ? { approvalId: request.approvalId }
+                      : {}),
+                  });
+                },
+                onApprovalResolved: async (approval) => {
+                  if (!approval.approved) return;
+                  await transitionInvocation({
+                    status: "authorized",
+                    reason: approval.reason ?? "user approved",
+                  });
+                },
               },
               executionOptions: {
                 ...(runSignal ? { signal: runSignal } : {}),
@@ -732,6 +766,7 @@ export function createGoalRuntimeEngine(options: {
           tools: modelToolDefinitions,
           toolResultOffloadStore: options.toolResultOffloadStore,
           toolResultOffloadThreshold: options.toolResultOffloadThreshold,
+          toolResultContinuationOwnerId: `goal:${goal.id}`,
           pauseOnFailureLoop: true,
           pauseOnStrategyGuard: false,
           pauseOnTurnLimit: false,
@@ -810,14 +845,15 @@ export function createGoalRuntimeEngine(options: {
               }),
             );
           },
-          onToolInvocation(record) {
-            void appendRunTrajectory("tool_invocation", {
+          async onToolInvocation(record) {
+            await appendRunTrajectory("tool_invocation", {
               ...payload,
               toolInvocationId: record.id,
               toolCallId: record.toolCallId,
               toolName: record.toolName,
               toolSource: record.source,
               invocationStatus: record.status,
+              ...(record.approvalId ? { approvalId: record.approvalId } : {}),
               args: record.args,
               ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
               ...(record.resultRef ? { resultRef: record.resultRef } : {}),

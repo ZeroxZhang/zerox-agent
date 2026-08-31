@@ -400,6 +400,7 @@ export function restoreChatTaskActivity(
   const events = snapshot.statusEvents;
   const latestEvent = events[events.length - 1];
   if (
+    !isWaitingForToolApproval(latestEvent) &&
     latestEvent.state !== "paused" &&
     latestEvent.state !== "waiting_for_input" &&
     latestEvent.state !== "completed" &&
@@ -493,7 +494,9 @@ export function buildTaskActivityFromStatusEvent(
   const eventTime = parseEventTime(event.createdAt);
   const startedAt = eventTime - event.elapsedMs;
   const kind =
-    event.state === "paused" || event.state === "waiting_for_input"
+    event.state === "paused" ||
+    event.state === "waiting_for_input" ||
+    isWaitingForToolApproval(event)
       ? "paused"
       : event.state === "completed" || event.state === "canceled"
         ? "done"
@@ -529,7 +532,11 @@ function getRestoredTerminalUserMessage(event: ChatTaskStatusEvent): string {
 export function getChatStatusKindFromStatusEvent(
   event: ChatTaskStatusEvent,
 ): GoalUiStatusKind {
-  if (event.state === "paused" || event.state === "waiting_for_input") {
+  if (
+    event.state === "paused" ||
+    event.state === "waiting_for_input" ||
+    isWaitingForToolApproval(event)
+  ) {
     return "paused";
   }
   if (event.state === "failed") return "error";
@@ -541,6 +548,7 @@ export function getChatStatusKindFromStatusEvent(
 export function getWorkPhaseFromChatStatusEvent(
   event: ChatTaskStatusEvent,
 ): AgentWorkPhase {
+  if (isWaitingForToolApproval(event)) return "paused";
   if (event.state === "started") return "planning";
   if (event.state === "workspace") return "planning";
   if (event.state === "skill") return "planning";
@@ -670,6 +678,7 @@ function formatEventTime(value: string): string {
 }
 
 function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string {
+  if (isWaitingForToolApproval(event)) return "等待工具授权";
   if (event.state === "started") return "正在启动任务";
   if (event.state === "workspace") return "正在确定工作区";
   if (event.state === "skill") return "正在调用技能";
@@ -695,6 +704,16 @@ function getTaskActivityTitleFromStatusEvent(event: ChatTaskStatusEvent): string
   if (event.state === "canceled") return "任务已中断";
   if (event.state === "completed") return "本轮已完成";
   return "执行遇到问题";
+}
+
+function isWaitingForToolApproval(event: ChatTaskStatusEvent): boolean {
+  return (
+    event.state === "tool_invocation" &&
+    (
+      event.invocationStatus === "waiting_approval" ||
+      event.invocationStatus === "waiting_for_approval"
+    )
+  );
 }
 
 function parseEventTime(value: string): number {

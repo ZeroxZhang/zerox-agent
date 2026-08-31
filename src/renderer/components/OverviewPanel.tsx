@@ -44,6 +44,7 @@ import {
   loadPreviewValidationSnapshot,
   savePreviewValidationSnapshot,
 } from "../agentValidationPreviewStore";
+import { translateRunStatus } from "../runStatusPresentation";
 
 type OverviewData = {
   activeGoals: Goal[];
@@ -907,18 +908,6 @@ function formatDate(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
-}
-
-function translateRunStatus(status: AgentRunRecord["status"]): string {
-  if (status === "succeeded") {
-    return "成功";
-  }
-
-  if (status === "canceled") {
-    return "已取消";
-  }
-
-  return "失败";
 }
 
 function isValidationReport(

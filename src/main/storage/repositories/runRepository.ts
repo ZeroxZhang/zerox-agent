@@ -160,6 +160,41 @@ export function createRunRepository(
       return event;
     },
 
+    appendTrajectoryNext(runId, event) {
+      const row = db.prepare(
+        `INSERT INTO trajectory_events (id, run_id, seq, type, payload, created_at)
+         SELECT
+           ?,
+           ?,
+           (SELECT COALESCE(MAX(seq), 0) + 1
+              FROM trajectory_events
+             WHERE run_id = ?),
+           ?,
+           json_set(
+             ?,
+             '$.sequence',
+             (SELECT COALESCE(MAX(seq), 0) + 1
+                FROM trajectory_events
+               WHERE run_id = ?)
+           ),
+           ?
+         RETURNING payload`,
+      ).get<{ payload: string }>(
+        event.id,
+        runId,
+        runId,
+        event.type,
+        jsonify(event),
+        runId,
+        event.createdAt,
+      );
+      const stored = row ? parseJson<AgentTrajectoryEvent>(row.payload) : null;
+      if (!stored) {
+        throw new Error(`Unable to append the next trajectory event for run ${runId}.`);
+      }
+      return stored;
+    },
+
     appendTrajectoryIfAbsent(runId, event) {
       const result = db.prepare(
         `INSERT OR IGNORE INTO trajectory_events (id, run_id, seq, type, payload, created_at)

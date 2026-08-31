@@ -1,15 +1,17 @@
 import {
   access,
-  mkdir,
+  lstat,
+  open,
   readdir,
-  readFile,
-  rename,
-  writeFile,
+  realpath,
 } from "node:fs/promises";
+import { constants } from "node:fs";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { validatePathInsideLocationRoots } from "../shared/locationResource";
+import { assertSafeStoreEntityId } from "./storeEntityId";
 
 export type LocalFileCategory =
   | "Images"
@@ -27,6 +29,20 @@ export type LocalFileMovePlan = {
   to: string;
   category: LocalFileCategory;
   reason: string;
+  sourceIdentity?: LocalFileIdentity;
+};
+
+type LocalFileIdentity = {
+  dev: string;
+  ino: string;
+  size: string;
+  uid: string;
+};
+
+type LocalDirectoryIdentity = {
+  dev: string;
+  ino: string;
+  uid: string;
 };
 
 export type LocalFileMoveConflict = {
@@ -47,6 +63,7 @@ export type LocalFileOrganizationPreview = {
   };
   moves: LocalFileMovePlan[];
   conflicts: LocalFileMoveConflict[];
+  rootIdentity?: LocalDirectoryIdentity;
 };
 
 export type LocalFileOrganizationTransaction = {
@@ -60,19 +77,35 @@ export type LocalFileOrganizationTransaction = {
   moves: LocalFileMovePlan[];
   movesApplied: number;
   movesRolledBack?: number;
+  rootIdentity?: LocalDirectoryIdentity;
+  logIdentity?: LocalFileIdentity;
   history: Array<{ status: "pending" | "applied" | "rolled_back"; at: string }>;
+};
+
+export type LocalFileOrganizationVerification = {
+  verified: boolean;
+  checked: number;
+  missingTargets: string[];
+  changedTargets: string[];
+  unmovedSources: string[];
+  sourceConflicts: string[];
 };
 
 export type LocalFileOrganizerRuntimeOptions = {
   createId?: () => string;
   now?: () => string;
+  safeFsHelperPath?: string;
+  safeFsTestDelayMs?: number;
+  safeFsTestOnReady?: (command: string) => void;
 };
 
 export async function previewLocalFileOrganization(
   root: string,
   options: LocalFileOrganizerRuntimeOptions = {},
 ): Promise<LocalFileOrganizationPreview> {
-  const resolvedRoot = resolveUserPath(root);
+  const resolvedRoot = await realpath(resolveUserPath(root));
+  await assertStableDirectory(resolvedRoot, resolvedRoot);
+  const rootIdentity = await readDirectoryIdentity(resolvedRoot);
   const entries = await readdir(resolvedRoot, { withFileTypes: true });
   const moves: LocalFileMovePlan[] = [];
   const conflicts: LocalFileMoveConflict[] = [];
@@ -84,7 +117,7 @@ export async function previewLocalFileOrganization(
     const sourcePath = path.join(resolvedRoot, entry.name);
     if (entry.isDirectory()) {
       directoryCount += 1;
-      skipped += isOrganizerManagedDirectory(entry.name) ? 1 : 0;
+      skipped += 1;
       continue;
     }
 
@@ -125,11 +158,14 @@ export async function previewLocalFileOrganization(
       to: targetPath,
       category,
       reason: `extension:${path.extname(entry.name).toLowerCase() || "none"}`,
+      sourceIdentity: await readRegularFileIdentity(sourcePath),
     });
   }
 
+  const id = options.createId?.() ?? `organize_${randomUUID()}`;
+  assertSafeStoreEntityId(id, "Local file organization transaction id");
   return {
-    id: options.createId?.() ?? `organize_${randomUUID()}`,
+    id,
     root: resolvedRoot,
     generatedAt: currentTimestamp(options),
     confirmationRequired: true,
@@ -140,6 +176,7 @@ export async function previewLocalFileOrganization(
     },
     moves,
     conflicts,
+    rootIdentity,
   };
 }
 
@@ -147,80 +184,234 @@ export async function applyLocalFileOrganization(
   preview: LocalFileOrganizationPreview,
   options: LocalFileOrganizerRuntimeOptions = {},
 ): Promise<LocalFileOrganizationTransaction> {
+  assertSafeStoreEntityId(
+    preview.id,
+    "Local file organization transaction id",
+  );
   if (preview.conflicts.length > 0) {
     throw new Error("Cannot apply local file organization while conflicts exist.");
   }
 
-  const transaction: LocalFileOrganizationTransaction = {
+  const logPath = transactionLogPath(preview.root, preview.id);
+  assertLocalOrganizationBoundary(preview.root, [
+    logPath,
+    ...preview.moves.flatMap((move) => [move.from, move.to]),
+  ]);
+  if (!preview.rootIdentity) {
+    throw new Error("Local file organization preview lacks root identity.");
+  }
+
+  let transaction: LocalFileOrganizationTransaction = {
     id: preview.id,
     root: preview.root,
     status: "pending",
     createdAt: preview.generatedAt,
-    logPath: transactionLogPath(preview.root, preview.id),
+    logPath,
     moves: preview.moves,
     movesApplied: 0,
+    rootIdentity: preview.rootIdentity,
     history: [{ status: "pending", at: preview.generatedAt }],
   };
-  assertLocalOrganizationBoundary(transaction.root, [
-    transaction.logPath,
-    ...transaction.moves.flatMap((move) => [move.from, move.to]),
-  ]);
-
-  await writeTransactionLog(transaction);
+  transaction = {
+    ...transaction,
+    logIdentity: await writeTransactionLog(transaction, options),
+  };
 
   let movesApplied = 0;
   for (const move of preview.moves) {
-    await mkdir(path.dirname(move.to), { recursive: true });
-    await rename(move.from, move.to);
+    if (!move.sourceIdentity) {
+      throw new Error("Local file organization preview lacks source identity.");
+    }
+    assertMoveShape(transaction.root, move);
+    await runMoveWithSafeFs(
+      "move-into-category",
+      transaction.root,
+      transaction.rootIdentity!,
+      move,
+      options,
+    );
     movesApplied += 1;
   }
 
+  const appliedAt = currentTimestamp(options);
   const appliedTransaction: LocalFileOrganizationTransaction = {
     ...transaction,
     status: "applied",
-    appliedAt: currentTimestamp(options),
+    appliedAt,
     movesApplied,
     history: [
       ...transaction.history,
-      { status: "applied", at: currentTimestamp(options) },
+      { status: "applied", at: appliedAt },
     ],
   };
-  await writeTransactionLog(appliedTransaction);
-  return appliedTransaction;
+  return {
+    ...appliedTransaction,
+    logIdentity: await writeTransactionLog(appliedTransaction, options),
+  };
 }
 
 export async function rollbackLocalFileOrganization(
   transaction: LocalFileOrganizationTransaction,
   options: LocalFileOrganizerRuntimeOptions = {},
 ): Promise<LocalFileOrganizationTransaction> {
+  assertSafeStoreEntityId(
+    transaction.id,
+    "Local file organization transaction id",
+  );
+  const expectedLogPath = resolveUserPath(
+    transactionLogPath(resolveUserPath(transaction.root), transaction.id),
+  );
+  if (resolveUserPath(transaction.logPath) !== expectedLogPath) {
+    throw new Error(
+      "Local file organization transaction log does not belong to the transaction.",
+    );
+  }
   assertLocalOrganizationBoundary(transaction.root, [
     transaction.logPath,
     ...transaction.moves.flatMap((move) => [move.from, move.to]),
   ]);
+  if (!transaction.rootIdentity || !transaction.logIdentity) {
+    throw new Error("Local file organization transaction lacks native identities.");
+  }
+
+  const rollbackSteps: Array<{
+    move: LocalFileMovePlan;
+    disposition: "move" | "remove_duplicate" | "already_restored";
+  }> = [];
+  // Preflight every move before changing any path. A rollback conflict must
+  // leave the canonical transaction in its applied state; partial rollback
+  // cannot be reported as complete.
+  for (const move of [...transaction.moves].reverse()) {
+    if (!move.sourceIdentity) {
+      throw new Error("Local file organization transaction lacks source identity.");
+    }
+    const [fromIdentity, toIdentity] = await Promise.all([
+      readRegularFileIdentityOrNull(move.from),
+      readRegularFileIdentityOrNull(move.to),
+    ]);
+    if (fromIdentity && !identitiesEqual(fromIdentity, move.sourceIdentity)) {
+      throw new Error(`Local file organization rollback source conflict: ${move.from}`);
+    }
+    if (toIdentity && !identitiesEqual(toIdentity, move.sourceIdentity)) {
+      throw new Error(`Local file organization rollback target identity changed: ${move.to}`);
+    }
+    if (fromIdentity && toIdentity) {
+      rollbackSteps.push({ move, disposition: "remove_duplicate" });
+    } else if (fromIdentity) {
+      rollbackSteps.push({ move, disposition: "already_restored" });
+    } else if (toIdentity) {
+      rollbackSteps.push({ move, disposition: "move" });
+    } else {
+      throw new Error(`Local file organization rollback lost both paths: ${move.from}`);
+    }
+  }
 
   let movesRolledBack = 0;
-
-  for (const move of [...transaction.moves].reverse()) {
-    if (!(await pathExists(move.to)) || (await pathExists(move.from))) {
+  for (const step of rollbackSteps) {
+    const { move } = step;
+    if (step.disposition === "already_restored") {
+      movesRolledBack += 1;
       continue;
     }
-    await mkdir(path.dirname(move.from), { recursive: true });
-    await rename(move.to, move.from);
+    if (step.disposition === "remove_duplicate") {
+      assertMoveShape(transaction.root, move);
+      await runMoveWithSafeFs(
+        "remove-category-duplicate",
+        transaction.root,
+        transaction.rootIdentity,
+        move,
+        options,
+      );
+      movesRolledBack += 1;
+      continue;
+    }
+    const identity = move.sourceIdentity;
+    if (!identity) {
+      throw new Error("Local file organization transaction lacks source identity.");
+    }
+    assertMoveShape(transaction.root, move);
+    await runMoveWithSafeFs(
+      "move-from-category",
+      transaction.root,
+      transaction.rootIdentity,
+      move,
+      options,
+    );
     movesRolledBack += 1;
   }
 
+  const rolledBackAt = currentTimestamp(options);
   const rolledBackTransaction: LocalFileOrganizationTransaction = {
     ...transaction,
     status: "rolled_back",
-    rolledBackAt: currentTimestamp(options),
+    rolledBackAt,
     movesRolledBack,
     history: [
       ...transaction.history,
-      { status: "rolled_back", at: currentTimestamp(options) },
+      { status: "rolled_back", at: rolledBackAt },
     ],
   };
-  await writeTransactionLog(rolledBackTransaction);
-  return rolledBackTransaction;
+  return {
+    ...rolledBackTransaction,
+    logIdentity: await writeTransactionLog(rolledBackTransaction, options),
+  };
+}
+
+export async function verifyLocalFileOrganization(
+  transaction: LocalFileOrganizationTransaction,
+): Promise<LocalFileOrganizationVerification> {
+  assertSafeStoreEntityId(
+    transaction.id,
+    "Local file organization transaction id",
+  );
+  assertLocalOrganizationBoundary(transaction.root, [
+    transaction.logPath,
+    ...transaction.moves.flatMap((move) => [move.from, move.to]),
+  ]);
+  const missingTargets: string[] = [];
+  const changedTargets: string[] = [];
+  const unmovedSources: string[] = [];
+  const sourceConflicts: string[] = [];
+  for (const move of transaction.moves) {
+    if (!move.sourceIdentity) {
+      throw new Error("Local file organization transaction lacks source identity.");
+    }
+    assertMoveShape(transaction.root, move);
+    const [source, target] = await Promise.all([
+      inspectRegularFileIdentity(move.from),
+      inspectRegularFileIdentity(move.to),
+    ]);
+    if (target.kind === "missing") {
+      missingTargets.push(move.to);
+    } else if (
+      target.kind === "invalid"
+      || !identitiesEqual(target.identity, move.sourceIdentity)
+    ) {
+      changedTargets.push(move.to);
+    }
+    if (source.kind === "regular") {
+      if (identitiesEqual(source.identity, move.sourceIdentity)) {
+        unmovedSources.push(move.from);
+      } else {
+        sourceConflicts.push(move.from);
+      }
+    } else if (source.kind === "invalid") {
+      sourceConflicts.push(move.from);
+    }
+  }
+  return {
+    verified:
+      transaction.status === "applied"
+      && missingTargets.length === 0
+      && changedTargets.length === 0
+      && unmovedSources.length === 0
+      && sourceConflicts.length === 0,
+    checked: transaction.moves.length,
+    missingTargets,
+    changedTargets,
+    unmovedSources,
+    sourceConflicts,
+  };
 }
 
 function assertLocalOrganizationBoundary(root: string, paths: string[]): void {
@@ -238,9 +429,79 @@ function assertLocalOrganizationBoundary(root: string, paths: string[]): void {
 export async function readLocalFileOrganizationTransaction(
   logPath: string,
 ): Promise<LocalFileOrganizationTransaction> {
-  return JSON.parse(
-    await readFile(resolveUserPath(logPath), "utf8"),
-  ) as LocalFileOrganizationTransaction;
+  const resolvedLogPath = resolveUserPath(logPath);
+  const handle = await open(
+    resolvedLogPath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || before.nlink !== 1n) {
+      throw new Error("Local file organization journal is not a single-link regular file.");
+    }
+    const body = await handle.readFile("utf8");
+    const [after, leaf, canonicalPath] = await Promise.all([
+      handle.stat({ bigint: true }),
+      lstat(resolvedLogPath, { bigint: true }),
+      realpath(resolvedLogPath),
+    ]);
+    if (
+      !after.isFile()
+      || after.nlink !== 1n
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || after.mtimeNs !== before.mtimeNs
+      || after.ctimeNs !== before.ctimeNs
+      || !leaf.isFile()
+      || leaf.isSymbolicLink()
+      || leaf.dev !== before.dev
+      || leaf.ino !== before.ino
+      || canonicalPath !== resolvedLogPath
+    ) {
+      throw new Error("Local file organization journal identity changed while reading.");
+    }
+    const transaction = parseLastJournalTransaction(body);
+    if (resolveUserPath(transaction.logPath) !== resolvedLogPath) {
+      throw new Error("Local file organization journal path does not match its transaction.");
+    }
+    return {
+      ...transaction,
+      logIdentity: {
+        dev: after.dev.toString(),
+        ino: after.ino.toString(),
+        size: after.size.toString(),
+        uid: after.uid.toString(),
+      },
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseLastJournalTransaction(body: string): LocalFileOrganizationTransaction {
+  const records = body.split("\n");
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index]?.trim();
+    if (!record) continue;
+    try {
+      const value = JSON.parse(record) as Partial<LocalFileOrganizationTransaction>;
+      if (
+        typeof value.id === "string"
+        && typeof value.root === "string"
+        && typeof value.logPath === "string"
+        && ["pending", "applied", "rolled_back"].includes(value.status ?? "")
+        && Array.isArray(value.moves)
+        && Array.isArray(value.history)
+      ) {
+        return value as LocalFileOrganizationTransaction;
+      }
+    } catch {
+      // A killed append may leave one incomplete trailing record. Earlier
+      // fsynced records remain authoritative and recoverable.
+    }
+  }
+  throw new Error("Local file organization journal has no complete transaction record.");
 }
 
 function categorizeFile(fileName: string): LocalFileCategory {
@@ -292,9 +553,348 @@ function transactionLogPath(root: string, id: string): string {
 
 async function writeTransactionLog(
   transaction: LocalFileOrganizationTransaction,
+  options: LocalFileOrganizerRuntimeOptions,
+): Promise<LocalFileIdentity> {
+  if (!transaction.rootIdentity) {
+    throw new Error("Local file organization transaction lacks root identity.");
+  }
+  if (transaction.status === "pending") {
+    return runLogWithSafeFs(
+      "log-create",
+      transaction,
+      `${JSON.stringify(transaction)}\n`,
+      options,
+    );
+  }
+  if (!transaction.logIdentity) {
+    throw new Error("Local file organization transaction lacks log identity.");
+  }
+  return runLogWithSafeFs(
+    "log-append",
+    transaction,
+    `\n${JSON.stringify(transaction)}\n`,
+    options,
+  );
+}
+
+async function readRegularFileIdentity(targetPath: string): Promise<LocalFileIdentity> {
+  const stats = await lstat(targetPath, { bigint: true });
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(`Local file organization source is not a regular file: ${targetPath}`);
+  }
+  return {
+    dev: stats.dev.toString(),
+    ino: stats.ino.toString(),
+    size: stats.size.toString(),
+    uid: stats.uid.toString(),
+  };
+}
+
+async function readDirectoryIdentity(
+  targetPath: string,
+): Promise<LocalDirectoryIdentity> {
+  const stats = await lstat(targetPath, { bigint: true });
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Local file organization root is not a stable directory: ${targetPath}`);
+  }
+  return {
+    dev: stats.dev.toString(),
+    ino: stats.ino.toString(),
+    uid: stats.uid.toString(),
+  };
+}
+
+async function readRegularFileIdentityOrNull(
+  targetPath: string,
+): Promise<LocalFileIdentity | null> {
+  try {
+    return await readRegularFileIdentity(targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function inspectRegularFileIdentity(
+  targetPath: string,
+): Promise<
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "regular"; identity: LocalFileIdentity }
+> {
+  try {
+    return { kind: "regular", identity: await readRegularFileIdentity(targetPath) };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing" };
+    }
+    return { kind: "invalid" };
+  }
+}
+
+function identitiesEqual(
+  left: LocalFileIdentity,
+  right: LocalFileIdentity,
+): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.uid === right.uid;
+}
+
+async function assertStableDirectory(
+  root: string,
+  directory: string,
 ): Promise<void> {
-  await mkdir(path.dirname(transaction.logPath), { recursive: true });
-  await writeFile(transaction.logPath, `${JSON.stringify(transaction, null, 2)}\n`, "utf8");
+  const stats = await lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Local file organization directory is not stable: ${directory}`);
+  }
+  const [resolvedRoot, resolvedDirectory] = await Promise.all([
+    realpath(root),
+    realpath(directory),
+  ]);
+  const boundary = validatePathInsideLocationRoots(
+    resolvedDirectory,
+    [resolvedRoot],
+    { workspaceRoot: resolvedRoot },
+  );
+  if (!boundary.ok) {
+    throw new Error(`Local file organization directory escaped its root: ${directory}`);
+  }
+}
+
+function assertMoveShape(root: string, move: LocalFileMovePlan): void {
+  const resolvedRoot = resolveUserPath(root);
+  const sourceName = path.basename(move.from);
+  const targetName = path.basename(move.to);
+  if (
+    path.dirname(resolveUserPath(move.from)) !== resolvedRoot
+    || path.dirname(resolveUserPath(move.to)) !== path.join(resolvedRoot, move.category)
+    || sourceName !== targetName
+    || !isSinglePathComponent(sourceName)
+    || !isOrganizerCategory(move.category)
+  ) {
+    throw new Error("Local file organization move shape is invalid.");
+  }
+}
+
+async function runMoveWithSafeFs(
+  command: "move-into-category" | "move-from-category" | "remove-category-duplicate",
+  root: string,
+  rootIdentity: LocalDirectoryIdentity,
+  move: LocalFileMovePlan,
+  options: LocalFileOrganizerRuntimeOptions,
+): Promise<void> {
+  const sourceIdentity = move.sourceIdentity;
+  if (!sourceIdentity) {
+    throw new Error("Local file organization move lacks source identity.");
+  }
+  await runSafeFsHelper(
+    command,
+    [
+      root,
+      rootIdentity.dev,
+      rootIdentity.ino,
+      rootIdentity.uid,
+      sourceIdentity.uid,
+      path.basename(move.from),
+      move.category,
+      path.basename(move.to),
+      sourceIdentity.dev,
+      sourceIdentity.ino,
+      sourceIdentity.size,
+    ],
+    undefined,
+    options,
+  );
+}
+
+async function runLogWithSafeFs(
+  command: "log-create" | "log-append",
+  transaction: LocalFileOrganizationTransaction,
+  body: string,
+  options: LocalFileOrganizerRuntimeOptions,
+): Promise<LocalFileIdentity> {
+  const rootIdentity = transaction.rootIdentity!;
+  const args = [
+    transaction.root,
+    rootIdentity.dev,
+    rootIdentity.ino,
+    rootIdentity.uid,
+    transaction.id,
+    ...(command === "log-append"
+      ? [
+          transaction.logIdentity!.dev,
+          transaction.logIdentity!.ino,
+          transaction.logIdentity!.size,
+          transaction.logIdentity!.uid,
+        ]
+      : []),
+  ];
+  const result = await runSafeFsHelper(command, args, body, options);
+  const identity = result.identity;
+  if (
+    !identity
+    || ![identity.dev, identity.ino, identity.size, identity.uid]
+      .every((value) => typeof value === "string" && /^\d+$/.test(value))
+  ) {
+    throw new Error("Local file organization helper returned an invalid log identity.");
+  }
+  return identity;
+}
+
+async function runSafeFsHelper(
+  command: string,
+  args: string[],
+  input: string | undefined,
+  options: LocalFileOrganizerRuntimeOptions,
+): Promise<{ ok: true; identity?: LocalFileIdentity }> {
+  const helperPath = await resolveSafeFsHelper(options.safeFsHelperPath);
+  return new Promise((resolve, reject) => {
+    const child = spawn(helperPath, [command, ...args], {
+      cwd: "/",
+      env: {
+        ...(options.safeFsTestDelayMs === undefined
+          ? {}
+          : { ZEROX_SAFE_FS_TEST_DELAY_MS: String(options.safeFsTestDelayMs) }),
+        ...(options.safeFsTestOnReady
+          ? { ZEROX_SAFE_FS_TEST_READY: "1" }
+          : {}),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let outputOverflow = false;
+    let readySignaled = false;
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, 10_000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      const next = appendBoundedOutput(stdout, chunk);
+      if (next === null) {
+        outputOverflow = true;
+        child.kill("SIGKILL");
+      } else {
+        stdout = next;
+      }
+    });
+    child.stderr.on("data", (chunk: string) => {
+      const next = appendBoundedOutput(stderr, chunk);
+      if (next === null) {
+        outputOverflow = true;
+        child.kill("SIGKILL");
+      } else {
+        stderr = next;
+      }
+      if (
+        !readySignaled
+        && stderr.includes("zerox-safe-fs-test-ready")
+      ) {
+        readySignaled = true;
+        options.safeFsTestOnReady?.(command);
+      }
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      if (outputOverflow) {
+        reject(new Error("Local file organization helper output exceeded its limit."));
+        return;
+      }
+      reject(error);
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        reject(new Error(
+          stderr.trim()
+          || `Local file organization helper failed (${signal ?? code ?? "unknown"}).`,
+        ));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout) as {
+          ok?: boolean;
+          identity?: LocalFileIdentity;
+        };
+        if (parsed.ok !== true) {
+          throw new Error("Local file organization helper did not confirm success.");
+        }
+        resolve(parsed as { ok: true; identity?: LocalFileIdentity });
+      } catch (error) {
+        reject(error);
+      }
+    });
+    child.stdin.end(input ?? "");
+  });
+}
+
+async function resolveSafeFsHelper(override?: string): Promise<string> {
+  if (process.platform !== "darwin") {
+    throw new Error("Secure local file organization is supported only on macOS.");
+  }
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string })
+    .resourcesPath;
+  const candidates = override
+    ? [override]
+    : resourcesPath
+      ? [path.join(resourcesPath, "safe-fs", "zerox-safe-fs")]
+      : [path.resolve(
+          __dirname,
+          "..",
+          "..",
+          `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+        )];
+  for (const candidate of candidates) {
+    try {
+      const metadata = await lstat(candidate);
+      if (
+        metadata.isFile()
+        && !metadata.isSymbolicLink()
+        && (metadata.mode & 0o111) !== 0
+        && await realpath(candidate) === path.resolve(candidate)
+      ) {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("Secure local file organization helper is unavailable.");
+}
+
+function appendBoundedOutput(current: string, chunk: string): string | null {
+  const combined = current + chunk;
+  if (combined.length > 64 * 1024) {
+    return null;
+  }
+  return combined;
+}
+
+function isSinglePathComponent(value: string): boolean {
+  return value.length > 0
+    && value !== "."
+    && value !== ".."
+    && !value.includes(path.sep);
+}
+
+function isOrganizerCategory(value: string): value is LocalFileCategory {
+  return [
+    "Images",
+    "Documents",
+    "Archives",
+    "Audio",
+    "Video",
+    "Code",
+    "Spreadsheets",
+    "Presentations",
+    "Other",
+  ].includes(value);
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
@@ -318,19 +918,4 @@ function resolveUserPath(targetPath: string): string {
 
 function currentTimestamp(options: LocalFileOrganizerRuntimeOptions): string {
   return options.now?.() ?? new Date().toISOString();
-}
-
-function isOrganizerManagedDirectory(name: string): boolean {
-  return [
-    "Images",
-    "Documents",
-    "Archives",
-    "Audio",
-    "Video",
-    "Code",
-    "Spreadsheets",
-    "Presentations",
-    "Other",
-    ".zerox-organize-transactions",
-  ].includes(name);
 }

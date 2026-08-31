@@ -3,9 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S10-accessibility",
   "scenarioDigest": "sha256:3fdfc7cd9183c89b18b5cb2771543213dfe031e31abcf33f86c2e8d9a4b09065",
-  "executionId": "be8052bc-47de-41b7-bf73-37849ec491d8",
+  "executionId": "69ac0803-4c64-491c-92d9-3f8a4758fde1",
   "processEpochs": [
-    "main_e4677cb2-914b-4592-aa0f-4c9ca0f4de85"
+    "main_25580c86-43ad-4cf5-9a4b-90605a110303"
+  ],
+  "attemptNonces": [
+    "7af55a8e-0980-45e9-9670-1f32c13e12cf"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -26,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "d92c74d8-9c1f-434c-b50a-6c7ab4935a6b",
+        "340e411f-dcd2-4178-a538-514d6cf0c857",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_e4677cb2-914b-4592-aa0f-4c9ca0f4de85"
+        "process:main_25580c86-43ad-4cf5-9a4b-90605a110303"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -59,10 +62,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "d92c74d8-9c1f-434c-b50a-6c7ab4935a6b",
+        "340e411f-dcd2-4178-a538-514d6cf0c857",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_e4677cb2-914b-4592-aa0f-4c9ca0f4de85"
+        "process:main_25580c86-43ad-4cf5-9a4b-90605a110303"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -83,10 +86,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "d92c74d8-9c1f-434c-b50a-6c7ab4935a6b",
+        "340e411f-dcd2-4178-a538-514d6cf0c857",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_e4677cb2-914b-4592-aa0f-4c9ca0f4de85"
+        "process:main_25580c86-43ad-4cf5-9a4b-90605a110303"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -110,7 +113,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:8f0557f59ea5ba72cae59debfacb446c8f4181086e5396e671965fbbc00e5fac",
-        "screenshot:sha256:703539252eb7f1d0ef883483cd76eb75fc609bc15fd485c18184dd535c42600f"
+        "screenshot:sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
       ]
     },
     {
@@ -119,7 +122,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:9ba031c97a64af3b6aa74eb80dd5d29918655b633142db81b9afaf880bc6221d",
-        "screenshot:sha256:703539252eb7f1d0ef883483cd76eb75fc609bc15fd485c18184dd535c42600f"
+        "screenshot:sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
       ]
     },
     {
@@ -128,7 +131,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:d585182d23b67c8ab06b3ef528d060b858720e75bbd147d7aabf558459e70001",
-        "screenshot:sha256:703539252eb7f1d0ef883483cd76eb75fc609bc15fd485c18184dd535c42600f"
+        "screenshot:sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
       ]
     }
   ],
@@ -210,22 +213,22 @@
     },
     {
       "ordinal": 16,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 17,
       "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
-      "ordinal": 18,
+      "ordinal": 17,
       "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
-      "ordinal": 19,
+      "ordinal": 18,
       "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 19,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -250,7 +253,7 @@
     },
     {
       "ordinal": 24,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
@@ -305,12 +308,12 @@
     },
     {
       "ordinal": 35,
-      "channel": "modelCatalog:load",
+      "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
       "ordinal": 36,
-      "channel": "plans:getLatestBySession",
+      "channel": "modelCatalog:load",
       "ok": true
     },
     {
@@ -385,7 +388,7 @@
     },
     {
       "ordinal": 51,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
@@ -435,7 +438,7 @@
     },
     {
       "ordinal": 61,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
@@ -530,8 +533,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:703539252eb7f1d0ef883483cd76eb75fc609bc15fd485c18184dd535c42600f"
+    "sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
   ],
   "status": "passed",
-  "digest": "sha256:c679cf9fe224e55c3357a3133fe5b495d79e17e07a193a5c64f46e5ed6891743"
+  "digest": "sha256:9c2dbb08ab4ea68ca5ea91984f09dcc56dd7ea69e8f7163bd06fb9ae39508e75"
 }

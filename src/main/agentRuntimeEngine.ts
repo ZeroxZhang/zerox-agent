@@ -15,6 +15,7 @@ import {
 import type { AgentRunStore } from "./agentRunStore";
 import type { AgentToolExecutor } from "./agentToolExecutor";
 import type { AgentTrajectoryStore } from "./agentTrajectoryStore";
+import { highestAgentTrajectorySequence } from "./agentTrajectorySequence";
 import type { AgentWorkspaceService } from "./agentWorkspaceService";
 import type { MemoryStore } from "./memoryStore";
 import {
@@ -274,7 +275,7 @@ export function createAgentRuntimeEngine(options: {
       let sequence = trajectorySequences.get(runId);
       if (sequence === undefined) {
         const persisted = await options.trajectoryStore!.list(runId);
-        sequence = Math.max(0, ...persisted.map((event) => event.sequence));
+        sequence = highestAgentTrajectorySequence(persisted);
       }
       sequence += 1;
       trajectorySequences.set(runId, sequence);
@@ -455,9 +456,8 @@ export function createAgentRuntimeEngine(options: {
           task,
         );
     const observationQueue = createFailureVisibleSerialQueue();
-    const observe = (operation: () => Promise<void>) => {
-      void observationQueue.enqueue(operation);
-    };
+    const observe = (operation: () => Promise<void>) =>
+      observationQueue.enqueue(operation);
     const appendObserved = (
       type: AgentTrajectoryEventType,
       payload: Record<string, unknown>,
@@ -466,15 +466,13 @@ export function createAgentRuntimeEngine(options: {
         containsFileContent: false,
         containsUserText: false,
       },
-    ) => {
-      observe(() => appendTrajectory(
+    ) => observe(() => appendTrajectory(
         current.runId,
         type,
         payload,
         redaction,
         current.runContext,
       ));
-    };
 
     let kernelReporter: ProductionKernelReporter | undefined;
     const executeLoopSegment = () => options.runLoop!(
@@ -674,13 +672,14 @@ export function createAgentRuntimeEngine(options: {
               : {}),
           });
         },
-        onToolInvocation(record) {
-          appendObserved("tool_invocation", {
+        async onToolInvocation(record) {
+          await appendObserved("tool_invocation", {
             toolInvocationId: record.id,
             toolCallId: record.toolCallId,
             toolName: record.toolName,
             toolSource: record.source,
             invocationStatus: record.status,
+            ...(record.approvalId ? { approvalId: record.approvalId } : {}),
             args: record.args,
             ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
             ...(record.resultRef ? { resultRef: record.resultRef } : {}),
@@ -1254,6 +1253,7 @@ export function createAgentRuntimeEngine(options: {
             toolName: record.toolName,
             toolSource: record.source,
             invocationStatus: record.status,
+            ...(record.approvalId ? { approvalId: record.approvalId } : {}),
             args: record.args,
             ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
             ...(record.resultRef ? { resultRef: record.resultRef } : {}),
@@ -1288,6 +1288,25 @@ export function createAgentRuntimeEngine(options: {
             args,
           },
           authorizationOptions: {
+            approvalContext: {
+              ...(current.runContext?.sessionId
+                ? { sessionId: current.runContext.sessionId }
+                : {}),
+              trajectoryRunId: current.runId,
+              ...(current.runContext?.runId
+                ? { workspaceRunId: current.runContext.runId }
+                : {}),
+              toolInvocationId: toolInvocation.id,
+              toolInvocationRunId: toolInvocation.runId,
+              toolInvocationIdentity: {
+                id: toolInvocation.id,
+                runId: toolInvocation.runId,
+                toolCallId: toolInvocation.toolCallId,
+                toolName: toolInvocation.toolName,
+                source: toolInvocation.source,
+                createdAt: toolInvocation.createdAt,
+              },
+            },
             onApprovalRequested: async () => {
               await transitionInvocation({ status: "waiting_approval" });
               current = await saveCheckpoint(current, "waiting_for_approval");

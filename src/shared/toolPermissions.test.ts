@@ -278,6 +278,17 @@ describe("tool authorization", () => {
     });
     expect(
       authorizeToolCall(organizerPolicy, {
+        toolName: "file_move_transaction_read",
+        args: {
+          logPath: "/Users/demo/Downloads/.zerox-organize-transactions/tx.json",
+        },
+      }),
+    ).toEqual({
+      allowed: true,
+      reason: "文件路径位于已授权目录内。",
+    });
+    expect(
+      authorizeToolCall(organizerPolicy, {
         toolName: "file_apply_moves",
         args: { root: "/Users/demo/Downloads" },
       }),

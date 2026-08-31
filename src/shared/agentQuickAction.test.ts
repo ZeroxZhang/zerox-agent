@@ -25,7 +25,7 @@ describe("agent quick action", () => {
         gateId: "confirm_file_moves",
         reason: "Preview file moves before changing local data.",
       },
-      recoveryTools: ["file_rollback_moves"],
+      recoveryTools: ["file_move_transaction_read", "file_rollback_moves"],
       steps: [
         { id: "inventory", toolName: "file_inventory" },
         { id: "plan_moves", toolName: "file_move_plan" },

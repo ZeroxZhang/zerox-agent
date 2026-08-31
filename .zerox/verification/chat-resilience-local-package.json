@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "kind": "chat-resilience-local-package-acceptance",
+  "status": "passed",
+  "accepted": true,
+  "package": {
+    "path": "release-local/mac-arm64/Zerox Agent.app",
+    "appAsarSha256": "sha256:45a6555c6a6b16ce18da2adc340b2fb31cbf5b0e02b42133b427d762113ceff5"
+  },
+  "outputLimit": {
+    "accepted": true,
+    "modelCallCount": 2,
+    "resultOk": true,
+    "terminalState": "completed",
+    "combinedReplyObserved": true,
+    "providerPauseObserved": false
+  },
+  "ime": {
+    "accepted": true,
+    "formSubmitCount": 0,
+    "compositionEvents": [
+      "start"
+    ],
+    "enterEvent": {
+      "key": "Enter",
+      "keyCode": 13,
+      "isComposing": true,
+      "trusted": true
+    },
+    "inputValueObserved": "测试输入法",
+    "inputFocused": true
+  },
+  "screenshot": ".zerox/verification/chat-resilience-local-package.png"
+}

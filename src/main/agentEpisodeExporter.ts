@@ -23,6 +23,7 @@ export type AgentEpisodePackage = {
 
 export function createAgentEpisodePackage(input: {
   run: AgentRunRecord;
+  sourceAuthority?: "agent_run" | "trajectory_run";
   checkpoint: AgentExecutionCheckpoint | null;
   trajectory: AgentTrajectoryEvent[];
   kernelEvents?: KernelEvent[];
@@ -64,6 +65,7 @@ export function createAgentEpisodePackage(input: {
   };
   const metadata = {
     runId: input.run.id,
+    sourceAuthority: input.sourceAuthority ?? "agent_run",
     exportedAt: input.exportedAt,
     fileCount: Object.keys(files).length + 1,
     redaction: summarizeRedaction(input.trajectory),

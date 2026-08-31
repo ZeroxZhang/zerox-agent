@@ -50,6 +50,23 @@ describe("agent goal store", () => {
     ]);
   });
 
+  it("quarantines a goal whose embedded owner differs from its file owner", async () => {
+    const store = createAgentGoalStore({ configDir });
+    const goalsDir = path.join(configDir, "agent-goals");
+    await mkdir(goalsDir, { recursive: true });
+    await writeFile(
+      path.join(goalsDir, "goal_owner.json"),
+      JSON.stringify(createGoal("goal_foreign", "planning")),
+      "utf8",
+    );
+
+    await expect(store.get("goal_owner")).resolves.toBeNull();
+    const files = await readdir(goalsDir);
+    expect(files).toEqual([
+      expect.stringMatching(/^goal_owner\.json\.corrupt-.*$/),
+    ]);
+  });
+
   it("persists and returns credential-free Skill snapshots for new and legacy goals", async () => {
     const store = createAgentGoalStore({ configDir });
     const goalsDir = path.join(configDir, "agent-goals");

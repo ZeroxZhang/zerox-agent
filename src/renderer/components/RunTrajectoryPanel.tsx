@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import { summarizeTrajectoryInsights } from "../../shared/agentTrajectoryInsights";
 import { redactCredentials } from "../../shared/credentialRedaction";
+import { assessUnknownTrajectoryCoverage } from "../../shared/unknownTrajectoryCoverage";
 import {
   extractToolResultRef,
   type ReadToolResultRefResult,
@@ -10,6 +11,9 @@ import {
 export function RunTrajectoryPanel(props: {
   runId: string;
   events: AgentTrajectoryEvent[];
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const [selectedEventId, setSelectedEventId] = useState(() =>
     readPersistedEvidenceSelection(props.runId),
@@ -17,6 +21,7 @@ export function RunTrajectoryPanel(props: {
   const [visibleCount, setVisibleCount] = useState(50);
   const [loadedRef, setLoadedRef] = useState<ReadToolResultRefResult | null>(null);
   const [loadingRef, setLoadingRef] = useState(false);
+  const loadRefGeneration = useRef(0);
   const selectedEvent = useMemo(
     () =>
       props.events.find((event) => event.id === selectedEventId) ??
@@ -28,9 +33,14 @@ export function RunTrajectoryPanel(props: {
     () => summarizeTrajectoryInsights(props.events),
     [props.events],
   );
+  const unknownCoverage = useMemo(
+    () => assessUnknownTrajectoryCoverage(props.events),
+    [props.events],
+  );
   const resultRef = extractToolResultRef(selectedEvent?.payload);
 
   useEffect(() => {
+    loadRefGeneration.current += 1;
     setLoadedRef(null);
     setLoadingRef(false);
   }, [selectedEvent?.id]);
@@ -42,10 +52,7 @@ export function RunTrajectoryPanel(props: {
 
   useEffect(() => {
     if (!selectedEvent?.id) return;
-    window.localStorage?.setItem(
-      evidenceSelectionKey(props.runId),
-      selectedEvent.id,
-    );
+    persistEvidenceSelection(props.runId, selectedEvent.id);
   }, [props.runId, selectedEvent?.id]);
 
   async function handleLoadRef() {
@@ -53,17 +60,20 @@ export function RunTrajectoryPanel(props: {
       return;
     }
 
+    const generation = ++loadRefGeneration.current;
     setLoadingRef(true);
     try {
-      setLoadedRef(
-        await window.buildingAgent.readToolResultRef(resultRef, {
-          runId: selectedEvent?.runId,
-          sessionId: selectedEvent?.runContext?.sessionId,
-          workspaceRunId: selectedEvent?.runContext?.runId,
-        }),
-      );
+      const result = await window.buildingAgent.readToolResultRef(resultRef, {
+        runId: selectedEvent?.runId,
+        trajectoryEventId: selectedEvent?.id,
+      });
+      if (loadRefGeneration.current === generation) {
+        setLoadedRef(result);
+      }
     } finally {
-      setLoadingRef(false);
+      if (loadRefGeneration.current === generation) {
+        setLoadingRef(false);
+      }
     }
   }
 
@@ -84,8 +94,19 @@ export function RunTrajectoryPanel(props: {
     >
       <div className="section-heading">
         <span>证据事件</span>
-        <small>{props.events.length} 个事件</small>
+        <small>已加载 {props.events.length} 个事件</small>
       </div>
+      {unknownCoverage.state === "degraded" ? (
+        <p
+          className="settings-message is-error"
+          data-coverage-state={unknownCoverage.state}
+          data-reset-required={String(unknownCoverage.resetRequired)}
+          data-testid="unknown-trajectory-coverage"
+          role="alert"
+        >
+          检测到当前版本无法解释的必需证据，覆盖已降级；请重新加载证据视图后再作判断。
+        </p>
+      ) : null}
       {insights.length ? (
         <>
           <div className="section-heading">
@@ -121,7 +142,10 @@ export function RunTrajectoryPanel(props: {
               event.id === selectedEvent?.id ? "is-selected" : ""
             }`}
             key={event.id}
-            onClick={() => setSelectedEventId(event.id)}
+            onClick={() => {
+              loadRefGeneration.current += 1;
+              setSelectedEventId(event.id);
+            }}
             type="button"
           >
             <strong>{formatEvidenceEventType(event.type)}</strong>
@@ -129,13 +153,20 @@ export function RunTrajectoryPanel(props: {
           </button>
         ))}
       </div>
-      {visibleCount < props.events.length ? (
+      {visibleCount < props.events.length || props.hasMore ? (
         <button
           className="secondary-action"
-          onClick={() => setVisibleCount((current) => current + 50)}
+          disabled={props.loadingMore}
+          onClick={() => {
+            if (visibleCount < props.events.length) {
+              setVisibleCount((current) => current + 50);
+              return;
+            }
+            props.onLoadMore?.();
+          }}
           type="button"
         >
-          加载更多证据
+          {props.loadingMore ? "正在加载..." : "加载更多证据"}
         </button>
       ) : null}
       {selectedEvent ? (
@@ -201,6 +232,14 @@ function readPersistedEvidenceSelection(runId: string): string {
     return window.localStorage?.getItem(evidenceSelectionKey(runId)) ?? "";
   } catch {
     return "";
+  }
+}
+
+function persistEvidenceSelection(runId: string, eventId: string): void {
+  try {
+    window.localStorage?.setItem(evidenceSelectionKey(runId), eventId);
+  } catch {
+    // Evidence selection persistence is a best-effort renderer preference.
   }
 }
 
