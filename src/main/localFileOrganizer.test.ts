@@ -3,6 +3,7 @@ import {
   appendFile,
   chmod,
   copyFile,
+  link,
   mkdir,
   mkdtemp,
   readFile,
@@ -154,6 +155,41 @@ describe("local file organizer", () => {
       .resolves.toBe("new");
     await expect(readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"))
       .resolves.toBe("existing");
+  });
+
+  it("preserves a source replacement swapped after identity verification", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const held = path.join(tempDir, "photo-held.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_leaf_swap",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "source-verified",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await rename(source, held);
+    await writeFile(source, "replacement", "utf8");
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/identity/i);
+    await expect(readFile(held, "utf8")).resolves.toBe("original");
+    await expect(readFile(target, "utf8")).resolves.toBe("replacement");
+    await expectPath(source, false);
+    await expect(readLocalFileOrganizationTransaction(path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_leaf_swap.json",
+    ))).resolves.toMatchObject({ status: "pending" });
   });
 
   it("rejects a category directory replaced by a symlink", async () => {
@@ -324,6 +360,25 @@ describe("local file organizer", () => {
       .resolves.toBe("replacement");
     await expect(readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"))
       .resolves.toBe("original");
+    await expect(readLocalFileOrganizationTransaction(transaction.logPath))
+      .resolves.toMatchObject({ status: "applied" });
+  });
+
+  it("preserves both historical duplicate links for manual reconciliation", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_duplicate_preserved",
+    });
+    const transaction = await applyLocalFileOrganization(preview);
+    await link(target, source);
+
+    await expect(rollbackLocalFileOrganization(transaction)).rejects.toThrow(
+      /preserved duplicate links for manual reconciliation/i,
+    );
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expect(readFile(target, "utf8")).resolves.toBe("original");
     await expect(readLocalFileOrganizationTransaction(transaction.logPath))
       .resolves.toMatchObject({ status: "applied" });
   });

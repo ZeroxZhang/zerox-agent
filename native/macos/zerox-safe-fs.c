@@ -196,18 +196,30 @@ static int open_child_directory(
   return verify_fd_path(*child_fd, expected_path);
 }
 
-static void maybe_test_delay(void) {
-  const char *value = getenv("ZEROX_SAFE_FS_TEST_DELAY_MS");
-  uint64_t delay_ms = 0;
-  if (value == NULL || !parse_u64(value, &delay_ms) || delay_ms > 5000U) return;
-  if (delay_ms > 0U) usleep((useconds_t)(delay_ms * 1000U));
+static int test_stage_selected(const char *stage) {
+  const char *configured = getenv("ZEROX_SAFE_FS_TEST_READY_STAGE");
+  return configured == NULL
+    ? strcmp(stage, "directories-opened") == 0
+    : strcmp(configured, stage) == 0;
 }
 
-static void maybe_signal_test_ready(void) {
-  const char *value = getenv("ZEROX_SAFE_FS_TEST_READY");
-  if (value == NULL || strcmp(value, "1") != 0) return;
-  fputs("zerox-safe-fs-test-ready\n", stderr);
-  fflush(stderr);
+static void maybe_test_checkpoint(const char *stage) {
+  const char *value = getenv("ZEROX_SAFE_FS_TEST_DELAY_MS");
+  uint64_t delay_ms = 0;
+  const char *ready = getenv("ZEROX_SAFE_FS_TEST_READY");
+  if (!test_stage_selected(stage)) return;
+  if (ready != NULL && strcmp(ready, "1") == 0) {
+    fprintf(stderr, "zerox-safe-fs-test-ready:%s\n", stage);
+    fflush(stderr);
+  }
+  if (
+    value != NULL
+    && parse_u64(value, &delay_ms)
+    && delay_ms <= 5000U
+    && delay_ms > 0U
+  ) {
+    usleep((useconds_t)(delay_ms * 1000U));
+  }
 }
 
 static int verify_directories(
@@ -230,30 +242,36 @@ static int move_between_directories(
 ) {
   struct stat source_stats;
   struct stat target_stats;
-  int saved_errno;
   int result = read_regular_at(source_fd, source_name, expected, &source_stats);
   if (result != 0) return result;
-  if (linkat(source_fd, source_name, target_fd, target_name, 0) != 0) {
+  maybe_test_checkpoint("source-verified");
+  if (
+    renameatx_np(
+      source_fd,
+      source_name,
+      target_fd,
+      target_name,
+      RENAME_EXCL
+    ) != 0
+  ) {
     if (errno == EEXIST) return fail_message("target appeared after preview");
-    return fail_errno("cannot create no-replace target link");
+    return fail_errno("cannot atomically move to no-replace target");
   }
   result = read_regular_at(target_fd, target_name, expected, &target_stats);
   if (
     result != 0 ||
     target_stats.st_dev != source_stats.st_dev ||
-    target_stats.st_ino != source_stats.st_ino ||
-    target_stats.st_nlink < 2
+    target_stats.st_ino != source_stats.st_ino
   ) {
-    saved_errno = errno;
-    (void)unlinkat(target_fd, target_name, 0);
-    errno = saved_errno;
-    return result != 0 ? result : fail_message("target link identity is inconsistent");
+    return result != 0
+      ? result
+      : fail_message("atomically moved target identity is inconsistent");
   }
-  if (unlinkat(source_fd, source_name, 0) != 0) {
-    saved_errno = errno;
-    (void)unlinkat(target_fd, target_name, 0);
-    errno = saved_errno;
-    return fail_errno("cannot remove no-replace source link");
+  if (fstatat(source_fd, source_name, &source_stats, AT_SYMLINK_NOFOLLOW) == 0) {
+    return fail_message("source path was repopulated during atomic move");
+  }
+  if (errno != ENOENT) {
+    return fail_errno("cannot verify atomic source retirement");
   }
   if (fsync(source_fd) != 0 || fsync(target_fd) != 0) {
     return fail_errno("cannot durably synchronize moved file");
@@ -289,8 +307,7 @@ static int run_move(int argc, char **argv, int reverse) {
     category_path
   );
   if (result != 0) goto done;
-  maybe_signal_test_ready();
-  maybe_test_delay();
+  maybe_test_checkpoint("directories-opened");
   result = verify_directories(root_fd, argv[2], category_fd, category_path);
   if (result != 0) goto done;
   result = reverse
@@ -300,57 +317,6 @@ static int run_move(int argc, char **argv, int reverse) {
     : move_between_directories(
         root_fd, argv[7], category_fd, argv[9], &source_identity
       );
-done:
-  if (category_fd >= 0) close(category_fd);
-  if (root_fd >= 0) close(root_fd);
-  if (result == 0) puts("{\"ok\":true}");
-  return result;
-}
-
-static int run_remove_duplicate(int argc, char **argv) {
-  file_identity root_identity;
-  file_identity expected;
-  struct stat root_file;
-  struct stat category_file;
-  int root_fd = -1;
-  int category_fd = -1;
-  int result;
-  char category_path[MAXPATHLEN];
-  if (argc != 13) return fail_message("invalid remove-duplicate arguments");
-  if (!is_single_component(argv[7]) || !is_category(argv[8]) || !is_single_component(argv[9])) {
-    return fail_message("duplicate paths must use allowed single components");
-  }
-  if (!parse_identity(argv[3], argv[4], "0", argv[5], &root_identity)) {
-    return fail_message("invalid root identity");
-  }
-  if (!parse_identity(argv[10], argv[11], argv[12], argv[6], &expected)) {
-    return fail_message("invalid duplicate identity");
-  }
-  result = open_root(argv[2], &root_identity, &root_fd);
-  if (result != 0) goto done;
-  result = open_child_directory(
-    root_fd, argv[2], argv[8], 0, &category_fd, category_path
-  );
-  if (result != 0) goto done;
-  maybe_signal_test_ready();
-  maybe_test_delay();
-  result = verify_directories(root_fd, argv[2], category_fd, category_path);
-  if (result != 0) goto done;
-  result = read_regular_at(root_fd, argv[7], &expected, &root_file);
-  if (result != 0) goto done;
-  result = read_regular_at(category_fd, argv[9], &expected, &category_file);
-  if (result != 0) goto done;
-  if (
-    root_file.st_dev != category_file.st_dev ||
-    root_file.st_ino != category_file.st_ino
-  ) {
-    result = fail_message("duplicate links do not share one inode");
-    goto done;
-  }
-  if (unlinkat(category_fd, argv[9], 0) != 0 || fsync(category_fd) != 0) {
-    result = fail_errno("cannot remove duplicate category link");
-    goto done;
-  }
 done:
   if (category_fd >= 0) close(category_fd);
   if (root_fd >= 0) close(root_fd);
@@ -489,8 +455,7 @@ static int run_log(int argc, char **argv, int append) {
       goto done;
     }
   }
-  maybe_signal_test_ready();
-  maybe_test_delay();
+  maybe_test_checkpoint("directories-opened");
   result = verify_directories(root_fd, argv[2], log_fd, log_path);
   if (result != 0) goto done;
   if (append) {
@@ -555,9 +520,6 @@ int main(int argc, char **argv) {
   }
   if (strcmp(argv[1], "move-from-category") == 0) {
     return run_move(argc, argv, 1);
-  }
-  if (strcmp(argv[1], "remove-category-duplicate") == 0) {
-    return run_remove_duplicate(argc, argv);
   }
   if (strcmp(argv[1], "log-create") == 0) {
     return run_log(argc, argv, 0);

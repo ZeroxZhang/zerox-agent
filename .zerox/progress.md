@@ -13541,3 +13541,33 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `scripts/build-v392-acceptance-anchor.mjs`, release documentation, focused
   tests, and generated-output ignore rules. Independent code/security review
   and the fresh caller-private authoritative run remain mandatory next gates.
+
+## 2026-08-31 - v3.9.2 independent-review trust-boundary repair
+
+- The first frozen release candidate was rejected by both independent lanes.
+  Code review found that the completed-state checker could derive its trust
+  pins from the same tracked attestation it was validating. Security review
+  confirmed that finding and also identified a leaf-swap TOCTOU window in the
+  native local-file move/rollback path. No acceptance receipt was issued for
+  that rejected candidate.
+- Completed v3.9.2 verification now requires an externally supplied, exact
+  release-attestation digest. Both verify and release workflows receive that
+  pin from the protected `ZEROX_V392_RELEASE_ATTESTATION_DIGEST` secret; the
+  tracked attestation can describe evidence but cannot authorize itself.
+- macOS file moves now use one atomic no-overwrite `renameatx_np(...,
+  RENAME_EXCL)` operation followed by identity and source-retirement checks.
+  The pathname-based link/unlink sequence and duplicate-deletion command were
+  removed. Historical duplicate links are preserved fail-closed for manual
+  reconciliation instead of deleting either pathname.
+- New race regressions swap the source after identity verification and create
+  a historical duplicate before rollback. Both prove that no replacement or
+  duplicate file is deleted. Native-source inspection also rejects any return
+  of `linkat`, `unlinkat`, or the removed duplicate command.
+- Post-repair focused validation passes `4/4` files and `43/43` tests. Full
+  `npm run verify` passes strict test type coverage `433/433`, current suite
+  `324` passed files / `3868` passed tests with declared skips, all historical
+  lanes, production build, Agent eval `26/26`, and Memory eval `2/2`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration. The repaired exact-byte candidate still requires fresh
+  independent code/security approval before release.

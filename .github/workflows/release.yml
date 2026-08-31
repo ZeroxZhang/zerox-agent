@@ -39,6 +39,8 @@ jobs:
         run: npm ci
 
       - name: Verify source tree
+        env:
+          ZEROX_V392_RELEASE_ATTESTATION_DIGEST: ${{ secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST }}
         run: |
           npm run typecheck:tests
           npm test -- --maxWorkers=1

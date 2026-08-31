@@ -45,6 +45,15 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       minimumSystemVersion: expect.stringMatching(/^12\.0/),
       linkedLibraries: ["/usr/lib/libSystem.B.dylib"],
     });
+    const source = readFileSync(
+      path.join(process.cwd(), "native/macos/zerox-safe-fs.c"),
+      "utf8",
+    );
+    expect(source).toContain("renameatx_np(");
+    expect(source).toContain("RENAME_EXCL");
+    expect(source).not.toContain("linkat(");
+    expect(source).not.toContain("unlinkat(");
+    expect(source).not.toContain("remove-category-duplicate");
   });
 
   it("requires hardened signing and an empty entitlement set", () => {

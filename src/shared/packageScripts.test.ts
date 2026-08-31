@@ -554,13 +554,18 @@ describe("package scripts", () => {
     );
     expect(checker).toContain("value.reviewOutput !== expectedOutput");
     expect(checker).toContain("text === expectedText");
-    expect(checker).toContain("validateReleaseAttestation(canonicalRoot, errors)");
+    expect(checker).toContain("validateReleaseAttestation(");
     expect(checker).toContain(
       '"caller-promoted-external-anchor-not-signed"',
     );
     expect(checker).toContain("attestation.acceptedGitTree !== acceptedTree");
     expect(checker).toContain("!acceptedIsAncestor");
     expect(checker).toContain("if (!options.releaseAttestation)");
+    expect(checker).toContain("ZEROX_V392_RELEASE_ATTESTATION_DIGEST");
+    expect(checker).toContain("attestation.digest !== expectedDigest");
+    expect(checker).toContain(
+      "completed v3.9.2 requires a caller-pinned release attestation digest",
+    );
     expect(checker).not.toContain(
       'value.reviewOutput.includes("FINAL_VERDICT: PASS")',
     );
@@ -628,6 +633,16 @@ describe("package scripts", () => {
     expect(workflow).toContain("runs-on: macos-14");
     expect(workflow).toContain('test "$(uname -m)" = "arm64"');
     expect(workflow).toContain("secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY");
+    expect(workflow).toContain(
+      "secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST",
+    );
+    const verifyWorkflow = readFileSync(
+      path.join(process.cwd(), ".github", "workflows", "verify.yml"),
+      "utf8",
+    );
+    expect(verifyWorkflow).toContain(
+      "secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST",
+    );
     expect(workflow).toContain("ZEROX_RELEASE_MODE: legacy-adhoc");
     expect(workflow).toContain("npm test -- --maxWorkers=1");
     expect(workflow).toContain("npm run stress:runtime");

@@ -426,6 +426,9 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
     ?? process.env.ZEROX_CD04_DELTA_ANCHOR;
   const expectedAnchorDigest = options.expectedDeltaAnchorDigest
     ?? process.env.ZEROX_CD04_DELTA_ANCHOR_DIGEST;
+  const expectedReleaseAttestationDigest =
+    options.expectedReleaseAttestationDigest
+    ?? process.env.ZEROX_V392_RELEASE_ATTESTATION_DIGEST;
 
   const [canonicalRoot, snapshotCapture, manifestCapture, program, featureList] =
     await Promise.all([
@@ -439,9 +442,19 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
       readCanonicalJson(path.join(root, ".zerox/feature_list.json"), errors),
     ]);
   const releaseReady = program?.value?.status === "completed";
-  const useReleaseAttestation = releaseReady && !hasCallerPinMaterial(options);
+  const hasPrivatePins = hasPrivateCallerPinMaterial(options);
+  const useReleaseAttestation =
+    releaseReady
+    && !hasPrivatePins
+    && /^sha256:[0-9a-f]{64}$/.test(
+      expectedReleaseAttestationDigest ?? "",
+    );
   const releaseAttestation = useReleaseAttestation
-    ? await validateReleaseAttestation(canonicalRoot, errors)
+    ? await validateReleaseAttestation(
+        canonicalRoot,
+        expectedReleaseAttestationDigest,
+        errors,
+      )
     : null;
   const validationOptions = releaseAttestation
     ? withReleaseAttestationPins(options, releaseAttestation)
@@ -454,6 +467,11 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
     )
   ) {
     errors.push("caller-pinned CD04 anchor path and digest are required");
+  }
+  if (releaseReady && !hasPrivatePins && !useReleaseAttestation) {
+    errors.push(
+      "completed v3.9.2 requires a caller-pinned release attestation digest",
+    );
   }
   const anchorCapture = !useReleaseAttestation && path.isAbsolute(anchorPath ?? "")
     ? await readCanonicalJson(anchorPath, errors, true)
@@ -537,7 +555,11 @@ export async function checkConversationDisclosureSuccessorProgram(options = {}) 
   return { ...receipt, digest: hashCanonicalV13(receipt) };
 }
 
-async function validateReleaseAttestation(canonicalRoot, errors) {
+async function validateReleaseAttestation(
+  canonicalRoot,
+  expectedDigest,
+  errors,
+) {
   const capture = await readCanonicalJson(
     path.join(root, releaseAttestationPath),
     errors,
@@ -589,6 +611,7 @@ async function validateReleaseAttestation(canonicalRoot, errors) {
     || attestation.status !== "accepted"
     || attestation.identityAssurance
       !== "caller-promoted-external-anchor-not-signed"
+    || attestation.digest !== expectedDigest
     || !/^sha256:[0-9a-f]{64}$/.test(attestation.acceptanceAnchorDigest ?? "")
     || !/^[0-9a-f]{40}$/.test(attestation.acceptedGitHead ?? "")
     || !/^[0-9a-f]{40}$/.test(attestation.acceptedGitTree ?? "")
@@ -626,7 +649,7 @@ function withReleaseAttestationPins(options, attestation) {
   };
 }
 
-function hasCallerPinMaterial(options) {
+function hasPrivateCallerPinMaterial(options) {
   return [
     options.deltaAnchor,
     options.expectedDeltaAnchorDigest,

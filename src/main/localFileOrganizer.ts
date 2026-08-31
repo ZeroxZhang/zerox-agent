@@ -96,6 +96,7 @@ export type LocalFileOrganizerRuntimeOptions = {
   now?: () => string;
   safeFsHelperPath?: string;
   safeFsTestDelayMs?: number;
+  safeFsTestReadyStage?: "directories-opened" | "source-verified";
   safeFsTestOnReady?: (command: string) => void;
 };
 
@@ -276,7 +277,7 @@ export async function rollbackLocalFileOrganization(
 
   const rollbackSteps: Array<{
     move: LocalFileMovePlan;
-    disposition: "move" | "remove_duplicate" | "already_restored";
+    disposition: "move" | "already_restored";
   }> = [];
   // Preflight every move before changing any path. A rollback conflict must
   // leave the canonical transaction in its applied state; partial rollback
@@ -296,7 +297,9 @@ export async function rollbackLocalFileOrganization(
       throw new Error(`Local file organization rollback target identity changed: ${move.to}`);
     }
     if (fromIdentity && toIdentity) {
-      rollbackSteps.push({ move, disposition: "remove_duplicate" });
+      throw new Error(
+        `Local file organization rollback preserved duplicate links for manual reconciliation: ${move.from}`,
+      );
     } else if (fromIdentity) {
       rollbackSteps.push({ move, disposition: "already_restored" });
     } else if (toIdentity) {
@@ -310,18 +313,6 @@ export async function rollbackLocalFileOrganization(
   for (const step of rollbackSteps) {
     const { move } = step;
     if (step.disposition === "already_restored") {
-      movesRolledBack += 1;
-      continue;
-    }
-    if (step.disposition === "remove_duplicate") {
-      assertMoveShape(transaction.root, move);
-      await runMoveWithSafeFs(
-        "remove-category-duplicate",
-        transaction.root,
-        transaction.rootIdentity,
-        move,
-        options,
-      );
       movesRolledBack += 1;
       continue;
     }
@@ -682,7 +673,7 @@ function assertMoveShape(root: string, move: LocalFileMovePlan): void {
 }
 
 async function runMoveWithSafeFs(
-  command: "move-into-category" | "move-from-category" | "remove-category-duplicate",
+  command: "move-into-category" | "move-from-category",
   root: string,
   rootIdentity: LocalDirectoryIdentity,
   move: LocalFileMovePlan,
@@ -762,6 +753,9 @@ async function runSafeFsHelper(
           : { ZEROX_SAFE_FS_TEST_DELAY_MS: String(options.safeFsTestDelayMs) }),
         ...(options.safeFsTestOnReady
           ? { ZEROX_SAFE_FS_TEST_READY: "1" }
+          : {}),
+        ...(options.safeFsTestReadyStage
+          ? { ZEROX_SAFE_FS_TEST_READY_STAGE: options.safeFsTestReadyStage }
           : {}),
       },
       stdio: ["pipe", "pipe", "pipe"],

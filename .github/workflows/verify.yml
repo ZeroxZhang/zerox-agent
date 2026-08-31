@@ -17,3 +17,5 @@ jobs:
       - run: npm ci
       - run: npm run verify
       - run: npm run harness:check
+        env:
+          ZEROX_V392_RELEASE_ATTESTATION_DIGEST: ${{ secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST }}
