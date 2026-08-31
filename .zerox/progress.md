@@ -13604,3 +13604,39 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   SQLite `3.53.2`, seven migrations, eight authority domains, renderer startup,
   and final Node ABI `137` restoration. A third exact-byte independent review
   remains required before authoritative acceptance.
+
+## 2026-09-01 - v3.9.2 journal-authority and marker self-validation repair
+
+- The third frozen candidate was rejected by code review with three Majors and
+  one Minor, and by security review with one Major. The shared root cause was
+  that rollback/verify still trusted caller-projected transaction state and a
+  pre-existing reconciliation marker was accepted without proving its exact
+  body and canonical leaf identity. No acceptance receipt was issued for that
+  rejected candidate.
+- Rollback and verify now reload the canonical single-link transaction journal
+  before making any decision. Every native move keeps that exact journal leaf
+  open, binds its device/inode/size/owner and private `0600` mode before and
+  after mutation, and refuses a replaced, relocated, or permission-broadened
+  journal without moving user data.
+- Reconciliation markers are now self-validating on both creation and
+  `EEXIST`: descriptor path, canonical leaf, directory ownership, mode, link
+  count, exact fixed body, and before/after identity timestamps must all match.
+  Post-mutation branches explicitly report when durable reconciliation evidence
+  could not be persisted instead of silently discarding that failure.
+- The acceptance runner now checks committed whitespace from the v3.9.1 source
+  baseline. Five immutable predecessor EOF diagnostics are allowed only while
+  their exact historical Git blob identities match; every other committed,
+  staged, working-tree, or untracked whitespace defect remains fail-closed.
+- A stale hard-coded P113 definition digest was corrected after the active
+  Feature was expanded to explicitly own the native helper, journal runtime,
+  tool adapter, package integration, and their tests. Caller-pinned Program and
+  Harness checks now pass again without changing frozen predecessor bytes.
+- Focused validation passes `4/4` files and `96/96` tests. Full `npm run verify`
+  passes strict type coverage `433/433`, `324` current files / `3875` current
+  tests with declared skips, all historical lanes, production build, Agent eval
+  `26/26`, and Memory eval `2/2`. Production smoke passes Electron `42.9.0` /
+  ABI `146`, SQLite `3.53.2`, seven migrations, eight authority domains,
+  renderer startup, and Node ABI `137` restoration. Production audit reports
+  zero vulnerabilities; `npm ls --all`, Program, Harness, and `git diff
+  --check` pass. A fresh fourth exact-byte code/security review is the next
+  mandatory gate.

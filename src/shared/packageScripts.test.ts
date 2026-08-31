@@ -297,6 +297,20 @@ describe("package scripts", () => {
       'captureRegularFile(SELF_PATH, "external acceptance runner")',
     );
     expect(runner).toContain("await verifyGitIdentity(repositoryRealpath, options)");
+    expect(runner).toContain("await verifyCommittedWhitespace(");
+    expect(runner).toContain("SOURCE_BASELINE_GIT_HEAD");
+    expect(runner).toContain(
+      "`${SOURCE_BASELINE_GIT_HEAD}...${expectedGitHead}`",
+    );
+    expect(runner).toContain("IMMUTABLE_COMMITTED_WHITESPACE_ALLOWLIST");
+    expect(runner).toContain(
+      'blob: "4925ab7ef0cc1270f26a6671ea137705e9345681"',
+    );
+    expect(runner).toContain("unexpected committed whitespace");
+    expect(runner).toContain("immutable whitespace allowlist blob changed");
+    expect(runner).toContain(
+      '["rev-parse", "--verify", `${expectedGitHead}:${relativePath}`]',
+    );
     expect(runner).toContain('[executionNpmCliPath, "run", "verify"]');
     expect(runner).toContain('ZEROX_V392_OUTER_SANDBOX: "1"');
     expect(runner).toContain("await runTrustedSeatbeltRegressionLane(");

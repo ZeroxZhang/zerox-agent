@@ -32,6 +32,31 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 const SELF_PATH = await realpath(fileURLToPath(import.meta.url));
+const SOURCE_BASELINE_GIT_HEAD =
+  "942712279426601c1a5162dabc6fb9b663262e07";
+const IMMUTABLE_COMMITTED_WHITESPACE_ALLOWLIST = Object.freeze({
+  ".zerox/decisions/CD05-chat-disclosure-surface.md": Object.freeze({
+    blob: "4925ab7ef0cc1270f26a6671ea137705e9345681",
+    diagnostics: Object.freeze(["47: new blank line at EOF."]),
+  }),
+  ".zerox/decisions/CD06-cross-surface-disclosure.md": Object.freeze({
+    blob: "5b3c58df15ae6a7c691a14ad231ddf19c65a408d",
+    diagnostics: Object.freeze(["40: new blank line at EOF."]),
+  }),
+  ".zerox/decisions/CD07-evidence-inspector.md": Object.freeze({
+    blob: "ce87fce7d172ea7041411c793338eb7982292ba0",
+    diagnostics: Object.freeze(["25: new blank line at EOF."]),
+  }),
+  ".zerox/verification/conversation-disclosure/CD04-package-scripts-test.target.ts":
+    Object.freeze({
+      blob: "1861c7a4b59c7347303171ba9b80f6b8b38ec1d7",
+      diagnostics: Object.freeze(["1065: new blank line at EOF."]),
+    }),
+  "src/shared/conversationDisclosureProgramGovernanceV3.test.ts": Object.freeze({
+    blob: "250f1bdafcd4bb99f0065dcbb1912f93c9d9b1f2",
+    diagnostics: Object.freeze(["525: new blank line at EOF."]),
+  }),
+});
 const CD04_ANCHOR_DIGEST =
   "sha256:99b8b7af27e24d2c44e2bb3b2433ada877fd68aeac2d1de80427931de15c01ef";
 const EXPECTED_NPM_CLI_DIGEST =
@@ -72,7 +97,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "package-lock.json":
     "sha256:c5cd81cff944c33d2a1bcd785cba49fd3a34f0c7279a701989e6fa9e3c448beb",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:3d50ef32eaff2cb701930d167982cb9a3618436438a48fa5433d8c8d7e8491d5",
+    "sha256:8eddc20420dfdafb256f081fcd193a4799c6f0d41cbaf8640964b0949621b86e",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
@@ -411,6 +436,10 @@ if (recoveredPublication?.status === "committed") {
   process.exit(0);
 }
 await verifyGitIdentity(repositoryRealpath, options);
+await verifyCommittedWhitespace(
+  repositoryRealpath,
+  options.expectedGitHead,
+);
 await verifyControlSet(repositoryRealpath);
 await verifyToolchain(repositoryRealpath);
 await verifyNativeNodeAddon(repositoryRealpath);
@@ -2960,6 +2989,70 @@ async function verifyWhitespace(repositoryRoot, env) {
     if (text.split("\n").some((line) => /[ \t]+\r?$/.test(line))) {
       fail(`untracked source has trailing whitespace: ${relativePath}`);
     }
+  }
+}
+
+async function verifyCommittedWhitespace(repositoryRoot, expectedGitHead) {
+  const gitEnvironment = {
+    HOME: "/var/empty",
+    LANG: "en_US.UTF-8",
+    PATH: "/usr/bin:/bin",
+  };
+  let failure;
+  try {
+    await execFile(
+      "/usr/bin/git",
+      [
+        "diff",
+        "--check",
+        `${SOURCE_BASELINE_GIT_HEAD}...${expectedGitHead}`,
+      ],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        maxBuffer: 16 * 1024 * 1024,
+        env: gitEnvironment,
+      },
+    );
+    return;
+  } catch (error) {
+    failure = error;
+  }
+
+  const diagnostics = `${failure?.stdout ?? ""}${failure?.stderr ?? ""}`
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  if (diagnostics.length === 0) {
+    throw failure;
+  }
+
+  const verifiedPaths = new Set();
+  for (const diagnostic of diagnostics) {
+    const match = diagnostic.match(/^(.+?):(\d+): (.+)$/);
+    const relativePath = match?.[1];
+    const detail = match ? `${match[2]}: ${match[3]}` : "";
+    const allowance = relativePath
+      ? IMMUTABLE_COMMITTED_WHITESPACE_ALLOWLIST[relativePath]
+      : undefined;
+    if (!allowance?.diagnostics.includes(detail)) {
+      fail(`unexpected committed whitespace: ${diagnostic}`);
+    }
+    if (verifiedPaths.has(relativePath)) continue;
+    const { stdout } = await execFile(
+      "/usr/bin/git",
+      ["rev-parse", "--verify", `${expectedGitHead}:${relativePath}`],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        maxBuffer: 1024 * 1024,
+        env: gitEnvironment,
+      },
+    );
+    if (stdout.trim() !== allowance.blob) {
+      fail(`immutable whitespace allowlist blob changed: ${relativePath}`);
+    }
+    verifiedPaths.add(relativePath);
   }
 }
 

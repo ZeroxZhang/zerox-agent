@@ -105,6 +105,7 @@ export type LocalFileOrganizerRuntimeOptions = {
   safeFsTestDelayMs?: number;
   safeFsTestReadyStage?:
     | "directories-opened"
+    | "journal-bound"
     | "source-verified"
     | "move-applied"
     | "log-before-mutation"
@@ -236,12 +237,16 @@ export async function applyLocalFileOrganization(
     if (!move.sourceIdentity) {
       throw new Error("Local file organization preview lacks source identity.");
     }
+    if (!transaction.logIdentity) {
+      throw new Error("Local file organization transaction lacks log identity.");
+    }
     assertMoveShape(transaction.root, move);
     await runMoveWithSafeFs(
       "move-into-category",
       transaction.root,
       transaction.rootIdentity!,
       transaction.id,
+      transaction.logIdentity,
       move,
       options,
     );
@@ -281,6 +286,11 @@ export async function rollbackLocalFileOrganization(
       "Local file organization transaction log does not belong to the transaction.",
     );
   }
+  assertLocalOrganizationBoundary(transaction.root, [
+    transaction.logPath,
+    ...transaction.moves.flatMap((move) => [move.from, move.to]),
+  ]);
+  transaction = await loadAuthoritativeTransaction(transaction);
   assertLocalOrganizationBoundary(transaction.root, [
     transaction.logPath,
     ...transaction.moves.flatMap((move) => [move.from, move.to]),
@@ -345,6 +355,7 @@ export async function rollbackLocalFileOrganization(
       transaction.root,
       transaction.rootIdentity,
       transaction.id,
+      transaction.logIdentity,
       move,
       options,
     );
@@ -375,6 +386,11 @@ export async function verifyLocalFileOrganization(
     transaction.id,
     "Local file organization transaction id",
   );
+  assertLocalOrganizationBoundary(transaction.root, [
+    transaction.logPath,
+    ...transaction.moves.flatMap((move) => [move.from, move.to]),
+  ]);
+  transaction = await loadAuthoritativeTransaction(transaction);
   assertLocalOrganizationBoundary(transaction.root, [
     transaction.logPath,
     ...transaction.moves.flatMap((move) => [move.from, move.to]),
@@ -451,14 +467,21 @@ export async function readLocalFileOrganizationTransaction(
       throw new Error("Local file organization journal is not a single-link regular file.");
     }
     const body = await handle.readFile("utf8");
-    const [after, leaf, canonicalPath] = await Promise.all([
+    const [after, leaf, directory, canonicalPath] = await Promise.all([
       handle.stat({ bigint: true }),
       lstat(resolvedLogPath, { bigint: true }),
+      lstat(path.dirname(resolvedLogPath), { bigint: true }),
       realpath(resolvedLogPath),
     ]);
     if (
-      !after.isFile()
+      (before.mode & 0o777n) !== 0o600n
+      || !directory.isDirectory()
+      || directory.isSymbolicLink()
+      || before.uid !== directory.uid
+      || !after.isFile()
       || after.nlink !== 1n
+      || (after.mode & 0o777n) !== 0o600n
+      || after.uid !== before.uid
       || after.dev !== before.dev
       || after.ino !== before.ino
       || after.size !== before.size
@@ -477,7 +500,13 @@ export async function readLocalFileOrganizationTransaction(
       transaction.id,
       "Local file organization transaction id",
     );
-    if (resolveUserPath(transaction.logPath) !== resolvedLogPath) {
+    const canonicalTransactionLogPath = resolveUserPath(
+      transactionLogPath(resolveUserPath(transaction.root), transaction.id),
+    );
+    if (
+      resolveUserPath(transaction.logPath) !== resolvedLogPath
+      || canonicalTransactionLogPath !== resolvedLogPath
+    ) {
       throw new Error("Local file organization journal path does not match its transaction.");
     }
     const markerPath = reconciliationMarkerPath(
@@ -506,6 +535,37 @@ export async function readLocalFileOrganizationTransaction(
   } finally {
     await handle.close();
   }
+}
+
+async function loadAuthoritativeTransaction(
+  provided: LocalFileOrganizationTransaction,
+): Promise<LocalFileOrganizationTransaction> {
+  assertSafeStoreEntityId(
+    provided.id,
+    "Local file organization transaction id",
+  );
+  const providedRoot = resolveUserPath(provided.root);
+  const expectedLogPath = resolveUserPath(
+    transactionLogPath(providedRoot, provided.id),
+  );
+  if (resolveUserPath(provided.logPath) !== expectedLogPath) {
+    throw new Error(
+      "Local file organization transaction log does not belong to the transaction.",
+    );
+  }
+  const authoritative = await readLocalFileOrganizationTransaction(
+    expectedLogPath,
+  );
+  if (
+    authoritative.id !== provided.id
+    || resolveUserPath(authoritative.root) !== providedRoot
+    || resolveUserPath(authoritative.logPath) !== expectedLogPath
+  ) {
+    throw new Error(
+      "Local file organization transaction input does not match journal authority.",
+    );
+  }
+  return authoritative;
 }
 
 function parseLastJournalTransaction(body: string): LocalFileOrganizationTransaction {
@@ -602,16 +662,23 @@ async function readReconciliationMarker(markerPath: string): Promise<boolean> {
   try {
     const before = await handle.stat({ bigint: true });
     const body = await handle.readFile("utf8");
-    const [after, leaf, canonicalPath] = await Promise.all([
+    const [after, leaf, directory, canonicalPath] = await Promise.all([
       handle.stat({ bigint: true }),
       lstat(markerPath, { bigint: true }),
+      lstat(path.dirname(markerPath), { bigint: true }),
       realpath(markerPath),
     ]);
     if (
       !before.isFile()
       || before.nlink !== 1n
+      || (before.mode & 0o777n) !== 0o600n
+      || !directory.isDirectory()
+      || directory.isSymbolicLink()
+      || before.uid !== directory.uid
       || !after.isFile()
       || after.nlink !== 1n
+      || (after.mode & 0o777n) !== 0o600n
+      || after.uid !== before.uid
       || after.dev !== before.dev
       || after.ino !== before.ino
       || after.size !== before.size
@@ -769,6 +836,7 @@ async function runMoveWithSafeFs(
   root: string,
   rootIdentity: LocalDirectoryIdentity,
   transactionId: string,
+  journalIdentity: LocalFileIdentity,
   move: LocalFileMovePlan,
   options: LocalFileOrganizerRuntimeOptions,
 ): Promise<void> {
@@ -791,6 +859,10 @@ async function runMoveWithSafeFs(
       sourceIdentity.ino,
       sourceIdentity.size,
       transactionId,
+      journalIdentity.dev,
+      journalIdentity.ino,
+      journalIdentity.size,
+      journalIdentity.uid,
     ],
     undefined,
     options,

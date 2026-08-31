@@ -236,17 +236,159 @@ static int verify_directories(
   return verify_fd_path(child_fd, child_path);
 }
 
-static int verify_move_capabilities(
+static int verify_opened_regular_path(
+  int directory_fd,
+  const char *directory_path,
+  const char *name,
+  int file_fd,
+  const file_identity *expected
+) {
+  char expected_path[MAXPATHLEN];
+  struct stat directory_stats;
+  struct stat opened_stats;
+  struct stat path_stats;
+  int written = snprintf(
+    expected_path,
+    sizeof(expected_path),
+    "%s/%s",
+    directory_path,
+    name
+  );
+  if (written < 0 || (size_t)written >= sizeof(expected_path)) {
+    return fail_message("opened regular-file path is too long");
+  }
+  if (
+    fstat(directory_fd, &directory_stats) != 0
+    || fstat(file_fd, &opened_stats) != 0
+  ) {
+    return fail_errno("cannot inspect opened regular file");
+  }
+  if (
+    !S_ISDIR(directory_stats.st_mode)
+    || !S_ISREG(opened_stats.st_mode)
+    || opened_stats.st_nlink != 1
+    || (opened_stats.st_mode & 0777) != 0600
+    || opened_stats.st_uid != directory_stats.st_uid
+    || !stat_matches(&opened_stats, expected)
+  ) {
+    return fail_message("opened regular-file identity changed");
+  }
+  if (read_regular_at(directory_fd, name, expected, &path_stats) != 0) return 1;
+  if (
+    path_stats.st_nlink != 1
+    || path_stats.st_dev != opened_stats.st_dev
+    || path_stats.st_ino != opened_stats.st_ino
+  ) {
+    return fail_message("regular-file path no longer names the opened file");
+  }
+  return verify_fd_path(file_fd, expected_path);
+}
+
+static int verify_move_authority(
   int root_fd,
   const char *root_path,
   int category_fd,
   const char *category_path,
   int log_fd,
-  const char *log_path
+  const char *log_path,
+  int journal_fd,
+  const char *journal_name,
+  const file_identity *journal_identity
 ) {
   int result = verify_directories(root_fd, root_path, category_fd, category_path);
   if (result != 0) return result;
-  return verify_fd_path(log_fd, log_path);
+  result = verify_fd_path(log_fd, log_path);
+  if (result != 0) return result;
+  return verify_opened_regular_path(
+    log_fd,
+    log_path,
+    journal_name,
+    journal_fd,
+    journal_identity
+  );
+}
+
+static int validate_reconciliation_marker(
+  int log_fd,
+  const char *marker_name,
+  int marker_fd
+) {
+  char log_path[MAXPATHLEN];
+  char marker_path[MAXPATHLEN];
+  char expected_marker_path[MAXPATHLEN];
+  char body[sizeof(RECONCILIATION_BODY)];
+  struct stat log_stats;
+  struct stat before;
+  struct stat after;
+  struct stat leaf;
+  ssize_t count;
+  int written;
+  if (
+    fcntl(log_fd, F_GETPATH, log_path) != 0
+    || fcntl(marker_fd, F_GETPATH, marker_path) != 0
+  ) {
+    return fail_errno("cannot resolve reconciliation marker capability");
+  }
+  written = snprintf(
+    expected_marker_path,
+    sizeof(expected_marker_path),
+    "%s/%s",
+    log_path,
+    marker_name
+  );
+  if (written < 0 || (size_t)written >= sizeof(expected_marker_path)) {
+    return fail_message("reconciliation marker path is too long");
+  }
+  if (
+    strcmp(marker_path, expected_marker_path) != 0
+    || fstat(log_fd, &log_stats) != 0
+    || fstat(marker_fd, &before) != 0
+    || fstatat(log_fd, marker_name, &leaf, AT_SYMLINK_NOFOLLOW) != 0
+  ) {
+    return fail_message("reconciliation marker capability is not canonical");
+  }
+  if (
+    !S_ISDIR(log_stats.st_mode)
+    || !S_ISREG(before.st_mode)
+    || before.st_nlink != 1
+    || (before.st_mode & 0777) != 0600
+    || before.st_uid != log_stats.st_uid
+    || !S_ISREG(leaf.st_mode)
+    || leaf.st_nlink != 1
+    || leaf.st_dev != before.st_dev
+    || leaf.st_ino != before.st_ino
+    || leaf.st_size != before.st_size
+  ) {
+    return fail_message("reconciliation marker metadata is invalid");
+  }
+  count = pread(marker_fd, body, sizeof(body), 0);
+  if (
+    count != (ssize_t)(sizeof(RECONCILIATION_BODY) - 1U)
+    || memcmp(
+      body,
+      RECONCILIATION_BODY,
+      sizeof(RECONCILIATION_BODY) - 1U
+    ) != 0
+  ) {
+    return fail_message("reconciliation marker body is invalid");
+  }
+  if (fstat(marker_fd, &after) != 0) {
+    return fail_errno("cannot re-inspect reconciliation marker");
+  }
+  if (
+    after.st_dev != before.st_dev
+    || after.st_ino != before.st_ino
+    || after.st_size != before.st_size
+    || after.st_nlink != before.st_nlink
+    || after.st_uid != before.st_uid
+    || after.st_mtimespec.tv_sec != before.st_mtimespec.tv_sec
+    || after.st_mtimespec.tv_nsec != before.st_mtimespec.tv_nsec
+    || after.st_ctimespec.tv_sec != before.st_ctimespec.tv_sec
+    || after.st_ctimespec.tv_nsec != before.st_ctimespec.tv_nsec
+  ) {
+    return fail_message("reconciliation marker changed while reading");
+  }
+  return 0;
 }
 
 static int record_reconciliation_marker(
@@ -254,7 +396,6 @@ static int record_reconciliation_marker(
   const char *transaction_id
 ) {
   char marker_name[NAME_MAX + 1];
-  struct stat marker_stats;
   const char *body = RECONCILIATION_BODY;
   size_t body_length = strlen(body);
   size_t offset = 0U;
@@ -272,18 +413,24 @@ static int record_reconciliation_marker(
   marker_fd = openat(
     log_fd,
     marker_name,
-    O_WRONLY | O_CLOEXEC | O_NOFOLLOW | O_CREAT | O_EXCL,
+    O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_CREAT | O_EXCL,
     0600
   );
   if (marker_fd < 0 && errno == EEXIST) {
-    if (
-      fstatat(log_fd, marker_name, &marker_stats, AT_SYMLINK_NOFOLLOW) == 0
-      && S_ISREG(marker_stats.st_mode)
-      && marker_stats.st_nlink == 1
-    ) {
-      return 0;
+    marker_fd = openat(log_fd, marker_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (marker_fd < 0) {
+      return fail_errno("cannot open existing reconciliation marker");
     }
-    return fail_message("existing reconciliation marker is unsafe");
+    if (validate_reconciliation_marker(log_fd, marker_name, marker_fd) != 0) {
+      close(marker_fd);
+      return fail_message("existing reconciliation marker is invalid");
+    }
+    if (close(marker_fd) != 0) {
+      return fail_errno("cannot close existing reconciliation marker");
+    }
+    return fsync(log_fd) == 0
+      ? 0
+      : fail_errno("cannot synchronize reconciliation directory");
   }
   if (marker_fd < 0) return fail_errno("cannot create reconciliation marker");
   while (offset < body_length) {
@@ -298,6 +445,10 @@ static int record_reconciliation_marker(
   if (fsync(marker_fd) != 0) {
     close(marker_fd);
     return fail_errno("cannot synchronize reconciliation marker");
+  }
+  if (validate_reconciliation_marker(log_fd, marker_name, marker_fd) != 0) {
+    close(marker_fd);
+    return fail_message("new reconciliation marker failed self-validation");
   }
   if (close(marker_fd) != 0) {
     return fail_errno("cannot close reconciliation marker");
@@ -364,6 +515,9 @@ static int move_between_directories(
   const char *category_path,
   int log_fd,
   const char *log_path,
+  int journal_fd,
+  const char *journal_name,
+  const file_identity *journal_identity,
   const char *transaction_id
 ) {
   struct stat source_stats;
@@ -372,13 +526,16 @@ static int move_between_directories(
   int result = read_regular_at(source_fd, source_name, expected, &source_stats);
   if (result != 0) return result;
   maybe_test_checkpoint("source-verified");
-  result = verify_move_capabilities(
+  result = verify_move_authority(
     root_fd,
     root_path,
     category_fd,
     category_path,
     log_fd,
-    log_path
+    log_path,
+    journal_fd,
+    journal_name,
+    journal_identity
   );
   if (result != 0) return result;
   result = read_regular_at(source_fd, source_name, expected, &source_stats);
@@ -396,17 +553,26 @@ static int move_between_directories(
     return fail_errno("cannot atomically move to no-replace target");
   }
   if (fstatat(target_fd, target_name, &moved_stats, AT_SYMLINK_NOFOLLOW) != 0) {
-    (void)record_reconciliation_marker(log_fd, transaction_id);
-    return fail_errno("cannot observe atomically moved target");
+    if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
+      return fail_message(
+        "cannot observe atomically moved target and reconciliation marker could not be persisted"
+      );
+    }
+    return fail_message(
+      "cannot observe atomically moved target; reconciliation marker persisted"
+    );
   }
   maybe_test_checkpoint("move-applied");
-  result = verify_move_capabilities(
+  result = verify_move_authority(
     root_fd,
     root_path,
     category_fd,
     category_path,
     log_fd,
-    log_path
+    log_path,
+    journal_fd,
+    journal_name,
+    journal_identity
   );
   if (
     result == 0
@@ -470,13 +636,17 @@ static int move_between_directories(
 static int run_move(int argc, char **argv, int reverse) {
   file_identity root_identity;
   file_identity source_identity;
+  file_identity journal_identity;
   int root_fd = -1;
   int category_fd = -1;
   int log_fd = -1;
+  int journal_fd = -1;
   int result;
   char category_path[MAXPATHLEN];
   char log_path[MAXPATHLEN];
-  if (argc != 14) return fail_message("invalid move arguments");
+  char journal_name[NAME_MAX + 1];
+  int written;
+  if (argc != 18) return fail_message("invalid move arguments");
   if (!is_single_component(argv[7]) || !is_category(argv[8]) || !is_single_component(argv[9])) {
     return fail_message("move paths must use allowed single components");
   }
@@ -488,6 +658,13 @@ static int run_move(int argc, char **argv, int reverse) {
   }
   if (!parse_identity(argv[10], argv[11], argv[12], argv[6], &source_identity)) {
     return fail_message("invalid source identity");
+  }
+  if (!parse_identity(argv[14], argv[15], argv[16], argv[17], &journal_identity)) {
+    return fail_message("invalid journal identity");
+  }
+  written = snprintf(journal_name, sizeof(journal_name), "%s.json", argv[13]);
+  if (written < 0 || (size_t)written >= sizeof(journal_name)) {
+    return fail_message("transaction journal name is too long");
   }
   result = open_root(argv[2], &root_identity, &root_fd);
   if (result != 0) goto done;
@@ -509,14 +686,31 @@ static int run_move(int argc, char **argv, int reverse) {
     log_path
   );
   if (result != 0) goto done;
+  journal_fd = openat(log_fd, journal_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (journal_fd < 0) {
+    result = fail_errno("cannot open transaction journal authority");
+    goto done;
+  }
+  result = verify_opened_regular_path(
+    log_fd,
+    log_path,
+    journal_name,
+    journal_fd,
+    &journal_identity
+  );
+  if (result != 0) goto done;
+  maybe_test_checkpoint("journal-bound");
   maybe_test_checkpoint("directories-opened");
-  result = verify_move_capabilities(
+  result = verify_move_authority(
     root_fd,
     argv[2],
     category_fd,
     category_path,
     log_fd,
-    log_path
+    log_path,
+    journal_fd,
+    journal_name,
+    &journal_identity
   );
   if (result != 0) goto done;
   result = reverse
@@ -532,6 +726,9 @@ static int run_move(int argc, char **argv, int reverse) {
         category_path,
         log_fd,
         log_path,
+        journal_fd,
+        journal_name,
+        &journal_identity,
         argv[13]
       )
     : move_between_directories(
@@ -546,9 +743,13 @@ static int run_move(int argc, char **argv, int reverse) {
         category_path,
         log_fd,
         log_path,
+        journal_fd,
+        journal_name,
+        &journal_identity,
         argv[13]
       );
 done:
+  if (journal_fd >= 0) close(journal_fd);
   if (log_fd >= 0) close(log_fd);
   if (category_fd >= 0) close(category_fd);
   if (root_fd >= 0) close(root_fd);
@@ -751,7 +952,11 @@ static int run_log(int argc, char **argv, int append) {
 done:
   saved_errno = errno;
   if (result != 0 && mutation_started && log_fd >= 0) {
-    (void)record_reconciliation_marker(log_fd, argv[6]);
+    if (record_reconciliation_marker(log_fd, argv[6]) != 0) {
+      (void)fail_message(
+        "transaction journal mutated but reconciliation marker could not be persisted"
+      );
+    }
   }
   if (output_fd >= 0) close(output_fd);
   if (log_fd >= 0) close(log_fd);

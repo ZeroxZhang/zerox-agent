@@ -16,6 +16,7 @@ import { createAgentToolExecutor, getShellExecShell } from "./agentToolExecutor"
 import { createDynamicToolRegistry } from "./dynamicToolRegistry";
 import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
+import type { LocalFileOrganizationTransaction } from "./localFileOrganizer";
 import type { MemoryRecord } from "../shared/memory";
 import type { SkillDiscoveryResult } from "../shared/skills";
 import {
@@ -678,6 +679,52 @@ describe("agent tool executor", () => {
     await expect(readFile(path.join(tempDir, "photo.jpg"), "utf8")).resolves.toBe(
       "image",
     );
+  });
+
+  it("reloads journal reconciliation authority before model-requested verify or rollback", async () => {
+    await writeFile(path.join(tempDir, "photo.jpg"), "image", "utf8");
+    const executor = createAgentToolExecutor();
+    const previewResult = await executor.execute({
+      toolName: "file_move_plan",
+      args: { targetDir: tempDir },
+    });
+    if (!previewResult.ok) throw new Error(previewResult.error);
+    const applyResult = await executor.execute({
+      toolName: "file_apply_moves",
+      args: { preview: previewResult.result.preview },
+    });
+    if (!applyResult.ok) throw new Error(applyResult.error);
+    const transaction = applyResult.result.transaction as LocalFileOrganizationTransaction;
+    const markerPath = transaction.logPath.replace(/\.json$/, ".reconciliation");
+    await writeFile(
+      markerPath,
+      '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n',
+      { encoding: "utf8", mode: 0o600 },
+    );
+    const staleProjection = {
+      ...transaction,
+      status: "applied" as const,
+      reconciliation: undefined,
+    };
+
+    await expect(executor.execute({
+      toolName: "file_verify_moves",
+      args: { transaction: staleProjection },
+    })).resolves.toMatchObject({
+      ok: true,
+      result: { verified: false },
+    });
+    await expect(executor.execute({
+      toolName: "file_rollback_moves",
+      args: { transaction: staleProjection },
+    })).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/manual reconciliation/i),
+    });
+    await expect(readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"))
+      .resolves.toBe("image");
+    await expect(access(path.join(tempDir, "photo.jpg"))).rejects
+      .toMatchObject({ code: "ENOENT" });
   });
 
   it("reads Chrome bookmarks through a native structured tool", async () => {

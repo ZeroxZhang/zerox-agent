@@ -233,9 +233,57 @@ describe("local file organizer", () => {
         ),
       },
     });
-    await expect(rollbackLocalFileOrganization(transaction)).rejects.toThrow(
+    const staleCallerProjection = {
+      ...transaction,
+      status: "applied" as const,
+      reconciliation: undefined,
+    };
+    await expect(rollbackLocalFileOrganization(staleCallerProjection)).rejects.toThrow(
       /manual reconciliation/i,
     );
+    await expect(verifyLocalFileOrganization(staleCallerProjection)).resolves
+      .toMatchObject({ verified: false });
+  });
+
+  it("does not claim persistence for an invalid pre-existing reconciliation marker", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const marker = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_invalid_marker.reconciliation",
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_invalid_marker",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "move-applied",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await writeFile(source, "replacement", "utf8");
+    await writeFile(marker, "invalid", { encoding: "utf8", mode: 0o600 });
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(
+      /marker could not be persisted/i,
+    );
+    await expect(readFile(source, "utf8")).resolves.toBe("replacement");
+    await expect(readFile(target, "utf8")).resolves.toBe("original");
+    await expect(readFile(marker, "utf8")).resolves.toBe("invalid");
+    await expect(readLocalFileOrganizationTransaction(path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_invalid_marker.json",
+    ))).rejects.toThrow(/reconciliation marker is invalid/i);
   });
 
   it("rejects a category directory replaced by a symlink", async () => {
@@ -256,6 +304,79 @@ describe("local file organizer", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("binds every move to the canonical pending journal leaf", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const journal = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_journal_authority.json",
+    );
+    const heldJournal = `${journal}.held`;
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_journal_authority",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "journal-bound",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await rename(journal, heldJournal);
+    await writeFile(journal, "replacement", { encoding: "utf8", mode: 0o600 });
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/identity|opened file/i);
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expectPath(target, false);
+    await expect(readFile(journal, "utf8")).resolves.toBe("replacement");
+    await expect(readFile(heldJournal, "utf8")).resolves.toContain(
+      '"status":"pending"',
+    );
+  });
+
+  it("rejects a transaction journal whose private mode changes before mutation", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const journal = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_journal_mode.json",
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_journal_mode",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "journal-bound",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await chmod(journal, 0o644);
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/identity changed/i);
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expectPath(target, false);
+    await expect(readLocalFileOrganizationTransaction(journal)).rejects.toThrow(
+      /identity changed while reading/i,
+    );
   });
 
   it("rejects a category directory moved after its native capability is opened", async () => {
