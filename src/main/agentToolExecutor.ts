@@ -2632,7 +2632,8 @@ function isLocalFileOrganizationTransaction(
     Array.isArray(value.moves) &&
     (value.status === "pending" ||
       value.status === "applied" ||
-      value.status === "rolled_back")
+      value.status === "rolled_back" ||
+      value.status === "reconciliation_required")
   );
 }
 

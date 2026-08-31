@@ -13,6 +13,9 @@ import { randomUUID } from "node:crypto";
 import { validatePathInsideLocationRoots } from "../shared/locationResource";
 import { assertSafeStoreEntityId } from "./storeEntityId";
 
+const RECONCILIATION_MARKER_BODY =
+  '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n';
+
 export type LocalFileCategory =
   | "Images"
   | "Documents"
@@ -69,7 +72,7 @@ export type LocalFileOrganizationPreview = {
 export type LocalFileOrganizationTransaction = {
   id: string;
   root: string;
-  status: "pending" | "applied" | "rolled_back";
+  status: "pending" | "applied" | "rolled_back" | "reconciliation_required";
   createdAt: string;
   appliedAt?: string;
   rolledBackAt?: string;
@@ -79,6 +82,10 @@ export type LocalFileOrganizationTransaction = {
   movesRolledBack?: number;
   rootIdentity?: LocalDirectoryIdentity;
   logIdentity?: LocalFileIdentity;
+  reconciliation?: {
+    required: true;
+    markerPath: string;
+  };
   history: Array<{ status: "pending" | "applied" | "rolled_back"; at: string }>;
 };
 
@@ -96,7 +103,13 @@ export type LocalFileOrganizerRuntimeOptions = {
   now?: () => string;
   safeFsHelperPath?: string;
   safeFsTestDelayMs?: number;
-  safeFsTestReadyStage?: "directories-opened" | "source-verified";
+  safeFsTestReadyStage?:
+    | "directories-opened"
+    | "source-verified"
+    | "move-applied"
+    | "log-before-mutation"
+    | "log-opened"
+    | "log-mutated";
   safeFsTestOnReady?: (command: string) => void;
 };
 
@@ -228,6 +241,7 @@ export async function applyLocalFileOrganization(
       "move-into-category",
       transaction.root,
       transaction.rootIdentity!,
+      transaction.id,
       move,
       options,
     );
@@ -273,6 +287,11 @@ export async function rollbackLocalFileOrganization(
   ]);
   if (!transaction.rootIdentity || !transaction.logIdentity) {
     throw new Error("Local file organization transaction lacks native identities.");
+  }
+  if (transaction.status === "reconciliation_required") {
+    throw new Error(
+      "Local file organization requires manual reconciliation before rollback.",
+    );
   }
 
   const rollbackSteps: Array<{
@@ -325,6 +344,7 @@ export async function rollbackLocalFileOrganization(
       "move-from-category",
       transaction.root,
       transaction.rootIdentity,
+      transaction.id,
       move,
       options,
     );
@@ -453,11 +473,29 @@ export async function readLocalFileOrganizationTransaction(
       throw new Error("Local file organization journal identity changed while reading.");
     }
     const transaction = parseLastJournalTransaction(body);
+    assertSafeStoreEntityId(
+      transaction.id,
+      "Local file organization transaction id",
+    );
     if (resolveUserPath(transaction.logPath) !== resolvedLogPath) {
       throw new Error("Local file organization journal path does not match its transaction.");
     }
+    const markerPath = reconciliationMarkerPath(
+      transaction.root,
+      transaction.id,
+    );
+    const reconciliationRequired = await readReconciliationMarker(markerPath);
     return {
       ...transaction,
+      ...(reconciliationRequired
+        ? {
+            status: "reconciliation_required" as const,
+            reconciliation: {
+              required: true as const,
+              markerPath,
+            },
+          }
+        : {}),
       logIdentity: {
         dev: after.dev.toString(),
         ino: after.ino.toString(),
@@ -540,6 +578,60 @@ function categorizeFile(fileName: string): LocalFileCategory {
 
 function transactionLogPath(root: string, id: string): string {
   return path.join(root, ".zerox-organize-transactions", `${id}.json`);
+}
+
+function reconciliationMarkerPath(root: string, id: string): string {
+  return path.join(
+    root,
+    ".zerox-organize-transactions",
+    `${id}.reconciliation`,
+  );
+}
+
+async function readReconciliationMarker(markerPath: string): Promise<boolean> {
+  let handle;
+  try {
+    handle = await open(
+      markerPath,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  try {
+    const before = await handle.stat({ bigint: true });
+    const body = await handle.readFile("utf8");
+    const [after, leaf, canonicalPath] = await Promise.all([
+      handle.stat({ bigint: true }),
+      lstat(markerPath, { bigint: true }),
+      realpath(markerPath),
+    ]);
+    if (
+      !before.isFile()
+      || before.nlink !== 1n
+      || !after.isFile()
+      || after.nlink !== 1n
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || after.mtimeNs !== before.mtimeNs
+      || after.ctimeNs !== before.ctimeNs
+      || !leaf.isFile()
+      || leaf.isSymbolicLink()
+      || leaf.dev !== before.dev
+      || leaf.ino !== before.ino
+      || canonicalPath !== markerPath
+      || body !== RECONCILIATION_MARKER_BODY
+    ) {
+      throw new Error(
+        "Local file organization reconciliation marker is invalid or changed while reading.",
+      );
+    }
+    return true;
+  } finally {
+    await handle.close();
+  }
 }
 
 async function writeTransactionLog(
@@ -676,6 +768,7 @@ async function runMoveWithSafeFs(
   command: "move-into-category" | "move-from-category",
   root: string,
   rootIdentity: LocalDirectoryIdentity,
+  transactionId: string,
   move: LocalFileMovePlan,
   options: LocalFileOrganizerRuntimeOptions,
 ): Promise<void> {
@@ -697,6 +790,7 @@ async function runMoveWithSafeFs(
       sourceIdentity.dev,
       sourceIdentity.ino,
       sourceIdentity.size,
+      transactionId,
     ],
     undefined,
     options,

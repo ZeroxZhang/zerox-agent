@@ -18,6 +18,9 @@
 
 #define MAX_LOG_BYTES (4U * 1024U * 1024U)
 #define TRANSACTION_DIRECTORY ".zerox-organize-transactions"
+#define RECONCILIATION_SUFFIX ".reconciliation"
+#define RECONCILIATION_BODY \
+  "{\"schemaVersion\":1,\"kind\":\"local-file-organization-reconciliation-required\"}\n"
 
 typedef struct {
   dev_t dev;
@@ -233,18 +236,153 @@ static int verify_directories(
   return verify_fd_path(child_fd, child_path);
 }
 
+static int verify_move_capabilities(
+  int root_fd,
+  const char *root_path,
+  int category_fd,
+  const char *category_path,
+  int log_fd,
+  const char *log_path
+) {
+  int result = verify_directories(root_fd, root_path, category_fd, category_path);
+  if (result != 0) return result;
+  return verify_fd_path(log_fd, log_path);
+}
+
+static int record_reconciliation_marker(
+  int log_fd,
+  const char *transaction_id
+) {
+  char marker_name[NAME_MAX + 1];
+  struct stat marker_stats;
+  const char *body = RECONCILIATION_BODY;
+  size_t body_length = strlen(body);
+  size_t offset = 0U;
+  int marker_fd;
+  int written = snprintf(
+    marker_name,
+    sizeof(marker_name),
+    "%s%s",
+    transaction_id,
+    RECONCILIATION_SUFFIX
+  );
+  if (written < 0 || (size_t)written >= sizeof(marker_name)) {
+    return fail_message("reconciliation marker name is too long");
+  }
+  marker_fd = openat(
+    log_fd,
+    marker_name,
+    O_WRONLY | O_CLOEXEC | O_NOFOLLOW | O_CREAT | O_EXCL,
+    0600
+  );
+  if (marker_fd < 0 && errno == EEXIST) {
+    if (
+      fstatat(log_fd, marker_name, &marker_stats, AT_SYMLINK_NOFOLLOW) == 0
+      && S_ISREG(marker_stats.st_mode)
+      && marker_stats.st_nlink == 1
+    ) {
+      return 0;
+    }
+    return fail_message("existing reconciliation marker is unsafe");
+  }
+  if (marker_fd < 0) return fail_errno("cannot create reconciliation marker");
+  while (offset < body_length) {
+    ssize_t count = write(marker_fd, body + offset, body_length - offset);
+    if (count < 0) {
+      if (errno == EINTR) continue;
+      close(marker_fd);
+      return fail_errno("cannot write reconciliation marker");
+    }
+    offset += (size_t)count;
+  }
+  if (fsync(marker_fd) != 0) {
+    close(marker_fd);
+    return fail_errno("cannot synchronize reconciliation marker");
+  }
+  if (close(marker_fd) != 0) {
+    return fail_errno("cannot close reconciliation marker");
+  }
+  return fsync(log_fd) == 0
+    ? 0
+    : fail_errno("cannot synchronize reconciliation directory");
+}
+
+static int restore_moved_entry(
+  int source_fd,
+  const char *source_name,
+  int target_fd,
+  const char *target_name,
+  const struct stat *moved_stats
+) {
+  struct stat current_target;
+  struct stat restored_source;
+  if (fstatat(target_fd, target_name, &current_target, AT_SYMLINK_NOFOLLOW) != 0) {
+    return 1;
+  }
+  if (
+    !S_ISREG(current_target.st_mode)
+    || current_target.st_dev != moved_stats->st_dev
+    || current_target.st_ino != moved_stats->st_ino
+  ) {
+    return 1;
+  }
+  if (
+    renameatx_np(
+      target_fd,
+      target_name,
+      source_fd,
+      source_name,
+      RENAME_EXCL
+    ) != 0
+  ) {
+    return 1;
+  }
+  if (
+    fstatat(source_fd, source_name, &restored_source, AT_SYMLINK_NOFOLLOW) != 0
+    || !S_ISREG(restored_source.st_mode)
+    || restored_source.st_dev != moved_stats->st_dev
+    || restored_source.st_ino != moved_stats->st_ino
+  ) {
+    return 1;
+  }
+  if (fstatat(target_fd, target_name, &current_target, AT_SYMLINK_NOFOLLOW) == 0) {
+    return 1;
+  }
+  if (errno != ENOENT) return 1;
+  return fsync(source_fd) == 0 && fsync(target_fd) == 0 ? 0 : 1;
+}
+
 static int move_between_directories(
   int source_fd,
   const char *source_name,
   int target_fd,
   const char *target_name,
-  const file_identity *expected
+  const file_identity *expected,
+  int root_fd,
+  const char *root_path,
+  int category_fd,
+  const char *category_path,
+  int log_fd,
+  const char *log_path,
+  const char *transaction_id
 ) {
   struct stat source_stats;
-  struct stat target_stats;
+  struct stat moved_stats;
+  struct stat post_stats;
   int result = read_regular_at(source_fd, source_name, expected, &source_stats);
   if (result != 0) return result;
   maybe_test_checkpoint("source-verified");
+  result = verify_move_capabilities(
+    root_fd,
+    root_path,
+    category_fd,
+    category_path,
+    log_fd,
+    log_path
+  );
+  if (result != 0) return result;
+  result = read_regular_at(source_fd, source_name, expected, &source_stats);
+  if (result != 0) return result;
   if (
     renameatx_np(
       source_fd,
@@ -257,26 +395,76 @@ static int move_between_directories(
     if (errno == EEXIST) return fail_message("target appeared after preview");
     return fail_errno("cannot atomically move to no-replace target");
   }
-  result = read_regular_at(target_fd, target_name, expected, &target_stats);
+  if (fstatat(target_fd, target_name, &moved_stats, AT_SYMLINK_NOFOLLOW) != 0) {
+    (void)record_reconciliation_marker(log_fd, transaction_id);
+    return fail_errno("cannot observe atomically moved target");
+  }
+  maybe_test_checkpoint("move-applied");
+  result = verify_move_capabilities(
+    root_fd,
+    root_path,
+    category_fd,
+    category_path,
+    log_fd,
+    log_path
+  );
   if (
-    result != 0 ||
-    target_stats.st_dev != source_stats.st_dev ||
-    target_stats.st_ino != source_stats.st_ino
+    result == 0
+    && (
+      !S_ISREG(moved_stats.st_mode)
+      || !stat_matches(&moved_stats, expected)
+      || moved_stats.st_dev != source_stats.st_dev
+      || moved_stats.st_ino != source_stats.st_ino
+    )
   ) {
-    return result != 0
-      ? result
-      : fail_message("atomically moved target identity is inconsistent");
+    result = fail_message("atomically moved target identity is inconsistent");
   }
-  if (fstatat(source_fd, source_name, &source_stats, AT_SYMLINK_NOFOLLOW) == 0) {
-    return fail_message("source path was repopulated during atomic move");
+  if (
+    result == 0
+    && fstatat(target_fd, target_name, &post_stats, AT_SYMLINK_NOFOLLOW) != 0
+  ) {
+    result = fail_errno("cannot verify atomically moved target");
   }
-  if (errno != ENOENT) {
-    return fail_errno("cannot verify atomic source retirement");
+  if (
+    result == 0
+    && (
+      !S_ISREG(post_stats.st_mode)
+      || post_stats.st_dev != moved_stats.st_dev
+      || post_stats.st_ino != moved_stats.st_ino
+    )
+  ) {
+    result = fail_message("atomically moved target changed after rename");
   }
-  if (fsync(source_fd) != 0 || fsync(target_fd) != 0) {
-    return fail_errno("cannot durably synchronize moved file");
+  if (
+    result == 0
+    && fstatat(source_fd, source_name, &post_stats, AT_SYMLINK_NOFOLLOW) == 0
+  ) {
+    result = fail_message("source path was repopulated during atomic move");
   }
-  return 0;
+  if (result == 0 && errno != ENOENT) {
+    result = fail_errno("cannot verify atomic source retirement");
+  }
+  if (result == 0 && (fsync(source_fd) != 0 || fsync(target_fd) != 0)) {
+    result = fail_errno("cannot durably synchronize moved file");
+  }
+  if (result == 0) return 0;
+  if (
+    restore_moved_entry(
+      source_fd,
+      source_name,
+      target_fd,
+      target_name,
+      &moved_stats
+    ) == 0
+  ) {
+    return fail_message("move postcondition failed; original layout restored");
+  }
+  if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
+    return fail_message(
+      "move postcondition failed and reconciliation marker could not be persisted"
+    );
+  }
+  return fail_message("move postcondition failed; reconciliation marker persisted");
 }
 
 static int run_move(int argc, char **argv, int reverse) {
@@ -284,11 +472,16 @@ static int run_move(int argc, char **argv, int reverse) {
   file_identity source_identity;
   int root_fd = -1;
   int category_fd = -1;
+  int log_fd = -1;
   int result;
   char category_path[MAXPATHLEN];
-  if (argc != 13) return fail_message("invalid move arguments");
+  char log_path[MAXPATHLEN];
+  if (argc != 14) return fail_message("invalid move arguments");
   if (!is_single_component(argv[7]) || !is_category(argv[8]) || !is_single_component(argv[9])) {
     return fail_message("move paths must use allowed single components");
+  }
+  if (!is_single_component(argv[13])) {
+    return fail_message("invalid move transaction id");
   }
   if (!parse_identity(argv[3], argv[4], "0", argv[5], &root_identity)) {
     return fail_message("invalid root identity");
@@ -307,17 +500,56 @@ static int run_move(int argc, char **argv, int reverse) {
     category_path
   );
   if (result != 0) goto done;
+  result = open_child_directory(
+    root_fd,
+    argv[2],
+    TRANSACTION_DIRECTORY,
+    0,
+    &log_fd,
+    log_path
+  );
+  if (result != 0) goto done;
   maybe_test_checkpoint("directories-opened");
-  result = verify_directories(root_fd, argv[2], category_fd, category_path);
+  result = verify_move_capabilities(
+    root_fd,
+    argv[2],
+    category_fd,
+    category_path,
+    log_fd,
+    log_path
+  );
   if (result != 0) goto done;
   result = reverse
     ? move_between_directories(
-        category_fd, argv[7], root_fd, argv[9], &source_identity
+        category_fd,
+        argv[7],
+        root_fd,
+        argv[9],
+        &source_identity,
+        root_fd,
+        argv[2],
+        category_fd,
+        category_path,
+        log_fd,
+        log_path,
+        argv[13]
       )
     : move_between_directories(
-        root_fd, argv[7], category_fd, argv[9], &source_identity
+        root_fd,
+        argv[7],
+        category_fd,
+        argv[9],
+        &source_identity,
+        root_fd,
+        argv[2],
+        category_fd,
+        category_path,
+        log_fd,
+        log_path,
+        argv[13]
       );
 done:
+  if (log_fd >= 0) close(log_fd);
   if (category_fd >= 0) close(category_fd);
   if (root_fd >= 0) close(root_fd);
   if (result == 0) puts("{\"ok\":true}");
@@ -395,6 +627,7 @@ static int run_log(int argc, char **argv, int append) {
   int output_fd = -1;
   int result = 0;
   int saved_errno;
+  int mutation_started = 0;
   char log_path[MAXPATHLEN];
   char final_name[NAME_MAX + 1];
   char *body = NULL;
@@ -428,6 +661,12 @@ static int run_log(int argc, char **argv, int append) {
     log_path
   );
   if (result != 0) goto done;
+  maybe_test_checkpoint("directories-opened");
+  result = verify_directories(root_fd, argv[2], log_fd, log_path);
+  if (result != 0) goto done;
+  maybe_test_checkpoint("log-before-mutation");
+  result = verify_directories(root_fd, argv[2], log_fd, log_path);
+  if (result != 0) goto done;
   output_fd = openat(
     log_fd,
     final_name,
@@ -441,34 +680,37 @@ static int run_log(int argc, char **argv, int append) {
       : "cannot create transaction log");
     goto done;
   }
-  if (append) {
-    if (fstat(output_fd, &opened_stats) != 0) {
-      result = fail_errno("cannot inspect opened transaction log");
-      goto done;
-    }
-    if (
-      !S_ISREG(opened_stats.st_mode) ||
-      opened_stats.st_nlink != 1 ||
-      !stat_matches(&opened_stats, &expected_log)
-    ) {
-      result = fail_message("opened transaction log identity changed");
-      goto done;
-    }
+  if (!append) mutation_started = 1;
+  if (fstat(output_fd, &opened_stats) != 0) {
+    result = fail_errno("cannot inspect opened transaction log");
+    goto done;
   }
-  maybe_test_checkpoint("directories-opened");
+  if (
+    !S_ISREG(opened_stats.st_mode)
+    || opened_stats.st_nlink != 1
+    || (append && !stat_matches(&opened_stats, &expected_log))
+  ) {
+    result = fail_message("opened transaction log identity changed");
+    goto done;
+  }
+  maybe_test_checkpoint("log-opened");
   result = verify_directories(root_fd, argv[2], log_fd, log_path);
   if (result != 0) goto done;
-  if (append) {
-    result = read_regular_at(log_fd, final_name, &expected_log, &path_stats);
-    if (result != 0) goto done;
-    if (
-      path_stats.st_dev != opened_stats.st_dev ||
-      path_stats.st_ino != opened_stats.st_ino
-    ) {
-      result = fail_message("transaction log path no longer names the opened file");
-      goto done;
-    }
+  result = read_regular_at(
+    log_fd,
+    final_name,
+    append ? &expected_log : NULL,
+    &path_stats
+  );
+  if (result != 0) goto done;
+  if (
+    path_stats.st_dev != opened_stats.st_dev
+    || path_stats.st_ino != opened_stats.st_ino
+  ) {
+    result = fail_message("transaction log path no longer names the opened file");
+    goto done;
   }
+  mutation_started = 1;
   result = write_all(output_fd, body, body_length);
   if (result != 0 || fsync(output_fd) != 0) {
     if (result == 0) result = fail_errno("cannot synchronize transaction log");
@@ -478,6 +720,7 @@ static int run_log(int argc, char **argv, int append) {
     result = fail_errno("cannot inspect written transaction log");
     goto done;
   }
+  maybe_test_checkpoint("log-mutated");
   result = verify_directories(root_fd, argv[2], log_fd, log_path);
   if (result != 0) goto done;
   result = read_regular_at(log_fd, final_name, NULL, &path_stats);
@@ -502,9 +745,14 @@ static int run_log(int argc, char **argv, int append) {
     result = fail_errno("cannot synchronize transaction directory");
     goto done;
   }
+  result = verify_directories(root_fd, argv[2], log_fd, log_path);
+  if (result != 0) goto done;
   print_identity(&final_stats);
 done:
   saved_errno = errno;
+  if (result != 0 && mutation_started && log_fd >= 0) {
+    (void)record_reconciliation_marker(log_fd, argv[6]);
+  }
   if (output_fd >= 0) close(output_fd);
   if (log_fd >= 0) close(log_fd);
   if (root_fd >= 0) close(root_fd);

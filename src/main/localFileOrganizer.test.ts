@@ -157,7 +157,7 @@ describe("local file organizer", () => {
       .resolves.toBe("existing");
   });
 
-  it("preserves a source replacement swapped after identity verification", async () => {
+  it("rejects a source replacement before atomic move without changing its path", async () => {
     const source = path.join(tempDir, "photo.jpg");
     const held = path.join(tempDir, "photo-held.jpg");
     const target = path.join(tempDir, "Images", "photo.jpg");
@@ -183,13 +183,59 @@ describe("local file organizer", () => {
     expect(result.ok).toBe(false);
     expect(String(result.ok ? "" : result.error)).toMatch(/identity/i);
     await expect(readFile(held, "utf8")).resolves.toBe("original");
-    await expect(readFile(target, "utf8")).resolves.toBe("replacement");
-    await expectPath(source, false);
+    await expect(readFile(source, "utf8")).resolves.toBe("replacement");
+    await expectPath(target, false);
     await expect(readLocalFileOrganizationTransaction(path.join(
       tempDir,
       ".zerox-organize-transactions",
       "tx_leaf_swap.json",
     ))).resolves.toMatchObject({ status: "pending" });
+  });
+
+  it("persists reconciliation state when a moved source is concurrently repopulated", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_reconciliation",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "move-applied",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await writeFile(source, "replacement", "utf8");
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/reconciliation marker persisted/i);
+    await expect(readFile(source, "utf8")).resolves.toBe("replacement");
+    await expect(readFile(target, "utf8")).resolves.toBe("original");
+    const transaction = await readLocalFileOrganizationTransaction(path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_reconciliation.json",
+    ));
+    expect(transaction).toMatchObject({
+      status: "reconciliation_required",
+      reconciliation: {
+        required: true,
+        markerPath: path.join(
+          tempDir,
+          ".zerox-organize-transactions",
+          "tx_reconciliation.reconciliation",
+        ),
+      },
+    });
+    await expect(rollbackLocalFileOrganization(transaction)).rejects.toThrow(
+      /manual reconciliation/i,
+    );
   });
 
   it("rejects a category directory replaced by a symlink", async () => {
@@ -227,6 +273,7 @@ describe("local file organizer", () => {
       const ready = waitForSafeFsCommand("move-into-category");
       const outcome = applyLocalFileOrganization(preview, {
         safeFsTestDelayMs: 1_000,
+        safeFsTestReadyStage: "source-verified",
         safeFsTestOnReady: ready.onReady,
       }).then(
         () => ({ ok: true as const }),
@@ -246,6 +293,50 @@ describe("local file organizer", () => {
         .resolves.toBe("new");
       await expect(access(path.join(outside, "photo.jpg"))).rejects
         .toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("restores an atomic move when the category capability moves after rename", async () => {
+    const outside = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "local-file-organizer-post-move-outside-")),
+    );
+    const source = path.join(tempDir, "photo.jpg");
+    const category = path.join(tempDir, "Images");
+    const displaced = path.join(tempDir, "Images-displaced");
+    try {
+      await mkdir(category);
+      await writeFile(source, "original", "utf8");
+      const preview = await previewLocalFileOrganization(tempDir, {
+        createId: () => "tx_category_post_move",
+      });
+      const ready = waitForSafeFsCommand("move-into-category");
+      const outcome = applyLocalFileOrganization(preview, {
+        safeFsTestDelayMs: 750,
+        safeFsTestReadyStage: "move-applied",
+        safeFsTestOnReady: ready.onReady,
+      }).then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await ready.promise;
+      await rename(category, displaced);
+      await symlink(outside, category);
+
+      const result = await outcome;
+      expect(result.ok).toBe(false);
+      expect(String(result.ok ? "" : result.error)).toMatch(/layout restored/i);
+      await expect(readFile(source, "utf8")).resolves.toBe("original");
+      await expectPath(path.join(displaced, "photo.jpg"), false);
+      await expect(access(path.join(outside, "photo.jpg"))).rejects
+        .toMatchObject({ code: "ENOENT" });
+      await expect(readLocalFileOrganizationTransaction(path.join(
+        tempDir,
+        ".zerox-organize-transactions",
+        "tx_category_post_move.json",
+      ))).resolves.toMatchObject({ status: "pending" });
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
@@ -284,6 +375,53 @@ describe("local file organizer", () => {
         .rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(path.join(tempDir, "photo.jpg"), "utf8"))
         .resolves.toBe("new");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("persists reconciliation beside a journal moved after an append mutation", async () => {
+    const outside = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "local-file-organizer-log-post-outside-")),
+    );
+    const transactionDirectory = path.join(tempDir, ".zerox-organize-transactions");
+    const displaced = path.join(tempDir, ".zerox-organize-transactions-displaced");
+    try {
+      await writeFile(path.join(tempDir, "photo.jpg"), "original", "utf8");
+      const preview = await previewLocalFileOrganization(tempDir, {
+        createId: () => "tx_log_post_mutation",
+      });
+      const ready = waitForSafeFsCommand("log-append");
+      const outcome = applyLocalFileOrganization(preview, {
+        safeFsTestDelayMs: 500,
+        safeFsTestReadyStage: "log-mutated",
+        safeFsTestOnReady: ready.onReady,
+      }).then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await ready.promise;
+      await rename(transactionDirectory, displaced);
+      await symlink(outside, transactionDirectory);
+
+      const result = await outcome;
+      expect(result.ok).toBe(false);
+      expect(String(result.ok ? "" : result.error)).toMatch(
+        /capability moved from its authorized path/i,
+      );
+      await expect(readFile(
+        path.join(displaced, "tx_log_post_mutation.json"),
+        "utf8",
+      )).resolves.toContain('"status":"applied"');
+      await expect(readFile(
+        path.join(displaced, "tx_log_post_mutation.reconciliation"),
+        "utf8",
+      )).resolves.toContain("local-file-organization-reconciliation-required");
+      await expect(access(path.join(outside, "tx_log_post_mutation.json")))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"))
+        .resolves.toBe("original");
     } finally {
       await rm(outside, { recursive: true, force: true });
     }

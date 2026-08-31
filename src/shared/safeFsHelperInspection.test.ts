@@ -51,6 +51,9 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     );
     expect(source).toContain("renameatx_np(");
     expect(source).toContain("RENAME_EXCL");
+    expect(source).toContain("restore_moved_entry(");
+    expect(source).toContain("record_reconciliation_marker(");
+    expect(source).toContain("RECONCILIATION_SUFFIX");
     expect(source).not.toContain("linkat(");
     expect(source).not.toContain("unlinkat(");
     expect(source).not.toContain("remove-category-duplicate");

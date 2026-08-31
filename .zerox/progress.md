@@ -13571,3 +13571,36 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   migrations, eight authority domains, renderer startup, and Node ABI `137`
   restoration. The repaired exact-byte candidate still requires fresh
   independent code/security approval before release.
+
+## 2026-08-31 - v3.9.2 native reconciliation protocol repair
+
+- The second frozen candidate was independently rejected by both code and
+  security lanes with the same Major: after an atomic rename, a failed
+  postcondition could return an error while leaving the moved object at its
+  target and the canonical journal at `pending`. The existing leaf-swap test
+  incorrectly treated preservation without transaction recording as success.
+- The native helper now revalidates source identity and all opened capabilities
+  immediately before rename. After rename it captures the moved inode, checks
+  target/source/capability postconditions, and atomically restores the observed
+  inode with no-overwrite semantics when any postcondition fails.
+- If a concurrent source occupant prevents restoration, the helper preserves
+  both files and fsyncs a single-link reconciliation marker beside the
+  transaction journal. Transaction reads validate that marker by descriptor,
+  exact body, inode, link count, and canonical path, then project the durable
+  `reconciliation_required` state. Automatic rollback refuses that state until
+  explicit manual reconciliation.
+- Journal creation and append now check root/log capabilities before opening,
+  after opening, after mutation, and after directory synchronization. Any
+  failure after a log mutation also persists the reconciliation marker through
+  the already-open transaction-directory capability.
+- Race regressions now cover pre-rename source replacement with zero mutation,
+  post-rename source repopulation with durable reconciliation, post-rename
+  category relocation with automatic restoration, and post-append journal
+  directory relocation with colocated reconciliation evidence. Focused tests
+  pass `4/4` files and `92/92` tests; strict type coverage remains `433/433`.
+- Full `npm run verify` passes `324` current files / `3871` current tests with
+  declared skips, all historical lanes, production build, Agent eval `26/26`,
+  and Memory eval `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`,
+  SQLite `3.53.2`, seven migrations, eight authority domains, renderer startup,
+  and final Node ABI `137` restoration. A third exact-byte independent review
+  remains required before authoritative acceptance.
