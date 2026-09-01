@@ -426,10 +426,14 @@ static void maybe_test_checkpoint(const char *stage) {
   const char *value = getenv("ZEROX_SAFE_FS_TEST_DELAY_MS");
   uint64_t delay_ms = 0;
   const char *ready = getenv("ZEROX_SAFE_FS_TEST_READY");
+  const char *crash_stage = getenv("ZEROX_SAFE_FS_TEST_CRASH_STAGE");
   if (!test_stage_selected(stage)) return;
   if (ready != NULL && strcmp(ready, "1") == 0) {
     fprintf(stderr, "zerox-safe-fs-test-ready:%s\n", stage);
     fflush(stderr);
+  }
+  if (crash_stage != NULL && strcmp(crash_stage, stage) == 0) {
+    _exit(86);
   }
   if (
     value != NULL
@@ -2276,6 +2280,7 @@ static int run_projection_write(int argc, char **argv) {
   int already_published = 0;
   int published = 0;
   int swapped = 0;
+  int swap_durable = 0;
   int transaction_absent = 0;
   char zerox_path[MAXPATHLEN];
   char plans_path[MAXPATHLEN];
@@ -2626,9 +2631,22 @@ projection_prepared:
     }
     swapped = 1;
     /*
-     * The old canonical inode is now known exactly through existing_fd. Scrub
-     * it before any path/directory postflight so a concurrent displacement can
-     * make the operation fail but can never preserve the retired contents.
+     * Commit the exchange itself before retiring the old inode. Otherwise a
+     * power loss could restore the old directory entry after its descriptor
+     * had already been truncated. This fsync uses the capability-bound plans
+     * descriptor and intentionally precedes every pathname postflight.
+     */
+    if (fsync(plans_fd) != 0) {
+      result = fail_errno("cannot synchronize plan projection exchange");
+      goto done;
+    }
+    swap_durable = 1;
+    maybe_test_checkpoint("projection-swap-durable");
+    /*
+     * The durable old canonical inode is now known exactly through
+     * existing_fd. Scrub it before any pathname postflight so a concurrent
+     * displacement can make the operation fail but cannot preserve retired
+     * Plan bytes in the deterministic transaction inode.
      */
     result = scrub_projection_descriptor(existing_fd, &existing_identity);
     if (result != 0) goto done;
@@ -2758,7 +2776,7 @@ projection_prepared:
   }
   print_identity(&output_identity);
 done:
-  if (swapped && existing_fd >= 0 && existing_identity.size > 0) {
+  if (swap_durable && existing_fd >= 0 && existing_identity.size > 0) {
     (void)scrub_projection_descriptor(existing_fd, &existing_identity);
   }
   if (!published && plans_fd >= 0 && output_fd >= 0 && output_owned) {

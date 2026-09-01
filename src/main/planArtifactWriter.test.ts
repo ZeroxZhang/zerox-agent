@@ -233,6 +233,68 @@ describe("plan artifact writer", () => {
     );
   });
 
+  it("durably publishes the swap before scrubbing the retired descriptor", async () => {
+    const baseWriter = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await baseWriter.write(plan, createArtifact());
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const writer = createPlanArtifactWriter({
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "projection-swap-durable",
+      safeFsTestOnReady: signalReady,
+    });
+    const revised = { ...createArtifact(), summary: "durable before scrub" };
+    const outcome = writer.write({ ...plan, projection: first }, revised);
+
+    await ready;
+    const transactionPath = path.join(
+      path.dirname(first.path),
+      `.${plan.id}.projection.transaction`,
+    );
+    await expect(readFile(first.path, "utf8")).resolves.toContain(
+      "durable before scrub",
+    );
+    await expect(readFile(transactionPath, "utf8")).resolves.toContain(
+      "# Writer Test",
+    );
+
+    await expect(outcome).resolves.toMatchObject({ path: first.path });
+    await expect(readFile(transactionPath, "utf8")).resolves.toBe("");
+  });
+
+  it("recovers after a helper crash between durable swap and retired scrub", async () => {
+    const baseWriter = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await baseWriter.write(plan, createArtifact());
+    const revised = { ...createArtifact(), summary: "crash-safe next" };
+    const crashingWriter = createPlanArtifactWriter({
+      safeFsTestReadyStage: "projection-swap-durable",
+      safeFsTestCrashStage: "projection-swap-durable",
+    });
+
+    await expect(
+      crashingWriter.write({ ...plan, projection: first }, revised),
+    ).rejects.toThrow(/helper failed \(86\)/i);
+    const transactionPath = path.join(
+      path.dirname(first.path),
+      `.${plan.id}.projection.transaction`,
+    );
+    await expect(readFile(first.path, "utf8")).resolves.toContain(
+      "crash-safe next",
+    );
+    await expect(readFile(transactionPath, "utf8")).resolves.toContain(
+      "# Writer Test",
+    );
+
+    await expect(
+      baseWriter.write({ ...plan, projection: first }, revised),
+    ).resolves.toMatchObject({ path: first.path });
+    await expect(readFile(transactionPath, "utf8")).resolves.toBe("");
+  });
+
   it("never swaps an attacker replacement from the retired leaf back into the canonical path", async () => {
     const baseWriter = createPlanArtifactWriter();
     const plan = createPlan(workspaceRoot);

@@ -13983,3 +13983,30 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   caller-pinned Program/Harness, and whitespace checks pass. Fresh exact-byte
   code and security review remains mandatory before external package acceptance
   and release.
+
+## 2026-09-02 - v3.9.2 crash-consistent projection retirement order
+
+- Candidate `b968f73689b2d41576ebb2bac1d7f16539639249` was rejected after the
+  security/data lane found one Major crash-consistency issue; the code lane was
+  stopped and no PASS receipts were issued. The atomic swap could be followed
+  by retired-inode truncation before the containing directory entry was
+  durably synchronized, so a power loss could restore the old pathname bound
+  to an already-empty inode.
+- Replacement now synchronizes the already-open, capability-bound `plans`
+  directory immediately after `RENAME_SWAP`, and only then scrubs the old
+  canonical inode through its verified descriptor. Path postflights remain
+  after descriptor cleanup, so concurrent pathname displacement cannot retain
+  retired Plan bytes. A failed pre-durability `fsync` never triggers cleanup;
+  a post-durability failure is recoverable by the deterministic transaction.
+- A native crash-injection checkpoint exits the helper in the exact window
+  after durable swap and before retired scrub. The regression proves the new
+  canonical bytes survive the helper crash, the old transaction bytes remain
+  recoverable, and an idempotent retry scrubs them without losing Plan/file
+  authority. Focused writer validation passes `15/15` tests.
+- Fresh `npm run verify` passes strict test type coverage `434/434`, `325`
+  current files / `3945` current tests with declared skips, every
+  Round2-Round12 lane, production build, Agent eval `26/26`, and Memory eval
+  `2/2`. The native helper is `53536` bytes with digest
+  `sha256:e8572caab28d66f82d97fa70479c141a88a721ed91a3a123ba99935006c0eff6`.
+  Production smoke, caller-pinned Program/Harness, zero-vulnerability audit,
+  and whitespace checks pass. A new exact-byte review candidate is required.
