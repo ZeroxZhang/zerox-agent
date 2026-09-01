@@ -39,8 +39,18 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       cwd: process.cwd(),
     });
     const second = inspectSafeFsHelper(helperPath);
+    execFileSync(process.execPath, ["scripts/build-safe-fs-helper.mjs"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        CC: "clang",
+        SDKROOT: "macosx",
+      },
+    });
+    const portableOverride = inspectSafeFsHelper(helperPath);
 
     expect(second).toEqual(first);
+    expect(portableOverride).toEqual(first);
     expect(first).toMatchObject({
       mode: "0755",
       architecture: process.arch,
@@ -55,7 +65,9 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       path.join(process.cwd(), "scripts/build-safe-fs-helper.mjs"),
       "utf8",
     );
-    expect(buildSource).toContain("const configuredCompiler = process.env.CC?.trim()");
+    expect(buildSource).toContain("const configuredCompiler = toolchainPolicy");
+    expect(buildSource).toContain("? process.env.CC?.trim() || toolchainPolicy.compiler.configuredPath");
+    expect(buildSource).toContain(': resolveXcrun(["--find", "clang"])');
     expect(buildSource).toContain("const compilerPath = realpathSync(configuredCompiler)");
     expect(buildSource).toContain("const sdkRoot = realpathSync(configuredSdkRoot)");
     expect(buildSource).toContain("const buildToolchainBefore = toolchainPolicy");

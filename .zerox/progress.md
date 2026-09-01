@@ -14459,3 +14459,12 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   again passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
   eight authority domains, renderer startup, and Node ABI `137` restoration;
   the production dependency audit remains at zero vulnerabilities.
+- Candidate `75542ffc52191f50cc81d29d1588b86e7e0a4640` passed the security
+  lane at `0C/0M/0m` but was rejected before receipts because the code lane
+  reported `0C/0M/1m`: without a caller-owned policy, relative developer/CI
+  values such as `CC=clang` were still subjected to pinned-mode absolute-path
+  validation. Portable mode now ignores tool override variables and resolves
+  both compiler and SDK through the active `xcrun` selection; pinned mode alone
+  reads and strictly validates `CC`/`SDKROOT`. A regression proves unpinned
+  `CC=clang` plus symbolic `SDKROOT=macosx` produces the same helper, while the
+  pinned override rejection tests remain intact.

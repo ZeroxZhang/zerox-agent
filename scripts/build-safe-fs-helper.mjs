@@ -49,9 +49,9 @@ const temporaryDirectory = path.join(
 );
 const temporaryPath = path.join(temporaryDirectory, "zerox-safe-fs");
 const toolchainPolicy = loadPinnedToolchainPolicy();
-const configuredCompiler = process.env.CC?.trim()
-  || toolchainPolicy?.compiler.configuredPath
-  || resolveXcrun(["--find", "clang"]);
+const configuredCompiler = toolchainPolicy
+  ? process.env.CC?.trim() || toolchainPolicy.compiler.configuredPath
+  : resolveXcrun(["--find", "clang"]);
 if (toolchainPolicy && configuredCompiler !== toolchainPolicy.compiler.configuredPath) {
   throw new Error("CC differs from the caller-reviewed compiler path");
 }
@@ -62,9 +62,9 @@ const compilerPath = realpathSync(configuredCompiler);
 if (toolchainPolicy && compilerPath !== toolchainPolicy.compiler.canonicalPath) {
   throw new Error("CC canonical path differs from the caller-reviewed compiler");
 }
-const configuredSdkRoot = process.env.SDKROOT?.trim()
-  || toolchainPolicy?.sdk.configuredPath
-  || resolveXcrun(["--show-sdk-path"]);
+const configuredSdkRoot = toolchainPolicy
+  ? process.env.SDKROOT?.trim() || toolchainPolicy.sdk.configuredPath
+  : resolveXcrun(["--show-sdk-path"]);
 if (toolchainPolicy && configuredSdkRoot !== toolchainPolicy.sdk.configuredPath) {
   throw new Error("SDKROOT differs from the caller-reviewed SDK path");
 }
