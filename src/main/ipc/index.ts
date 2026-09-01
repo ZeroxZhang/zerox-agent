@@ -749,13 +749,22 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
 }
 
 function registerPlansIpcHandlers(container: AppContainer): void {
-  handleTrustedIpc("plans:get", (_event, planId: string) =>
-    container.planStore().get(planId),
-  );
+  handleTrustedIpc("plans:get", async (_event, planId: string) => {
+    try {
+      return await container.planStore().get(planId);
+    } catch {
+      throw new Error("计划存储读取失败。");
+    }
+  });
   handleTrustedIpc(
     "plans:getLatestBySession",
     async (_event, sessionId: string) => {
-      const plan = await container.planStore().getLatestBySession(sessionId);
+      let plan: PlanRecord | null;
+      try {
+        plan = await container.planStore().getLatestBySession(sessionId);
+      } catch {
+        throw new Error("计划存储读取失败。");
+      }
       if (
         plan &&
         (plan.status === "awaiting_confirmation" ||

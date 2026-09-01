@@ -1104,10 +1104,9 @@ export function createPlanDebateOrchestrator(options: {
       projection,
       "plan_synthesized",
       { actionGate: canonicalArtifact.actionGate },
+      signal,
     );
-    await persistCancellationIfAborted(synthesized, signal, {
-      afterProjection: true,
-    });
+    throwIfAborted(signal);
     return synthesized;
   }
 
@@ -1531,7 +1530,9 @@ export function createPlanDebateOrchestrator(options: {
         compatibilityNormalized,
         ...(gateRepair.attempted ? { gateRepairAttempted: true } : {}),
       },
+      signal,
     );
+    throwIfAborted(signal);
     return {
       ok: true,
       plan: saved,
@@ -1987,11 +1988,19 @@ export function createPlanDebateOrchestrator(options: {
       if (existing.revision !== expectedRevision) {
         return { ok: false, message: "计划版本已变化，请刷新后重试。", plan: existing };
       }
-      const discarded = await options.planStore.save(
-        { ...existing, status: "discarded", actionGate: "blocked" },
-        existing.revision,
-        "plan_discarded",
-      );
+      const discarded = existing.projectionIntent
+        ? await options.planStore.abandonProjectionIntent(
+            existing.id,
+            existing.revision,
+            "discarded",
+            "plan_projection_abandoned",
+            { requestedAction: "discard" },
+          )
+        : await options.planStore.save(
+            { ...existing, status: "discarded", actionGate: "blocked" },
+            existing.revision,
+            "plan_discarded",
+          );
       return { ok: true, plan: discarded, message: "计划已丢弃，未开始执行。" };
     },
   };

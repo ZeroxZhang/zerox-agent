@@ -14,12 +14,19 @@ import {
 
 export type PlanArtifactWriter = {
   write(plan: PlanRecord, artifact: PlanArtifact): Promise<PlanProjection>;
+  writePrepared(
+    plan: PlanRecord,
+    projection: PreparedPlanProjection,
+  ): Promise<PlanProjection>;
   verify(plan: PlanRecord): Promise<boolean>;
 };
 
 export type PreparedPlanProjection = {
+  kind: "artifact" | "tombstone";
+  renderVersion: 1;
   path: string;
   sha256: string;
+  body: string;
 };
 
 export function createPlanArtifactWriter(options?: SafeFsHelperRuntimeOptions & {
@@ -30,22 +37,35 @@ export function createPlanArtifactWriter(options?: SafeFsHelperRuntimeOptions & 
   return {
     async write(plan, artifact) {
       const prepared = await preparePlanProjection(plan, artifact);
-      const safeInput = prepared.safeInput;
-      await runSafeFsHelper(
-        "projection-write",
-        await projectionHelperArgs(
-          prepared.root,
-          safeInput.plan.id,
-          safeInput.plan.projection?.sha256,
-          prepared.projection.sha256,
-        ),
-        prepared.markdown,
+      return publishPreparedProjection(
+        prepared.safeInput.plan,
+        prepared.root,
+        prepared.projection,
+        now,
         options ?? {},
       );
-      return {
-        ...prepared.projection,
-        writtenAt: now(),
-      };
+    },
+
+    async writePrepared(plan, projection) {
+      const sanitized = sanitizePlanRecordDiagnostics(plan);
+      if (!sanitized.workspaceRoot) {
+        throw new Error("计划没有绑定工作区，无法恢复 Markdown 投影。");
+      }
+      assertPreparedProjection(projection);
+      const root = await realpath(sanitized.workspaceRoot);
+      if (projection.path !== canonicalProjectionPath(root, sanitized.id)) {
+        throw new Error("持久化投影 intent 不是当前计划的规范路径。");
+      }
+      if (hash(projection.body) !== projection.sha256) {
+        throw new Error("持久化投影 intent 正文与摘要不一致。");
+      }
+      return publishPreparedProjection(
+        sanitized,
+        root,
+        projection,
+        now,
+        options ?? {},
+      );
     },
 
     async verify(plan) {
@@ -88,6 +108,31 @@ export function createPlanArtifactWriter(options?: SafeFsHelperRuntimeOptions & 
         return false;
       }
     },
+  };
+}
+
+async function publishPreparedProjection(
+  plan: PlanRecord,
+  root: string,
+  projection: PreparedPlanProjection,
+  now: () => string,
+  options: SafeFsHelperRuntimeOptions,
+): Promise<PlanProjection> {
+  await runSafeFsHelper(
+    "projection-write",
+    await projectionHelperArgs(
+      root,
+      plan.id,
+      plan.projection?.sha256,
+      projection.sha256,
+    ),
+    projection.body,
+    options,
+  );
+  return {
+    path: projection.path,
+    sha256: projection.sha256,
+    writtenAt: now(),
   };
 }
 
@@ -155,8 +200,36 @@ export async function describePlanTombstoneProjection(
     throw new Error("计划投影路径不是当前计划的规范路径。");
   }
   return {
+    kind: "tombstone",
+    renderVersion: 1,
     path: destination,
     sha256: hash(tombstoneProjectionMarkdown()),
+    body: tombstoneProjectionMarkdown(),
+  };
+}
+
+/**
+ * Builds a migration intent without touching the workspace. The persisted
+ * legacy projection path remains only expected-old authority; writePrepared
+ * must still prove that it is the current canonical workspace path before it
+ * can publish these exact sanitized bytes.
+ */
+export function describeStoredPlanProjection(
+  plan: PlanRecord,
+): PreparedPlanProjection {
+  const sanitized = sanitizePlanRecordDiagnostics(plan);
+  if (!sanitized.projection) {
+    throw new Error("计划没有可迁移的旧投影权威。");
+  }
+  const body = sanitized.finalArtifact
+    ? renderPlanMarkdown(sanitized, sanitized.finalArtifact)
+    : tombstoneProjectionMarkdown();
+  return {
+    kind: sanitized.finalArtifact ? "artifact" : "tombstone",
+    renderVersion: 1,
+    path: sanitized.projection.path,
+    sha256: hash(body),
+    body,
   };
 }
 
@@ -166,7 +239,6 @@ async function preparePlanProjection(
 ): Promise<{
   safeInput: { plan: PlanRecord; artifact: PlanArtifact };
   root: string;
-  markdown: string;
   projection: PreparedPlanProjection;
 }> {
   const safeInput = sanitizeArtifactProjection(plan, artifact);
@@ -186,9 +258,29 @@ async function preparePlanProjection(
   return {
     safeInput,
     root,
-    markdown,
-    projection: { path: destination, sha256: hash(markdown) },
+    projection: {
+      kind: "artifact",
+      renderVersion: 1,
+      path: destination,
+      sha256: hash(markdown),
+      body: markdown,
+    },
   };
+}
+
+function assertPreparedProjection(
+  projection: PreparedPlanProjection,
+): void {
+  if (
+    (projection.kind !== "artifact" && projection.kind !== "tombstone")
+    || projection.renderVersion !== 1
+    || typeof projection.path !== "string"
+    || !path.isAbsolute(projection.path)
+    || !/^[a-f0-9]{64}$/.test(projection.sha256)
+    || typeof projection.body !== "string"
+  ) {
+    throw new Error("持久化投影 intent 结构非法。");
+  }
 }
 
 function sanitizeArtifactProjection(

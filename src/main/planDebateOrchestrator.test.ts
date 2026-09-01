@@ -17,7 +17,10 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
 } from "./openAiCompatibleClient";
-import { createPlanArtifactWriter } from "./planArtifactWriter";
+import {
+  createPlanArtifactWriter,
+  describePlanProjection,
+} from "./planArtifactWriter";
 import { createPlanDebateOrchestrator } from "./planDebateOrchestrator";
 import { createPlanStore } from "./planStore";
 import {
@@ -1924,6 +1927,9 @@ describe("plan debate orchestrator", () => {
           await release;
           return baseWriter.write(plan, artifact);
         },
+        writePrepared(plan, projection) {
+          return baseWriter.writePrepared(plan, projection);
+        },
         verify(plan) {
           return baseWriter.verify(plan);
         },
@@ -1965,6 +1971,68 @@ describe("plan debate orchestrator", () => {
         status: "completed",
       }),
     ]);
+  });
+
+  it("lets the public discard action abandon an unrecoverable projection intent", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      { profileDirect: [artifact("Initial projection")] },
+      calls,
+    );
+    let id = 0;
+    const store = createPlanStore({
+      configDir: path.join(tempDir, "config"),
+      createId: () => `event_${++id}`,
+    });
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: store,
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      createId: () => `id_${++id}`,
+    });
+    const ready = await orchestrator.createPlan({
+      sessionId: "session-discard-pending-projection",
+      workspaceRoot,
+      sourceMessage: "生成一个随后发生投影冲突的计划。",
+      mode: "direct",
+      modelAssignments: { direct: "profileDirect" },
+    });
+    const replacement = {
+      ...ready.finalArtifact!,
+      title: "Replacement projection",
+    };
+    const target = {
+      ...ready,
+      finalArtifact: replacement,
+    };
+    const prepared = await describePlanProjection(
+      { ...target, revision: ready.revision + 1 },
+      replacement,
+    );
+    const pending = await store.saveProjectionIntent(
+      target,
+      ready.revision,
+      prepared,
+      "plan_synthesized",
+    );
+    await writeFile(ready.projection!.path, "# conflicting user projection\n", {
+      mode: 0o600,
+    });
+
+    const discarded = await orchestrator.discard(pending.id, pending.revision);
+    expect(discarded).toMatchObject({
+      ok: true,
+      plan: {
+        status: "discarded",
+        actionGate: "blocked",
+      },
+    });
+    expect(discarded.plan).not.toHaveProperty("projection");
+    expect(discarded.plan).not.toHaveProperty("projectionIntent");
+    await expect(readFile(ready.projection!.path, "utf8")).resolves.toBe(
+      "# conflicting user projection\n",
+    );
   });
 
   it("refuses to discard a plan after it has created an execution goal", async () => {

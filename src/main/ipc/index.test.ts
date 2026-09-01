@@ -537,6 +537,36 @@ describe("chat IPC handlers", () => {
     });
   });
 
+  it("maps Plan storage failures to a content-free IPC error", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const secret = "local-canary-plan-ipc-secret-0123456789abcdef";
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      planStore: () => ({
+        get: vi.fn(async () => {
+          throw new Error(secret);
+        }),
+        getLatestBySession: vi.fn(async () => {
+          throw new Error(secret);
+        }),
+      }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
+
+    for (const [channel, value] of [
+      ["plans:get", "plan_1"],
+      ["plans:getLatestBySession", "session_1"],
+    ] as const) {
+      const error = await Promise.resolve(
+        electronState.ipcHandlers.get(channel)?.({}, value),
+      ).catch((caught) => caught);
+      expect(String(error)).toContain("计划存储读取失败");
+      expect(String(error)).not.toContain(secret);
+    }
+  });
+
   it.each([
     "goal:continueAcceptance",
     "goal:markCompletedUnverified",

@@ -13905,3 +13905,44 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Production audit reports zero vulnerabilities; dependency, caller-pinned
   Program/Harness, and whitespace checks pass. A fresh exact-byte code and
   security review remains mandatory before package acceptance and release.
+
+## 2026-09-01 - v3.9.2 exact replay bytes and terminal projection recovery
+
+- The eleventh frozen candidate was rejected by code review with no Critical,
+  five Major, and one Minor finding, and by security review with no Critical,
+  four Major, and one Minor finding. No review receipts were issued. The shared
+  causes were loss of system I/O failures during corrupt-record isolation, no
+  terminal exit from an unrecoverable projection intent, legacy migration that
+  could detach authority before the intent was durable, recovery that rendered
+  new bytes before checking the persisted intent, and retired native projection
+  bytes whose cleanup still depended on unlink.
+- Each durable projection intent now stores a versioned exact sanitized body,
+  canonical path, old and next digests, and target state. Preparation proves
+  those fields against the canonical next revision before persistence;
+  recovery publishes only the stored bytes after revalidating path and digest.
+  Legacy migration durably retains the old projection as replacement authority
+  before touching the workspace. A public discard atomically abandons a stuck
+  intent without modifying a conflicting user file.
+- JSON and SQLite decoders now use closed enums and validate persisted Skill
+  execution, input-default, planning, and requested-Skill fields. Unknown deep
+  Skill fields are removed by exact DTO reconstruction. Malformed JSON and IPC
+  Plan read failures expose only fixed content-free errors. Batch reads isolate
+  only explicit corrupt-record errors and propagate EACCES and other systemic
+  I/O failures instead of silently returning stale or incomplete results.
+- Projection finalization chooses cancellation inside the same serialized Plan
+  store boundary. The native helper uses one deterministic per-Plan transaction
+  leaf and scrubs a retired inode through its already-verified descriptor before
+  success, including when unlink would be blocked; idempotent retry verifies and
+  finishes the same cleanup state.
+- Focused Plan writer/store/orchestrator/IPC validation passes `95/95` tests.
+  Full `npm run verify` passes strict test type coverage `434/434`, `325`
+  current files / `3933` current tests with declared skips, every Round2–Round12
+  lane, production build, Agent eval `26/26`, and Memory eval `2/2`. The native
+  helper is `53440` bytes with digest
+  `sha256:c9fe10edcb5e68350fcc522e2d5d04ffe060526e8047a2a05c3b7820efe50642`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration. Production audit reports zero vulnerabilities; the full
+  dependency tree, caller-pinned Program/Harness, and whitespace checks pass.
+  A fresh exact-byte code and security review remains mandatory before package
+  acceptance and release.

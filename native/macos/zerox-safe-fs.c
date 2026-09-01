@@ -1989,7 +1989,7 @@ static int open_expected_projection(
   *existing_fd = openat(
     plans_fd,
     final_name,
-    O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
+    O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
   );
   if (*existing_fd < 0) {
     if (errno == ENOENT && *expect_absent) return 0;
@@ -2137,6 +2137,103 @@ done:
   return result;
 }
 
+static int open_projection_transaction(
+  int plans_fd,
+  const char *plans_path,
+  const char *transaction_name,
+  uid_t expected_uid,
+  int *transaction_fd,
+  file_identity *transaction_identity,
+  int *absent
+) {
+  struct stat stats;
+  *absent = 0;
+  *transaction_fd = openat(
+    plans_fd,
+    transaction_name,
+    O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
+  );
+  if (*transaction_fd < 0) {
+    if (errno == ENOENT) {
+      *absent = 1;
+      return 0;
+    }
+    return fail_errno("cannot open plan projection transaction");
+  }
+  if (fstat(*transaction_fd, &stats) != 0) {
+    return fail_errno("cannot inspect plan projection transaction");
+  }
+  if (
+    !S_ISREG(stats.st_mode)
+    || stats.st_nlink != 1
+    || (stats.st_mode & 0777) != 0600
+    || stats.st_uid != expected_uid
+    || capture_file_identity(
+      *transaction_fd,
+      &stats,
+      transaction_identity
+    ) != 0
+  ) {
+    return fail_message("plan projection transaction authority is unsafe");
+  }
+  return verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    transaction_name,
+    *transaction_fd,
+    transaction_identity,
+    1,
+    1
+  );
+}
+
+static int scrub_projection_transaction(
+  int plans_fd,
+  const char *plans_path,
+  const char *transaction_name,
+  int transaction_fd,
+  file_identity *transaction_identity
+) {
+  struct stat scrubbed_stats;
+  int result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    transaction_name,
+    transaction_fd,
+    transaction_identity,
+    1,
+    1
+  );
+  if (result != 0) return result;
+  if (ftruncate(transaction_fd, 0) != 0 || fsync(transaction_fd) != 0) {
+    return fail_errno("cannot scrub retired plan projection transaction");
+  }
+  if (fstat(transaction_fd, &scrubbed_stats) != 0) {
+    return fail_errno("cannot inspect scrubbed plan projection transaction");
+  }
+  if (
+    !S_ISREG(scrubbed_stats.st_mode)
+    || scrubbed_stats.st_size != 0
+    || scrubbed_stats.st_nlink != 1
+    || capture_file_identity(
+      transaction_fd,
+      &scrubbed_stats,
+      transaction_identity
+    ) != 0
+  ) {
+    return fail_message("retired plan projection transaction was not scrubbed");
+  }
+  return verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    transaction_name,
+    transaction_fd,
+    transaction_identity,
+    1,
+    1
+  );
+}
+
 static int run_projection_write(int argc, char **argv) {
   directory_identity root_identity;
   directory_identity zerox_identity;
@@ -2151,24 +2248,25 @@ static int run_projection_write(int argc, char **argv) {
   int existing_fd = -1;
   int lock_fd = -1;
   int output_fd = -1;
-  int output_bound = 0;
+  int output_owned = 0;
   int result = 0;
   int expect_absent = 0;
   int already_published = 0;
   int published = 0;
   int swapped = 0;
+  int transaction_absent = 0;
   char zerox_path[MAXPATHLEN];
   char plans_path[MAXPATHLEN];
   char final_name[NAME_MAX + 1];
   char lock_name[NAME_MAX + 1];
   char temporary_name[NAME_MAX + 1];
   char body_digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
+  char expected_digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
   char next_digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
   char *body = NULL;
   size_t body_length = 0U;
   mode_t zerox_mode = 0;
   mode_t plans_mode = 0;
-  unsigned int attempt;
   int written;
   if (argc != 10) return fail_message("invalid projection write arguments");
   if (!is_single_component(argv[7])) return fail_message("invalid plan id");
@@ -2183,8 +2281,23 @@ static int run_projection_write(int argc, char **argv) {
   if (written < 0 || (size_t)written >= sizeof(lock_name)) {
     return fail_message("plan projection lock name is too long");
   }
+  written = snprintf(
+    temporary_name,
+    sizeof(temporary_name),
+    ".%s.projection.transaction",
+    argv[7]
+  );
+  if (written < 0 || (size_t)written >= sizeof(temporary_name)) {
+    return fail_message("plan projection transaction name is too long");
+  }
   if (!parse_sha256_value(argv[9], next_digest)) {
     return fail_message("invalid next plan projection digest");
+  }
+  if (
+    strcmp(argv[8], "absent") != 0
+    && !parse_sha256_value(argv[8], expected_digest)
+  ) {
+    return fail_message("invalid expected plan projection digest");
   }
   result = read_stdin_body(&body, &body_length);
   if (result != 0) goto done;
@@ -2271,6 +2384,44 @@ static int run_projection_write(int argc, char **argv) {
   );
   if (result != 0) goto done;
   if (already_published) {
+    published = 1;
+    result = open_projection_transaction(
+      plans_fd,
+      plans_path,
+      temporary_name,
+      root_identity.uid,
+      &output_fd,
+      &output_identity,
+      &transaction_absent
+    );
+    if (result != 0) goto done;
+    if (!transaction_absent) {
+      if (
+        strcmp(
+          output_identity.sha256,
+          "e3b0c44298fc1c149afbf4c8996fb924"
+          "27ae41e4649b934ca495991b7852b855"
+        ) != 0
+      ) {
+        if (
+          expect_absent
+          || strcmp(output_identity.sha256, expected_digest) != 0
+        ) {
+          result = fail_message(
+            "plan projection transaction does not match retired authority"
+          );
+          goto done;
+        }
+        result = scrub_projection_transaction(
+          plans_fd,
+          plans_path,
+          temporary_name,
+          output_fd,
+          &output_identity
+        );
+        if (result != 0) goto done;
+      }
+    }
     if (
       fsync(plans_fd) != 0
       || fsync(zerox_fd) != 0
@@ -2295,41 +2446,76 @@ static int run_projection_write(int argc, char **argv) {
     result = verify_opened_regular_path(
       plans_fd,
       plans_path,
+      lock_name,
+      lock_fd,
+      &lock_identity,
+      1,
+      1
+    );
+    if (result != 0) goto done;
+    result = verify_opened_regular_path(
+      plans_fd,
+      plans_path,
       final_name,
       existing_fd,
       &existing_identity,
       1,
       1
     );
-    if (result == 0) print_identity(&existing_identity);
+    if (result != 0) goto done;
+    if (!transaction_absent) {
+      result = verify_opened_regular_path(
+        plans_fd,
+        plans_path,
+        temporary_name,
+        output_fd,
+        &output_identity,
+        1,
+        1
+      );
+      if (result != 0) goto done;
+    }
+    print_identity(&existing_identity);
     goto done;
   }
-  for (attempt = 0U; attempt < 16U; attempt += 1U) {
-    written = snprintf(
-      temporary_name,
-      sizeof(temporary_name),
-      ".zerox-plan-%ld-%08x.tmp",
-      (long)getpid(),
-      arc4random()
-    );
-    if (written < 0 || (size_t)written >= sizeof(temporary_name)) {
-      result = fail_message("plan projection temporary name is too long");
-      goto done;
-    }
+  result = open_projection_transaction(
+    plans_fd,
+    plans_path,
+    temporary_name,
+    root_identity.uid,
+    &output_fd,
+    &output_identity,
+    &transaction_absent
+  );
+  if (result != 0) goto done;
+  if (transaction_absent) {
     output_fd = openat(
       plans_fd,
       temporary_name,
       O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW | O_CREAT | O_EXCL,
       0600
     );
-    if (output_fd >= 0) break;
-    if (errno != EEXIST) {
-      result = fail_errno("cannot create plan projection temporary file");
+    if (output_fd < 0) {
+      result = fail_errno("cannot create plan projection transaction");
       goto done;
     }
+    output_owned = 1;
+  } else if (strcmp(output_identity.sha256, next_digest) == 0) {
+    output_owned = 1;
+    goto projection_prepared;
+  } else if (
+    strcmp(
+      output_identity.sha256,
+      "e3b0c44298fc1c149afbf4c8996fb924"
+      "27ae41e4649b934ca495991b7852b855"
+    ) != 0
+  ) {
+    result = fail_message("plan projection transaction contains unknown state");
+    goto done;
   }
-  if (output_fd < 0) {
-    result = fail_message("cannot allocate plan projection temporary file");
+  output_owned = 1;
+  if (ftruncate(output_fd, 0) != 0 || lseek(output_fd, 0, SEEK_SET) < 0) {
+    result = fail_errno("cannot prepare plan projection transaction");
     goto done;
   }
   result = write_all(output_fd, body, body_length);
@@ -2351,7 +2537,7 @@ static int run_projection_write(int argc, char **argv) {
     result = fail_message("plan projection temporary authority is unsafe");
     goto done;
   }
-  output_bound = 1;
+projection_prepared:
   maybe_test_checkpoint("projection-before-publish");
   result = verify_plan_directories(
     root_fd,
@@ -2508,9 +2694,30 @@ static int run_projection_write(int argc, char **argv) {
     1
   );
   if (result != 0) goto done;
-  if (
-    swapped
-    && verify_opened_regular_path(
+  if (swapped) {
+    result = scrub_projection_transaction(
+      plans_fd,
+      plans_path,
+      temporary_name,
+      existing_fd,
+      &existing_identity
+    );
+    if (result != 0) goto done;
+    if (fsync(plans_fd) != 0) {
+      result = fail_errno("cannot synchronize scrubbed plan projection transaction");
+      goto done;
+    }
+    result = verify_opened_regular_path(
+      plans_fd,
+      plans_path,
+      final_name,
+      output_fd,
+      &output_identity,
+      1,
+      1
+    );
+    if (result != 0) goto done;
+    result = verify_opened_regular_path(
       plans_fd,
       plans_path,
       temporary_name,
@@ -2518,24 +2725,40 @@ static int run_projection_write(int argc, char **argv) {
       &existing_identity,
       1,
       1
-    ) == 0
-    && unlinkat(plans_fd, temporary_name, 0) == 0
-  ) {
-    (void)fsync(plans_fd);
+    );
+    if (result != 0) goto done;
   }
   print_identity(&output_identity);
 done:
-  if (!published && plans_fd >= 0 && output_fd >= 0 && output_bound) {
-    if (verify_opened_regular_path(
-      plans_fd,
-      plans_path,
-      temporary_name,
-      output_fd,
-      &output_identity,
-      1,
-      1
-    ) == 0) {
-      (void)unlinkat(plans_fd, temporary_name, 0);
+  if (!published && plans_fd >= 0 && output_fd >= 0 && output_owned) {
+    struct stat cleanup_stats;
+    file_identity cleanup_identity;
+    if (
+      fstat(output_fd, &cleanup_stats) == 0
+      && S_ISREG(cleanup_stats.st_mode)
+      && cleanup_stats.st_nlink == 1
+      && capture_file_identity(
+        output_fd,
+        &cleanup_stats,
+        &cleanup_identity
+      ) == 0
+      && verify_opened_regular_path(
+        plans_fd,
+        plans_path,
+        temporary_name,
+        output_fd,
+        &cleanup_identity,
+        1,
+        1
+      ) == 0
+    ) {
+      (void)scrub_projection_transaction(
+        plans_fd,
+        plans_path,
+        temporary_name,
+        output_fd,
+        &cleanup_identity
+      );
     }
   }
   if (output_fd >= 0) close(output_fd);

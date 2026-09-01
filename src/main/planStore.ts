@@ -1,10 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   appendFile,
   mkdir,
+  open,
   readFile,
   readdir,
   rename,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -26,12 +28,14 @@ import { sanitizePlanRecordDiagnostics } from "../shared/planDiagnostics";
 import {
   createPlanArtifactWriter,
   describePlanProjection,
-  describePlanTombstoneProjection,
-  rewriteSanitizedPlanProjection,
+  describeStoredPlanProjection,
   type PlanArtifactWriter,
   type PreparedPlanProjection,
 } from "./planArtifactWriter";
-import { decodePersistedPlanRecord } from "./planRecordDecoder";
+import {
+  decodePersistedPlanRecord,
+  InvalidPersistedPlanRecordError,
+} from "./planRecordDecoder";
 
 export type PlanStoreEvent = {
   id: string;
@@ -62,6 +66,14 @@ export type PlanStore = {
     planId: string,
     expectedRevision: number,
     projection: PlanProjection,
+    eventType: string,
+    payload?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<PlanRecord>;
+  abandonProjectionIntent(
+    planId: string,
+    expectedRevision: number,
+    status: "discarded" | "canceled",
     eventType: string,
     payload?: Record<string, unknown>,
   ): Promise<PlanRecord>;
@@ -117,61 +129,36 @@ export function createPlanStore(options: {
     return path.join(plansDir, SESSION_INDEX_FILENAME);
   }
 
-  function detachProjection(plan: PlanRecord): PlanRecord {
-    const { projection: _projection, ...detached } = plan;
-    return detached;
-  }
-
   async function migrateDiagnosticProjection(
     plan: PlanRecord,
   ): Promise<PlanRecord> {
     if (!plan.projection) return plan;
-    const detached = detachProjection(plan);
-    if (!plan.workspaceRoot) return detached;
-    try {
-      const next = plan.finalArtifact
-        ? await describePlanProjection(plan, plan.finalArtifact)
-        : await describePlanTombstoneProjection(plan);
-      const durableIntent = validatePlanRecord({
-        ...plan,
-        status: "drafting",
-        actionGate: "blocked",
-        projectionIntent: {
-          kind: plan.finalArtifact ? "artifact" : "tombstone",
-          expectedSha256: plan.projection.sha256,
-          nextPath: next.path,
-          nextSha256: next.sha256,
-          targetStatus: plan.status,
-          targetActionGate: plan.actionGate,
-          preparedAt: now(),
-        },
-      });
-      await writePlan(durableIntent);
-      return await recoverProjectionIntent(durableIntent);
-    } catch {
-      // The persistent record must remain readable and content-free when an
-      // old workspace is offline, removed, read-only, or no longer canonical.
-      // Detaching the unverified projection also keeps IPC consumers from
-      // treating a legacy diagnostic artifact as authoritative.
-      return detached;
-    }
+    const next = describeStoredPlanProjection(plan);
+    const durableIntent = validatePlanRecord({
+      ...plan,
+      status: "drafting",
+      actionGate: "blocked",
+      projectionIntent: createProjectionIntent(plan, next, now()),
+    });
+    // This is the first durable migration write. It retains the exact old
+    // digest and exact sanitized replay bytes, so a crash or offline workspace
+    // cannot strand a legacy projection after its authority was detached.
+    await writePlan(durableIntent);
+    return recoverProjectionIntent(durableIntent);
   }
 
   async function readSqlitePlanPayload(
     payload: string,
     recoverProjection = true,
   ): Promise<PlanRecord> {
-    const parsed: unknown = JSON.parse(payload);
-    const diagnosticSafe = decodePersistedPlanRecord(parsed);
+    const { parsed, diagnosticSafe, validated } = decodeAndValidatePlan(payload);
     const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
-    const validated = validatePlanRecord(diagnosticSafe);
     let migrated = validated;
     if (diagnosticsChanged && options.storage) {
-      const detached = detachProjection(validated);
-      writeSqlitePlan(options.storage, detached);
-      migrated = await migrateDiagnosticProjection(validated);
-      if (!recordsEqual(detached, migrated)) {
-        writeSqlitePlan(options.storage, migrated);
+      if (validated.projection) {
+        migrated = await migrateDiagnosticProjection(validated);
+      } else {
+        writeSqlitePlan(options.storage, validated);
       }
     } else if (options.storage && !recordsEqual(parsed, validated)) {
       writeSqlitePlan(options.storage, validated);
@@ -195,19 +182,16 @@ export function createPlanStore(options: {
       return readSqlitePlanPayload(row.payload, recoverProjection);
     }
     try {
-      const parsed: unknown = JSON.parse(
+      const { parsed, diagnosticSafe, validated } = decodeAndValidatePlan(
         await readFile(planPath(planId), "utf8"),
       );
-      const diagnosticSafe = decodePersistedPlanRecord(parsed);
       const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
-      const validated = validatePlanRecord(diagnosticSafe);
       let migrated = validated;
       if (diagnosticsChanged) {
-        const detached = detachProjection(validated);
-        await writePlan(detached);
-        migrated = await migrateDiagnosticProjection(validated);
-        if (!recordsEqual(detached, migrated)) {
-          await writePlan(migrated);
+        if (validated.projection) {
+          migrated = await migrateDiagnosticProjection(validated);
+        } else {
+          await writePlan(validated);
         }
       } else if (!recordsEqual(parsed, validated)) {
         await writePlan(validated);
@@ -232,11 +216,23 @@ export function createPlanStore(options: {
     await mkdir(plansDir, { recursive: true });
     const destination = planPath(plan.id);
     const temp = `${destination}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temp, `${JSON.stringify(plan, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(temp, destination);
+    const handle = await open(temp, "wx", 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(plan, null, 2)}\n`, "utf8");
+      await handle.sync();
+      await handle.close();
+      await rename(temp, destination);
+      const directory = await open(plansDir, "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      await rm(temp, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   async function appendEvent(event: PlanStoreEvent) {
@@ -268,12 +264,11 @@ export function createPlanStore(options: {
     const intent = plan.projectionIntent;
     if (!intent) return plan;
     try {
-      const published = intent.kind === "artifact"
-        ? plan.finalArtifact
-          ? await projectionRecoveryWriter.write(plan, plan.finalArtifact)
-          : undefined
-        : (await rewriteSanitizedPlanProjection(plan, now)).projection;
-      if (!published) return plan;
+      const prepared = intentProjection(intent);
+      const published = await projectionRecoveryWriter.writePrepared(
+        plan,
+        prepared,
+      );
       if (
         published.path !== intent.nextPath
         || published.sha256 !== intent.nextSha256
@@ -300,6 +295,30 @@ export function createPlanStore(options: {
       // A pending intent is a valid, non-confirmable recovery state. Workspace
       // drift/offline errors must not make the Plan store unreadable.
       return plan;
+    }
+  }
+
+  function decodeAndValidatePlan(payload: string): {
+    parsed: unknown;
+    diagnosticSafe: PlanRecord;
+    validated: PlanRecord;
+  } {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      throw new InvalidPersistedPlanRecordError("$");
+    }
+    try {
+      const diagnosticSafe = decodePersistedPlanRecord(parsed);
+      return {
+        parsed,
+        diagnosticSafe,
+        validated: validatePlanRecord(diagnosticSafe),
+      };
+    } catch (error) {
+      if (error instanceof InvalidPersistedPlanRecordError) throw error;
+      throw new InvalidPersistedPlanRecordError("$");
     }
   }
 
@@ -476,25 +495,36 @@ export function createPlanStore(options: {
             existing.revision,
           );
         }
-        const candidate = validatePlanRecord(
-          sanitizePlanRecordDiagnostics({
-            ...structuredClone(plan),
-            revision: expectedRevision + 1,
-            updatedAt: now(),
-            status: "drafting",
-            actionGate: "blocked",
-            projection: existing.projection,
-            projectionIntent: {
-              kind: "artifact",
-              expectedSha256: existing.projection?.sha256 ?? null,
-              nextPath: projection.path,
-              nextSha256: projection.sha256,
+        const target = sanitizePlanRecordDiagnostics({
+          ...structuredClone(plan),
+          revision: expectedRevision + 1,
+          updatedAt: now(),
+          projection: existing.projection,
+        });
+        if (!target.finalArtifact) {
+          throw new Error("计划缺少可发布的终版投影。");
+        }
+        const canonicalProjection = await describePlanProjection(
+          target,
+          target.finalArtifact,
+        );
+        if (!preparedProjectionsEqual(projection, canonicalProjection)) {
+          throw new Error("计划投影 intent 与规范化终版不一致。");
+        }
+        const candidate = validatePlanRecord({
+          ...target,
+          status: "drafting",
+          actionGate: "blocked",
+          projectionIntent: createProjectionIntent(
+            existing,
+            projection,
+            now(),
+            {
               targetStatus: plan.status,
               targetActionGate: plan.actionGate,
-              preparedAt: now(),
             },
-          }),
-        );
+          ),
+        });
         const event: PlanStoreEvent = {
           id: `plan_event_${createId()}`,
           planId: candidate.id,
@@ -515,6 +545,7 @@ export function createPlanStore(options: {
       projection,
       eventType,
       payload,
+      signal,
     ) {
       return serialize(planId, async () => {
         const existing = await readPlan(planId, false);
@@ -545,22 +576,63 @@ export function createPlanStore(options: {
         }
         const finalized = validatePlanRecord({
           ...existing,
-          status: intent.targetStatus,
-          actionGate: intent.targetActionGate,
+          status: signal?.aborted ? "canceled" : intent.targetStatus,
+          actionGate: signal?.aborted ? "blocked" : intent.targetActionGate,
           projection,
           projectionIntent: undefined,
         });
         const event: PlanStoreEvent = {
           id: `plan_event_${createId()}`,
           planId,
-          type: eventType,
+          type: signal?.aborted ? "plan_canceled" : eventType,
           revision: finalized.revision,
-          ...(payload ? { payload: structuredClone(payload) } : {}),
+          ...(signal?.aborted
+            ? { payload: { afterProjection: true } }
+            : payload
+              ? { payload: structuredClone(payload) }
+              : {}),
           createdAt: now(),
         };
         trackActiveRunIds(finalized, activeRunIds);
         await persistPlanAndEvent(finalized, event);
         return structuredClone(finalized);
+      });
+    },
+
+    abandonProjectionIntent(planId, expectedRevision, status, eventType, payload) {
+      return serialize(planId, async () => {
+        const existing = await readPlan(planId, false);
+        if (!existing) throw new Error(`计划 ${planId} 不存在。`);
+        if (!existing.projectionIntent) {
+          throw new Error("计划不存在可放弃的投影 intent。");
+        }
+        if (existing.revision !== expectedRevision) {
+          throw new PlanVersionConflictError(
+            planId,
+            expectedRevision,
+            existing.revision,
+          );
+        }
+        const abandoned = validatePlanRecord({
+          ...existing,
+          status,
+          actionGate: "blocked",
+          revision: expectedRevision + 1,
+          updatedAt: now(),
+          projection: undefined,
+          projectionIntent: undefined,
+        });
+        const event: PlanStoreEvent = {
+          id: `plan_event_${createId()}`,
+          planId,
+          type: eventType,
+          revision: abandoned.revision,
+          ...(payload ? { payload: structuredClone(payload) } : {}),
+          createdAt: now(),
+        };
+        trackActiveRunIds(abandoned, activeRunIds);
+        await persistPlanAndEvent(abandoned, event);
+        return structuredClone(abandoned);
       });
     },
 
@@ -650,7 +722,8 @@ export function createPlanStore(options: {
         try {
           const indexed = await readPlan(entry.planId);
           if (indexed?.sessionId === sessionId) return indexed;
-        } catch {
+        } catch (error) {
+          if (!isCorruptPlanRecordError(error)) throw error;
           // The authoritative record scan below isolates a corrupt/stale index
           // target instead of turning one entry into a session-wide outage.
         }
@@ -668,9 +741,66 @@ async function collectValidPlans(
   reads: Array<Promise<PlanRecord | null>>,
 ): Promise<PlanRecord[]> {
   const settled = await Promise.allSettled(reads);
-  return settled.flatMap((result) =>
-    result.status === "fulfilled" && result.value ? [result.value] : []
-  );
+  const plans: PlanRecord[] = [];
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      if (isCorruptPlanRecordError(result.reason)) continue;
+      throw result.reason;
+    }
+    if (result.value) plans.push(result.value);
+  }
+  return plans;
+}
+
+function isCorruptPlanRecordError(
+  error: unknown,
+): error is InvalidPersistedPlanRecordError {
+  return error instanceof InvalidPersistedPlanRecordError;
+}
+
+function createProjectionIntent(
+  current: PlanRecord,
+  projection: PreparedPlanProjection,
+  preparedAt: string,
+  target?: {
+    targetStatus: PlanRecord["status"];
+    targetActionGate: PlanRecord["actionGate"];
+  },
+): NonNullable<PlanRecord["projectionIntent"]> {
+  return {
+    kind: projection.kind,
+    renderVersion: projection.renderVersion,
+    expectedSha256: current.projection?.sha256 ?? null,
+    nextPath: projection.path,
+    nextSha256: projection.sha256,
+    body: projection.body,
+    targetStatus: target?.targetStatus ?? current.status,
+    targetActionGate: target?.targetActionGate ?? current.actionGate,
+    preparedAt,
+  };
+}
+
+function intentProjection(
+  intent: NonNullable<PlanRecord["projectionIntent"]>,
+): PreparedPlanProjection {
+  return {
+    kind: intent.kind,
+    renderVersion: intent.renderVersion,
+    path: intent.nextPath,
+    sha256: intent.nextSha256,
+    body: intent.body,
+  };
+}
+
+function preparedProjectionsEqual(
+  left: PreparedPlanProjection,
+  right: PreparedPlanProjection,
+): boolean {
+  return left.kind === right.kind
+    && left.renderVersion === right.renderVersion
+    && left.path === right.path
+    && left.sha256 === right.sha256
+    && left.body === right.body;
 }
 
 function writeSqlitePlan(storage: Storage, plan: PlanRecord): void {
@@ -808,9 +938,15 @@ function validatePlanRecord(plan: PlanRecord): PlanRecord {
       || (intent.kind !== "artifact" && intent.kind !== "tombstone")
       || (intent.kind === "artifact" && !plan.finalArtifact)
       || !plan.workspaceRoot
+      || intent.renderVersion !== 1
       || !validStatuses.has(intent.targetStatus)
       || !validActionGates.has(intent.targetActionGate)
+      || typeof intent.nextPath !== "string"
+      || !path.isAbsolute(intent.nextPath)
       || !/^[a-f0-9]{64}$/.test(intent.nextSha256)
+      || typeof intent.body !== "string"
+      || createHash("sha256").update(intent.body).digest("hex")
+        !== intent.nextSha256
       || (intent.expectedSha256 !== null
         && !/^[a-f0-9]{64}$/.test(intent.expectedSha256))
       || intent.expectedSha256 !== (plan.projection?.sha256 ?? null)

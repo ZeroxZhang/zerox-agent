@@ -364,9 +364,12 @@ export type PlanProjection = {
  */
 export type PlanProjectionIntent = {
   kind: "artifact" | "tombstone";
+  renderVersion: 1;
   expectedSha256: string | null;
   nextPath: string;
   nextSha256: string;
+  /** Exact sanitized bytes that must be replayed during recovery. */
+  body: string;
   targetStatus: PlanStatus;
   targetActionGate: PlanActionGate;
   preparedAt: string;

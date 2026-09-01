@@ -230,9 +230,11 @@ export function sanitizePlanRecordDiagnostics(plan: PlanRecord): PlanRecord {
       ? {
           projectionIntent: {
             kind: plan.projectionIntent.kind,
+            renderVersion: plan.projectionIntent.renderVersion,
             expectedSha256: plan.projectionIntent.expectedSha256,
             nextPath: plan.projectionIntent.nextPath,
             nextSha256: plan.projectionIntent.nextSha256,
+            body: plan.projectionIntent.body,
             targetStatus: plan.projectionIntent.targetStatus,
             targetActionGate: plan.projectionIntent.targetActionGate,
             preparedAt: plan.projectionIntent.preparedAt,

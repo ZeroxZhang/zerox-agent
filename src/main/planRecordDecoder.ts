@@ -25,6 +25,10 @@ function objectOf(
   };
 }
 
+function enumOf(values: readonly unknown[]): Schema {
+  return { enum: [...values] };
+}
+
 const usageSchema = objectOf({
   inputTokens: numberSchema,
   outputTokens: numberSchema,
@@ -201,16 +205,17 @@ const selectedSkillSchema = objectOf({
     description: stringSchema,
     version: stringSchema,
     execution: objectOf({
-      mode: stringSchema,
+      mode: enumOf(["agent", "script"]),
       entrypoint: {},
       maxTurns: numberSchema,
     }, ["mode", "entrypoint"]),
     inputs: arrayOf(objectOf({
       name: stringSchema,
       label: stringSchema,
-      type: stringSchema,
+      type: enumOf(["string", "path", "number", "boolean", "choice"]),
       required: booleanSchema,
       description: stringSchema,
+      defaultValue: {},
       choices: stringArraySchema,
     }, ["name", "label", "type", "required"])),
     permissions: objectOf({
@@ -228,7 +233,10 @@ const selectedSkillSchema = objectOf({
         ["read", "write"],
       ),
     }, ["files", "shell", "web", "memory"]),
-    planning: objectSchema,
+    planning: objectOf({
+      required: booleanSchema,
+      maxSteps: numberSchema,
+    }, ["required"]),
     tools: arrayOf(objectOf({
       name: stringSchema,
       description: stringSchema,
@@ -237,7 +245,7 @@ const selectedSkillSchema = objectOf({
     }, ["name", "description", "parameters", "entrypoint"])),
     mcpServers: arrayOf(objectOf({
       name: stringSchema,
-      transport: stringSchema,
+      transport: enumOf(["stdio", "http", "sse"]),
       command: stringSchema,
       args: stringArraySchema,
       readRoots: stringArraySchema,
@@ -267,10 +275,14 @@ const planRecordSchema = objectOf({
   clarifications: stringArraySchema,
   requestedSkillName: {},
   selectedSkill: selectedSkillSchema,
-  mode: stringSchema,
-  autonomyMode: stringSchema,
-  status: stringSchema,
-  actionGate: stringSchema,
+  mode: enumOf(["direct", "debate"]),
+  autonomyMode: enumOf(["standard", "auto"]),
+  status: enumOf([
+    "drafting", "paused", "awaiting_input", "awaiting_confirmation",
+    "confirmed_pending_execution", "executing", "steps_completed",
+    "completed", "superseded", "discarded", "canceled", "failed",
+  ]),
+  actionGate: enumOf(["ready", "needs_input", "blocked"]),
   revision: numberSchema,
   taskProfile: objectOf({
     domain: stringSchema,
@@ -325,10 +337,13 @@ const planRecordSchema = objectOf({
   ]),
   planningStages: arrayOf(objectOf({
     id: stringSchema,
-    kind: stringSchema,
+    kind: enumOf([
+      "triage", "investigation", "skill_route", "contract", "generation",
+      "review", "quality",
+    ]),
     runId: stringSchema,
-    status: stringSchema,
-    investigationDepth: stringSchema,
+    status: enumOf(["pending", "running", "completed", "failed", "invalidated"]),
+    investigationDepth: enumOf(["quick", "standard", "deep"]),
     modelBinding: modelBindingSchema,
     evidenceRefs: stringArraySchema,
     reviewApproved: booleanSchema,
@@ -465,12 +480,12 @@ const planRecordSchema = objectOf({
   }),
   rounds: arrayOf(objectOf({
     id: stringSchema,
-    kind: stringSchema,
-    role: stringSchema,
+    kind: enumOf(["direct", "a1", "b1", "a2", "b2", "c"]),
+    role: enumOf(["direct", "a", "b", "c"]),
     ordinal: numberSchema,
     runId: stringSchema,
     modelBinding: modelBindingSchema,
-    status: stringSchema,
+    status: enumOf(["pending", "running", "completed", "failed", "invalidated"]),
     publicInputRefs: stringArraySchema,
     output: proposalSchema,
     error: stringSchema,
@@ -487,13 +502,23 @@ const planRecordSchema = objectOf({
     writtenAt: stringSchema,
   }),
   projectionIntent: objectOf({
-    kind: stringSchema,
+    kind: enumOf(["artifact", "tombstone"]),
+    renderVersion: enumOf([1]),
+    expectedSha256: {},
     nextPath: stringSchema,
     nextSha256: stringSchema,
-    targetStatus: stringSchema,
-    targetActionGate: stringSchema,
+    body: stringSchema,
+    targetStatus: enumOf([
+      "drafting", "paused", "awaiting_input", "awaiting_confirmation",
+      "confirmed_pending_execution", "executing", "steps_completed",
+      "completed", "superseded", "discarded", "canceled", "failed",
+    ]),
+    targetActionGate: enumOf(["ready", "needs_input", "blocked"]),
     preparedAt: stringSchema,
-  }),
+  }, [
+    "kind", "renderVersion", "expectedSha256", "nextPath", "nextSha256",
+    "body", "targetStatus", "targetActionGate", "preparedAt",
+  ]),
   executionGoalId: stringSchema,
   executionRunId: stringSchema,
   confirmedRevision: numberSchema,
@@ -528,6 +553,7 @@ export function decodePersistedPlanRecord(value: unknown): PlanRecord {
   const error = validateOutputSchema(value, planRecordSchema);
   if (error) throw new InvalidPersistedPlanRecordError(error);
   const record = value as Record<string, unknown>;
+  assertNullableString(record.requestedSkillName, "$.requestedSkillName");
   assertStringArrayRecord(
     (record.planningBrief as Record<string, unknown> | undefined)
       ?.recommendedSkillInputEvidenceRefs,
@@ -539,7 +565,14 @@ export function decodePersistedPlanRecord(value: unknown): PlanRecord {
     "$.skillDecision.inputEvidenceRefs",
   );
   assertSelectedSkillServers(record.selectedSkill);
+  assertSelectedSkillScalars(record.selectedSkill);
   return sanitizePlanRecordDiagnostics(value as PlanRecord);
+}
+
+function assertNullableString(value: unknown, path: string): void {
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new InvalidPersistedPlanRecordError(path);
+  }
 }
 
 function assertStringArrayRecord(value: unknown, path: string): void {
@@ -570,6 +603,52 @@ function assertSelectedSkillServers(value: unknown): void {
     if (!valid) {
       throw new InvalidPersistedPlanRecordError(
         "$.selectedSkill.manifest.mcpServers",
+      );
+    }
+  }
+}
+
+function assertSelectedSkillScalars(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const manifest = (value as Record<string, unknown>).manifest;
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    return;
+  }
+  const manifestRecord = manifest as Record<string, unknown>;
+  const execution = manifestRecord.execution as Record<string, unknown>;
+  assertNullableString(
+    execution.entrypoint,
+    "$.selectedSkill.manifest.execution.entrypoint",
+  );
+  if (
+    execution.maxTurns !== undefined
+    && (!Number.isInteger(execution.maxTurns) || Number(execution.maxTurns) <= 0)
+  ) {
+    throw new InvalidPersistedPlanRecordError(
+      "$.selectedSkill.manifest.execution.maxTurns",
+    );
+  }
+  const planning = manifestRecord.planning as Record<string, unknown> | undefined;
+  if (
+    planning?.maxSteps !== undefined
+    && (!Number.isInteger(planning.maxSteps) || Number(planning.maxSteps) <= 0)
+  ) {
+    throw new InvalidPersistedPlanRecordError(
+      "$.selectedSkill.manifest.planning.maxSteps",
+    );
+  }
+  const inputs = manifestRecord.inputs as Array<Record<string, unknown>>;
+  for (let index = 0; index < inputs.length; index += 1) {
+    const input = inputs[index];
+    if (input.defaultValue === undefined) continue;
+    const expectedType = input.type === "number"
+      ? "number"
+      : input.type === "boolean"
+        ? "boolean"
+        : "string";
+    if (typeof input.defaultValue !== expectedType) {
+      throw new InvalidPersistedPlanRecordError(
+        `$.selectedSkill.manifest.inputs[${index}].defaultValue`,
       );
     }
   }

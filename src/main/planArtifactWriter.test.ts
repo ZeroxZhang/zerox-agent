@@ -220,7 +220,7 @@ describe("plan artifact writer", () => {
     await ready;
     const plansDir = path.dirname(first.path);
     const retiredLeaf = (await readdir(plansDir)).find((name) =>
-      name.endsWith(".tmp")
+      name.endsWith(".projection.transaction")
     );
     expect(retiredLeaf).toBeDefined();
     await rm(path.join(plansDir, retiredLeaf!));
@@ -268,6 +268,49 @@ describe("plan artifact writer", () => {
     );
     await expect(readFile(displaced, "utf8")).resolves.toContain(
       "displaced safe next",
+    );
+  });
+
+  it("scrubs the deterministic retired transaction even when unlink would be blocked", async () => {
+    const baseWriter = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await baseWriter.write(plan, createArtifact());
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const delayedWriter = createPlanArtifactWriter({
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "projection-before-success",
+      safeFsTestOnReady: signalReady,
+    });
+    const revised = { ...createArtifact(), summary: "cleanup recovery" };
+    const outcome = delayedWriter.write(
+      { ...plan, projection: first },
+      revised,
+    ).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready;
+    const transactionPath = path.join(
+      path.dirname(first.path),
+      `.${plan.id}.projection.transaction`,
+    );
+    execFileSync("/usr/bin/chflags", ["uchg", transactionPath]);
+    const completed = await outcome;
+    expect(completed.ok).toBe(true);
+    await expect(readFile(transactionPath, "utf8")).resolves.toBe("");
+    execFileSync("/usr/bin/chflags", ["nouchg", transactionPath]);
+    const recovered = await baseWriter.write(
+      { ...plan, projection: first },
+      revised,
+    );
+    expect(recovered.sha256).not.toBe(first.sha256);
+    await expect(readFile(transactionPath, "utf8")).resolves.toBe("");
+    await expect(readFile(first.path, "utf8")).resolves.toContain(
+      "cleanup recovery",
     );
   });
 

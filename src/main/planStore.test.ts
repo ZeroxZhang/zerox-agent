@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
   realpath,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -285,6 +287,23 @@ describe("plan store parity", () => {
     Object.assign(raw.goalContractIssues![0]!, {
       rawDiagnostic: `goal issue ${secret}`,
     });
+    raw.selectedSkill = createPrivateSkillSnapshot();
+    Object.assign(raw.selectedSkill.manifest.execution, {
+      rawDiagnostic: `skill execution ${secret}`,
+    });
+    raw.selectedSkill.manifest.inputs = [{
+      name: "scope",
+      label: "Scope",
+      type: "string",
+      required: false,
+      defaultValue: "safe",
+      rawDiagnostic: `skill input ${secret}`,
+    } as NonNullable<PlanRecord["selectedSkill"]>["manifest"]["inputs"][number]];
+    raw.selectedSkill.manifest.planning = {
+      required: true,
+      maxSteps: 3,
+      rawDiagnostic: `skill planning ${secret}`,
+    } as NonNullable<PlanRecord["selectedSkill"]>["manifest"]["planning"];
     Object.assign(raw.rounds[1]!.output!, {
       rawDiagnostic: `round output ${secret}`,
       issues: [{ rawDiagnostic: `shape injection ${secret}` }],
@@ -334,6 +353,15 @@ describe("plan store parity", () => {
           "规划模型报告 GoalContract 存在阻断问题；原始诊断内容未保存。",
         evidenceRefs: [],
       });
+      expect(jsonCreated.selectedSkill?.manifest.execution).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.selectedSkill?.manifest.inputs[0]).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.selectedSkill?.manifest.planning).not.toHaveProperty(
+        "rawDiagnostic",
+      );
       expect(jsonCreated.rounds[1]?.output).not.toHaveProperty("issues");
       expect(jsonCreated.rounds[1]?.output).not.toHaveProperty(
         "rawDiagnostic",
@@ -426,17 +454,41 @@ describe("plan store parity", () => {
       await writeFile(planFile, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
       storage.db.prepare("UPDATE plan_records SET payload = ? WHERE id = ?")
         .run(JSON.stringify(raw), raw.id);
-      await rm(workspaceRoot, { recursive: true, force: true });
+      const offlineWorkspace = `${workspaceRoot}.offline`;
+      await rename(workspaceRoot, offlineWorkspace);
 
       const jsonMigrated = await json.get(raw.id);
       const sqliteMigrated = await sqlite.get(raw.id);
       expect(jsonMigrated).toMatchObject({ id: raw.id });
       expect(sqliteMigrated).toMatchObject({ id: raw.id });
-      expect(jsonMigrated?.projection).toBeUndefined();
-      expect(sqliteMigrated?.projection).toBeUndefined();
+      expect(jsonMigrated).toMatchObject({
+        status: "drafting",
+        actionGate: "blocked",
+        projection: { path: projectionPath, sha256: sha256(legacyProjection) },
+        projectionIntent: {
+          expectedSha256: sha256(legacyProjection),
+          body: expect.not.stringContaining(secret),
+        },
+      });
+      expect(sqliteMigrated).toMatchObject({
+        status: "drafting",
+        actionGate: "blocked",
+        projection: { path: projectionPath, sha256: sha256(legacyProjection) },
+        projectionIntent: {
+          expectedSha256: sha256(legacyProjection),
+          body: expect.not.stringContaining(secret),
+        },
+      });
       await expect(readFile(planFile, "utf8")).resolves.not.toContain(secret);
       expect(storage.db.prepare("SELECT payload FROM plan_records WHERE id = ?")
         .get<{ payload: string }>(raw.id)?.payload).not.toContain(secret);
+
+      await rename(offlineWorkspace, workspaceRoot);
+      const jsonRecovered = await json.get(raw.id);
+      const sqliteRecovered = await sqlite.get(raw.id);
+      expect(jsonRecovered?.projectionIntent).toBeUndefined();
+      expect(sqliteRecovered?.projectionIntent).toBeUndefined();
+      await expect(readFile(projectionPath, "utf8")).resolves.not.toContain(secret);
     } finally {
       storage.close();
     }
@@ -857,6 +909,163 @@ describe("plan store parity", () => {
     ).resolves.toBe(true);
   });
 
+  it("rejects a mismatched prepared projection before persisting or publishing it", async () => {
+    const configDir = path.join(tempDir, "projection-intent-mismatch");
+    const workspaceRoot = path.join(tempDir, "projection-intent-mismatch-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const store = createPlanStore({ configDir });
+    const created = await store.create({ ...createRecord(), workspaceRoot });
+    const artifact = createDiagnosticArtifact("safe");
+    const target = {
+      ...created,
+      status: "awaiting_input" as const,
+      actionGate: "needs_input" as const,
+      finalArtifact: artifact,
+    };
+    const prepared = await describePlanProjection(
+      { ...target, revision: created.revision + 1 },
+      artifact,
+    );
+
+    await expect(store.saveProjectionIntent(
+      target,
+      created.revision,
+      { ...prepared, sha256: "0".repeat(64) },
+      "plan_synthesized",
+    )).rejects.toThrow("规范化终版不一致");
+    await expect(store.get(created.id)).resolves.toEqual(created);
+    await expect(readFile(prepared.path, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("atomically abandons an unrecoverable projection intent so the Plan can be discarded", async () => {
+    const configDir = path.join(tempDir, "projection-intent-abandon");
+    const workspaceRoot = path.join(tempDir, "projection-intent-abandon-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const store = createPlanStore({ configDir });
+    const created = await store.create({ ...createRecord(), workspaceRoot });
+    const artifact = createDiagnosticArtifact("safe");
+    const target = {
+      ...created,
+      status: "awaiting_input" as const,
+      actionGate: "needs_input" as const,
+      finalArtifact: artifact,
+    };
+    const prepared = await describePlanProjection(
+      { ...target, revision: created.revision + 1 },
+      artifact,
+    );
+    const pending = await store.saveProjectionIntent(
+      target,
+      created.revision,
+      prepared,
+      "plan_synthesized",
+    );
+    await mkdir(path.dirname(prepared.path), { recursive: true });
+    await writeFile(prepared.path, "# conflicting user projection\n", {
+      mode: 0o600,
+    });
+    expect((await store.get(created.id))?.projectionIntent).toBeDefined();
+
+    const discarded = await store.abandonProjectionIntent(
+      created.id,
+      pending.revision,
+      "discarded",
+      "plan_projection_abandoned",
+    );
+    expect(discarded).toMatchObject({
+      revision: pending.revision + 1,
+      status: "discarded",
+      actionGate: "blocked",
+    });
+    expect(discarded.projection).toBeUndefined();
+    expect(discarded.projectionIntent).toBeUndefined();
+    await expect(readFile(prepared.path, "utf8")).resolves.toBe(
+      "# conflicting user projection\n",
+    );
+  });
+
+  it("isolates only corrupt records and propagates systemic Plan I/O failures", async () => {
+    const configDir = path.join(tempDir, "plan-io-failure");
+    const store = createPlanStore({ configDir });
+    const older = await store.create({
+      ...createRecord(),
+      id: "plan-older",
+      updatedAt: "2026-07-30T00:00:00.000Z",
+    });
+    const latest = await store.create({
+      ...createRecord(),
+      id: "plan-latest",
+      updatedAt: "2026-07-30T01:00:00.000Z",
+    });
+    const latestPath = path.join(configDir, "plans", `${latest.id}.json`);
+    await chmod(latestPath, 0o000);
+    try {
+      await expect(store.get(latest.id)).rejects.toMatchObject({ code: "EACCES" });
+      await expect(store.listAll()).rejects.toMatchObject({ code: "EACCES" });
+      await expect(store.listBySession(older.sessionId)).rejects.toMatchObject({
+        code: "EACCES",
+      });
+      await expect(store.getLatestBySession(older.sessionId)).rejects.toMatchObject({
+        code: "EACCES",
+      });
+    } finally {
+      await chmod(latestPath, 0o600);
+    }
+  });
+
+  it("converts malformed JSON parser output to a content-free record error", async () => {
+    const configDir = path.join(tempDir, "malformed-json-secret");
+    const plansDir = path.join(configDir, "plans");
+    await mkdir(plansDir, { recursive: true });
+    const secret = "local-canary-parser-secret-0123456789abcdef";
+    await writeFile(
+      path.join(plansDir, "plan-parser-secret.json"),
+      `{"secret":"${secret}",`,
+      "utf8",
+    );
+    const store = createPlanStore({ configDir });
+    const error = await store.get("plan-parser-secret").catch((caught) => caught);
+    expect(error).toBeInstanceOf(InvalidPersistedPlanRecordError);
+    expect(String(error)).not.toContain(secret);
+  });
+
+  it("converts malformed SQLite JSON parser output to a content-free record error", async () => {
+    const storage = createStorageImpl({
+      dbPath: path.join(tempDir, "malformed-sqlite-secret.sqlite"),
+      skipFts5Check: true,
+    });
+    const store = createPlanStore({
+      configDir: path.join(tempDir, "sqlite-unused"),
+      storage,
+    });
+    const secret = "local-canary-sqlite-parser-secret-0123456789abcdef";
+    try {
+      storage.db.prepare(
+        `INSERT INTO plan_records
+          (id, session_id, mode, status, action_gate, revision, payload, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "plan-sqlite-parser-secret",
+        "session-store-test",
+        "direct",
+        "drafting",
+        "blocked",
+        1,
+        `{"secret":"${secret}",`,
+        "2026-07-30T00:00:00.000Z",
+        "2026-07-30T00:00:00.000Z",
+      );
+      const error = await store.get("plan-sqlite-parser-secret")
+        .catch((caught) => caught);
+      expect(error).toBeInstanceOf(InvalidPersistedPlanRecordError);
+      expect(String(error)).not.toContain(secret);
+    } finally {
+      storage.close();
+    }
+  });
+
   it("quarantines malformed JSON Plans without blocking valid list queries", async () => {
     const configDir = path.join(tempDir, "malformed-json");
     const store = createPlanStore({ configDir });
@@ -876,6 +1085,39 @@ describe("plan store parity", () => {
         ...createRecord(),
         id: "plan-malformed-skill",
         selectedSkill: { manifest: { inputs: [], permissions: {} } },
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-requested-skill",
+        requestedSkillName: { rawDiagnostic: "secret" },
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-skill-entrypoint",
+        selectedSkill: {
+          ...createPrivateSkillSnapshot(),
+          manifest: {
+            ...createPrivateSkillSnapshot().manifest,
+            execution: { mode: "agent", entrypoint: { rawDiagnostic: "secret" } },
+          },
+        },
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-skill-default",
+        selectedSkill: {
+          ...createPrivateSkillSnapshot(),
+          manifest: {
+            ...createPrivateSkillSnapshot().manifest,
+            inputs: [{
+              name: "count",
+              label: "Count",
+              type: "number",
+              required: false,
+              defaultValue: { rawDiagnostic: "secret" },
+            }],
+          },
+        },
       },
     ];
     for (const malformed of malformedRecords) {
