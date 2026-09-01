@@ -13640,3 +13640,38 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   zero vulnerabilities; `npm ls --all`, Program, Harness, and `git diff
   --check` pass. A fresh fourth exact-byte code/security review is the next
   mandatory gate.
+
+## 2026-09-01 - v3.9.2 bounded-continuation and native content-authority repair
+
+- The fourth frozen candidate was rejected by code review with one Major and
+  by security review with three Majors. No acceptance receipts were issued.
+  The findings exposed one shared fail-open class: productive output-limit
+  continuations had no total resource ceiling, while native file authority
+  covered path metadata but not same-inode content rewrites or directory-mode
+  drift. Verification also lacked a native descriptor proof for the complete
+  category path.
+- Automatic output-limit recovery now has independent total ceilings for
+  continuation count, accumulated characters, and output tokens in addition
+  to the existing no-progress bound. Distinct productive fragments therefore
+  cannot keep one request alive indefinitely, while normal one-step recovery
+  remains automatic.
+- Native move, rollback, verification, and journal append now bind regular
+  files to SHA-256 content authority as well as device/inode/size/owner. Root,
+  category, and transaction-directory capabilities bind their exact safe modes
+  and are revalidated before and after mutation. Journal append refuses mode or
+  digest drift and durably records reconciliation whenever an append attempt
+  can no longer prove the canonical journal state.
+- Verification now invokes the native `verify-into-category` descriptor path
+  proof after the TypeScript projection succeeds. New adversarial regressions
+  cover equal-length same-inode source and journal rewrites, category permission
+  drift, journal permission drift before append, and intermediate category
+  symlink escape.
+- Focused validation passes `4/4` files and `144/144` tests. Full
+  `npm run verify` passes strict type coverage `433/433`, `324` current files /
+  `3882` current tests with declared skips, every historical lane, production
+  build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke passes
+  Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations, eight
+  authority domains, renderer startup, and Node ABI `137` restoration.
+  Production audit reports zero vulnerabilities; `npm ls --depth=0`,
+  caller-pinned Program/Harness, and `git diff --check` pass. A fresh fifth
+  exact-byte code/security review is the next mandatory gate.

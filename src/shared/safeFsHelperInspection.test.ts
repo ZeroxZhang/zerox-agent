@@ -55,8 +55,12 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(source).toContain("record_reconciliation_marker(");
     expect(source).toContain("validate_reconciliation_marker(");
     expect(source).toContain("verify_opened_regular_path(");
+    expect(source).toContain("verify-into-category");
     expect(source).toContain("journal-bound");
     expect(source).toContain("pread(");
+    expect(source).toContain("CC_SHA256_Init(");
+    expect(source).toContain("digest_matches(");
+    expect(source).toContain("safe_directory_mode(");
     expect(source).toContain("RECONCILIATION_SUFFIX");
     expect(source).not.toContain("linkat(");
     expect(source).not.toContain("unlinkat(");

@@ -1,6 +1,7 @@
 #define _DARWIN_C_SOURCE 1
 
 #include <errno.h>
+#include <CommonCrypto/CommonDigest.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdint.h>
@@ -27,7 +28,15 @@ typedef struct {
   ino_t ino;
   off_t size;
   uid_t uid;
+  char sha256[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
 } file_identity;
+
+typedef struct {
+  dev_t dev;
+  ino_t ino;
+  uid_t uid;
+  mode_t mode;
+} directory_identity;
 
 static int fail_message(const char *message) {
   fprintf(stderr, "zerox-safe-fs: %s\n", message);
@@ -70,17 +79,19 @@ static int parse_u64(const char *value, uint64_t *result) {
   return 1;
 }
 
-static int parse_identity(
+static int parse_file_identity(
   const char *dev_value,
   const char *ino_value,
   const char *size_value,
   const char *uid_value,
+  const char *sha256_value,
   file_identity *identity
 ) {
   uint64_t dev;
   uint64_t ino;
   uint64_t size;
   uint64_t uid;
+  size_t digest_index;
   if (
     !parse_u64(dev_value, &dev) ||
     !parse_u64(ino_value, &ino) ||
@@ -89,15 +100,64 @@ static int parse_identity(
   ) {
     return 0;
   }
+  if (
+    sha256_value == NULL
+    || strncmp(sha256_value, "sha256:", 7U) != 0
+    || strlen(sha256_value + 7U) != CC_SHA256_DIGEST_LENGTH * 2U
+  ) {
+    return 0;
+  }
+  for (
+    digest_index = 0U;
+    digest_index < CC_SHA256_DIGEST_LENGTH * 2U;
+    digest_index += 1U
+  ) {
+    const char value = sha256_value[7U + digest_index];
+    if (!((value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'))) {
+      return 0;
+    }
+  }
   identity->dev = (dev_t)dev;
   identity->ino = (ino_t)ino;
   identity->size = (off_t)size;
   identity->uid = (uid_t)uid;
+  memcpy(identity->sha256, sha256_value + 7U, sizeof(identity->sha256));
   return
     (uint64_t)identity->dev == dev &&
     (uint64_t)identity->ino == ino &&
     (uint64_t)identity->size == size &&
     (uint64_t)identity->uid == uid;
+}
+
+static int parse_directory_identity(
+  const char *dev_value,
+  const char *ino_value,
+  const char *uid_value,
+  const char *mode_value,
+  directory_identity *identity
+) {
+  uint64_t dev;
+  uint64_t ino;
+  uint64_t uid;
+  uint64_t mode;
+  if (
+    !parse_u64(dev_value, &dev)
+    || !parse_u64(ino_value, &ino)
+    || !parse_u64(uid_value, &uid)
+    || !parse_u64(mode_value, &mode)
+    || mode > 0777U
+  ) {
+    return 0;
+  }
+  identity->dev = (dev_t)dev;
+  identity->ino = (ino_t)ino;
+  identity->uid = (uid_t)uid;
+  identity->mode = (mode_t)mode;
+  return
+    (uint64_t)identity->dev == dev
+    && (uint64_t)identity->ino == ino
+    && (uint64_t)identity->uid == uid
+    && (uint64_t)identity->mode == mode;
 }
 
 static int stat_matches(const struct stat *stats, const file_identity *identity) {
@@ -106,6 +166,52 @@ static int stat_matches(const struct stat *stats, const file_identity *identity)
     stats->st_ino == identity->ino &&
     stats->st_size == identity->size &&
     stats->st_uid == identity->uid;
+}
+
+static int safe_directory_mode(mode_t mode) {
+  return (mode & 0022) == 0;
+}
+
+static int sha256_fd(int fd, char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U]) {
+  CC_SHA256_CTX context;
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  unsigned char buffer[64U * 1024U];
+  off_t offset = 0;
+  ssize_t count;
+  size_t index;
+  if (CC_SHA256_Init(&context) != 1) {
+    return fail_message("cannot initialize regular-file digest");
+  }
+  while (1) {
+    count = pread(fd, buffer, sizeof(buffer), offset);
+    if (count < 0) {
+      if (errno == EINTR) continue;
+      return fail_errno("cannot read regular file for digest");
+    }
+    if (count == 0) break;
+    if (CC_SHA256_Update(&context, buffer, (CC_LONG)count) != 1) {
+      return fail_message("cannot update regular-file digest");
+    }
+    offset += count;
+  }
+  if (CC_SHA256_Final(digest, &context) != 1) {
+    return fail_message("cannot finalize regular-file digest");
+  }
+  for (index = 0U; index < CC_SHA256_DIGEST_LENGTH; index += 1U) {
+    (void)snprintf(output + index * 2U, 3U, "%02x", digest[index]);
+  }
+  output[CC_SHA256_DIGEST_LENGTH * 2U] = '\0';
+  return 0;
+}
+
+static int digest_matches(int fd, const file_identity *identity) {
+  char digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
+  if (sha256_fd(fd, digest) != 0) return 0;
+  if (strcmp(digest, identity->sha256) != 0) {
+    (void)fail_message("regular-file content digest changed");
+    return 0;
+  }
+  return 1;
 }
 
 static int read_regular_at(
@@ -139,7 +245,7 @@ static int verify_fd_path(int fd, const char *expected_path) {
 
 static int open_root(
   const char *root_path,
-  const file_identity *expected,
+  const directory_identity *expected,
   int *root_fd
 ) {
   struct stat stats;
@@ -156,7 +262,9 @@ static int open_root(
     !S_ISDIR(stats.st_mode) ||
     stats.st_dev != expected->dev ||
     stats.st_ino != expected->ino ||
-    stats.st_uid != expected->uid
+    stats.st_uid != expected->uid ||
+    (stats.st_mode & 0777) != expected->mode ||
+    !safe_directory_mode(stats.st_mode)
   ) {
     return fail_message("authorized root identity changed");
   }
@@ -169,7 +277,8 @@ static int open_child_directory(
   const char *name,
   int allow_create,
   int *child_fd,
-  char expected_path[MAXPATHLEN]
+  char expected_path[MAXPATHLEN],
+  mode_t *expected_mode
 ) {
   struct stat root_stats;
   struct stat child_stats;
@@ -189,9 +298,14 @@ static int open_child_directory(
   if (fstat(root_fd, &root_stats) != 0 || fstat(*child_fd, &child_stats) != 0) {
     return fail_errno("cannot inspect authorized child directory");
   }
-  if (!S_ISDIR(child_stats.st_mode) || child_stats.st_uid != root_stats.st_uid) {
+  if (
+    !S_ISDIR(child_stats.st_mode)
+    || child_stats.st_uid != root_stats.st_uid
+    || !safe_directory_mode(child_stats.st_mode)
+  ) {
     return fail_message("authorized child directory ownership changed");
   }
+  *expected_mode = child_stats.st_mode & 0777;
   written = snprintf(expected_path, MAXPATHLEN, "%s/%s", root_path, name);
   if (written < 0 || written >= MAXPATHLEN) {
     return fail_message("authorized child directory path is too long");
@@ -228,12 +342,38 @@ static void maybe_test_checkpoint(const char *stage) {
 static int verify_directories(
   int root_fd,
   const char *root_path,
+  const directory_identity *root_identity,
   int child_fd,
-  const char *child_path
+  const char *child_path,
+  mode_t child_mode
 ) {
+  struct stat root_stats;
+  struct stat child_stats;
   int result = verify_fd_path(root_fd, root_path);
   if (result != 0) return result;
-  return verify_fd_path(child_fd, child_path);
+  result = verify_fd_path(child_fd, child_path);
+  if (result != 0) return result;
+  if (
+    fstat(root_fd, &root_stats) != 0
+    || fstat(child_fd, &child_stats) != 0
+  ) {
+    return fail_errno("cannot re-inspect authorized directories");
+  }
+  if (
+    !S_ISDIR(root_stats.st_mode)
+    || root_stats.st_dev != root_identity->dev
+    || root_stats.st_ino != root_identity->ino
+    || root_stats.st_uid != root_identity->uid
+    || (root_stats.st_mode & 0777) != root_identity->mode
+    || !safe_directory_mode(root_stats.st_mode)
+    || !S_ISDIR(child_stats.st_mode)
+    || child_stats.st_uid != root_stats.st_uid
+    || (child_stats.st_mode & 0777) != child_mode
+    || !safe_directory_mode(child_stats.st_mode)
+  ) {
+    return fail_message("authorized directory identity or mode changed");
+  }
+  return 0;
 }
 
 static int verify_opened_regular_path(
@@ -241,7 +381,9 @@ static int verify_opened_regular_path(
   const char *directory_path,
   const char *name,
   int file_fd,
-  const file_identity *expected
+  const file_identity *expected,
+  int require_single_link,
+  int require_private_mode
 ) {
   char expected_path[MAXPATHLEN];
   struct stat directory_stats;
@@ -266,18 +408,21 @@ static int verify_opened_regular_path(
   if (
     !S_ISDIR(directory_stats.st_mode)
     || !S_ISREG(opened_stats.st_mode)
-    || opened_stats.st_nlink != 1
-    || (opened_stats.st_mode & 0777) != 0600
+    || (require_single_link && opened_stats.st_nlink != 1)
+    || (require_private_mode && (opened_stats.st_mode & 0777) != 0600)
     || opened_stats.st_uid != directory_stats.st_uid
     || !stat_matches(&opened_stats, expected)
+    || !digest_matches(file_fd, expected)
   ) {
     return fail_message("opened regular-file identity changed");
   }
   if (read_regular_at(directory_fd, name, expected, &path_stats) != 0) return 1;
   if (
-    path_stats.st_nlink != 1
+    (require_single_link && path_stats.st_nlink != 1)
     || path_stats.st_dev != opened_stats.st_dev
     || path_stats.st_ino != opened_stats.st_ino
+    || path_stats.st_size != opened_stats.st_size
+    || path_stats.st_uid != opened_stats.st_uid
   ) {
     return fail_message("regular-file path no longer names the opened file");
   }
@@ -287,24 +432,43 @@ static int verify_opened_regular_path(
 static int verify_move_authority(
   int root_fd,
   const char *root_path,
+  const directory_identity *root_identity,
   int category_fd,
   const char *category_path,
+  mode_t category_mode,
   int log_fd,
   const char *log_path,
+  mode_t log_mode,
   int journal_fd,
   const char *journal_name,
   const file_identity *journal_identity
 ) {
-  int result = verify_directories(root_fd, root_path, category_fd, category_path);
+  int result = verify_directories(
+    root_fd,
+    root_path,
+    root_identity,
+    category_fd,
+    category_path,
+    category_mode
+  );
   if (result != 0) return result;
-  result = verify_fd_path(log_fd, log_path);
+  result = verify_directories(
+    root_fd,
+    root_path,
+    root_identity,
+    log_fd,
+    log_path,
+    log_mode
+  );
   if (result != 0) return result;
   return verify_opened_regular_path(
     log_fd,
     log_path,
     journal_name,
     journal_fd,
-    journal_identity
+    journal_identity,
+    1,
+    1
   );
 }
 
@@ -349,6 +513,7 @@ static int validate_reconciliation_marker(
   }
   if (
     !S_ISDIR(log_stats.st_mode)
+    || !safe_directory_mode(log_stats.st_mode)
     || !S_ISREG(before.st_mode)
     || before.st_nlink != 1
     || (before.st_mode & 0777) != 0600
@@ -505,16 +670,21 @@ static int restore_moved_entry(
 
 static int move_between_directories(
   int source_fd,
+  const char *source_directory_path,
   const char *source_name,
   int target_fd,
+  const char *target_directory_path,
   const char *target_name,
   const file_identity *expected,
   int root_fd,
   const char *root_path,
+  const directory_identity *root_identity,
   int category_fd,
   const char *category_path,
+  mode_t category_mode,
   int log_fd,
   const char *log_path,
+  mode_t log_mode,
   int journal_fd,
   const char *journal_name,
   const file_identity *journal_identity,
@@ -523,23 +693,56 @@ static int move_between_directories(
   struct stat source_stats;
   struct stat moved_stats;
   struct stat post_stats;
-  int result = read_regular_at(source_fd, source_name, expected, &source_stats);
-  if (result != 0) return result;
+  int opened_source_fd = -1;
+  int result;
+  opened_source_fd = openat(
+    source_fd,
+    source_name,
+    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+  );
+  if (opened_source_fd < 0) {
+    return fail_errno("cannot open source file capability");
+  }
+  result = verify_opened_regular_path(
+    source_fd,
+    source_directory_path,
+    source_name,
+    opened_source_fd,
+    expected,
+    0,
+    0
+  );
+  if (result != 0) goto done;
+  if (fstat(opened_source_fd, &source_stats) != 0) {
+    result = fail_errno("cannot inspect source file capability");
+    goto done;
+  }
   maybe_test_checkpoint("source-verified");
   result = verify_move_authority(
     root_fd,
     root_path,
+    root_identity,
     category_fd,
     category_path,
+    category_mode,
     log_fd,
     log_path,
+    log_mode,
     journal_fd,
     journal_name,
     journal_identity
   );
-  if (result != 0) return result;
-  result = read_regular_at(source_fd, source_name, expected, &source_stats);
-  if (result != 0) return result;
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    source_fd,
+    source_directory_path,
+    source_name,
+    opened_source_fd,
+    expected,
+    0,
+    0
+  );
+  if (result != 0) goto done;
   if (
     renameatx_np(
       source_fd,
@@ -549,27 +752,34 @@ static int move_between_directories(
       RENAME_EXCL
     ) != 0
   ) {
-    if (errno == EEXIST) return fail_message("target appeared after preview");
-    return fail_errno("cannot atomically move to no-replace target");
+    result = errno == EEXIST
+      ? fail_message("target appeared after preview")
+      : fail_errno("cannot atomically move to no-replace target");
+    goto done;
   }
   if (fstatat(target_fd, target_name, &moved_stats, AT_SYMLINK_NOFOLLOW) != 0) {
     if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
-      return fail_message(
+      result = fail_message(
         "cannot observe atomically moved target and reconciliation marker could not be persisted"
       );
+      goto done;
     }
-    return fail_message(
+    result = fail_message(
       "cannot observe atomically moved target; reconciliation marker persisted"
     );
+    goto done;
   }
   maybe_test_checkpoint("move-applied");
   result = verify_move_authority(
     root_fd,
     root_path,
+    root_identity,
     category_fd,
     category_path,
+    category_mode,
     log_fd,
     log_path,
+    log_mode,
     journal_fd,
     journal_name,
     journal_identity
@@ -587,9 +797,23 @@ static int move_between_directories(
   }
   if (
     result == 0
-    && fstatat(target_fd, target_name, &post_stats, AT_SYMLINK_NOFOLLOW) != 0
+    && verify_opened_regular_path(
+      target_fd,
+      target_directory_path,
+      target_name,
+      opened_source_fd,
+      expected,
+      0,
+      0
+    ) != 0
   ) {
-    result = fail_errno("cannot verify atomically moved target");
+    result = fail_message("cannot verify atomically moved target capability");
+  }
+  if (
+    result == 0
+    && fstat(opened_source_fd, &post_stats) != 0
+  ) {
+    result = fail_errno("cannot re-inspect atomically moved target");
   }
   if (
     result == 0
@@ -613,7 +837,34 @@ static int move_between_directories(
   if (result == 0 && (fsync(source_fd) != 0 || fsync(target_fd) != 0)) {
     result = fail_errno("cannot durably synchronize moved file");
   }
-  if (result == 0) return 0;
+  if (result == 0) {
+    result = verify_move_authority(
+      root_fd,
+      root_path,
+      root_identity,
+      category_fd,
+      category_path,
+      category_mode,
+      log_fd,
+      log_path,
+      log_mode,
+      journal_fd,
+      journal_name,
+      journal_identity
+    );
+  }
+  if (result == 0) {
+    result = verify_opened_regular_path(
+      target_fd,
+      target_directory_path,
+      target_name,
+      opened_source_fd,
+      expected,
+      0,
+      0
+    );
+  }
+  if (result == 0) goto done;
   if (
     restore_moved_entry(
       source_fd,
@@ -623,18 +874,23 @@ static int move_between_directories(
       &moved_stats
     ) == 0
   ) {
-    return fail_message("move postcondition failed; original layout restored");
+    result = fail_message("move postcondition failed; original layout restored");
+    goto done;
   }
   if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
-    return fail_message(
+    result = fail_message(
       "move postcondition failed and reconciliation marker could not be persisted"
     );
+    goto done;
   }
-  return fail_message("move postcondition failed; reconciliation marker persisted");
+  result = fail_message("move postcondition failed; reconciliation marker persisted");
+done:
+  if (opened_source_fd >= 0) close(opened_source_fd);
+  return result;
 }
 
 static int run_move(int argc, char **argv, int reverse) {
-  file_identity root_identity;
+  directory_identity root_identity;
   file_identity source_identity;
   file_identity journal_identity;
   int root_fd = -1;
@@ -645,24 +901,30 @@ static int run_move(int argc, char **argv, int reverse) {
   char category_path[MAXPATHLEN];
   char log_path[MAXPATHLEN];
   char journal_name[NAME_MAX + 1];
+  mode_t category_mode = 0;
+  mode_t log_mode = 0;
   int written;
-  if (argc != 18) return fail_message("invalid move arguments");
+  if (argc != 21) return fail_message("invalid move arguments");
   if (!is_single_component(argv[7]) || !is_category(argv[8]) || !is_single_component(argv[9])) {
     return fail_message("move paths must use allowed single components");
   }
-  if (!is_single_component(argv[13])) {
+  if (!is_single_component(argv[15])) {
     return fail_message("invalid move transaction id");
   }
-  if (!parse_identity(argv[3], argv[4], "0", argv[5], &root_identity)) {
+  if (!parse_directory_identity(argv[3], argv[4], argv[5], argv[6], &root_identity)) {
     return fail_message("invalid root identity");
   }
-  if (!parse_identity(argv[10], argv[11], argv[12], argv[6], &source_identity)) {
+  if (!parse_file_identity(
+    argv[10], argv[11], argv[12], argv[13], argv[14], &source_identity
+  )) {
     return fail_message("invalid source identity");
   }
-  if (!parse_identity(argv[14], argv[15], argv[16], argv[17], &journal_identity)) {
+  if (!parse_file_identity(
+    argv[16], argv[17], argv[18], argv[19], argv[20], &journal_identity
+  )) {
     return fail_message("invalid journal identity");
   }
-  written = snprintf(journal_name, sizeof(journal_name), "%s.json", argv[13]);
+  written = snprintf(journal_name, sizeof(journal_name), "%s.json", argv[15]);
   if (written < 0 || (size_t)written >= sizeof(journal_name)) {
     return fail_message("transaction journal name is too long");
   }
@@ -674,7 +936,8 @@ static int run_move(int argc, char **argv, int reverse) {
     argv[8],
     reverse ? 0 : 1,
     &category_fd,
-    category_path
+    category_path,
+    &category_mode
   );
   if (result != 0) goto done;
   result = open_child_directory(
@@ -683,7 +946,8 @@ static int run_move(int argc, char **argv, int reverse) {
     TRANSACTION_DIRECTORY,
     0,
     &log_fd,
-    log_path
+    log_path,
+    &log_mode
   );
   if (result != 0) goto done;
   journal_fd = openat(log_fd, journal_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -696,7 +960,9 @@ static int run_move(int argc, char **argv, int reverse) {
     log_path,
     journal_name,
     journal_fd,
-    &journal_identity
+    &journal_identity,
+    1,
+    1
   );
   if (result != 0) goto done;
   maybe_test_checkpoint("journal-bound");
@@ -704,10 +970,13 @@ static int run_move(int argc, char **argv, int reverse) {
   result = verify_move_authority(
     root_fd,
     argv[2],
+    &root_identity,
     category_fd,
     category_path,
+    category_mode,
     log_fd,
     log_path,
+    log_mode,
     journal_fd,
     journal_name,
     &journal_identity
@@ -716,39 +985,191 @@ static int run_move(int argc, char **argv, int reverse) {
   result = reverse
     ? move_between_directories(
         category_fd,
+        category_path,
         argv[7],
         root_fd,
+        argv[2],
         argv[9],
         &source_identity,
         root_fd,
         argv[2],
+        &root_identity,
         category_fd,
         category_path,
+        category_mode,
         log_fd,
         log_path,
+        log_mode,
         journal_fd,
         journal_name,
         &journal_identity,
-        argv[13]
+        argv[15]
       )
     : move_between_directories(
         root_fd,
+        argv[2],
         argv[7],
         category_fd,
+        category_path,
         argv[9],
         &source_identity,
         root_fd,
         argv[2],
+        &root_identity,
         category_fd,
         category_path,
+        category_mode,
         log_fd,
         log_path,
+        log_mode,
         journal_fd,
         journal_name,
         &journal_identity,
-        argv[13]
+        argv[15]
       );
 done:
+  if (journal_fd >= 0) close(journal_fd);
+  if (log_fd >= 0) close(log_fd);
+  if (category_fd >= 0) close(category_fd);
+  if (root_fd >= 0) close(root_fd);
+  if (result == 0) puts("{\"ok\":true}");
+  return result;
+}
+
+static int run_verify_into_category(int argc, char **argv) {
+  directory_identity root_identity;
+  file_identity source_identity;
+  file_identity journal_identity;
+  struct stat unexpected_source;
+  int root_fd = -1;
+  int category_fd = -1;
+  int log_fd = -1;
+  int journal_fd = -1;
+  int target_fd = -1;
+  int result = 0;
+  char category_path[MAXPATHLEN];
+  char log_path[MAXPATHLEN];
+  char journal_name[NAME_MAX + 1];
+  mode_t category_mode = 0;
+  mode_t log_mode = 0;
+  int written;
+  if (argc != 21) return fail_message("invalid verify arguments");
+  if (
+    !is_single_component(argv[7])
+    || !is_category(argv[8])
+    || !is_single_component(argv[9])
+    || !is_single_component(argv[15])
+  ) {
+    return fail_message("verify paths must use allowed single components");
+  }
+  if (!parse_directory_identity(argv[3], argv[4], argv[5], argv[6], &root_identity)) {
+    return fail_message("invalid verify root identity");
+  }
+  if (!parse_file_identity(
+    argv[10], argv[11], argv[12], argv[13], argv[14], &source_identity
+  )) {
+    return fail_message("invalid verify source identity");
+  }
+  if (!parse_file_identity(
+    argv[16], argv[17], argv[18], argv[19], argv[20], &journal_identity
+  )) {
+    return fail_message("invalid verify journal identity");
+  }
+  written = snprintf(journal_name, sizeof(journal_name), "%s.json", argv[15]);
+  if (written < 0 || (size_t)written >= sizeof(journal_name)) {
+    return fail_message("verify journal name is too long");
+  }
+  result = open_root(argv[2], &root_identity, &root_fd);
+  if (result != 0) goto done;
+  result = open_child_directory(
+    root_fd,
+    argv[2],
+    argv[8],
+    0,
+    &category_fd,
+    category_path,
+    &category_mode
+  );
+  if (result != 0) goto done;
+  result = open_child_directory(
+    root_fd,
+    argv[2],
+    TRANSACTION_DIRECTORY,
+    0,
+    &log_fd,
+    log_path,
+    &log_mode
+  );
+  if (result != 0) goto done;
+  journal_fd = openat(log_fd, journal_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (journal_fd < 0) {
+    result = fail_errno("cannot open verify journal authority");
+    goto done;
+  }
+  target_fd = openat(category_fd, argv[9], O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (target_fd < 0) {
+    result = fail_errno("cannot open verified target capability");
+    goto done;
+  }
+  result = verify_move_authority(
+    root_fd,
+    argv[2],
+    &root_identity,
+    category_fd,
+    category_path,
+    category_mode,
+    log_fd,
+    log_path,
+    log_mode,
+    journal_fd,
+    journal_name,
+    &journal_identity
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    category_fd,
+    category_path,
+    argv[9],
+    target_fd,
+    &source_identity,
+    0,
+    0
+  );
+  if (result != 0) goto done;
+  if (fstatat(root_fd, argv[7], &unexpected_source, AT_SYMLINK_NOFOLLOW) == 0) {
+    result = fail_message("verified source path is not retired");
+    goto done;
+  }
+  if (errno != ENOENT) {
+    result = fail_errno("cannot verify source retirement");
+    goto done;
+  }
+  result = verify_move_authority(
+    root_fd,
+    argv[2],
+    &root_identity,
+    category_fd,
+    category_path,
+    category_mode,
+    log_fd,
+    log_path,
+    log_mode,
+    journal_fd,
+    journal_name,
+    &journal_identity
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    category_fd,
+    category_path,
+    argv[9],
+    target_fd,
+    &source_identity,
+    0,
+    0
+  );
+done:
+  if (target_fd >= 0) close(target_fd);
   if (journal_fd >= 0) close(journal_fd);
   if (log_fd >= 0) close(log_fd);
   if (category_fd >= 0) close(category_fd);
@@ -806,22 +1227,36 @@ static int write_all(int fd, const char *body, size_t length) {
   return 0;
 }
 
-static void print_identity(const struct stat *stats) {
+static int capture_file_identity(
+  int fd,
+  const struct stat *stats,
+  file_identity *identity
+) {
+  identity->dev = stats->st_dev;
+  identity->ino = stats->st_ino;
+  identity->size = stats->st_size;
+  identity->uid = stats->st_uid;
+  return sha256_fd(fd, identity->sha256);
+}
+
+static void print_identity(const file_identity *identity) {
   printf(
     "{\"ok\":true,\"identity\":{\"dev\":\"%llu\",\"ino\":\"%llu\","
-    "\"size\":\"%llu\",\"uid\":\"%llu\"}}\n",
-    (unsigned long long)stats->st_dev,
-    (unsigned long long)stats->st_ino,
-    (unsigned long long)stats->st_size,
-    (unsigned long long)stats->st_uid
+    "\"size\":\"%llu\",\"uid\":\"%llu\",\"sha256\":\"sha256:%s\"}}\n",
+    (unsigned long long)identity->dev,
+    (unsigned long long)identity->ino,
+    (unsigned long long)identity->size,
+    (unsigned long long)identity->uid,
+    identity->sha256
   );
 }
 
 static int run_log(int argc, char **argv, int append) {
-  file_identity root_identity;
+  directory_identity root_identity;
   file_identity expected_log;
+  file_identity opened_identity;
+  file_identity final_identity;
   struct stat opened_stats;
-  struct stat path_stats;
   struct stat final_stats;
   int root_fd = -1;
   int log_fd = -1;
@@ -833,19 +1268,22 @@ static int run_log(int argc, char **argv, int append) {
   char final_name[NAME_MAX + 1];
   char *body = NULL;
   size_t body_length = 0U;
+  mode_t log_mode = 0;
   int written;
-  if (argc != (append ? 11 : 7)) return fail_message("invalid log arguments");
-  if (!is_single_component(argv[6])) return fail_message("invalid transaction id");
-  if (!parse_identity(argv[3], argv[4], "0", argv[5], &root_identity)) {
+  if (argc != (append ? 13 : 8)) return fail_message("invalid log arguments");
+  if (!is_single_component(argv[7])) return fail_message("invalid transaction id");
+  if (!parse_directory_identity(argv[3], argv[4], argv[5], argv[6], &root_identity)) {
     return fail_message("invalid root identity");
   }
   if (
     append &&
-    !parse_identity(argv[7], argv[8], argv[9], argv[10], &expected_log)
+    !parse_file_identity(
+      argv[8], argv[9], argv[10], argv[11], argv[12], &expected_log
+    )
   ) {
     return fail_message("invalid existing log identity");
   }
-  written = snprintf(final_name, sizeof(final_name), "%s.json", argv[6]);
+  written = snprintf(final_name, sizeof(final_name), "%s.json", argv[7]);
   if (written < 0 || (size_t)written >= sizeof(final_name)) {
     return fail_message("transaction log name is too long");
   }
@@ -859,19 +1297,24 @@ static int run_log(int argc, char **argv, int append) {
     TRANSACTION_DIRECTORY,
     1,
     &log_fd,
-    log_path
+    log_path,
+    &log_mode
   );
   if (result != 0) goto done;
   maybe_test_checkpoint("directories-opened");
-  result = verify_directories(root_fd, argv[2], log_fd, log_path);
+  result = verify_directories(
+    root_fd, argv[2], &root_identity, log_fd, log_path, log_mode
+  );
   if (result != 0) goto done;
   maybe_test_checkpoint("log-before-mutation");
-  result = verify_directories(root_fd, argv[2], log_fd, log_path);
+  result = verify_directories(
+    root_fd, argv[2], &root_identity, log_fd, log_path, log_mode
+  );
   if (result != 0) goto done;
   output_fd = openat(
     log_fd,
     final_name,
-    O_WRONLY | O_CLOEXEC | O_NOFOLLOW |
+    O_RDWR | O_CLOEXEC | O_NOFOLLOW |
       (append ? O_APPEND : O_CREAT | O_EXCL),
     0600
   );
@@ -889,28 +1332,45 @@ static int run_log(int argc, char **argv, int append) {
   if (
     !S_ISREG(opened_stats.st_mode)
     || opened_stats.st_nlink != 1
-    || (append && !stat_matches(&opened_stats, &expected_log))
+    || (opened_stats.st_mode & 0777) != 0600
+    || opened_stats.st_uid != root_identity.uid
+    || capture_file_identity(output_fd, &opened_stats, &opened_identity) != 0
   ) {
     result = fail_message("opened transaction log identity changed");
     goto done;
   }
-  maybe_test_checkpoint("log-opened");
-  result = verify_directories(root_fd, argv[2], log_fd, log_path);
-  if (result != 0) goto done;
-  result = read_regular_at(
-    log_fd,
-    final_name,
-    append ? &expected_log : NULL,
-    &path_stats
-  );
-  if (result != 0) goto done;
-  if (
-    path_stats.st_dev != opened_stats.st_dev
-    || path_stats.st_ino != opened_stats.st_ino
-  ) {
-    result = fail_message("transaction log path no longer names the opened file");
+  if (append && (
+    !stat_matches(&opened_stats, &expected_log)
+    || strcmp(opened_identity.sha256, expected_log.sha256) != 0
+  )) {
+    result = fail_message("opened transaction log content authority changed");
     goto done;
   }
+  result = verify_opened_regular_path(
+    log_fd,
+    log_path,
+    final_name,
+    output_fd,
+    append ? &expected_log : &opened_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
+  maybe_test_checkpoint("log-opened");
+  result = verify_directories(
+    root_fd, argv[2], &root_identity, log_fd, log_path, log_mode
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    log_fd,
+    log_path,
+    final_name,
+    output_fd,
+    append ? &expected_log : &opened_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
   mutation_started = 1;
   result = write_all(output_fd, body, body_length);
   if (result != 0 || fsync(output_fd) != 0) {
@@ -921,38 +1381,60 @@ static int run_log(int argc, char **argv, int append) {
     result = fail_errno("cannot inspect written transaction log");
     goto done;
   }
-  maybe_test_checkpoint("log-mutated");
-  result = verify_directories(root_fd, argv[2], log_fd, log_path);
-  if (result != 0) goto done;
-  result = read_regular_at(log_fd, final_name, NULL, &path_stats);
-  if (result != 0) goto done;
   if (
-    path_stats.st_dev != final_stats.st_dev ||
-    path_stats.st_ino != final_stats.st_ino ||
-    path_stats.st_size != final_stats.st_size ||
-    path_stats.st_uid != final_stats.st_uid ||
-    path_stats.st_nlink != 1
+    !S_ISREG(final_stats.st_mode)
+    || final_stats.st_nlink != 1
+    || (final_stats.st_mode & 0777) != 0600
+    || final_stats.st_uid != root_identity.uid
+    || capture_file_identity(output_fd, &final_stats, &final_identity) != 0
   ) {
-    result = fail_message("transaction log path changed during append");
+    result = fail_message("written transaction log identity is unsafe");
     goto done;
   }
+  maybe_test_checkpoint("log-mutated");
+  result = verify_directories(
+    root_fd, argv[2], &root_identity, log_fd, log_path, log_mode
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    log_fd,
+    log_path,
+    final_name,
+    output_fd,
+    &final_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
+  if (fsync(log_fd) != 0 || fsync(root_fd) != 0) {
+    result = fail_errno("cannot synchronize transaction directory");
+    goto done;
+  }
+  result = verify_directories(
+    root_fd, argv[2], &root_identity, log_fd, log_path, log_mode
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    log_fd,
+    log_path,
+    final_name,
+    output_fd,
+    &final_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
+  print_identity(&final_identity);
   if (close(output_fd) != 0) {
     output_fd = -1;
     result = fail_errno("cannot close transaction log");
     goto done;
   }
   output_fd = -1;
-  if (fsync(log_fd) != 0 || fsync(root_fd) != 0) {
-    result = fail_errno("cannot synchronize transaction directory");
-    goto done;
-  }
-  result = verify_directories(root_fd, argv[2], log_fd, log_path);
-  if (result != 0) goto done;
-  print_identity(&final_stats);
 done:
   saved_errno = errno;
-  if (result != 0 && mutation_started && log_fd >= 0) {
-    if (record_reconciliation_marker(log_fd, argv[6]) != 0) {
+  if (result != 0 && (mutation_started || append) && log_fd >= 0) {
+    if (record_reconciliation_marker(log_fd, argv[7]) != 0) {
       (void)fail_message(
         "transaction journal mutated but reconciliation marker could not be persisted"
       );
@@ -973,6 +1455,9 @@ int main(int argc, char **argv) {
   }
   if (strcmp(argv[1], "move-from-category") == 0) {
     return run_move(argc, argv, 1);
+  }
+  if (strcmp(argv[1], "verify-into-category") == 0) {
+    return run_verify_into_category(argc, argv);
   }
   if (strcmp(argv[1], "log-create") == 0) {
     return run_log(argc, argv, 0);

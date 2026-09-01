@@ -3139,6 +3139,71 @@ describe("agent loop", () => {
     });
   });
 
+  it("pauses after the hard total continuation cap despite distinct progress", async () => {
+    let calls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "continue within a bounded budget" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            calls += 1;
+            return {
+              content: `distinct chunk ${calls}`,
+              toolCalls: [],
+              finishReason: "length",
+              usage: { inputTokens: 1, outputTokens: 2 },
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        autoContinueOutputLimit: true,
+        maxAutoOutputLimitContinuations: 2,
+        maxAutoOutputLimitCharacters: 10_000,
+        maxAutoOutputLimitTokens: 10_000,
+      },
+    );
+
+    expect(calls).toBe(3);
+    expect(result).toMatchObject({
+      status: "paused",
+      continuation: { reason: "provider_output_limit" },
+      modelServiceNotice: { kind: "output_limit" },
+    });
+    expect(result.summary).toContain("distinct chunk 3");
+  });
+
+  it("pauses when cumulative output-limit characters reach their hard cap", async () => {
+    let calls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "continue within a character budget" }],
+      modelProfile,
+      {
+        chatClient: {
+          async complete() {
+            calls += 1;
+            return {
+              content: calls === 1 ? "abc" : "def",
+              toolCalls: [],
+              finishReason: "length",
+            };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        autoContinueOutputLimit: true,
+        maxAutoOutputLimitContinuations: 10,
+        maxAutoOutputLimitCharacters: 6,
+        maxAutoOutputLimitTokens: 10_000,
+      },
+    );
+
+    expect(calls).toBe(2);
+    expect(result.status).toBe("paused");
+    expect(result.summary).toBe("abcdef");
+  });
+
   it("does not fall back or auto-retry when a stream is rate limited", async () => {
     let completeCalls = 0;
     let streamCalls = 0;

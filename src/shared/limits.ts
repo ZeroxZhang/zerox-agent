@@ -24,6 +24,15 @@ export const MIN_TOOL_TIMEOUT_MS = 25;
  *  stream is considered dead and the loop exits (CORE-02, NET-14). */
 export const SSE_READ_IDLE_TIMEOUT_MS = 30_000;
 
+/** Maximum transparent follow-up requests after provider output truncation. */
+export const AUTO_OUTPUT_LIMIT_MAX_CONTINUATIONS = 8;
+
+/** Maximum observed partial-response characters before Chat pauses for review. */
+export const AUTO_OUTPUT_LIMIT_MAX_CHARS = 256 * 1024;
+
+/** Maximum observed output tokens before Chat pauses for review. */
+export const AUTO_OUTPUT_LIMIT_MAX_TOKENS = 64 * 1024;
+
 /** Tool approval timeout in ms — if the user doesn't respond within this window
  *  the request is auto-denied (CORE-10). */
 export const TOOL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes

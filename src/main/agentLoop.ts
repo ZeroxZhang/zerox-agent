@@ -92,6 +92,11 @@ import {
   redactCredentialString,
   stringifyRedactedCredentials,
 } from "../shared/credentialRedaction";
+import {
+  AUTO_OUTPUT_LIMIT_MAX_CHARS,
+  AUTO_OUTPUT_LIMIT_MAX_CONTINUATIONS,
+  AUTO_OUTPUT_LIMIT_MAX_TOKENS,
+} from "../shared/limits";
 
 export type AgentLoopOptions = {
   chatClient: ChatClient;
@@ -131,6 +136,12 @@ export type AgentLoopOptions = {
   autoContinueOutputLimit?: boolean;
   /** Pause after this many repeated or empty output-limit continuations. */
   maxStalledOutputLimitContinuations?: number;
+  /** Hard cap on transparent follow-up requests after output truncation. */
+  maxAutoOutputLimitContinuations?: number;
+  /** Hard cap on observed partial-response characters before pausing. */
+  maxAutoOutputLimitCharacters?: number;
+  /** Hard cap on observed output tokens before pausing. */
+  maxAutoOutputLimitTokens?: number;
   contextManager?: ContextManager;
   /** @deprecated Kept for caller compatibility. Token usage is telemetry-only. */
   tokenBudget?: number;
@@ -320,6 +331,9 @@ export async function runAgentLoop(
     pauseOnFailureLoop = false,
     autoContinueOutputLimit = false,
     maxStalledOutputLimitContinuations = 2,
+    maxAutoOutputLimitContinuations = AUTO_OUTPUT_LIMIT_MAX_CONTINUATIONS,
+    maxAutoOutputLimitCharacters = AUTO_OUTPUT_LIMIT_MAX_CHARS,
+    maxAutoOutputLimitTokens = AUTO_OUTPUT_LIMIT_MAX_TOKENS,
     contextManager = createContextManager(),
     compactionStrategy,
     systemReminderRegistry,
@@ -455,10 +469,25 @@ export async function runAgentLoop(
   let modelServiceNotice: ModelServiceNotice | undefined;
   let lastOutputLimitPartial: string | null = null;
   let stalledOutputLimitContinuations = 0;
+  let automaticOutputLimitContinuations = 0;
+  let observedOutputLimitCharacters = 0;
+  let observedOutputLimitTokens = 0;
   const automaticallyContinuedContent: string[] = [];
   const allowedStalledOutputLimitContinuations = Math.max(
     0,
     Math.floor(maxStalledOutputLimitContinuations),
+  );
+  const allowedAutomaticOutputLimitContinuations = Math.max(
+    0,
+    Math.floor(maxAutoOutputLimitContinuations),
+  );
+  const allowedOutputLimitCharacters = Math.max(
+    0,
+    Math.floor(maxAutoOutputLimitCharacters),
+  );
+  const allowedOutputLimitTokens = Math.max(
+    0,
+    Math.floor(maxAutoOutputLimitTokens),
   );
   let lastExecutedToolSignature: string | null =
     findLastExecutedToolSignature(messages);
@@ -1087,6 +1116,14 @@ export async function runAgentLoop(
           const replayablePartial = redactCredentialString(
             response.content ?? "",
           );
+          observedOutputLimitCharacters += replayablePartial.length;
+          observedOutputLimitTokens += Math.max(
+            0,
+            Math.floor(
+              response.usage?.outputTokens
+                ?? estimateTextTokens(replayablePartial),
+            ),
+          );
           const comparablePartial = replayablePartial.trim();
           const madeDistinctProgress = Boolean(
             comparablePartial
@@ -1103,8 +1140,13 @@ export async function runAgentLoop(
 
           if (
             stalledOutputLimitContinuations
-            <= allowedStalledOutputLimitContinuations
+              <= allowedStalledOutputLimitContinuations
+            && automaticOutputLimitContinuations
+              < allowedAutomaticOutputLimitContinuations
+            && observedOutputLimitCharacters < allowedOutputLimitCharacters
+            && observedOutputLimitTokens < allowedOutputLimitTokens
           ) {
+            automaticOutputLimitContinuations += 1;
             lastOutputLimitPartial = comparablePartial || lastOutputLimitPartial;
             appendMessage({
               role: "user",

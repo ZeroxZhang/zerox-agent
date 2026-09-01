@@ -10,6 +10,7 @@ import {
   realpath,
   rename,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -192,6 +193,35 @@ describe("local file organizer", () => {
     ))).resolves.toMatchObject({ status: "pending" });
   });
 
+  it("rejects an equal-length rewrite of the same source inode before rename", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    await writeFile(source, "original", "utf8");
+    const originalIdentity = await stat(source);
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_source_same_inode_rewrite",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "source-verified",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await writeFile(source, "modified", "utf8");
+    expect((await stat(source)).ino).toBe(originalIdentity.ino);
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/digest|content|identity/i);
+    await expect(readFile(source, "utf8")).resolves.toBe("modified");
+    await expectPath(target, false);
+  });
+
   it("persists reconciliation state when a moved source is concurrently repopulated", async () => {
     const source = path.join(tempDir, "photo.jpg");
     const target = path.join(tempDir, "Images", "photo.jpg");
@@ -344,6 +374,43 @@ describe("local file organizer", () => {
     );
   });
 
+  it("rejects an equal-length rewrite of the same journal inode", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const journal = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_journal_same_inode_rewrite.json",
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_journal_same_inode_rewrite",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "journal-bound",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    const originalBody = await readFile(journal, "utf8");
+    const originalIdentity = await stat(journal);
+    const rewrittenBody = originalBody.replace('"pending"', '"invalid"');
+    expect(rewrittenBody).toHaveLength(originalBody.length);
+    await writeFile(journal, rewrittenBody, "utf8");
+    expect((await stat(journal)).ino).toBe(originalIdentity.ino);
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/digest|content|identity/i);
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expectPath(target, false);
+  });
+
   it("rejects a transaction journal whose private mode changes before mutation", async () => {
     const source = path.join(tempDir, "photo.jpg");
     const target = path.join(tempDir, "Images", "photo.jpg");
@@ -377,6 +444,72 @@ describe("local file organizer", () => {
     await expect(readLocalFileOrganizationTransaction(journal)).rejects.toThrow(
       /identity changed while reading/i,
     );
+  });
+
+  it("rejects category permission drift after native capabilities are opened", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const category = path.join(tempDir, "Images");
+    const target = path.join(category, "photo.jpg");
+    await mkdir(category);
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_category_mode_drift",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "source-verified",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await chmod(category, 0o777);
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/mode|permission|identity/i);
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expectPath(target, false);
+  });
+
+  it("records reconciliation when journal permissions drift before append", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const journal = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_log_append_mode_drift.json",
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_log_append_mode_drift",
+    });
+    const ready = waitForSafeFsCommand("log-append");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "log-opened",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await chmod(journal, 0o644);
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(/mode|permission|identity/i);
+    await expectPath(source, false);
+    await expect(readFile(target, "utf8")).resolves.toBe("original");
+    await chmod(journal, 0o600);
+    await expect(readLocalFileOrganizationTransaction(journal)).resolves.toMatchObject({
+      status: "reconciliation_required",
+      reconciliation: { required: true },
+    });
   });
 
   it("rejects a category directory moved after its native capability is opened", async () => {
@@ -734,9 +867,11 @@ describe("local file organizer", () => {
     await rm(logPath);
     await rename(displacedLog, logPath);
     const recovered = await readLocalFileOrganizationTransaction(logPath);
-    await expect(rollbackLocalFileOrganization(recovered)).resolves
-      .toMatchObject({ status: "rolled_back" });
-    await expect(readFile(path.join(tempDir, "photo.jpg"), "utf8"))
+    expect(recovered.status).toBe("reconciliation_required");
+    await expect(rollbackLocalFileOrganization(recovered)).rejects.toThrow(
+      /manual reconciliation/i,
+    );
+    await expect(readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"))
       .resolves.toBe("original");
   });
 
@@ -759,6 +894,31 @@ describe("local file organizer", () => {
         unmovedSources: [],
         sourceConflicts: [],
       });
+  });
+
+  it("fails closed when verification crosses an intermediate category symlink", async () => {
+    const outside = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "local-file-organizer-verify-outside-")),
+    );
+    try {
+      await writeFile(path.join(tempDir, "photo.jpg"), "original", "utf8");
+      const preview = await previewLocalFileOrganization(tempDir, {
+        createId: () => "tx_verify_category_symlink",
+      });
+      const transaction = await applyLocalFileOrganization(preview);
+      const category = path.join(tempDir, "Images");
+      const relocatedCategory = path.join(outside, "Images");
+      await rename(category, relocatedCategory);
+      await symlink(relocatedCategory, category);
+
+      await expect(verifyLocalFileOrganization(transaction)).rejects.toThrow(
+        /outside|escaped|symbolic|stable/i,
+      );
+      await expect(readFile(path.join(relocatedCategory, "photo.jpg"), "utf8"))
+        .resolves.toBe("original");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("uses the packaged resources helper when Electron resources are present", async () => {

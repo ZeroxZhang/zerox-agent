@@ -9,7 +9,7 @@ import { constants } from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { validatePathInsideLocationRoots } from "../shared/locationResource";
 import { assertSafeStoreEntityId } from "./storeEntityId";
 
@@ -40,12 +40,14 @@ type LocalFileIdentity = {
   ino: string;
   size: string;
   uid: string;
+  sha256: string;
 };
 
 type LocalDirectoryIdentity = {
   dev: string;
   ino: string;
   uid: string;
+  mode: string;
 };
 
 export type LocalFileMoveConflict = {
@@ -399,6 +401,9 @@ export async function verifyLocalFileOrganization(
   const changedTargets: string[] = [];
   const unmovedSources: string[] = [];
   const sourceConflicts: string[] = [];
+  if (!transaction.rootIdentity || !transaction.logIdentity) {
+    throw new Error("Local file organization transaction lacks native identities.");
+  }
   for (const move of transaction.moves) {
     if (!move.sourceIdentity) {
       throw new Error("Local file organization transaction lacks source identity.");
@@ -424,6 +429,23 @@ export async function verifyLocalFileOrganization(
       }
     } else if (source.kind === "invalid") {
       sourceConflicts.push(move.from);
+    }
+    if (
+      source.kind === "missing"
+      && target.kind === "regular"
+      && identitiesEqual(target.identity, move.sourceIdentity)
+    ) {
+      try {
+        await runVerifyWithSafeFs(
+          transaction.root,
+          transaction.rootIdentity,
+          transaction.id,
+          transaction.logIdentity,
+          move,
+        );
+      } catch {
+        changedTargets.push(move.to);
+      }
     }
   }
   return {
@@ -466,7 +488,8 @@ export async function readLocalFileOrganizationTransaction(
     if (!before.isFile() || before.nlink !== 1n) {
       throw new Error("Local file organization journal is not a single-link regular file.");
     }
-    const body = await handle.readFile("utf8");
+    const bytes = await handle.readFile();
+    const body = bytes.toString("utf8");
     const [after, leaf, directory, canonicalPath] = await Promise.all([
       handle.stat({ bigint: true }),
       lstat(resolvedLogPath, { bigint: true }),
@@ -530,6 +553,7 @@ export async function readLocalFileOrganizationTransaction(
         ino: after.ino.toString(),
         size: after.size.toString(),
         uid: after.uid.toString(),
+        sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
       },
     };
   } finally {
@@ -728,16 +752,53 @@ async function writeTransactionLog(
 }
 
 async function readRegularFileIdentity(targetPath: string): Promise<LocalFileIdentity> {
-  const stats = await lstat(targetPath, { bigint: true });
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error(`Local file organization source is not a regular file: ${targetPath}`);
+  const resolvedPath = resolveUserPath(targetPath);
+  const handle = await open(
+    resolvedPath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile()) {
+      throw new Error(`Local file organization source is not a regular file: ${targetPath}`);
+    }
+    const hash = createHash("sha256");
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
+      hash.update(chunk);
+    }
+    const [after, leaf, canonicalPath] = await Promise.all([
+      handle.stat({ bigint: true }),
+      lstat(resolvedPath, { bigint: true }),
+      realpath(resolvedPath),
+    ]);
+    if (
+      !after.isFile()
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || after.uid !== before.uid
+      || after.mtimeNs !== before.mtimeNs
+      || after.ctimeNs !== before.ctimeNs
+      || !leaf.isFile()
+      || leaf.isSymbolicLink()
+      || leaf.dev !== before.dev
+      || leaf.ino !== before.ino
+      || canonicalPath !== resolvedPath
+    ) {
+      throw new Error(
+        `Local file organization source changed while hashing: ${targetPath}`,
+      );
+    }
+    return {
+      dev: after.dev.toString(),
+      ino: after.ino.toString(),
+      size: after.size.toString(),
+      uid: after.uid.toString(),
+      sha256: `sha256:${hash.digest("hex")}`,
+    };
+  } finally {
+    await handle.close();
   }
-  return {
-    dev: stats.dev.toString(),
-    ino: stats.ino.toString(),
-    size: stats.size.toString(),
-    uid: stats.uid.toString(),
-  };
 }
 
 async function readDirectoryIdentity(
@@ -751,6 +812,7 @@ async function readDirectoryIdentity(
     dev: stats.dev.toString(),
     ino: stats.ino.toString(),
     uid: stats.uid.toString(),
+    mode: (stats.mode & 0o777n).toString(),
   };
 }
 
@@ -791,7 +853,8 @@ function identitiesEqual(
   return left.dev === right.dev
     && left.ino === right.ino
     && left.size === right.size
-    && left.uid === right.uid;
+    && left.uid === right.uid
+    && left.sha256 === right.sha256;
 }
 
 async function assertStableDirectory(
@@ -846,27 +909,71 @@ async function runMoveWithSafeFs(
   }
   await runSafeFsHelper(
     command,
-    [
+    buildSafeFsMoveArgs(
       root,
-      rootIdentity.dev,
-      rootIdentity.ino,
-      rootIdentity.uid,
-      sourceIdentity.uid,
-      path.basename(move.from),
-      move.category,
-      path.basename(move.to),
-      sourceIdentity.dev,
-      sourceIdentity.ino,
-      sourceIdentity.size,
+      rootIdentity,
       transactionId,
-      journalIdentity.dev,
-      journalIdentity.ino,
-      journalIdentity.size,
-      journalIdentity.uid,
-    ],
+      journalIdentity,
+      move,
+    ),
     undefined,
     options,
   );
+}
+
+async function runVerifyWithSafeFs(
+  root: string,
+  rootIdentity: LocalDirectoryIdentity,
+  transactionId: string,
+  journalIdentity: LocalFileIdentity,
+  move: LocalFileMovePlan,
+): Promise<void> {
+  await runSafeFsHelper(
+    "verify-into-category",
+    buildSafeFsMoveArgs(
+      root,
+      rootIdentity,
+      transactionId,
+      journalIdentity,
+      move,
+    ),
+    undefined,
+    {},
+  );
+}
+
+function buildSafeFsMoveArgs(
+  root: string,
+  rootIdentity: LocalDirectoryIdentity,
+  transactionId: string,
+  journalIdentity: LocalFileIdentity,
+  move: LocalFileMovePlan,
+): string[] {
+  const sourceIdentity = move.sourceIdentity;
+  if (!sourceIdentity) {
+    throw new Error("Local file organization move lacks source identity.");
+  }
+  return [
+    root,
+    rootIdentity.dev,
+    rootIdentity.ino,
+    rootIdentity.uid,
+    rootIdentity.mode,
+    path.basename(move.from),
+    move.category,
+    path.basename(move.to),
+    sourceIdentity.dev,
+    sourceIdentity.ino,
+    sourceIdentity.size,
+    sourceIdentity.uid,
+    sourceIdentity.sha256,
+    transactionId,
+    journalIdentity.dev,
+    journalIdentity.ino,
+    journalIdentity.size,
+    journalIdentity.uid,
+    journalIdentity.sha256,
+  ];
 }
 
 async function runLogWithSafeFs(
@@ -881,6 +988,7 @@ async function runLogWithSafeFs(
     rootIdentity.dev,
     rootIdentity.ino,
     rootIdentity.uid,
+    rootIdentity.mode,
     transaction.id,
     ...(command === "log-append"
       ? [
@@ -888,6 +996,7 @@ async function runLogWithSafeFs(
           transaction.logIdentity!.ino,
           transaction.logIdentity!.size,
           transaction.logIdentity!.uid,
+          transaction.logIdentity!.sha256,
         ]
       : []),
   ];
@@ -897,6 +1006,7 @@ async function runLogWithSafeFs(
     !identity
     || ![identity.dev, identity.ino, identity.size, identity.uid]
       .every((value) => typeof value === "string" && /^\d+$/.test(value))
+    || !/^sha256:[0-9a-f]{64}$/.test(identity.sha256)
   ) {
     throw new Error("Local file organization helper returned an invalid log identity.");
   }
