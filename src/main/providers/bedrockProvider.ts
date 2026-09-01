@@ -5,6 +5,7 @@ import {
   type BedrockRuntimeClientConfig,
 } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-providers";
+import { Readable, Transform } from "node:stream";
 import { estimateTextTokens } from "../contextManager";
 import { buildCachePrefix } from "./cachePrefix";
 import type {
@@ -46,7 +47,7 @@ export type BedrockProviderOptions = {
 export function createBedrockProvider(
   options: BedrockProviderOptions,
 ): LLMProvider {
-  const client = options.client ?? new BedrockRuntimeClient(buildClientConfig(options));
+  const client = options.client ?? createBoundedBedrockClient(options);
   const timeoutMs = options.timeoutMs ?? defaultRequestTimeoutMs;
 
   return {
@@ -92,6 +93,202 @@ export function createBedrockProvider(
       return buildCachePrefix(messages, opts);
     },
   };
+}
+
+function createBoundedBedrockClient(
+  options: BedrockProviderOptions,
+): BedrockRuntimeClient {
+  const client = new BedrockRuntimeClient(buildClientConfig(options));
+  const responseBudgetMiddleware = (
+    next: (args: object) => Promise<{ response?: unknown }>,
+  ) => async (args: object) => {
+      const result = await next(args);
+      const response = (result as {
+        response?: { headers?: Record<string, string>; body?: unknown };
+      }).response;
+      if (response) {
+        enforceBedrockSdkResponseBudget(response);
+      }
+      return result;
+    };
+  client.middlewareStack.addRelativeTo(
+    responseBudgetMiddleware as Parameters<
+      typeof client.middlewareStack.addRelativeTo
+    >[0],
+    {
+      name: "zeroxBedrockResponseBudget",
+      relation: "after",
+      toMiddleware: "deserializerMiddleware",
+      override: true,
+    },
+  );
+  return client;
+}
+
+/**
+ * AWS SDK commands deserialize their entire JSON body before `send()` resolves.
+ * Install this immediately outside Smithy's deserializer so the raw body is
+ * bounded while it is read, rather than after the SDK has already allocated it.
+ * Exported for a direct transport regression; production installs it above.
+ */
+export function enforceBedrockSdkResponseBudget(response: {
+  headers?: Record<string, string>;
+  body?: unknown;
+}): void {
+  const label = "Bedrock SDK";
+  const declaredLength = readContentLength(response.headers);
+  if (
+    declaredLength !== undefined
+    && declaredLength > MODEL_RESPONSE_MAX_BODY_BYTES
+  ) {
+    cancelBedrockBody(response.body);
+    throw new ResponseBodyLimitError(label, MODEL_RESPONSE_MAX_BODY_BYTES);
+  }
+  response.body = boundedBedrockBody(response.body, label);
+}
+
+function boundedBedrockBody(body: unknown, label: string): unknown {
+  if (body === undefined || body === null) return body;
+  if (typeof body === "string" || body instanceof Uint8Array) {
+    const byteLength = typeof body === "string"
+      ? Buffer.byteLength(body)
+      : body.byteLength;
+    if (byteLength > MODEL_RESPONSE_MAX_BODY_BYTES) {
+      throw new ResponseBodyLimitError(label, MODEL_RESPONSE_MAX_BODY_BYTES);
+    }
+    return body;
+  }
+  if (isWebReadableStream(body)) {
+    return boundWebReadableStream(body, label);
+  }
+  if (isNodeReadable(body)) {
+    return boundNodeReadable(body, label);
+  }
+  if (isAsyncIterable(body)) {
+    return Readable.from(boundAsyncIterable(body, label));
+  }
+  throw new Error("Bedrock SDK response body used an unsupported transport type.");
+}
+
+function boundNodeReadable(body: Readable, label: string): Readable {
+  let bytesRead = 0;
+  const limiter = new Transform({
+    transform(chunk: unknown, encoding, callback) {
+      const byteLength = typeof chunk === "string"
+        ? Buffer.byteLength(chunk, encoding)
+        : chunk instanceof Uint8Array
+          ? chunk.byteLength
+          : 0;
+      bytesRead += byteLength;
+      if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
+        body.destroy();
+        callback(new ResponseBodyLimitError(label, MODEL_RESPONSE_MAX_BODY_BYTES));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  const propagateSourceError = (error: Error) => limiter.destroy(error);
+  body.once("error", propagateSourceError);
+  limiter.once("close", () => body.off("error", propagateSourceError));
+  body.pipe(limiter);
+  return limiter;
+}
+
+function boundWebReadableStream(
+  body: ReadableStream<Uint8Array>,
+  label: string,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  let bytesRead = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await reader.read();
+        if (result.done) {
+          controller.close();
+          return;
+        }
+        bytesRead += result.value.byteLength;
+        if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
+          await reader.cancel(
+            `${label} response exceeded ${MODEL_RESPONSE_MAX_BODY_BYTES} bytes`,
+          );
+          controller.error(
+            new ResponseBodyLimitError(label, MODEL_RESPONSE_MAX_BODY_BYTES),
+          );
+          return;
+        }
+        controller.enqueue(result.value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
+
+async function* boundAsyncIterable(
+  body: AsyncIterable<unknown>,
+  label: string,
+): AsyncGenerator<unknown> {
+  let bytesRead = 0;
+  for await (const chunk of body) {
+    const byteLength = typeof chunk === "string"
+      ? Buffer.byteLength(chunk)
+      : chunk instanceof Uint8Array
+        ? chunk.byteLength
+        : 0;
+    bytesRead += byteLength;
+    if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
+      cancelBedrockBody(body);
+      throw new ResponseBodyLimitError(label, MODEL_RESPONSE_MAX_BODY_BYTES);
+    }
+    yield chunk;
+  }
+}
+
+function readContentLength(
+  headers: Record<string, string> | undefined,
+): number | undefined {
+  const raw = Object.entries(headers ?? {}).find(
+    ([name]) => name.toLowerCase() === "content-length",
+  )?.[1];
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function cancelBedrockBody(body: unknown): void {
+  if (!body || typeof body !== "object") return;
+  const candidate = body as {
+    destroy?: () => void;
+    cancel?: (reason?: unknown) => unknown;
+  };
+  candidate.destroy?.();
+  void Promise.resolve(candidate.cancel?.("Bedrock response budget exceeded"))
+    .catch(() => undefined);
+}
+
+function isNodeReadable(value: unknown): value is Readable {
+  return value instanceof Readable;
+}
+
+function isWebReadableStream(
+  value: unknown,
+): value is ReadableStream<Uint8Array> {
+  return typeof ReadableStream !== "undefined" && value instanceof ReadableStream;
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && Symbol.asyncIterator in value
+    && typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function",
+  );
 }
 
 function buildClientConfig(
@@ -228,6 +425,7 @@ async function completeConverse(
   const content =
     (response.output as { message?: { content?: unknown[] } } | undefined)
       ?.message?.content ?? [];
+  assertConverseContentWithinBudget(content);
   let text = "";
   let reasoningContent = "";
   const toolCalls: CompleteResponse["toolCalls"] = [];
@@ -270,6 +468,140 @@ async function completeConverse(
         }
       : {}),
   };
+}
+
+function assertConverseContentWithinBudget(content: unknown[]): void {
+  let bytes = 0;
+  const consumeText = (value: string | undefined) => {
+    if (!value) return;
+    bytes += Buffer.byteLength(value);
+    if (bytes > MODEL_RESPONSE_MAX_BODY_BYTES) {
+      throw new ResponseBodyLimitError(
+        "Bedrock Converse",
+        MODEL_RESPONSE_MAX_BODY_BYTES,
+      );
+    }
+  };
+  for (const block of content) {
+    const candidate = block as {
+      text?: string;
+      reasoningContent?: { reasoningText?: { text?: string } };
+      toolUse?: { toolUseId?: string; name?: string; input?: unknown };
+    };
+    consumeText(candidate.text);
+    consumeText(candidate.reasoningContent?.reasoningText?.text);
+    consumeText(candidate.toolUse?.toolUseId);
+    consumeText(candidate.toolUse?.name);
+    if (candidate.toolUse) {
+      bytes += jsonByteLength(candidate.toolUse.input ?? {},
+        MODEL_RESPONSE_MAX_BODY_BYTES - bytes);
+      if (bytes > MODEL_RESPONSE_MAX_BODY_BYTES) {
+        throw new ResponseBodyLimitError(
+          "Bedrock Converse",
+          MODEL_RESPONSE_MAX_BODY_BYTES,
+        );
+      }
+    }
+  }
+}
+
+function jsonByteLength(value: unknown, remaining: number): number {
+  let bytes = 0;
+  const active = new WeakSet<object>();
+  const stack: Array<
+    | { kind: "value"; value: unknown; arrayElement: boolean }
+    | { kind: "leave"; value: object }
+  > = [{ kind: "value", value, arrayElement: false }];
+  const add = (amount: number) => {
+    bytes += amount;
+    if (bytes > remaining) {
+      throw new ResponseBodyLimitError(
+        "Bedrock Converse",
+        MODEL_RESPONSE_MAX_BODY_BYTES,
+      );
+    }
+  };
+  while (stack.length) {
+    const item = stack.pop();
+    if (!item) break;
+    if (item.kind === "leave") {
+      active.delete(item.value);
+      continue;
+    }
+    const candidate = item.value;
+    if (candidate === null) {
+      add(4);
+    } else if (typeof candidate === "string") {
+      add(jsonStringByteLength(candidate));
+    } else if (typeof candidate === "number") {
+      add(Buffer.byteLength(Number.isFinite(candidate) ? String(candidate) : "null"));
+    } else if (typeof candidate === "boolean") {
+      add(candidate ? 4 : 5);
+    } else if (
+      candidate === undefined
+      || typeof candidate === "function"
+      || typeof candidate === "symbol"
+    ) {
+      if (item.arrayElement) add(4);
+    } else if (typeof candidate === "bigint") {
+      throw new TypeError("Bedrock tool input cannot contain bigint values.");
+    } else {
+      if (active.has(candidate)) {
+        throw new TypeError("Bedrock tool input cannot contain circular values.");
+      }
+      active.add(candidate);
+      stack.push({ kind: "leave", value: candidate });
+      if (Array.isArray(candidate)) {
+        add(2 + Math.max(0, candidate.length - 1));
+        for (let index = candidate.length - 1; index >= 0; index -= 1) {
+          stack.push({ kind: "value", value: candidate[index], arrayElement: true });
+        }
+      } else {
+        const prototype = Object.getPrototypeOf(candidate);
+        if (prototype !== Object.prototype && prototype !== null) {
+          throw new TypeError("Bedrock tool input must be plain JSON data.");
+        }
+        const entries = Object.entries(candidate).filter(([, entry]) =>
+          entry !== undefined
+          && typeof entry !== "function"
+          && typeof entry !== "symbol");
+        add(2 + Math.max(0, entries.length - 1) + entries.length);
+        for (let index = entries.length - 1; index >= 0; index -= 1) {
+          const [key, entry] = entries[index]!;
+          stack.push({ kind: "value", value: entry, arrayElement: false });
+          add(jsonStringByteLength(key));
+        }
+      }
+    }
+  }
+  return bytes;
+}
+
+function jsonStringByteLength(value: string): number {
+  let bytes = 2;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0x22 || code === 0x5c) {
+      bytes += 2;
+    } else if (code <= 0x1f) {
+      bytes += code === 0x08 || code === 0x09 || code === 0x0a
+          || code === 0x0c || code === 0x0d
+        ? 2
+        : 6;
+    } else if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff
+      && value.charCodeAt(index + 1) >= 0xdc00
+      && value.charCodeAt(index + 1) <= 0xdfff) {
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 async function sendBedrockWithTimeout<T>(

@@ -1,7 +1,11 @@
 import { ConverseCommand, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import type { CompleteRequest } from "./provider";
-import { createBedrockProvider } from "./bedrockProvider";
+import {
+  createBedrockProvider,
+  enforceBedrockSdkResponseBudget,
+} from "./bedrockProvider";
 import { createProvider } from "./providerFactory";
 import { createVertexProvider } from "./vertexProvider";
 import { ResponseBodyLimitError } from "../fetchWithTimeout";
@@ -23,6 +27,66 @@ const request: CompleteRequest = {
 };
 
 describe("Bedrock provider", () => {
+  it("rejects declared and chunked SDK bodies before deserialization", async () => {
+    let declaredDestroyed = false;
+    const declaredBody = {
+      destroy() {
+        declaredDestroyed = true;
+      },
+    };
+    expect(() => enforceBedrockSdkResponseBudget({
+      headers: {
+        "Content-Length": String(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+      },
+      body: declaredBody,
+    })).toThrow(ResponseBodyLimitError);
+    expect(declaredDestroyed).toBe(true);
+
+    let sourceClosed = false;
+    const chunk = Buffer.alloc(1024 * 1024, 0x61);
+    const body = Readable.from((async function* () {
+      try {
+        for (let index = 0; index < 33; index += 1) yield chunk;
+      } finally {
+        sourceClosed = true;
+      }
+    })());
+    const response = { headers: {}, body: body as unknown };
+    enforceBedrockSdkResponseBudget(response);
+
+    const consume = async () => {
+      for await (const _chunk of response.body as Readable) {
+        // Smithy's deserializer consumes the bounded replacement body.
+      }
+    };
+    await expect(consume()).rejects.toBeInstanceOf(ResponseBodyLimitError);
+    expect(sourceClosed).toBe(true);
+  });
+
+  it("rejects oversized Converse text, reasoning, and tool input", async () => {
+    const oversized = "x".repeat(MODEL_RESPONSE_MAX_BODY_BYTES + 1);
+    const responses = [
+      { text: oversized },
+      { reasoningContent: { reasoningText: { text: oversized } } },
+      { toolUse: { toolUseId: "tool-1", name: "run", input: { value: oversized } } },
+    ];
+    for (const content of responses) {
+      const provider = createBedrockProvider({
+        region: "us-west-2",
+        client: {
+          send: async () => ({
+            output: { message: { content: [content] } },
+            stopReason: "end_turn",
+          }),
+        } as never,
+      });
+      await expect(provider.complete({
+        ...request,
+        model: "other/amazon.nova-2-pro-v1:0",
+      })).rejects.toBeInstanceOf(ResponseBodyLimitError);
+    }
+  });
+
   it("routes Claude through Anthropic InvokeModel and strips the family prefix", async () => {
     const send = vi.fn(async (command: unknown) => {
       expect(command).toBeInstanceOf(InvokeModelCommand);
