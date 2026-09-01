@@ -174,11 +174,14 @@ function boundNodeReadable(body: Readable, label: string): Readable {
   let bytesRead = 0;
   const limiter = new Transform({
     transform(chunk: unknown, encoding, callback) {
-      const byteLength = typeof chunk === "string"
-        ? Buffer.byteLength(chunk, encoding)
-        : chunk instanceof Uint8Array
-          ? chunk.byteLength
-          : 0;
+      let byteLength: number;
+      try {
+        byteLength = bedrockChunkByteLength(chunk, encoding);
+      } catch (error) {
+        body.destroy();
+        callback(error as Error);
+        return;
+      }
       bytesRead += byteLength;
       if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
         body.destroy();
@@ -210,7 +213,7 @@ function boundWebReadableStream(
           controller.close();
           return;
         }
-        bytesRead += result.value.byteLength;
+        bytesRead += bedrockChunkByteLength(result.value);
         if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
           cancelWebReaderWithoutWaiting(
             reader,
@@ -283,11 +286,13 @@ function createBoundedAsyncIterable(
             return result;
           }
           const chunk = result.value;
-          const byteLength = typeof chunk === "string"
-            ? Buffer.byteLength(chunk)
-            : chunk instanceof Uint8Array
-              ? chunk.byteLength
-              : 0;
+          let byteLength: number;
+          try {
+            byteLength = bedrockChunkByteLength(chunk);
+          } catch (error) {
+            closeWithoutWaiting();
+            throw error;
+          }
           bytesRead += byteLength;
           if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
             closeWithoutWaiting();
@@ -309,6 +314,17 @@ function createBoundedAsyncIterable(
       };
     },
   };
+}
+
+function bedrockChunkByteLength(
+  chunk: unknown,
+  encoding?: BufferEncoding,
+): number {
+  if (typeof chunk === "string") {
+    return Buffer.byteLength(chunk, encoding);
+  }
+  if (chunk instanceof Uint8Array) return chunk.byteLength;
+  throw new Error("Bedrock SDK response stream emitted a non-byte chunk.");
 }
 
 function readContentLength(

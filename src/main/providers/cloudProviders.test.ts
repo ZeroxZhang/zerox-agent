@@ -129,6 +129,40 @@ describe("Bedrock provider", () => {
     expect(returnCalled).toBe(true);
   });
 
+  it("rejects non-byte Web and async-iterable chunks instead of bypassing the budget", async () => {
+    const webResponse = {
+      headers: {},
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ not: "bytes" });
+        },
+      }) as unknown,
+    };
+    enforceBedrockSdkResponseBudget(webResponse);
+    const webReader = (webResponse.body as ReadableStream<Uint8Array>).getReader();
+    await expect(webReader.read()).rejects.toThrow(
+      "Bedrock SDK response stream emitted a non-byte chunk",
+    );
+
+    const asyncResponse = {
+      headers: {},
+      body: {
+        async *[Symbol.asyncIterator]() {
+          yield { not: "bytes" };
+        },
+      } as unknown,
+    };
+    enforceBedrockSdkResponseBudget(asyncResponse);
+    const consume = async () => {
+      for await (const _chunk of asyncResponse.body as Readable) {
+        // Unsupported chunks must fail closed before Smithy sees them.
+      }
+    };
+    await expect(consume()).rejects.toThrow(
+      "Bedrock SDK response stream emitted a non-byte chunk",
+    );
+  });
+
   it("rejects oversized Converse text, reasoning, and tool input", async () => {
     const oversized = "x".repeat(MODEL_RESPONSE_MAX_BODY_BYTES + 1);
     const responses = [
