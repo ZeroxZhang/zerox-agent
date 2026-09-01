@@ -61,6 +61,7 @@ import {
   getPython3AcceptanceFallback,
   shouldRetryAcceptanceWithPython3,
 } from "../shared/acceptanceCommand";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 
 const defaultJudgeTimeoutMs = 30_000;
 const defaultFinalJudgeTimeoutMs = 60_000;
@@ -2437,6 +2438,7 @@ async function completeJudgeAttemptWithDeadline(
       (error) => {
         if (operation.timedOut()) return { status: "timed_out" };
         if (operation.signal.aborted) throw abortError(operation.signal.reason);
+        throwIfResponseBodyLimitError(error);
         return { status: "failed", error };
       },
     );

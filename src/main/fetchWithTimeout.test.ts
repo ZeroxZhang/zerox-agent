@@ -7,6 +7,7 @@ import {
   ResponseBodyLimitError,
   throwIfResponseBodyLimitError,
 } from "./fetchWithTimeout";
+import { readSseLinesUntilTerminal } from "./providers/sseLineReader";
 
 describe("fetchWithTimeout", () => {
   afterEach(() => {
@@ -149,7 +150,178 @@ describe("fetchWithTimeout", () => {
     expect(findResponseBodyLimitError(wrapped)).toBe(limit);
     expect(() => throwIfResponseBodyLimitError(wrapped)).toThrow(limit);
   });
+
+  it("releases raw and wrapped SSE readers after a terminal frame", async () => {
+    const encoder = new TextEncoder();
+    const rawBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      },
+      cancel() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const response = await fetchWithTimeout(
+      (async () => new Response(rawBody)) as typeof fetch,
+      "https://example.test/sse-terminal",
+      {},
+      1_000,
+      "fixture",
+    );
+    const wrappedBody = response.body!;
+    let terminal = false;
+
+    await expect(resolvesWithin(drainSse(wrappedBody, {
+      isTerminal: () => terminal,
+      onLine(line) {
+        terminal = line === "data: [DONE]";
+      },
+    }))).resolves.toBeUndefined();
+    expect(rawBody.locked).toBe(false);
+    expect(wrappedBody.locked).toBe(false);
+  });
+
+  it("releases raw and wrapped SSE readers after line and aggregate overflow", async () => {
+    const encoder = new TextEncoder();
+    for (const limitKind of ["line", "stream"] as const) {
+      const rawBody = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(
+            encoder.encode(limitKind === "line" ? "aaaaaaaa" : "data: {}\n\n"),
+          );
+        },
+        cancel() {
+          return new Promise<void>(() => undefined);
+        },
+      });
+      const response = await fetchWithTimeout(
+        (async () => new Response(rawBody)) as typeof fetch,
+        `https://example.test/sse-${limitKind}-overflow`,
+        {},
+        1_000,
+        "fixture",
+      );
+      const wrappedBody = response.body!;
+
+      await expect(resolvesWithin(
+        drainSse(wrappedBody, {
+          isTerminal: () => false,
+          ...(limitKind === "line"
+            ? { maxLineBytes: 7, maxStreamBytes: 64 }
+            : { maxLineBytes: 32, maxStreamBytes: 15 }),
+        }).catch((error: unknown) => error),
+      )).resolves.toBeInstanceOf(ResponseBodyLimitError);
+      expect(rawBody.locked).toBe(false);
+      expect(wrappedBody.locked).toBe(false);
+    }
+  });
+
+  it("releases raw and wrapped SSE readers when the parser unwinds", async () => {
+    const rawBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("data: invalid\n\n"));
+      },
+      cancel() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const response = await fetchWithTimeout(
+      (async () => new Response(rawBody)) as typeof fetch,
+      "https://example.test/sse-parser",
+      {},
+      1_000,
+      "fixture",
+    );
+    const wrappedBody = response.body!;
+
+    await expect(resolvesWithin(
+      drainSse(wrappedBody, {
+        isTerminal: () => false,
+        onLine() {
+          throw new Error("parser failed");
+        },
+      }).catch((error: unknown) => error),
+    )).resolves.toMatchObject({ message: "parser failed" });
+    expect(rawBody.locked).toBe(false);
+    expect(wrappedBody.locked).toBe(false);
+  });
+
+  it("returns promptly and releases both SSE readers after an idle timeout", async () => {
+    const rawBody = new ReadableStream<Uint8Array>({
+      start() {
+        // Keep the transport open without producing a frame.
+      },
+      cancel() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const response = await fetchWithTimeout(
+      (async () => new Response(rawBody)) as typeof fetch,
+      "https://example.test/sse-idle",
+      {},
+      1_000,
+      "fixture",
+    );
+    const wrappedBody = response.body!;
+
+    await expect(resolvesWithin(
+      drainSse(wrappedBody, {
+        isTerminal: () => false,
+        idleTimeoutMs: 5,
+      }).catch((error: unknown) => error),
+    )).resolves.toMatchObject({ message: "SSE stream idle timeout" });
+    expect(rawBody.locked).toBe(false);
+    expect(wrappedBody.locked).toBe(false);
+  });
+
+  it.each(["eof", "error"] as const)(
+    "releases raw and wrapped readers after transport %s",
+    async (ending) => {
+      const rawBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (ending === "eof") {
+            controller.enqueue(new TextEncoder().encode("data: partial\n"));
+            controller.close();
+          } else {
+            controller.error(new Error("transport failed"));
+          }
+        },
+      });
+      const response = await fetchWithTimeout(
+        (async () => new Response(rawBody)) as typeof fetch,
+        `https://example.test/sse-${ending}`,
+        {},
+        1_000,
+        "fixture",
+      );
+      const wrappedBody = response.body!;
+      const outcome = drainSse(wrappedBody, {
+        isTerminal: () => false,
+      });
+
+      if (ending === "eof") {
+        await expect(resolvesWithin(outcome)).resolves.toBeUndefined();
+      } else {
+        await expect(resolvesWithin(
+          outcome.catch((error: unknown) => error),
+        )).resolves.toMatchObject({ message: "transport failed" });
+      }
+      expect(rawBody.locked).toBe(false);
+      expect(wrappedBody.locked).toBe(false);
+    },
+  );
 });
+
+async function drainSse(
+  body: ReadableStream<Uint8Array>,
+  options: Parameters<typeof readSseLinesUntilTerminal>[1] & {
+    onLine?: (line: string) => void;
+  },
+): Promise<void> {
+  for await (const line of readSseLinesUntilTerminal(body, options)) {
+    options.onLine?.(line);
+  }
+}
 
 async function resolvesWithin<T>(promise: Promise<T>): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;

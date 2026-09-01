@@ -37,6 +37,7 @@ import {
   getArtifactProvenancePath,
   writeArtifactProvenance,
 } from "../shared/agentArtifactProvenance";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 
 describe("agent goal acceptance", () => {
   let workspacePath: string;
@@ -2665,6 +2666,33 @@ describe("agent goal acceptance", () => {
     expect(JSON.stringify(result)).not.toContain("secret");
   });
 
+  it.each(["cause", "aggregate"] as const)(
+    "propagates a final-judge response budget failure through %s without retrying",
+    async (wrapper) => {
+      const limit = new ResponseBodyLimitError("Final judge", 32);
+      let calls = 0;
+      const error = wrapper === "cause"
+        ? new Error("provider timeout", { cause: limit })
+        : new AggregateError([new Error("provider timeout"), limit]);
+      const evaluation = createAgentGoalAcceptance({
+        chatClient: {
+          async complete() {
+            calls += 1;
+            throw error;
+          },
+        },
+      }).evaluateGoal(
+        createGoal([
+          check("final_limit", "model_review", { evidenceRefs: ["evidence:final"] }, true),
+        ]),
+        createContext(),
+      );
+
+      await expect(evaluation).rejects.toBe(limit);
+      expect(calls).toBe(1);
+    },
+  );
+
   it("maps a structured provider failure to sanitized retry metadata", async () => {
     const result = await createAgentGoalAcceptance({
       chatClient: {
@@ -3182,6 +3210,40 @@ describe("agent goal acceptance", () => {
       checkResults: [{ code: "judge_invalid_response" }],
     });
   });
+
+  it.each(["cause", "aggregate"] as const)(
+    "propagates a milestone-judge response budget failure through %s without retrying",
+    async (wrapper) => {
+      const limit = new ResponseBodyLimitError("Milestone judge", 32);
+      let calls = 0;
+      const error = wrapper === "cause"
+        ? new Error("provider timeout", { cause: limit })
+        : new AggregateError([new Error("provider timeout"), limit]);
+      const evaluation = createAgentGoalAcceptance({
+        chatClient: {
+          async complete() {
+            calls += 1;
+            throw error;
+          },
+        },
+      }).evaluate(
+        createMilestone([
+          check(
+            "milestone_limit",
+            "model_review",
+            { evidenceRefs: ["evidence:milestone"] },
+            true,
+          ),
+        ]),
+        createContext({
+          transcriptMessages: [{ role: "assistant", content: "Evidence." }],
+        }),
+      );
+
+      await expect(evaluation).rejects.toBe(limit);
+      expect(calls).toBe(1);
+    },
+  );
 
   it("retries one malformed milestone judge response with the exact JSON contract", async () => {
     let calls = 0;

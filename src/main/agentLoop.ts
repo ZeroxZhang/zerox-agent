@@ -293,6 +293,7 @@ export type AgentLoopResult = {
   contextSurface?: ContextSurfaceState;
   continuation?: AgentLoopContinuation;
   modelServiceNotice?: ModelServiceNotice;
+  failureKind?: "model_response_limit";
 };
 
 export async function runAgentLoop(
@@ -472,6 +473,7 @@ export async function runAgentLoop(
   } | null = null;
   let continuation: AgentLoopContinuation | undefined;
   let modelServiceNotice: ModelServiceNotice | undefined;
+  let failureKind: AgentLoopResult["failureKind"];
   let lastOutputLimitPartial: string | null = null;
   let stalledOutputLimitContinuations = 0;
   let automaticOutputLimitContinuations = 0;
@@ -1834,23 +1836,30 @@ export async function runAgentLoop(
       status = "canceled";
       summary = "Agent loop canceled.";
     } else {
-      modelServiceNotice = modelServiceNoticeFromError(
-        error instanceof StreamingCompletionError ? error.cause : error,
-        { provider: modelProfile.providerId, model: modelProfile.model },
-      );
-      if (modelServiceNotice) {
-        status = "paused";
-        continuation = {
-          reason: continuationReasonForNotice(modelServiceNotice),
-          maxTurns: checkpointInterval,
-          toolCallsExecuted,
-        };
-        summary = modelServiceNotice.message;
-      } else {
+      const responseLimitError = findResponseBodyLimitError(error);
+      if (responseLimitError) {
+        failureKind = "model_response_limit";
         status = "failed";
-        summary = error instanceof Error
-          ? redactCredentialString(error.message)
-          : "Agent loop failed.";
+        summary = responseLimitError.message;
+      } else {
+        modelServiceNotice = modelServiceNoticeFromError(
+          error instanceof StreamingCompletionError ? error.cause : error,
+          { provider: modelProfile.providerId, model: modelProfile.model },
+        );
+        if (modelServiceNotice) {
+          status = "paused";
+          continuation = {
+            reason: continuationReasonForNotice(modelServiceNotice),
+            maxTurns: checkpointInterval,
+            toolCallsExecuted,
+          };
+          summary = modelServiceNotice.message;
+        } else {
+          status = "failed";
+          summary = error instanceof Error
+            ? redactCredentialString(error.message)
+            : "Agent loop failed.";
+        }
       }
     }
   }
@@ -1876,6 +1885,7 @@ export async function runAgentLoop(
     ...(modelServiceNotice
       ? { modelServiceNotice: sanitizeModelServiceNotice(modelServiceNotice) }
       : {}),
+    ...(failureKind ? { failureKind } : {}),
   };
 }
 

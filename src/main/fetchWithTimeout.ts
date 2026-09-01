@@ -232,23 +232,58 @@ function wrapResponseBody(
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   let abortHandler: (() => void) | undefined;
-  const finish = () => {
+  let finished = false;
+  let readerReleased = false;
+  const releaseReader = () => {
+    if (readerReleased) return;
+    try {
+      reader.releaseLock();
+      readerReleased = true;
+    } catch {
+      // cancel() settles pending read requests synchronously. This branch is
+      // defensive for non-conforming streams and will be retried in a microtask.
+      queueMicrotask(() => {
+        if (!readerReleased) {
+          try {
+            reader.releaseLock();
+            readerReleased = true;
+          } catch {
+            // The wrapper has no future reads after finish; do not mask the
+            // transport result with a cleanup failure.
+          }
+        }
+      });
+    }
+  };
+  const finish = (cancelReason?: unknown) => {
+    if (finished) return;
+    finished = true;
     if (abortHandler) {
       signal.removeEventListener("abort", abortHandler);
       abortHandler = undefined;
     }
+    if (cancelReason !== undefined) {
+      try {
+        void reader.cancel(cancelReason).catch(() => undefined);
+      } catch {
+        // Provider cleanup is best-effort and cannot retain the private lock.
+      }
+    }
+    releaseReader();
     cleanup();
   };
   return new ReadableStream<Uint8Array>({
     start(controller) {
       abortHandler = () => {
-        finish();
-        void reader.cancel(signal.reason).catch(() => undefined);
-        controller.error(
-          signal.reason instanceof Error
-            ? signal.reason
-            : new Error("request aborted"),
-        );
+        const reason = signal.reason instanceof Error
+          ? signal.reason
+          : new Error("request aborted");
+        finish(reason);
+        try {
+          controller.error(reason);
+        } catch {
+          // A concurrent EOF/error may already have settled the wrapper.
+        }
       };
       if (signal.aborted) {
         abortHandler();
@@ -257,8 +292,10 @@ function wrapResponseBody(
       }
     },
     async pull(controller) {
+      if (finished) return;
       try {
         const result = await reader.read();
+        if (finished) return;
         if (result.done) {
           finish();
           controller.close();
@@ -266,13 +303,13 @@ function wrapResponseBody(
         }
         controller.enqueue(result.value);
       } catch (error) {
+        if (finished) return;
         finish();
         controller.error(error);
       }
     },
-    async cancel(reason) {
-      finish();
-      await reader.cancel(reason);
+    cancel(reason) {
+      finish(reason ?? new Error("response body canceled"));
     },
   });
 }

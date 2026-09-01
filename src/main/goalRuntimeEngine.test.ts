@@ -161,6 +161,54 @@ describe("goal runtime engine", () => {
     });
   });
 
+  it("propagates a model response budget failure from the loop to Goal orchestration", async () => {
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          throw new Error("loop stub should be used");
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "goal-model",
+        temperature: 0,
+        maxTokens: 4096,
+      }),
+      toolExecutor: createAgentToolExecutor(),
+      runStore: {
+        async append(run) {
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      createId: () => "goal_response_limit",
+      runAgentLoop: async (messages): Promise<AgentLoopResult> => ({
+        status: "failed",
+        summary: "Model response exceeded the configured budget.",
+        turns: 1,
+        messages,
+        toolCallsExecuted: 0,
+        failureKind: "model_response_limit",
+      }),
+    });
+
+    await expect(engine.runMilestone(
+      createGoal(),
+      createGoal().milestones[0]!,
+    )).resolves.toMatchObject({
+      status: "failed",
+      summary: "Model response exceeded the configured budget.",
+      failureKind: "model_response_limit",
+    });
+  });
+
   it("drains later trajectory writes but never publishes success after an earlier gap", async () => {
     const bus = new KernelEventBus();
     const persistedTypes: string[] = [];

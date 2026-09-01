@@ -63,6 +63,7 @@ export type GoalRuntimeRunResult = {
   actionSignatures?: string[];
   modelServiceNotice?: ModelServiceNotice;
   contextUsage?: AgentContextUsage;
+  failureKind?: "model_response_limit";
 };
 
 export type GoalRuntimeProgressCheckpoint = {
@@ -860,11 +861,26 @@ export function createAgentGoalController(options: {
     if (runResult.contextUsage) {
       goal.contextUsage = structuredClone(runResult.contextUsage);
     }
+    if (runResult.failureKind === "model_response_limit") {
+      milestone.state = "rejected";
+      goal.runtimeCheckpoint = undefined;
+    }
     touch(goal);
     const usageGoal = await options.goalStore.save(goal);
     if (usageGoal.status !== goal.status) {
       await publishCanonicalTerminal(usageGoal);
       return { goal: usageGoal, suspend: true };
+    }
+    if (runResult.failureKind === "model_response_limit") {
+      return {
+        goal: await stopGoal(
+          usageGoal,
+          "failed",
+          "unrecoverable_failure",
+          runResult.summary ?? "Model response exceeded the configured budget.",
+        ),
+        suspend: true,
+      };
     }
     if (runResult.status === "paused") {
       milestone.state = "ready";

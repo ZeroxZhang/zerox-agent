@@ -1069,6 +1069,9 @@ export function createGoalRuntimeEngine(options: {
         ...(loopResult.modelServiceNotice
           ? { modelServiceNotice: loopResult.modelServiceNotice }
           : {}),
+        ...(loopResult.failureKind
+          ? { failureKind: loopResult.failureKind }
+          : {}),
       };
     },
   };

@@ -14328,3 +14328,35 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
   zero-vulnerability production audit pass. Exact-byte dual review and external
   package acceptance remain required before merge and release.
+
+## 2026-09-02 - v3.9.2 terminal response-budget closure
+
+- Candidate `8c64cf4b6bcdc3b89328ddeddfcc96cbd937852d` was rejected without PASS
+  receipts after the security/data lane reported `0 Critical / 3 Major / 0
+  Minor`. The remaining defects were all terminal-boundary leaks: the wrapped
+  fetch body could retain its raw reader, nested response-budget failures could
+  be reclassified as retryable judge transport failures, and Goal orchestration
+  could continue into acceptance or repair after Agent Loop had already
+  encountered an unrecoverable model response limit.
+- Wrapped response bodies now use one idempotent terminal lifecycle for abort,
+  cancel, EOF, transport error, and downstream consumer unwind. Provider
+  cancellation stays best-effort and non-blocking while both the raw and
+  wrapped reader locks are released. End-to-end regressions cover protocol
+  terminal, physical-line and aggregate overflow, parser unwind, idle timeout,
+  EOF, and transport error, including providers whose cancel hook never settles.
+- Final and milestone acceptance now traverse `cause` and `AggregateError`,
+  preserve the typed response-budget failure, and prohibit judge retry. Agent
+  Loop promotes that hard failure above service-notice degradation, Goal Runtime
+  carries the typed failure kind, and the controller stops before acceptance or
+  repair. Complete Goal-path regressions cover direct, nested-cause, and
+  aggregate failures and prove exactly one model call with zero acceptance calls.
+- Focused lifecycle, acceptance, Agent Loop, Goal Runtime, and Goal Controller
+  validation passes `357/357`. Full `npm test` and `npm run verify` pass `328`
+  current files / `4022` current tests with declared skips, strict test type
+  coverage `437/437`, every Round2–Round12 lane, production build, Agent eval
+  `26/26`, and Memory eval `2/2`. Production smoke passes Electron `42.9.0` /
+  ABI `146`, SQLite `3.53.2`, seven migrations, eight authority domains,
+  renderer startup, and Node ABI `137` restoration. Caller-pinned
+  Program/Harness checks and the zero-vulnerability production audit pass.
+  Exact-byte dual review and external package acceptance remain required before
+  merge and release.

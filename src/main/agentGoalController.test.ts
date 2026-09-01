@@ -21,6 +21,10 @@ import {
   createAgentGoalController,
   type GoalRuntimeEngine,
 } from "./agentGoalController";
+import { createAgentToolExecutor } from "./agentToolExecutor";
+import { createAgentGoalContext } from "./agentGoalContext";
+import { createGoalRuntimeEngine } from "./goalRuntimeEngine";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 import type { AcceptanceResult } from "./agentGoalAcceptance";
 import {
   createAgentGoalAcceptance,
@@ -89,6 +93,89 @@ describe("agent goal controller", () => {
       trajectoryEvents.filter((event) => event.type === "checkpoint_written"),
     ).toHaveLength(3);
   });
+
+  it.each(["direct", "cause", "aggregate"] as const)(
+    "fails the complete Goal path on a %s model response budget failure without a second model call",
+    async (wrapper) => {
+      await store.save(createGoal([milestone("milestone_1")]));
+      const limit = new ResponseBodyLimitError("Goal model", 32);
+      const modelError = wrapper === "direct"
+        ? limit
+        : wrapper === "cause"
+          ? new Error("provider timeout", { cause: limit })
+          : new AggregateError([new Error("provider timeout"), limit]);
+      let modelCalls = 0;
+      let milestoneAcceptanceCalls = 0;
+      let finalAcceptanceCalls = 0;
+      const runtime = createGoalRuntimeEngine({
+        workspaceRoot: configDir,
+        chatClient: {
+          async complete() {
+            modelCalls += 1;
+            throw modelError;
+          },
+        },
+        getModelProfile: async () => ({
+          baseUrl: "https://api.example.com/v1",
+          apiKey: "secret",
+          model: "goal-model",
+          temperature: 0,
+          maxTokens: 4096,
+        }),
+        toolExecutor: createAgentToolExecutor(),
+        runStore: {
+          async append(run) {
+            return run;
+          },
+        },
+        trajectoryStore: {
+          async append(_runId, event) {
+            return event;
+          },
+        },
+        goalContext: createAgentGoalContext(),
+        createId: () => `goal_response_limit_${wrapper}`,
+        now: () => "2026-06-12T00:00:00.000Z",
+      });
+      const controller = createController({
+        runtime,
+        acceptance: {
+          async evaluate() {
+            milestoneAcceptanceCalls += 1;
+            return rejectedResult("must_not_run");
+          },
+          async evaluateGoal() {
+            finalAcceptanceCalls += 1;
+            return rejectedResult("must_not_run");
+          },
+        },
+      });
+
+      const result = await controller.start("goal_1");
+
+      expect(result).toMatchObject({
+        status: "failed",
+        stopReason: "unrecoverable_failure",
+        milestones: [{
+          state: "rejected",
+          attempts: 1,
+          runIds: [`goal_response_limit_${wrapper}`],
+        }],
+      });
+      expect(result).not.toHaveProperty("runtimeCheckpoint");
+      expect(trajectoryEvents).toContainEqual(expect.objectContaining({
+        type: "goal_stopped",
+        payload: expect.objectContaining({
+          status: "failed",
+          stopReason: "unrecoverable_failure",
+          summary: "Goal model response exceeded 32 bytes.",
+        }),
+      }));
+      expect(modelCalls).toBe(1);
+      expect(milestoneAcceptanceCalls).toBe(0);
+      expect(finalAcceptanceCalls).toBe(0);
+    },
+  );
 
   it("holds the authoritative active-goal lease for the full controller run", async () => {
     await store.save(createGoal([milestone("milestone_1")]));

@@ -1,4 +1,5 @@
 import type { AcceptanceResult } from "./agentGoalAcceptance";
+import { findResponseBodyLimitError } from "./fetchWithTimeout";
 
 export const FINAL_ACCEPTANCE_MAX_ATTEMPTS = 3;
 export const FINAL_ACCEPTANCE_RETRY_DELAYS_MS = [1000, 2000] as const;
@@ -11,6 +12,7 @@ export type AcceptanceInfrastructureFailure = {
     | "provider_unavailable"
     | "network_reset"
     | "transport_failed"
+    | "response_body_limit"
     | "judge_invalid_response"
     | "validator_missing"
     | "validator_failed";
@@ -36,6 +38,13 @@ type ProviderError = {
 export function classifyAcceptanceInfrastructureFailure(
   error: unknown,
 ): AcceptanceInfrastructureFailure {
+  if (findResponseBodyLimitError(error)) {
+    return failure(
+      "response_body_limit",
+      false,
+      "Final judge response exceeded the model response budget.",
+    );
+  }
   const providerError = asProviderError(error);
   const status = readStatus(providerError);
   const providerCode = readProviderCode(providerError);

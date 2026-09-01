@@ -465,6 +465,7 @@ describe("agent loop", () => {
     expect(result).toMatchObject({
       status: "failed",
       summary: "LLM token count response exceeded 32 bytes.",
+      failureKind: "model_response_limit",
     });
     expect(modelCalls).toBe(0);
   });
@@ -3070,6 +3071,7 @@ describe("agent loop", () => {
     );
 
     expect(result.status).toBe("failed");
+    expect(result.failureKind).toBe("model_response_limit");
     expect(streamCalls).toBe(1);
     expect(completeCalls).toBe(0);
   });

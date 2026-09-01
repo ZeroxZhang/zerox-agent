@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AcceptanceResult } from "./agentGoalAcceptance";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 import {
   FINAL_ACCEPTANCE_MAX_RETRY_AFTER_MS,
   classifyAcceptanceInfrastructureFailure,
@@ -109,6 +110,30 @@ describe("agent goal acceptance retry policy", () => {
       code: "judge_timeout",
     });
   });
+
+  it.each(["cause", "aggregate"] as const)(
+    "classifies a response budget failure through %s as non-retryable",
+    (wrapper) => {
+      const limit = new ResponseBodyLimitError("Final judge", 32);
+      const error = wrapper === "cause"
+        ? new Error("provider timeout", { cause: limit })
+        : new AggregateError([new Error("provider timeout"), limit]);
+      const classified = classifyAcceptanceInfrastructureFailure(error);
+
+      expect(classified).toEqual({
+        code: "response_body_limit",
+        retryable: false,
+        detail: "Final judge response exceeded the model response budget.",
+      });
+      expect(decideFinalAcceptanceRetry(resultWith({
+        verdict: "acceptance_unavailable",
+        retry: classified,
+      }), 1, 10_000)).toEqual({
+        action: "wait_for_user",
+        code: "response_body_limit",
+      });
+    },
+  );
 
   it("allows only one clean retry for an invalid judge response", () => {
     expect(decideFinalAcceptanceRetry(invalidJudgeResult(), 1, 10_000).action).toBe("retry");
