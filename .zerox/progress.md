@@ -14612,3 +14612,10 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
   eight authority domains, renderer startup, and Node ABI `137` restoration;
   the production dependency audit reports zero vulnerabilities.
+- Frozen candidate `42943140d0a0453b140c98fa832ab1ef9500c4eb` passed fresh
+  independent code and security review at `0C/0M/0m` against review manifest
+  `sha256:094bc34a15d014f9dd4fa48888350552092b6ea37a5effa9ba8316b8422f31ea`
+  (`1461` files). The caller-pinned receipt digests are
+  `sha256:bd30a90a0223f65d602b3db347fe112c3946057f709ed1bb30f8c534869aba57`
+  and
+  `sha256:250caed5fe801cfb1b52bc785de2e163c5e1ce8923be5dcadf6f0289b9dda7fe`.
