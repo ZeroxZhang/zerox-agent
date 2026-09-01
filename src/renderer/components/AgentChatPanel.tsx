@@ -5261,7 +5261,7 @@ function PlanTechnicalDetails(props: { plan: PlanRecord }) {
           </section>
         ) : null}
 
-        {props.plan.projection ? (
+        {artifact && props.plan.projection ? (
           <p className="plan-projection-ref">
             Markdown 投影：{props.plan.projection.path} ·{" "}
             {props.plan.projection.sha256.slice(0, 12)}

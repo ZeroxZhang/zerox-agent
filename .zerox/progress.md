@@ -13827,3 +13827,42 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   migrations, eight authority domains, renderer startup, and Node ABI `137`
   restoration. A fresh ninth exact-byte code/security review is the next
   mandatory gate.
+
+## 2026-09-01 - v3.9.2 exact Plan authority and final transaction-boundary repair
+
+- The ninth frozen candidate was rejected by code review with two Majors and
+  by security review with four Majors; there were no Critical or Minor
+  findings. No review or acceptance receipts were issued. The remaining root
+  causes were incomplete nested Plan DTO reconstruction, shape-based round
+  dispatch, projection migration without prior digest authority, path-based
+  projection publication, and native transaction success/marker races.
+- Plan sanitation now exact-reconstructs GoalContract lineage, criterion
+  bindings, triggers, selected Skill snapshots, round outputs by declared
+  round kind, and content-free GoalContract issues. Unknown nested properties
+  cannot branch the sanitizer or cross JSON, SQLite, IPC, replay, or Markdown
+  projections. Contract references are recomputed over the sanitized canonical
+  snapshot with a shared Browser/CommonJS-compatible SHA-256 implementation.
+- Plan projection writes and verification now run through the native helper
+  against pinned root, `.zerox`, and `plans` directory descriptors. Initial
+  publication is exclusive; revision replacement requires the exact previous
+  projection digest and uses an atomic swap. A drifted legacy projection is
+  detached from the clean Plan record but left untouched for manual review.
+  Drafting revisions retain the prior projection only as replacement authority,
+  hide it from the UI when there is no current artifact, and cannot confirm or
+  execute it.
+- Native move, verify, and journal append recheck reconciliation immediately
+  before success. Marker publication holds the transaction lock, a concurrent
+  append lock loser cannot create a false marker, and unknown marker, source,
+  target, journal, and projection leaves open non-blockingly before regular-file
+  validation. Adversarial tests cover final-boundary marker insertion, parent
+  directory swaps, digest drift, lock contention, and FIFO leaves.
+- Full `npm run verify` passes strict test type coverage `434/434`, `325`
+  current files / `3918` current tests with declared skips, all Round2–Round12
+  historical lanes, production build, Agent eval `26/26`, and Memory eval
+  `2/2`. The native helper is `53232` bytes with digest
+  `sha256:b25d4a462f0c7ea2814de4c653c1eed522072751bd5ed51ff44ee2ace09838e1`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration. Production audit reports zero vulnerabilities; the full
+  dependency tree, caller-pinned Program/Harness, and whitespace checks pass.
+  A fresh tenth exact-byte code/security review is the next mandatory gate.

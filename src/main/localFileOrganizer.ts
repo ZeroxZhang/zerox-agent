@@ -40,12 +40,21 @@ export type LocalFileMovePlan = {
   sourceIdentity?: LocalFileIdentity;
 };
 
-type LocalFileIdentity = {
+export type SafeFsFileIdentity = {
   dev: string;
   ino: string;
   size: string;
   uid: string;
   sha256: string;
+};
+
+type LocalFileIdentity = SafeFsFileIdentity;
+
+export type SafeFsHelperRuntimeOptions = {
+  safeFsHelperPath?: string;
+  safeFsTestDelayMs?: number;
+  safeFsTestReadyStage?: string;
+  safeFsTestOnReady?: (command: string) => void;
 };
 
 type LocalDirectoryIdentity = {
@@ -122,7 +131,10 @@ export type LocalFileOrganizerRuntimeOptions = {
     | "post-move-target-digest-read"
     | "log-before-mutation"
     | "log-opened"
-    | "log-mutated";
+    | "log-mutated"
+    | "log-before-success"
+    | "move-before-success"
+    | "verify-before-success";
   safeFsTestOnReady?: (command: string) => void;
 };
 
@@ -393,6 +405,7 @@ export async function rollbackLocalFileOrganization(
 
 export async function verifyLocalFileOrganization(
   transaction: LocalFileOrganizationTransaction,
+  options: LocalFileOrganizerRuntimeOptions = {},
 ): Promise<LocalFileOrganizationVerification> {
   assertSafeStoreEntityId(
     transaction.id,
@@ -462,6 +475,7 @@ export async function verifyLocalFileOrganization(
           transaction.id,
           transaction.logIdentity,
           move,
+          options,
         );
       } catch {
         changedTargets.push(move.to);
@@ -507,7 +521,9 @@ export async function readLocalFileOrganizationTransaction(
   try {
     handle = await open(
       resolvedLogPath,
-      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      constants.O_RDONLY
+        | constants.O_NONBLOCK
+        | (constants.O_NOFOLLOW ?? 0),
     );
   } catch (error) {
     markerStats ??= await readReconciliationMarker(
@@ -889,7 +905,9 @@ async function readReconciliationMarker(
   try {
     handle = await open(
       markerPath,
-      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      constants.O_RDONLY
+        | constants.O_NONBLOCK
+        | (constants.O_NOFOLLOW ?? 0),
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -978,7 +996,9 @@ async function readRegularFileIdentity(targetPath: string): Promise<LocalFileIde
   const resolvedPath = resolveUserPath(targetPath);
   const handle = await open(
     resolvedPath,
-    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+    constants.O_RDONLY
+      | constants.O_NONBLOCK
+      | (constants.O_NOFOLLOW ?? 0),
   );
   try {
     const before = await handle.stat({ bigint: true });
@@ -1150,6 +1170,7 @@ async function runVerifyWithSafeFs(
   transactionId: string,
   journalIdentity: LocalFileIdentity,
   move: LocalFileMovePlan,
+  options: LocalFileOrganizerRuntimeOptions,
 ): Promise<void> {
   await runSafeFsHelper(
     "verify-into-category",
@@ -1161,7 +1182,7 @@ async function runVerifyWithSafeFs(
       move,
     ),
     undefined,
-    {},
+    options,
   );
 }
 
@@ -1247,12 +1268,12 @@ async function runLogWithSafeFs(
   return identity;
 }
 
-async function runSafeFsHelper(
+export async function runSafeFsHelper(
   command: string,
   args: string[],
   input: string | undefined,
-  options: LocalFileOrganizerRuntimeOptions,
-): Promise<{ ok: true; identity?: LocalFileIdentity }> {
+  options: SafeFsHelperRuntimeOptions,
+): Promise<{ ok: true; identity?: SafeFsFileIdentity }> {
   const helperPath = await resolveSafeFsHelper(options.safeFsHelperPath);
   const inputBody = input ?? "";
   if (Buffer.byteLength(inputBody, "utf8") > MAX_TRANSACTION_LOG_BYTES) {
@@ -1284,7 +1305,7 @@ async function runSafeFsHelper(
       settled = true;
       reject(error);
     };
-    const resolveOnce = (value: { ok: true; identity?: LocalFileIdentity }) => {
+    const resolveOnce = (value: { ok: true; identity?: SafeFsFileIdentity }) => {
       if (settled) return;
       settled = true;
       resolve(value);
@@ -1346,7 +1367,7 @@ async function runSafeFsHelper(
         if (parsed.ok !== true) {
           throw new Error("Local file organization helper did not confirm success.");
         }
-        resolveOnce(parsed as { ok: true; identity?: LocalFileIdentity });
+        resolveOnce(parsed as { ok: true; identity?: SafeFsFileIdentity });
       } catch (error) {
         rejectOnce(error);
       }
@@ -1355,7 +1376,7 @@ async function runSafeFsHelper(
   });
 }
 
-async function resolveSafeFsHelper(override?: string): Promise<string> {
+export async function resolveSafeFsHelper(override?: string): Promise<string> {
   if (process.platform !== "darwin") {
     throw new Error("Secure local file organization is supported only on macOS.");
   }

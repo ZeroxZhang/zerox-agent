@@ -1,12 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import {
-  lstat,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  writeFile,
-} from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import type {
   PlanArtifact,
@@ -14,13 +7,17 @@ import type {
   PlanRecord,
 } from "../shared/planMode";
 import { sanitizePlanRecordDiagnostics } from "../shared/planDiagnostics";
+import {
+  runSafeFsHelper,
+  type SafeFsHelperRuntimeOptions,
+} from "./localFileOrganizer";
 
 export type PlanArtifactWriter = {
   write(plan: PlanRecord, artifact: PlanArtifact): Promise<PlanProjection>;
   verify(plan: PlanRecord): Promise<boolean>;
 };
 
-export function createPlanArtifactWriter(options?: {
+export function createPlanArtifactWriter(options?: SafeFsHelperRuntimeOptions & {
   now?: () => string;
 }): PlanArtifactWriter {
   const now = options?.now ?? (() => new Date().toISOString());
@@ -33,26 +30,25 @@ export function createPlanArtifactWriter(options?: {
       }
       assertArtifactPlanId(safeInput.plan.id);
       const root = await realpath(safeInput.plan.workspaceRoot);
-      const zeroxDir = path.join(root, ".zerox");
-      const plansDir = path.join(zeroxDir, "plans");
-      await assertNotSymlinkIfPresent(zeroxDir);
-      await mkdir(plansDir, { recursive: true });
-      await assertNotSymlinkIfPresent(zeroxDir);
-      await assertNotSymlinkIfPresent(plansDir);
-      const destination = path.join(plansDir, `${safeInput.plan.id}.md`);
-      assertInside(root, destination);
+      const destination = canonicalProjectionPath(root, safeInput.plan.id);
+      if (
+        safeInput.plan.projection
+        && safeInput.plan.projection.path !== destination
+      ) {
+        throw new Error("计划投影路径不是当前计划的规范路径。");
+      }
       const markdown = renderPlanMarkdown(safeInput.plan, safeInput.artifact);
       const sha256 = hash(markdown);
-      const temp = path.join(
-        plansDir,
-        `.${safeInput.plan.id}.${randomUUID()}.tmp`,
+      await runSafeFsHelper(
+        "projection-write",
+        await projectionHelperArgs(
+          root,
+          safeInput.plan.id,
+          safeInput.plan.projection?.sha256,
+        ),
+        markdown,
+        options ?? {},
       );
-      await writeFile(temp, markdown, { encoding: "utf8", mode: 0o600 });
-      await rename(temp, destination);
-      const persisted = await readFile(destination, "utf8");
-      if (hash(persisted) !== sha256) {
-        throw new Error("计划投影写入后哈希校验失败。");
-      }
       return {
         path: destination,
         sha256,
@@ -67,9 +63,12 @@ export function createPlanArtifactWriter(options?: {
       try {
         const safeInput = sanitizeArtifactProjection(plan, plan.finalArtifact);
         const root = await realpath(safeInput.plan.workspaceRoot!);
-        assertInside(root, safeInput.plan.projection!.path);
-        await assertNoSymlinkChain(root, safeInput.plan.projection!.path);
-        const content = await readFile(safeInput.plan.projection!.path, "utf8");
+        if (
+          safeInput.plan.projection!.path
+          !== canonicalProjectionPath(root, safeInput.plan.id)
+        ) {
+          return false;
+        }
         const currentProjection = renderPlanMarkdown(
           safeInput.plan.confirmedRevision
             ? {
@@ -79,10 +78,20 @@ export function createPlanArtifactWriter(options?: {
             : safeInput.plan,
           safeInput.artifact,
         );
-        return (
-          hash(content) === safeInput.plan.projection!.sha256 &&
-          hash(currentProjection) === safeInput.plan.projection!.sha256
+        if (hash(currentProjection) !== safeInput.plan.projection!.sha256) {
+          return false;
+        }
+        await runSafeFsHelper(
+          "projection-verify",
+          await projectionHelperArgs(
+            root,
+            safeInput.plan.id,
+            safeInput.plan.projection!.sha256,
+          ),
+          undefined,
+          options ?? {},
         );
+        return true;
       } catch {
         return false;
       }
@@ -101,36 +110,24 @@ export async function rewriteSanitizedPlanProjection(
   }
   assertArtifactPlanId(sanitized.id);
   const root = await realpath(sanitized.workspaceRoot);
-  const zeroxDir = path.join(root, ".zerox");
-  const plansDir = path.join(zeroxDir, "plans");
-  const destination = path.join(plansDir, `${sanitized.id}.md`);
+  const destination = canonicalProjectionPath(root, sanitized.id);
   if (sanitized.projection.path !== destination) {
     throw new Error("计划投影路径不是当前计划的规范路径。");
   }
-  assertInside(root, destination);
-  await assertNotSymlinkIfPresent(zeroxDir);
-  await mkdir(plansDir, { recursive: true });
-  await assertNotSymlinkIfPresent(zeroxDir);
-  await assertNotSymlinkIfPresent(plansDir);
-  await assertNoSymlinkChain(root, destination);
   const markdown = sanitized.finalArtifact
     ? renderPlanMarkdown(sanitized, sanitized.finalArtifact)
     : "# Plan projection unavailable\n\nLegacy diagnostic projection removed.\n";
   const sha256 = hash(markdown);
-  let current = "";
-  try {
-    current = await readFile(destination, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  if (hash(current) !== sha256) {
-    const temp = path.join(
-      plansDir,
-      `.${sanitized.id}.${randomUUID()}.migration.tmp`,
-    );
-    await writeFile(temp, markdown, { encoding: "utf8", mode: 0o600 });
-    await rename(temp, destination);
-  }
+  await runSafeFsHelper(
+    "projection-write",
+    await projectionHelperArgs(
+      root,
+      sanitized.id,
+      sanitized.projection.sha256,
+    ),
+    markdown,
+    {},
+  );
   if (!sanitized.finalArtifact) return detached;
   return {
     ...sanitized,
@@ -347,32 +344,28 @@ function bullets(values: string[]): string[] {
   return values.length ? values.map((value) => `- ${value}`) : ["- 无"];
 }
 
-function assertInside(root: string, target: string) {
-  const relative = path.relative(root, target);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("计划投影路径越过工作区边界。");
-  }
+function canonicalProjectionPath(root: string, planId: string): string {
+  return path.join(root, ".zerox", "plans", `${planId}.md`);
 }
 
-async function assertNotSymlinkIfPresent(target: string) {
-  try {
-    if ((await lstat(target)).isSymbolicLink()) {
-      throw new Error(`计划投影目录不能是符号链接：${target}`);
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
+async function projectionHelperArgs(
+  root: string,
+  planId: string,
+  expectedSha256: string | undefined,
+): Promise<string[]> {
+  const stats = await lstat(root, { bigint: true });
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error("计划工作区不是稳定目录。");
   }
-}
-
-async function assertNoSymlinkChain(root: string, target: string) {
-  const relative = path.relative(root, target);
-  let current = root;
-  for (const segment of relative.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
-    await assertNotSymlinkIfPresent(current);
-  }
+  return [
+    root,
+    stats.dev.toString(),
+    stats.ino.toString(),
+    stats.uid.toString(),
+    (stats.mode & 0o777n).toString(),
+    planId,
+    expectedSha256 ? `sha256:${expectedSha256}` : "absent",
+  ];
 }
 
 function hash(value: string): string {

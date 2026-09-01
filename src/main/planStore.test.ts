@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -138,7 +139,11 @@ describe("plan store parity", () => {
       "plan-store-test.md",
     );
     await mkdir(path.dirname(projectionPath), { recursive: true });
-    await writeFile(projectionPath, `# raw projection ${secret}\n`, "utf8");
+    const rawProjection = `# raw projection ${secret}\n`;
+    await writeFile(projectionPath, rawProjection, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     const storage = createStorageImpl({
       dbPath: path.join(tempDir, "diagnostic.sqlite"),
       skipFts5Check: true,
@@ -148,7 +153,7 @@ describe("plan store parity", () => {
       configDir: path.join(tempDir, "diagnostic-sqlite-unused"),
       storage,
     });
-    const raw: PlanRecord = {
+    const raw: PlanRecord = ensurePlanGoalContract({
       ...createRecord(),
       workspaceRoot,
       rounds: [
@@ -163,6 +168,17 @@ describe("plan store parity", () => {
           publicInputRefs: [],
           error: `provider failed with ${secret}`,
           failureExcerpt: `raw response ${secret}`,
+        },
+        {
+          id: "round-owned-dto",
+          kind: "a1",
+          role: "a",
+          ordinal: 1,
+          runId: "run-owned-dto",
+          modelBinding: {} as PlanRecord["rounds"][number]["modelBinding"],
+          status: "completed",
+          publicInputRefs: [],
+          output: createDiagnosticArtifact("safe"),
         },
       ],
       planningStages: [
@@ -215,10 +231,27 @@ describe("plan store parity", () => {
       finalArtifact: createDiagnosticArtifact(secret),
       projection: {
         path: projectionPath,
-        sha256: `raw-${secret}`,
+        sha256: sha256(rawProjection),
         writtenAt: "2026-09-01T00:00:00.000Z",
       },
-    };
+      trigger: {
+        kind: "initial_request",
+        summary: "safe trigger",
+        evidenceRefs: [],
+        at: "2026-09-01T00:00:00.000Z",
+      },
+      criterionBindings: [
+        { criterionId: "criterion-1", milestoneIds: [], checkIds: [] },
+      ],
+      goalContractIssues: [
+        {
+          id: `issue-${secret}`,
+          severity: "blocking",
+          description: `issue ${secret}`,
+          evidenceRefs: [`evidence-${secret}`],
+        },
+      ],
+    });
     Object.assign(raw, { rawDiagnostic: `root ${secret}` });
     Object.assign(raw.rounds[0]!, { rawDiagnostic: `round ${secret}` });
     Object.assign(raw.planningStages![0]!, {
@@ -233,6 +266,32 @@ describe("plan store parity", () => {
     });
     Object.assign(raw.finalArtifact!.scope, {
       rawDiagnostic: `artifact scope ${secret}`,
+    });
+    Object.assign(raw.goalContractSnapshot!, {
+      rawDiagnostic: `contract ${secret}`,
+    });
+    Object.assign(raw.goalContractSnapshot!.source, {
+      rawDiagnostic: `contract source ${secret}`,
+    });
+    Object.assign(raw.trigger!, { rawDiagnostic: `trigger ${secret}` });
+    Object.assign(raw.criterionBindings![0]!, {
+      rawDiagnostic: `binding ${secret}`,
+    });
+    Object.assign(raw.goalContractIssues![0]!, {
+      rawDiagnostic: `goal issue ${secret}`,
+    });
+    Object.assign(raw.rounds[1]!.output!, {
+      rawDiagnostic: `round output ${secret}`,
+      issues: [{ rawDiagnostic: `shape injection ${secret}` }],
+      goalContractIssues: [
+        {
+          id: `round-issue-${secret}`,
+          severity: "warning",
+          description: `round issue ${secret}`,
+          evidenceRefs: [`round-evidence-${secret}`],
+          rawDiagnostic: `round issue unknown ${secret}`,
+        },
+      ],
     });
 
     try {
@@ -251,6 +310,27 @@ describe("plan store parity", () => {
       );
       expect(jsonCreated.finalArtifact).not.toHaveProperty("rawDiagnostic");
       expect(jsonCreated.finalArtifact?.scope).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.goalContractSnapshot).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.goalContractSnapshot?.source).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.trigger).not.toHaveProperty("rawDiagnostic");
+      expect(jsonCreated.criterionBindings?.[0]).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.goalContractIssues?.[0]).toEqual({
+        id: "goal_contract_issue_1",
+        severity: "blocking",
+        description:
+          "规划模型报告 GoalContract 存在阻断问题；原始诊断内容未保存。",
+        evidenceRefs: [],
+      });
+      expect(jsonCreated.rounds[1]?.output).not.toHaveProperty("issues");
+      expect(jsonCreated.rounds[1]?.output).not.toHaveProperty(
         "rawDiagnostic",
       );
       expect(JSON.stringify(jsonCreated)).not.toContain("SECRET_REVIEW");
@@ -275,10 +355,12 @@ describe("plan store parity", () => {
       expect(storage.db.prepare("SELECT payload FROM plan_records WHERE id = ?")
         .get<{ payload: string }>(raw.id)?.payload).not.toContain(secret);
 
+      const legacyProjection = `# legacy projection ${secret}\n`;
+      raw.projection!.sha256 = sha256(legacyProjection);
       await writeFile(planFile, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
       storage.db.prepare("UPDATE plan_records SET payload = ? WHERE id = ?")
         .run(JSON.stringify(raw), raw.id);
-      await writeFile(projectionPath, `# legacy projection ${secret}\n`, "utf8");
+      await writeFile(projectionPath, legacyProjection, "utf8");
 
       await expect(json.get(raw.id)).resolves.toMatchObject({ id: raw.id });
       await expect(sqlite.get(raw.id)).resolves.toMatchObject({ id: raw.id });
@@ -306,7 +388,11 @@ describe("plan store parity", () => {
       "plan-store-test.md",
     );
     await mkdir(path.dirname(projectionPath), { recursive: true });
-    await writeFile(projectionPath, `# legacy ${secret}\n`, "utf8");
+    const legacyProjection = `# legacy ${secret}\n`;
+    await writeFile(projectionPath, legacyProjection, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     const storage = createStorageImpl({
       dbPath: path.join(tempDir, "offline-diagnostic.sqlite"),
       skipFts5Check: true,
@@ -322,7 +408,7 @@ describe("plan store parity", () => {
       finalArtifact: createDiagnosticArtifact("offline-safe"),
       projection: {
         path: projectionPath,
-        sha256: `legacy-${secret}`,
+        sha256: sha256(legacyProjection),
         writtenAt: "2026-09-01T00:00:00.000Z",
       },
     };
@@ -363,7 +449,11 @@ describe("plan store parity", () => {
       "plan-store-test.md",
     );
     await mkdir(path.dirname(projectionPath), { recursive: true });
-    await writeFile(projectionPath, `# legacy ${secret}\n`, "utf8");
+    const legacyProjection = `# legacy ${secret}\n`;
+    await writeFile(projectionPath, legacyProjection, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     const store = createPlanStore({
       configDir: path.join(tempDir, "detached-diagnostic-json"),
     });
@@ -372,7 +462,7 @@ describe("plan store parity", () => {
       workspaceRoot,
       projection: {
         path: projectionPath,
-        sha256: `legacy-${secret}`,
+        sha256: sha256(legacyProjection),
         writtenAt: "2026-09-01T00:00:00.000Z",
       },
     };
@@ -383,6 +473,75 @@ describe("plan store parity", () => {
     await expect(readFile(projectionPath, "utf8")).resolves.not.toContain(
       secret,
     );
+  });
+
+  it("detaches sanitized records without overwriting a drifted legacy projection", async () => {
+    const secret = "local-canary-drifted-plan-0123456789abcdef";
+    const workspaceInput = path.join(tempDir, "drifted-diagnostic-workspace");
+    await mkdir(workspaceInput, { recursive: true });
+    const workspaceRoot = await realpath(workspaceInput);
+    const trustedProjection = "# trusted legacy projection\n";
+    const userModifiedProjection = "# user modified projection\n";
+    const storage = createStorageImpl({
+      dbPath: path.join(tempDir, "drifted-diagnostic.sqlite"),
+      skipFts5Check: true,
+    });
+    try {
+      for (const backend of ["json", "sqlite"] as const) {
+        const id = `plan-drifted-${backend}`;
+        const projectionPath = path.join(
+          workspaceRoot,
+          ".zerox",
+          "plans",
+          `${id}.md`,
+        );
+        await mkdir(path.dirname(projectionPath), { recursive: true });
+        await writeFile(projectionPath, userModifiedProjection, {
+          encoding: "utf8",
+          mode: 0o600,
+        });
+        const raw: PlanRecord = {
+          ...createRecord(),
+          id,
+          sessionId: `session-${backend}`,
+          workspaceRoot,
+          finalArtifact: createDiagnosticArtifact("safe"),
+          projection: {
+            path: projectionPath,
+            sha256: sha256(trustedProjection),
+            writtenAt: "2026-09-01T00:00:00.000Z",
+          },
+        };
+        Object.assign(raw, { rawDiagnostic: secret });
+        const store = createPlanStore({
+          configDir: path.join(tempDir, `drifted-${backend}`),
+          ...(backend === "sqlite" ? { storage } : {}),
+        });
+
+        const created = await store.create(raw);
+
+        expect(created.projection).toBeUndefined();
+        await expect(readFile(projectionPath, "utf8")).resolves.toBe(
+          userModifiedProjection,
+        );
+        if (backend === "sqlite") {
+          expect(
+            storage.db
+              .prepare("SELECT payload FROM plan_records WHERE id = ?")
+              .get<{ payload: string }>(id)?.payload,
+          ).not.toContain(secret);
+        } else {
+          await expect(
+            readFile(
+              path.join(tempDir, `drifted-${backend}`, "plans", `${id}.json`),
+              "utf8",
+            ),
+          ).resolves.not.toContain(secret);
+        }
+      }
+    } finally {
+      storage.close();
+    }
   });
 
   it("persists and returns credential-free Skill snapshots for JSON, SQLite, and legacy Plans", async () => {
@@ -777,4 +936,8 @@ function createPrivateSkillSnapshot(): NonNullable<PlanRecord["selectedSkill"]> 
       ],
     },
   };
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }

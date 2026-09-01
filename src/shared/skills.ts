@@ -130,15 +130,78 @@ export type SkillDiscoveryResult = {
 export function createPublicSkillSnapshot(
   skill: Pick<SkillRecord, "manifest" | "body" | "rootDir" | "skillFile">,
 ): PublicSkillSnapshot {
-  const { mcpServers, ...manifest } = skill.manifest;
+  const manifest = skill.manifest;
   return {
     rootDir: skill.rootDir,
     skillFile: skill.skillFile,
     body: skill.body,
     manifest: {
-      ...structuredClone(manifest),
-      ...(mcpServers !== undefined
-        ? { mcpServers: mcpServers.map(createPublicMcpServerConfig) }
+      name: manifest.name,
+      displayName: manifest.displayName,
+      description: manifest.description,
+      version: manifest.version,
+      execution: {
+        mode: manifest.execution.mode,
+        entrypoint: manifest.execution.entrypoint,
+        ...(manifest.execution.maxTurns !== undefined
+          ? { maxTurns: manifest.execution.maxTurns }
+          : {}),
+      },
+      inputs: manifest.inputs.map((input) => ({
+        name: input.name,
+        label: input.label,
+        type: input.type,
+        required: input.required,
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
+        ...(input.defaultValue !== undefined
+          ? { defaultValue: input.defaultValue }
+          : {}),
+        ...(input.choices !== undefined ? { choices: [...input.choices] } : {}),
+      })),
+      permissions: {
+        files: {
+          read: [...manifest.permissions.files.read],
+          write: [...manifest.permissions.files.write],
+        },
+        shell: { commands: [...manifest.permissions.shell.commands] },
+        web: {
+          search: manifest.permissions.web.search,
+          fetchDomains: [...manifest.permissions.web.fetchDomains],
+        },
+        memory: {
+          read: manifest.permissions.memory.read,
+          write: manifest.permissions.memory.write,
+        },
+      },
+      ...(manifest.planning !== undefined
+        ? {
+            planning: {
+              required: manifest.planning.required,
+              ...(manifest.planning.maxSteps !== undefined
+                ? { maxSteps: manifest.planning.maxSteps }
+                : {}),
+            },
+          }
+        : {}),
+      ...(manifest.tools !== undefined
+        ? {
+            tools: manifest.tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              // JSON Schema is intentionally open content. The surrounding
+              // Skill-owned DTO is still reconstructed exactly.
+              parameters: structuredClone(tool.parameters),
+              entrypoint: tool.entrypoint,
+            })),
+          }
+        : {}),
+      ...(manifest.mcpServers !== undefined
+        ? { mcpServers: manifest.mcpServers.map(createPublicMcpServerConfig) }
+        : {}),
+      ...(manifest.dependencies !== undefined
+        ? { dependencies: [...manifest.dependencies] }
         : {}),
     },
   };

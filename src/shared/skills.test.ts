@@ -264,6 +264,15 @@ mcpServers:
       rootDir: "/tmp/private-mcp-skill",
       skillFile: "/tmp/private-mcp-skill/SKILL.md",
     };
+    const unknownSentinel = "SKILL_UNKNOWN_FIELD_DO_NOT_PERSIST";
+    Object.assign(runtimeSkill, { rawDiagnostic: unknownSentinel });
+    Object.assign(runtimeSkill.manifest, { rawDiagnostic: unknownSentinel });
+    Object.assign(runtimeSkill.manifest.execution, {
+      rawDiagnostic: unknownSentinel,
+    });
+    Object.assign(runtimeSkill.manifest.permissions.files, {
+      rawDiagnostic: unknownSentinel,
+    });
 
     const snapshot = createPublicSkillSnapshot(runtimeSkill);
 
@@ -284,6 +293,7 @@ mcpServers:
     ]);
     expect(JSON.stringify(snapshot)).not.toContain("STDIO_SECRET_DO_NOT_PERSIST");
     expect(JSON.stringify(snapshot)).not.toContain("REMOTE_SECRET_DO_NOT_PERSIST");
+    expect(JSON.stringify(snapshot)).not.toContain(unknownSentinel);
     expect(JSON.stringify(runtimeSkill)).toContain("STDIO_SECRET_DO_NOT_PERSIST");
     expect(JSON.stringify(runtimeSkill)).toContain("REMOTE_SECRET_DO_NOT_PERSIST");
   });

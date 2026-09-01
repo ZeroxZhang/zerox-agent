@@ -1,6 +1,7 @@
 import type {
   DebateCritique,
   DebateRound,
+  DebateRoundKind,
   PlanArtifact,
   PlanMilestone,
   PlanProposal,
@@ -14,7 +15,18 @@ import type {
   RevisedPlanProposal,
 } from "./planMode";
 import type { AcceptanceCheck } from "./agentGoal";
+import {
+  canonicalizeGoalContract,
+  type GoalContractIssue,
+  type GoalContractRef,
+  type GoalContractSnapshot,
+  type GoalPlanRef,
+  type GoalPlanTrigger,
+  type PlanCriterionBinding,
+} from "./goalPlanContract";
 import type { ResolvedModelBinding } from "./modelSettings";
+import { createPublicSkillSnapshot } from "./skills";
+import { sha256Hex } from "./sha256";
 
 const contentFreeFailurePattern =
   /^response omitted; contentLength=\d{1,12}; contentSha256=[a-f0-9]{16}$/;
@@ -81,6 +93,14 @@ export function sanitizePlanRecordDiagnostics(plan: PlanRecord): PlanRecord {
         ),
       })
     : undefined;
+  const goalContractSnapshot = plan.goalContractSnapshot
+    ? sanitizeGoalContractSnapshot(plan.goalContractSnapshot)
+    : undefined;
+  const goalContractRef = plan.goalContractRef
+    ? goalContractSnapshot
+      ? createSanitizedGoalContractRef(goalContractSnapshot)
+      : sanitizeGoalContractRef(plan.goalContractRef)
+    : undefined;
 
   // This is deliberately an exact DTO reconstruction, not a spread-and-patch
   // sanitizer. Legacy JSON and SQLite payloads are untrusted at runtime even
@@ -107,7 +127,7 @@ export function sanitizePlanRecordDiagnostics(plan: PlanRecord): PlanRecord {
       ? { requestedSkillName: plan.requestedSkillName }
       : {}),
     ...(plan.selectedSkill !== undefined
-      ? { selectedSkill: structuredClone(plan.selectedSkill) }
+      ? { selectedSkill: createPublicSkillSnapshot(plan.selectedSkill) }
       : {}),
     mode: plan.mode,
     ...(plan.autonomyMode !== undefined
@@ -136,27 +156,31 @@ export function sanitizePlanRecordDiagnostics(plan: PlanRecord): PlanRecord {
     ...(qualityReport ? { qualityReport } : {}),
     taskContract: sanitizeTaskContract(plan.taskContract),
     ...(plan.purpose !== undefined ? { purpose: plan.purpose } : {}),
-    ...(plan.goalContractSnapshot !== undefined
-      ? { goalContractSnapshot: structuredClone(plan.goalContractSnapshot) }
+    ...(goalContractSnapshot !== undefined
+      ? { goalContractSnapshot }
       : {}),
-    ...(plan.goalContractRef !== undefined
-      ? { goalContractRef: structuredClone(plan.goalContractRef) }
+    ...(goalContractRef !== undefined
+      ? { goalContractRef }
       : {}),
     ...(plan.goalId !== undefined ? { goalId: plan.goalId } : {}),
     ...(plan.parentPlanRef !== undefined
-      ? { parentPlanRef: structuredClone(plan.parentPlanRef) }
+      ? { parentPlanRef: sanitizeGoalPlanRef(plan.parentPlanRef) }
       : {}),
     ...(plan.goalPlanVersion !== undefined
       ? { goalPlanVersion: plan.goalPlanVersion }
       : {}),
     ...(plan.trigger !== undefined
-      ? { trigger: structuredClone(plan.trigger) }
+      ? { trigger: sanitizeGoalPlanTrigger(plan.trigger) }
       : {}),
     ...(plan.criterionBindings !== undefined
-      ? { criterionBindings: structuredClone(plan.criterionBindings) }
+      ? {
+          criterionBindings: plan.criterionBindings.map(
+            sanitizePlanCriterionBinding,
+          ),
+        }
       : {}),
     ...(plan.goalContractIssues !== undefined
-      ? { goalContractIssues: structuredClone(plan.goalContractIssues) }
+      ? { goalContractIssues: sanitizeGoalContractIssues(plan.goalContractIssues) }
       : {}),
     ...(plan.supersededByPlanId !== undefined
       ? { supersededByPlanId: plan.supersededByPlanId }
@@ -233,7 +257,7 @@ function sanitizeRound(
     status: round.status,
     publicInputRefs: [...(round.publicInputRefs ?? [])],
     ...(round.output !== undefined
-      ? { output: sanitizeRoundOutput(round.output, options) }
+      ? { output: sanitizeRoundOutput(round.kind, round.output, options) }
       : {}),
     ...(round.error
       ? {
@@ -365,17 +389,21 @@ function sanitizePlanArtifact(
 }
 
 function sanitizeRoundOutput(
-  output: DebateRound["output"] & object,
+  kind: DebateRoundKind,
+  output: DebateRound["output"],
   options: { hasReviewDiagnostics: boolean; qualityBlocked: boolean },
 ): NonNullable<DebateRound["output"]> {
-  if ("claimLedger" in output && "markdown" in output) {
-    return sanitizePlanArtifact(output as PlanArtifact, options);
+  const candidate = (
+    output && typeof output === "object" ? output : {}
+  ) as NonNullable<DebateRound["output"]>;
+  if (kind === "direct" || kind === "c") {
+    return sanitizePlanArtifact(candidate as PlanArtifact, options);
   }
-  if ("issues" in output && "minorityOpinion" in output) {
-    const critique = output as DebateCritique;
+  if (kind === "b1" || kind === "b2") {
+    const critique = candidate as DebateCritique;
     return {
-      summary: critique.summary,
-      issues: critique.issues.map((issue) => ({
+      summary: critique.summary ?? "",
+      issues: (critique.issues ?? []).map((issue) => ({
         id: issue.id,
         target: issue.target,
         severity: issue.severity,
@@ -384,18 +412,22 @@ function sanitizeRoundOutput(
         requestedChange: issue.requestedChange,
         status: issue.status,
       })),
-      minorityOpinion: [...critique.minorityOpinion],
-      unresolvedRisks: critique.unresolvedRisks.map(sanitizeRisk),
+      minorityOpinion: [...(critique.minorityOpinion ?? [])],
+      unresolvedRisks: (critique.unresolvedRisks ?? []).map(sanitizeRisk),
       ...(critique.goalContractIssues !== undefined
-        ? { goalContractIssues: structuredClone(critique.goalContractIssues) }
+        ? {
+            goalContractIssues: sanitizeGoalContractIssues(
+              critique.goalContractIssues,
+            ),
+          }
         : {}),
     };
   }
-  if ("decisions" in output) {
-    const revised = output as RevisedPlanProposal;
+  if (kind === "a2") {
+    const revised = candidate as RevisedPlanProposal;
     return {
       ...sanitizePlanProposal(revised),
-      decisions: revised.decisions.map((decision) => ({
+      decisions: (revised.decisions ?? []).map((decision) => ({
         issueId: decision.issueId,
         decision: decision.decision,
         reason: decision.reason,
@@ -403,7 +435,7 @@ function sanitizeRoundOutput(
       })),
     };
   }
-  return sanitizePlanProposal(output as PlanProposal);
+  return sanitizePlanProposal(candidate as PlanProposal);
 }
 
 function sanitizePlanProposal(proposal: PlanProposal): PlanProposal {
@@ -424,9 +456,127 @@ function sanitizePlanProposal(proposal: PlanProposal): PlanProposal {
       ? { acceptanceChecks: proposal.acceptanceChecks.map(sanitizeAcceptanceCheck) }
       : {}),
     ...(proposal.goalContractIssues !== undefined
-      ? { goalContractIssues: structuredClone(proposal.goalContractIssues) }
+      ? {
+          goalContractIssues: sanitizeGoalContractIssues(
+            proposal.goalContractIssues,
+          ),
+        }
       : {}),
   };
+}
+
+function sanitizeGoalContractSnapshot(
+  snapshot: GoalContractSnapshot,
+): GoalContractSnapshot {
+  return {
+    schemaVersion: 1,
+    id: snapshot.id,
+    revision: snapshot.revision,
+    source: {
+      kind: snapshot.source.kind,
+      ...(snapshot.source.ref !== undefined ? { ref: snapshot.source.ref } : {}),
+      ...(snapshot.source.summary !== undefined
+        ? { summary: snapshot.source.summary }
+        : {}),
+    },
+    objective: snapshot.objective,
+    deliverables: [...snapshot.deliverables],
+    scope: {
+      in: [...snapshot.scope.in],
+      out: [...snapshot.scope.out],
+    },
+    assumptions: [...snapshot.assumptions],
+    constraints: snapshot.constraints.map((constraint) => ({
+      id: constraint.id,
+      dimension: constraint.dimension,
+      strength: constraint.strength,
+      description: constraint.description,
+    })),
+    successCriteria: snapshot.successCriteria.map((criterion) => ({
+      id: criterion.id,
+      description: criterion.description,
+    })),
+    stopPolicy: {
+      onSuccess: snapshot.stopPolicy.onSuccess,
+      onUserCancel: snapshot.stopPolicy.onUserCancel,
+      onExternalBlock: snapshot.stopPolicy.onExternalBlock,
+      onImpossible: snapshot.stopPolicy.onImpossible,
+      onSafetyBlock: snapshot.stopPolicy.onSafetyBlock,
+    },
+    riskPolicy: {
+      ordinaryOperations: snapshot.riskPolicy.ordinaryOperations,
+      highRiskOperations: snapshot.riskPolicy.highRiskOperations,
+      irreversibleOperations: snapshot.riskPolicy.irreversibleOperations,
+    },
+    createdAt: snapshot.createdAt,
+  };
+}
+
+function createSanitizedGoalContractRef(
+  snapshot: GoalContractSnapshot,
+): GoalContractRef {
+  return {
+    id: snapshot.id,
+    revision: snapshot.revision,
+    sha256: sha256Hex(
+      new TextEncoder().encode(canonicalizeGoalContract(snapshot)),
+    ),
+  };
+}
+
+function sanitizeGoalContractRef(reference: GoalContractRef): GoalContractRef {
+  return {
+    id: reference.id,
+    revision: reference.revision,
+    sha256: reference.sha256,
+  };
+}
+
+function sanitizeGoalPlanRef(reference: GoalPlanRef): GoalPlanRef {
+  return {
+    planId: reference.planId,
+    planRevision: reference.planRevision,
+    goalPlanVersion: reference.goalPlanVersion,
+    mode: reference.mode,
+    purpose: reference.purpose,
+    goalContractRef: sanitizeGoalContractRef(reference.goalContractRef),
+  };
+}
+
+function sanitizeGoalPlanTrigger(trigger: GoalPlanTrigger): GoalPlanTrigger {
+  return {
+    kind: trigger.kind,
+    summary: trigger.summary,
+    evidenceRefs: [...trigger.evidenceRefs],
+    at: trigger.at,
+  };
+}
+
+function sanitizePlanCriterionBinding(
+  binding: PlanCriterionBinding,
+): PlanCriterionBinding {
+  return {
+    criterionId: binding.criterionId,
+    milestoneIds: [...binding.milestoneIds],
+    checkIds: [...binding.checkIds],
+  };
+}
+
+function sanitizeGoalContractIssues(
+  issues: GoalContractIssue[],
+): GoalContractIssue[] {
+  return issues.map((issue, index) => {
+    const severity = issue.severity === "blocking" ? "blocking" : "warning";
+    return {
+      id: `goal_contract_issue_${index + 1}`,
+      severity,
+      description:
+        severity === "blocking"
+          ? "规划模型报告 GoalContract 存在阻断问题；原始诊断内容未保存。"
+          : "规划模型报告 GoalContract 存在警告；原始诊断内容未保存。",
+      evidenceRefs: [],
+    };
+  });
 }
 
 function sanitizeMilestone(milestone: PlanMilestone): PlanMilestone {
@@ -434,8 +584,8 @@ function sanitizeMilestone(milestone: PlanMilestone): PlanMilestone {
     id: milestone.id,
     title: milestone.title,
     description: milestone.description,
-    acceptanceCriteria: [...milestone.acceptanceCriteria],
-    dependencies: [...milestone.dependencies],
+    acceptanceCriteria: [...(milestone.acceptanceCriteria ?? [])],
+    dependencies: [...(milestone.dependencies ?? [])],
     ...(milestone.targetRefs !== undefined
       ? { targetRefs: [...milestone.targetRefs] }
       : {}),

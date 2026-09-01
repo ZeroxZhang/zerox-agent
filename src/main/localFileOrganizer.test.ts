@@ -17,12 +17,14 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyLocalFileOrganization,
   previewLocalFileOrganization,
   readLocalFileOrganizationTransaction,
   rollbackLocalFileOrganization,
+  runSafeFsHelper,
   verifyLocalFileOrganization,
 } from "./localFileOrganizer";
 
@@ -472,6 +474,186 @@ describe("local file organizer", () => {
     await expectPath(target, false);
   });
 
+  it("rejects success when reconciliation appears after an applied log mutation", async () => {
+    const transactionId = "tx_marker_before_success";
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const marker = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      `${transactionId}.reconciliation`,
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => transactionId,
+    });
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "log-before-success",
+      safeFsTestOnReady: (command) => {
+        if (command === "log-append") signalReady();
+      },
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready;
+    await writeFile(
+      marker,
+      '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n',
+      { encoding: "utf8", mode: 0o600 },
+    );
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(
+      /manual reconciliation/i,
+    );
+    await expectPath(source, false);
+    await expect(readFile(target, "utf8")).resolves.toBe("original");
+    await expect(
+      readLocalFileOrganizationTransaction(
+        path.join(
+          tempDir,
+          ".zerox-organize-transactions",
+          `${transactionId}.json`,
+        ),
+      ),
+    ).resolves.toMatchObject({ status: "reconciliation_required" });
+  });
+
+  it("rejects move success when reconciliation appears at the final boundary", async () => {
+    const transactionId = "tx_marker_before_move_success";
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const logPath = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      `${transactionId}.json`,
+    );
+    const marker = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      `${transactionId}.reconciliation`,
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => transactionId,
+    });
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "move-before-success",
+      safeFsTestOnReady: (command) => {
+        if (command === "move-into-category") signalReady();
+      },
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready;
+    await writeFile(
+      marker,
+      '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n',
+      { encoding: "utf8", mode: 0o600 },
+    );
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(
+      /manual reconciliation/i,
+    );
+    await expectPath(source, false);
+    await expect(readFile(target, "utf8")).resolves.toBe("original");
+    await expect(readLocalFileOrganizationTransaction(logPath)).resolves
+      .toMatchObject({ status: "reconciliation_required" });
+  });
+
+  it("does not publish reconciliation for a lock loser that mutated no bytes", async () => {
+    const transactionId = "tx_concurrent_append_lock";
+    await writeFile(path.join(tempDir, "photo.jpg"), "original", "utf8");
+    const transaction = await applyLocalFileOrganization(
+      await previewLocalFileOrganization(tempDir, {
+        createId: () => transactionId,
+      }),
+    );
+    const rootIdentity = transaction.rootIdentity!;
+    const logIdentity = transaction.logIdentity!;
+    const args = [
+      transaction.root,
+      rootIdentity.dev,
+      rootIdentity.ino,
+      rootIdentity.uid,
+      rootIdentity.mode,
+      transaction.id,
+      logIdentity.dev,
+      logIdentity.ino,
+      logIdentity.size,
+      logIdentity.uid,
+      logIdentity.sha256,
+    ];
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const body = `\n${JSON.stringify(transaction)}\n`;
+    const winner = runSafeFsHelper("log-append", args, body, {
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "log-before-success",
+      safeFsTestOnReady: signalReady,
+    });
+
+    await ready;
+    await expect(
+      runSafeFsHelper("log-append", args, body, {}),
+    ).rejects.toThrow(/already active/i);
+    await expect(
+      access(
+        path.join(
+          tempDir,
+          ".zerox-organize-transactions",
+          `${transactionId}.reconciliation`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(winner).resolves.toMatchObject({ ok: true });
+  });
+
+  it("rejects FIFO leaves without waiting for a writer", async () => {
+    const transactionId = "tx_fifo_leaf";
+    const source = path.join(tempDir, "photo.jpg");
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => transactionId,
+    });
+    await rm(source);
+    execFileSync("/usr/bin/mkfifo", [source]);
+
+    const result = await Promise.race([
+      applyLocalFileOrganization(preview).then(
+        () => ({ kind: "resolved" as const }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      ),
+      new Promise<{ kind: "timeout" }>((resolve) => {
+        setTimeout(() => resolve({ kind: "timeout" }), 1_000);
+      }),
+    ]);
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind === "rejected") {
+      expect(String(result.error)).toMatch(/regular file|identity/i);
+    }
+  });
+
   it("persists reconciliation state when a moved source is concurrently repopulated", async () => {
     const source = path.join(tempDir, "photo.jpg");
     const target = path.join(tempDir, "Images", "photo.jpg");
@@ -564,6 +746,30 @@ describe("local file organizer", () => {
       ".zerox-organize-transactions",
       "tx_invalid_marker.json",
     ))).rejects.toThrow(/reconciliation marker is invalid/i);
+  });
+
+  it("rejects a FIFO reconciliation marker without blocking journal recovery", async () => {
+    const transactionId = "tx_fifo_marker";
+    const directory = path.join(tempDir, ".zerox-organize-transactions");
+    const journal = path.join(directory, `${transactionId}.json`);
+    const marker = path.join(directory, `${transactionId}.reconciliation`);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    execFileSync("/usr/bin/mkfifo", [marker]);
+
+    const result = await Promise.race([
+      readLocalFileOrganizationTransaction(journal).then(
+        () => ({ kind: "resolved" as const }),
+        (error: unknown) => ({ kind: "rejected" as const, error }),
+      ),
+      new Promise<{ kind: "timeout" }>((resolve) => {
+        setTimeout(() => resolve({ kind: "timeout" }), 1_000);
+      }),
+    ]);
+
+    expect(result.kind).toBe("rejected");
+    if (result.kind === "rejected") {
+      expect(String(result.error)).toMatch(/marker is invalid|unexpected size/i);
+    }
   });
 
   it("rejects a category directory replaced by a symlink", async () => {
@@ -1283,6 +1489,47 @@ describe("local file organizer", () => {
         unmovedSources: [],
         sourceConflicts: [],
       });
+  });
+
+  it("rejects verification success when reconciliation appears at the final boundary", async () => {
+    const transactionId = "tx_marker_before_verify_success";
+    await writeFile(path.join(tempDir, "photo.jpg"), "original", "utf8");
+    const transaction = await applyLocalFileOrganization(
+      await previewLocalFileOrganization(tempDir, {
+        createId: () => transactionId,
+      }),
+    );
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const marker = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      `${transactionId}.reconciliation`,
+    );
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const outcome = verifyLocalFileOrganization(transaction, {
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "verify-before-success",
+      safeFsTestOnReady: (command) => {
+        if (command === "verify-into-category") signalReady();
+      },
+    });
+
+    await ready;
+    await writeFile(
+      marker,
+      '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n',
+      { encoding: "utf8", mode: 0o600 },
+    );
+
+    await expect(outcome).resolves.toMatchObject({
+      verified: false,
+      changedTargets: [target],
+    });
+    await expect(readLocalFileOrganizationTransaction(transaction.logPath))
+      .resolves.toMatchObject({ status: "reconciliation_required" });
   });
 
   it("fails closed when verification crosses an intermediate category symlink", async () => {

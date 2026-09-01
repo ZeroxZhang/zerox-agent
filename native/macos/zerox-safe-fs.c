@@ -20,6 +20,8 @@
 
 #define MAX_LOG_BYTES (4U * 1024U * 1024U)
 #define TRANSACTION_DIRECTORY ".zerox-organize-transactions"
+#define ZEROX_DIRECTORY ".zerox"
+#define PLAN_DIRECTORY "plans"
 #define RECONCILIATION_SUFFIX ".reconciliation"
 #define RECONCILIATION_BODY \
   "{\"schemaVersion\":1,\"kind\":\"local-file-organization-reconciliation-required\"}\n"
@@ -130,6 +132,32 @@ static int parse_file_identity(
     (uint64_t)identity->ino == ino &&
     (uint64_t)identity->size == size &&
     (uint64_t)identity->uid == uid;
+}
+
+static int parse_sha256_value(
+  const char *value,
+  char digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U]
+) {
+  size_t index;
+  if (
+    value == NULL
+    || strncmp(value, "sha256:", 7U) != 0
+    || strlen(value + 7U) != CC_SHA256_DIGEST_LENGTH * 2U
+  ) {
+    return 0;
+  }
+  for (index = 0U; index < CC_SHA256_DIGEST_LENGTH * 2U; index += 1U) {
+    const char character = value[7U + index];
+    if (!(
+      (character >= '0' && character <= '9')
+      || (character >= 'a' && character <= 'f')
+    )) {
+      return 0;
+    }
+  }
+  memcpy(digest, value + 7U, CC_SHA256_DIGEST_LENGTH * 2U);
+  digest[CC_SHA256_DIGEST_LENGTH * 2U] = '\0';
+  return 1;
 }
 
 static int parse_directory_identity(
@@ -427,6 +455,24 @@ static int verify_directories(
   return 0;
 }
 
+static int capture_directory_identity(
+  int directory_fd,
+  directory_identity *identity
+) {
+  struct stat stats;
+  if (fstat(directory_fd, &stats) != 0) {
+    return fail_errno("cannot inspect directory capability");
+  }
+  if (!S_ISDIR(stats.st_mode) || !safe_directory_mode(stats.st_mode)) {
+    return fail_message("directory capability is unsafe");
+  }
+  identity->dev = stats.st_dev;
+  identity->ino = stats.st_ino;
+  identity->uid = stats.st_uid;
+  identity->mode = stats.st_mode & 0777;
+  return 0;
+}
+
 static int verify_opened_regular_path_with_checkpoint(
   int directory_fd,
   const char *directory_path,
@@ -681,7 +727,7 @@ static int record_reconciliation_marker_at(
   marker_fd = openat(
     log_fd,
     marker_name,
-    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+    O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
   );
   if (marker_fd >= 0) {
     if (validate_reconciliation_marker(log_fd, marker_name, marker_fd) != 0) {
@@ -781,7 +827,7 @@ static int record_reconciliation_marker_at(
   marker_fd = openat(
     log_fd,
     marker_name,
-    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+    O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
   );
   if (marker_fd < 0) {
     return fail_errno("cannot open published reconciliation marker");
@@ -802,9 +848,15 @@ static int record_reconciliation_marker(
   int root_fd,
   const char *root_path,
   const directory_identity *root_identity,
+  int transaction_fd,
   const char *transaction_id
 ) {
   unsigned int attempt;
+  if (transaction_fd < 0 || lock_transaction_file(transaction_fd) != 0) {
+    return fail_message(
+      "cannot publish reconciliation marker without transaction authority"
+    );
+  }
   for (attempt = 0U; attempt < 3U; attempt += 1U) {
     int canonical_log_fd = -1;
     int result;
@@ -932,7 +984,7 @@ static int move_between_directories(
   opened_source_fd = openat(
     source_fd,
     source_name,
-    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+    O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
   );
   if (opened_source_fd < 0) {
     return fail_errno("cannot open source file capability");
@@ -998,6 +1050,7 @@ static int move_between_directories(
       root_fd,
       root_path,
       root_identity,
+      journal_fd,
       transaction_id
     ) != 0) {
       result = fail_message(
@@ -1149,6 +1202,7 @@ static int move_between_directories(
       root_fd,
       root_path,
       root_identity,
+      journal_fd,
       transaction_id
     ) != 0) {
       result = fail_message(
@@ -1165,6 +1219,7 @@ static int move_between_directories(
     root_fd,
     root_path,
     root_identity,
+    journal_fd,
     transaction_id
   ) != 0) {
     result = fail_message(
@@ -1239,7 +1294,11 @@ static int run_move(int argc, char **argv, int reverse) {
     &log_mode
   );
   if (result != 0) goto done;
-  journal_fd = openat(log_fd, journal_name, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+  journal_fd = openat(
+    log_fd,
+    journal_name,
+    O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
+  );
   if (journal_fd < 0) {
     result = fail_errno("cannot open transaction journal authority");
     goto done;
@@ -1320,6 +1379,10 @@ static int run_move(int argc, char **argv, int reverse) {
         &journal_identity,
         argv[15]
       );
+  if (result == 0) {
+    maybe_test_checkpoint("move-before-success");
+    result = require_no_reconciliation_marker(log_fd, argv[15]);
+  }
 done:
   if (journal_fd >= 0) close(journal_fd);
   if (log_fd >= 0) close(log_fd);
@@ -1394,7 +1457,11 @@ static int run_verify_into_category(int argc, char **argv) {
     &log_mode
   );
   if (result != 0) goto done;
-  journal_fd = openat(log_fd, journal_name, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+  journal_fd = openat(
+    log_fd,
+    journal_name,
+    O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
+  );
   if (journal_fd < 0) {
     result = fail_errno("cannot open verify journal authority");
     goto done;
@@ -1403,7 +1470,11 @@ static int run_verify_into_category(int argc, char **argv) {
   if (result != 0) goto done;
   result = require_no_reconciliation_marker(log_fd, argv[15]);
   if (result != 0) goto done;
-  target_fd = openat(category_fd, argv[9], O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  target_fd = openat(
+    category_fd,
+    argv[9],
+    O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
+  );
   if (target_fd < 0) {
     result = fail_errno("cannot open verified target capability");
     goto done;
@@ -1465,6 +1536,10 @@ static int run_verify_into_category(int argc, char **argv) {
     0,
     0
   );
+  if (result == 0) {
+    maybe_test_checkpoint("verify-before-success");
+    result = require_no_reconciliation_marker(log_fd, argv[15]);
+  }
 done:
   if (target_fd >= 0) close(target_fd);
   if (journal_fd >= 0) close(journal_fd);
@@ -1576,6 +1651,7 @@ static int run_log(int argc, char **argv, int append) {
   int result = 0;
   int saved_errno;
   int mutation_started = 0;
+  int transaction_lock_acquired = 0;
   char log_path[MAXPATHLEN];
   char final_name[NAME_MAX + 1];
   char *body = NULL;
@@ -1628,7 +1704,7 @@ static int run_log(int argc, char **argv, int append) {
   output_fd = openat(
     log_fd,
     final_name,
-    O_RDWR | O_CLOEXEC | O_NOFOLLOW |
+    O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW |
       (append ? O_APPEND : O_CREAT | O_EXCL),
     0600
   );
@@ -1641,6 +1717,7 @@ static int run_log(int argc, char **argv, int append) {
   if (!append) mutation_started = 1;
   result = lock_transaction_file(output_fd);
   if (result != 0) goto done;
+  transaction_lock_acquired = 1;
   result = require_no_reconciliation_marker(log_fd, argv[7]);
   if (result != 0) goto done;
   if (fstat(output_fd, &opened_stats) != 0) {
@@ -1750,6 +1827,9 @@ static int run_log(int argc, char **argv, int append) {
     1
   );
   if (result != 0) goto done;
+  maybe_test_checkpoint("log-before-success");
+  result = require_no_reconciliation_marker(log_fd, argv[7]);
+  if (result != 0) goto done;
   print_identity(&final_identity);
   if (close(output_fd) != 0) {
     output_fd = -1;
@@ -1759,11 +1839,16 @@ static int run_log(int argc, char **argv, int append) {
   output_fd = -1;
 done:
   saved_errno = errno;
-  if (result != 0 && (mutation_started || append) && log_fd >= 0) {
+  if (
+    result != 0
+    && (mutation_started || (append && transaction_lock_acquired))
+    && log_fd >= 0
+  ) {
     if (record_reconciliation_marker(
       root_fd,
       argv[2],
       &root_identity,
+      output_fd,
       argv[7]
     ) != 0) {
       (void)fail_message(
@@ -1776,6 +1861,544 @@ done:
   if (root_fd >= 0) close(root_fd);
   free(body);
   errno = saved_errno;
+  return result;
+}
+
+static int open_plan_directories(
+  int root_fd,
+  const char *root_path,
+  const directory_identity *root_identity,
+  int allow_create,
+  int *zerox_fd,
+  char zerox_path[MAXPATHLEN],
+  directory_identity *zerox_identity,
+  mode_t *zerox_mode,
+  int *plans_fd,
+  char plans_path[MAXPATHLEN],
+  mode_t *plans_mode
+) {
+  int result = open_child_directory(
+    root_fd,
+    root_path,
+    ZEROX_DIRECTORY,
+    allow_create,
+    zerox_fd,
+    zerox_path,
+    zerox_mode
+  );
+  if (result != 0) return result;
+  result = verify_directories(
+    root_fd,
+    root_path,
+    root_identity,
+    *zerox_fd,
+    zerox_path,
+    *zerox_mode
+  );
+  if (result != 0) return result;
+  result = capture_directory_identity(*zerox_fd, zerox_identity);
+  if (result != 0) return result;
+  return open_child_directory(
+    *zerox_fd,
+    zerox_path,
+    PLAN_DIRECTORY,
+    allow_create,
+    plans_fd,
+    plans_path,
+    plans_mode
+  );
+}
+
+static int verify_plan_directories(
+  int root_fd,
+  const char *root_path,
+  const directory_identity *root_identity,
+  int zerox_fd,
+  const char *zerox_path,
+  const directory_identity *zerox_identity,
+  mode_t zerox_mode,
+  int plans_fd,
+  const char *plans_path,
+  mode_t plans_mode
+) {
+  int result = verify_directories(
+    root_fd,
+    root_path,
+    root_identity,
+    zerox_fd,
+    zerox_path,
+    zerox_mode
+  );
+  if (result != 0) return result;
+  return verify_directories(
+    zerox_fd,
+    zerox_path,
+    zerox_identity,
+    plans_fd,
+    plans_path,
+    plans_mode
+  );
+}
+
+static int open_expected_projection(
+  int plans_fd,
+  const char *plans_path,
+  const char *final_name,
+  const char *expected_value,
+  uid_t expected_uid,
+  int *existing_fd,
+  file_identity *existing_identity,
+  int *expect_absent
+) {
+  struct stat stats;
+  *expect_absent = strcmp(expected_value, "absent") == 0;
+  if (*expect_absent) {
+    if (fstatat(plans_fd, final_name, &stats, AT_SYMLINK_NOFOLLOW) == 0) {
+      return fail_message("plan projection appeared without prior authority");
+    }
+    return errno == ENOENT
+      ? 0
+      : fail_errno("cannot inspect plan projection absence");
+  }
+  if (!parse_sha256_value(expected_value, existing_identity->sha256)) {
+    return fail_message("invalid expected plan projection digest");
+  }
+  *existing_fd = openat(
+    plans_fd,
+    final_name,
+    O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
+  );
+  if (*existing_fd < 0) {
+    return fail_errno("cannot open expected plan projection capability");
+  }
+  if (fstat(*existing_fd, &stats) != 0) {
+    return fail_errno("cannot inspect expected plan projection");
+  }
+  if (
+    !S_ISREG(stats.st_mode)
+    || stats.st_nlink != 1
+    || (stats.st_mode & 0777) != 0600
+    || stats.st_uid != expected_uid
+  ) {
+    return fail_message("expected plan projection metadata is unsafe");
+  }
+  existing_identity->dev = stats.st_dev;
+  existing_identity->ino = stats.st_ino;
+  existing_identity->size = stats.st_size;
+  existing_identity->uid = stats.st_uid;
+  if (!digest_matches_with_checkpoint(*existing_fd, existing_identity, NULL)) {
+    return fail_message("expected plan projection content authority changed");
+  }
+  return verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    final_name,
+    *existing_fd,
+    existing_identity,
+    1,
+    1
+  );
+}
+
+static int run_projection_verify(int argc, char **argv) {
+  directory_identity root_identity;
+  directory_identity zerox_identity;
+  file_identity projection_identity;
+  struct stat projection_stats;
+  int root_fd = -1;
+  int zerox_fd = -1;
+  int plans_fd = -1;
+  int projection_fd = -1;
+  int result = 0;
+  char zerox_path[MAXPATHLEN];
+  char plans_path[MAXPATHLEN];
+  char final_name[NAME_MAX + 1];
+  mode_t zerox_mode = 0;
+  mode_t plans_mode = 0;
+  int written;
+  if (argc != 9) return fail_message("invalid projection verify arguments");
+  if (!is_single_component(argv[7])) return fail_message("invalid plan id");
+  if (!parse_directory_identity(argv[3], argv[4], argv[5], argv[6], &root_identity)) {
+    return fail_message("invalid projection root identity");
+  }
+  if (!parse_sha256_value(argv[8], projection_identity.sha256)) {
+    return fail_message("invalid plan projection digest");
+  }
+  written = snprintf(final_name, sizeof(final_name), "%s.md", argv[7]);
+  if (written < 0 || (size_t)written >= sizeof(final_name)) {
+    return fail_message("plan projection name is too long");
+  }
+  result = open_root(argv[2], &root_identity, &root_fd);
+  if (result != 0) goto done;
+  result = open_plan_directories(
+    root_fd,
+    argv[2],
+    &root_identity,
+    0,
+    &zerox_fd,
+    zerox_path,
+    &zerox_identity,
+    &zerox_mode,
+    &plans_fd,
+    plans_path,
+    &plans_mode
+  );
+  if (result != 0) goto done;
+  projection_fd = openat(
+    plans_fd,
+    final_name,
+    O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
+  );
+  if (projection_fd < 0) {
+    result = fail_errno("cannot open plan projection capability");
+    goto done;
+  }
+  if (fstat(projection_fd, &projection_stats) != 0) {
+    result = fail_errno("cannot inspect plan projection capability");
+    goto done;
+  }
+  if (
+    !S_ISREG(projection_stats.st_mode)
+    || projection_stats.st_nlink != 1
+    || (projection_stats.st_mode & 0777) != 0600
+    || projection_stats.st_uid != root_identity.uid
+  ) {
+    result = fail_message("plan projection metadata is unsafe");
+    goto done;
+  }
+  projection_identity.dev = projection_stats.st_dev;
+  projection_identity.ino = projection_stats.st_ino;
+  projection_identity.size = projection_stats.st_size;
+  projection_identity.uid = projection_stats.st_uid;
+  if (!digest_matches_with_checkpoint(projection_fd, &projection_identity, NULL)) {
+    result = fail_message("plan projection digest changed");
+    goto done;
+  }
+  result = verify_plan_directories(
+    root_fd,
+    argv[2],
+    &root_identity,
+    zerox_fd,
+    zerox_path,
+    &zerox_identity,
+    zerox_mode,
+    plans_fd,
+    plans_path,
+    plans_mode
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    final_name,
+    projection_fd,
+    &projection_identity,
+    1,
+    1
+  );
+done:
+  if (projection_fd >= 0) close(projection_fd);
+  if (plans_fd >= 0) close(plans_fd);
+  if (zerox_fd >= 0) close(zerox_fd);
+  if (root_fd >= 0) close(root_fd);
+  if (result == 0) puts("{\"ok\":true}");
+  return result;
+}
+
+static int run_projection_write(int argc, char **argv) {
+  directory_identity root_identity;
+  directory_identity zerox_identity;
+  file_identity existing_identity;
+  file_identity output_identity;
+  struct stat output_stats;
+  int root_fd = -1;
+  int zerox_fd = -1;
+  int plans_fd = -1;
+  int existing_fd = -1;
+  int output_fd = -1;
+  int result = 0;
+  int expect_absent = 0;
+  int published = 0;
+  int swapped = 0;
+  char zerox_path[MAXPATHLEN];
+  char plans_path[MAXPATHLEN];
+  char final_name[NAME_MAX + 1];
+  char temporary_name[NAME_MAX + 1];
+  char *body = NULL;
+  size_t body_length = 0U;
+  mode_t zerox_mode = 0;
+  mode_t plans_mode = 0;
+  unsigned int attempt;
+  int written;
+  if (argc != 9) return fail_message("invalid projection write arguments");
+  if (!is_single_component(argv[7])) return fail_message("invalid plan id");
+  if (!parse_directory_identity(argv[3], argv[4], argv[5], argv[6], &root_identity)) {
+    return fail_message("invalid projection root identity");
+  }
+  written = snprintf(final_name, sizeof(final_name), "%s.md", argv[7]);
+  if (written < 0 || (size_t)written >= sizeof(final_name)) {
+    return fail_message("plan projection name is too long");
+  }
+  result = read_stdin_body(&body, &body_length);
+  if (result != 0) goto done;
+  result = open_root(argv[2], &root_identity, &root_fd);
+  if (result != 0) goto done;
+  result = open_plan_directories(
+    root_fd,
+    argv[2],
+    &root_identity,
+    1,
+    &zerox_fd,
+    zerox_path,
+    &zerox_identity,
+    &zerox_mode,
+    &plans_fd,
+    plans_path,
+    &plans_mode
+  );
+  if (result != 0) goto done;
+  maybe_test_checkpoint("projection-directories-opened");
+  result = verify_plan_directories(
+    root_fd,
+    argv[2],
+    &root_identity,
+    zerox_fd,
+    zerox_path,
+    &zerox_identity,
+    zerox_mode,
+    plans_fd,
+    plans_path,
+    plans_mode
+  );
+  if (result != 0) goto done;
+  result = open_expected_projection(
+    plans_fd,
+    plans_path,
+    final_name,
+    argv[8],
+    root_identity.uid,
+    &existing_fd,
+    &existing_identity,
+    &expect_absent
+  );
+  if (result != 0) goto done;
+  for (attempt = 0U; attempt < 16U; attempt += 1U) {
+    written = snprintf(
+      temporary_name,
+      sizeof(temporary_name),
+      ".zerox-plan-%ld-%08x.tmp",
+      (long)getpid(),
+      arc4random()
+    );
+    if (written < 0 || (size_t)written >= sizeof(temporary_name)) {
+      result = fail_message("plan projection temporary name is too long");
+      goto done;
+    }
+    output_fd = openat(
+      plans_fd,
+      temporary_name,
+      O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW | O_CREAT | O_EXCL,
+      0600
+    );
+    if (output_fd >= 0) break;
+    if (errno != EEXIST) {
+      result = fail_errno("cannot create plan projection temporary file");
+      goto done;
+    }
+  }
+  if (output_fd < 0) {
+    result = fail_message("cannot allocate plan projection temporary file");
+    goto done;
+  }
+  result = write_all(output_fd, body, body_length);
+  if (result != 0 || fsync(output_fd) != 0) {
+    if (result == 0) result = fail_errno("cannot synchronize plan projection");
+    goto done;
+  }
+  if (fstat(output_fd, &output_stats) != 0) {
+    result = fail_errno("cannot inspect plan projection temporary file");
+    goto done;
+  }
+  if (
+    !S_ISREG(output_stats.st_mode)
+    || output_stats.st_nlink != 1
+    || (output_stats.st_mode & 0777) != 0600
+    || output_stats.st_uid != root_identity.uid
+    || capture_file_identity(output_fd, &output_stats, &output_identity) != 0
+  ) {
+    result = fail_message("plan projection temporary authority is unsafe");
+    goto done;
+  }
+  maybe_test_checkpoint("projection-before-publish");
+  result = verify_plan_directories(
+    root_fd,
+    argv[2],
+    &root_identity,
+    zerox_fd,
+    zerox_path,
+    &zerox_identity,
+    zerox_mode,
+    plans_fd,
+    plans_path,
+    plans_mode
+  );
+  if (result != 0) goto done;
+  if (expect_absent) {
+    struct stat unexpected;
+    if (fstatat(plans_fd, final_name, &unexpected, AT_SYMLINK_NOFOLLOW) == 0) {
+      result = fail_message("plan projection appeared before publication");
+      goto done;
+    }
+    if (errno != ENOENT) {
+      result = fail_errno("cannot verify plan projection publication authority");
+      goto done;
+    }
+    if (renameatx_np(
+      plans_fd,
+      temporary_name,
+      plans_fd,
+      final_name,
+      RENAME_EXCL
+    ) != 0) {
+      result = fail_errno("cannot publish new plan projection");
+      goto done;
+    }
+  } else {
+    result = verify_opened_regular_path(
+      plans_fd,
+      plans_path,
+      final_name,
+      existing_fd,
+      &existing_identity,
+      1,
+      1
+    );
+    if (result != 0) goto done;
+    if (renameatx_np(
+      plans_fd,
+      temporary_name,
+      plans_fd,
+      final_name,
+      RENAME_SWAP
+    ) != 0) {
+      result = fail_errno("cannot atomically replace plan projection");
+      goto done;
+    }
+    swapped = 1;
+  }
+  published = 1;
+  maybe_test_checkpoint("projection-published");
+  result = verify_plan_directories(
+    root_fd,
+    argv[2],
+    &root_identity,
+    zerox_fd,
+    zerox_path,
+    &zerox_identity,
+    zerox_mode,
+    plans_fd,
+    plans_path,
+    plans_mode
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    final_name,
+    output_fd,
+    &output_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
+  if (swapped) {
+    result = verify_opened_regular_path(
+      plans_fd,
+      plans_path,
+      temporary_name,
+      existing_fd,
+      &existing_identity,
+      1,
+      1
+    );
+    if (result != 0) goto done;
+  }
+  if (
+    fsync(plans_fd) != 0
+    || fsync(zerox_fd) != 0
+    || fsync(root_fd) != 0
+  ) {
+    result = fail_errno("cannot synchronize plan projection directories");
+    goto done;
+  }
+  maybe_test_checkpoint("projection-before-success");
+  result = verify_plan_directories(
+    root_fd,
+    argv[2],
+    &root_identity,
+    zerox_fd,
+    zerox_path,
+    &zerox_identity,
+    zerox_mode,
+    plans_fd,
+    plans_path,
+    plans_mode
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    final_name,
+    output_fd,
+    &output_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
+  if (swapped && unlinkat(plans_fd, temporary_name, 0) != 0) {
+    result = fail_errno("cannot retire replaced plan projection");
+    goto done;
+  }
+  if (swapped && fsync(plans_fd) != 0) {
+    result = fail_errno("cannot synchronize replaced plan projection retirement");
+    goto done;
+  }
+  print_identity(&output_identity);
+done:
+  if (result != 0 && swapped) {
+    if (renameatx_np(
+      plans_fd,
+      temporary_name,
+      plans_fd,
+      final_name,
+      RENAME_SWAP
+    ) == 0) {
+      published = 0;
+    }
+  }
+  if (result != 0 && published && expect_absent) {
+    if (verify_opened_regular_path(
+      plans_fd,
+      plans_path,
+      final_name,
+      output_fd,
+      &output_identity,
+      1,
+      1
+    ) == 0) {
+      (void)unlinkat(plans_fd, final_name, 0);
+      published = 0;
+    }
+  }
+  if (!published && plans_fd >= 0 && output_fd >= 0) {
+    (void)unlinkat(plans_fd, temporary_name, 0);
+  }
+  if (output_fd >= 0) close(output_fd);
+  if (existing_fd >= 0) close(existing_fd);
+  if (plans_fd >= 0) close(plans_fd);
+  if (zerox_fd >= 0) close(zerox_fd);
+  if (root_fd >= 0) close(root_fd);
+  free(body);
   return result;
 }
 
@@ -1795,6 +2418,12 @@ int main(int argc, char **argv) {
   }
   if (strcmp(argv[1], "log-append") == 0) {
     return run_log(argc, argv, 1);
+  }
+  if (strcmp(argv[1], "projection-write") == 0) {
+    return run_projection_write(argc, argv);
+  }
+  if (strcmp(argv[1], "projection-verify") == 0) {
+    return run_projection_verify(argc, argv);
   }
   return fail_message("unknown command");
 }
