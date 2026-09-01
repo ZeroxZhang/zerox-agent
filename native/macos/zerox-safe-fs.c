@@ -422,6 +422,11 @@ static int test_stage_selected(const char *stage) {
     : strcmp(configured, stage) == 0;
 }
 
+static int test_failure_selected(const char *stage) {
+  const char *configured = getenv("ZEROX_SAFE_FS_TEST_FAIL_STAGE");
+  return configured != NULL && strcmp(configured, stage) == 0;
+}
+
 static void maybe_test_checkpoint(const char *stage) {
   const char *value = getenv("ZEROX_SAFE_FS_TEST_DELAY_MS");
   uint64_t delay_ms = 0;
@@ -2439,6 +2444,19 @@ static int run_projection_write(int argc, char **argv) {
           );
           goto done;
         }
+        /*
+         * Seeing next at the canonical leaf is not by itself proof that the
+         * prior exchange is durable. Synchronize the current namespace before
+         * destroying any non-empty retired authority; a failed fsync must
+         * always leave those bytes intact for another recovery attempt.
+         */
+        if (fsync(plans_fd) != 0) {
+          result = fail_errno(
+            "cannot synchronize recovered plan projection exchange"
+          );
+          goto done;
+        }
+        maybe_test_checkpoint("projection-recovery-durable");
         result = scrub_projection_transaction(
           plans_fd,
           plans_path,
@@ -2636,6 +2654,10 @@ projection_prepared:
      * had already been truncated. This fsync uses the capability-bound plans
      * descriptor and intentionally precedes every pathname postflight.
      */
+    if (test_failure_selected("projection-swap-sync")) {
+      result = fail_message("cannot synchronize plan projection exchange");
+      goto done;
+    }
     if (fsync(plans_fd) != 0) {
       result = fail_errno("cannot synchronize plan projection exchange");
       goto done;

@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import type { SkillDiscoveryResult } from "../../shared/skills";
+import type { PublicSkillDiscoveryResult } from "../../shared/skills";
 
-const emptySkillResult: SkillDiscoveryResult = {
+const emptySkillResult: PublicSkillDiscoveryResult = {
   skills: [],
   errors: [],
 };
 
 export function SkillLibraryPanel() {
-  const [result, setResult] = useState<SkillDiscoveryResult>(emptySkillResult);
+  const [result, setResult] = useState<PublicSkillDiscoveryResult>(
+    emptySkillResult,
+  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

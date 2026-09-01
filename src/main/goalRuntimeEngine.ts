@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   AcceptanceRepairDirective,
   Goal,
+  GoalSelectedSkill,
   Milestone,
 } from "../shared/agentGoal";
 import type { AgentRunEvent, AgentRunRecord } from "../shared/agentRuns";
@@ -100,6 +101,7 @@ export function createGoalRuntimeEngine(options: {
   tokenBudget?: number;
   maxMode?: MaxMode;
   getMaxMode?: (goal: Goal) => Promise<MaxMode>;
+  resolveSelectedSkill?: (goal: Goal) => Promise<GoalSelectedSkill | undefined>;
   onProgress?: (event: GoalProgressEvent) => void;
   onEvent?: (event: AgentRunEvent) => void;
   productionKernelDriver?: ProductionKernelDriver;
@@ -271,6 +273,13 @@ export function createGoalRuntimeEngine(options: {
 
   return {
     async runMilestone(goal, milestone, runOptions) {
+      if (options.resolveSelectedSkill) {
+        const selectedSkill = await options.resolveSelectedSkill(goal);
+        goal = {
+          ...goal,
+          ...(selectedSkill ? { selectedSkill } : { selectedSkill: undefined }),
+        };
+      }
       const startedAt = now();
       const runId = runOptions?.runId ?? createId();
       const runSignal = runOptions?.signal;

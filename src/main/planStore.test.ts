@@ -1184,6 +1184,28 @@ describe("plan store parity", () => {
         sourceMessage: "VICTIM",
       });
 
+      const older = await sqlite.create({
+        ...createRecord(),
+        id: "plan-envelope-older",
+        sessionId: "session-envelope-order",
+        updatedAt: "2026-07-30T01:00:00.000Z",
+      });
+      const newer = await sqlite.create({
+        ...createRecord(),
+        id: "plan-envelope-newer",
+        sessionId: "session-envelope-order",
+        updatedAt: "2026-07-30T02:00:00.000Z",
+      });
+      storage.db.prepare(
+        "UPDATE plan_records SET updated_at = ? WHERE id = ?",
+      ).run("9999-12-31T23:59:59.999Z", older.id);
+      await expect(
+        sqlite.getLatestBySession("session-envelope-order"),
+      ).resolves.toMatchObject({ id: newer.id });
+      await expect(
+        sqlite.listBySession("session-envelope-order"),
+      ).resolves.toEqual([expect.objectContaining({ id: newer.id })]);
+
       storage.db.prepare(
         "UPDATE plan_records SET session_id = ? WHERE id = ?",
       ).run("session-envelope-mismatch", victim.id);

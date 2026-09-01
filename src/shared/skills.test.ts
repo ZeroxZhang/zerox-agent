@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  createPublicSkillDiscoveryResult,
   createPublicSkillSnapshot,
+  createPublicSkillSnapshotSha256,
   parseSkillMarkdown,
   SkillManifestError,
 } from "./skills";
@@ -296,6 +298,76 @@ mcpServers:
     expect(JSON.stringify(runtimeSkill)).toContain("STDIO_SECRET_DO_NOT_PERSIST");
     expect(JSON.stringify(runtimeSkill)).toContain("REMOTE_SECRET_DO_NOT_PERSIST");
     expect(JSON.stringify(runtimeSkill)).toContain("ARGS_SECRET_DO_NOT_PERSIST");
+
+    const samePublicSkill = structuredClone(runtimeSkill);
+    const stdio = samePublicSkill.manifest.mcpServers?.[0];
+    const remote = samePublicSkill.manifest.mcpServers?.[1];
+    if (stdio?.transport === "stdio") {
+      stdio.args = ["server.js", "--token", "DIFFERENT_PRIVATE_ARGS"];
+      stdio.env = { PRIVATE_TOKEN: "DIFFERENT_PRIVATE_ENV" };
+    }
+    if (remote?.transport === "http") {
+      remote.url = "https://different.example.test/private";
+      remote.headers = { authorization: "DIFFERENT_PRIVATE_HEADER" };
+    }
+    expect(createPublicSkillSnapshotSha256(samePublicSkill)).toBe(
+      createPublicSkillSnapshotSha256(runtimeSkill),
+    );
+  });
+
+  it("keeps public discovery types and parser errors content-free", () => {
+    const parsed = parseSkillMarkdown(`---
+name: public-contract
+description: Verify public discovery contracts.
+execution:
+  mode: agent
+mcpServers:
+  - name: local-private
+    command: node
+    args: ["--token", "PUBLIC_DISCOVERY_ARGS_SECRET"]
+    env:
+      TOKEN: PUBLIC_DISCOVERY_ENV_SECRET
+  - name: remote-private
+    transport: http
+    url: https://mcp.example.test/rpc?token=PUBLIC_DISCOVERY_URL_SECRET
+    headers:
+      authorization: PUBLIC_DISCOVERY_HEADER_SECRET
+---
+
+# Public contract
+`);
+    const result = createPublicSkillDiscoveryResult({
+      skills: [{
+        ...parsed,
+        rootDir: "/tmp/public-contract",
+        skillFile: "/tmp/public-contract/SKILL.md",
+      }],
+      errors: [{
+        folderName: "PUBLIC_DISCOVERY_FOLDER_SECRET",
+        message:
+          'YAML error near args: ["--token", "PUBLIC_DISCOVERY_ERROR_SECRET"',
+      }],
+    });
+
+    expect(result.errors).toEqual([{
+      folderName: "invalid-skill-1",
+      message: "技能清单解析失败。",
+    }]);
+    expect(JSON.stringify(result)).not.toMatch(/PUBLIC_DISCOVERY_.*_SECRET/);
+    const local = result.skills[0]?.manifest.mcpServers?.[0];
+    if (local?.transport === "stdio") {
+      // @ts-expect-error Public stdio DTOs must never expose runtime arguments.
+      void local.args;
+      // @ts-expect-error Public stdio DTOs must never expose runtime env.
+      void local.env;
+    }
+    const remote = result.skills[0]?.manifest.mcpServers?.[1];
+    if (remote?.transport === "http") {
+      // @ts-expect-error Public remote DTOs must never expose endpoint URLs.
+      void remote.url;
+      // @ts-expect-error Public remote DTOs must never expose request headers.
+      void remote.headers;
+    }
   });
 
   it.each([

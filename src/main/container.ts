@@ -221,8 +221,10 @@ import {
   upgradeGoalAcceptanceProtocol,
   type Goal,
   type GoalBudget,
+  type GoalSelectedSkill,
   type SuccessCriterion,
 } from "../shared/agentGoal";
+import { verifySelectedSkillAuthority } from "./selectedSkillAuthority";
 import type { GoalReviewPolicy } from "../shared/agentGoalReview";
 import { compileAgentTaskContract } from "../shared/agentTaskContract";
 import type {
@@ -3284,6 +3286,38 @@ export function createAppContainer(options: {
           },
           getMaxMode: async (goal) =>
             createMaxMode(await getGoalProvider(goal)),
+          resolveSelectedSkill: async (goal) => {
+            const skillAuthority = verifySelectedSkillAuthority({
+              selectedSkill: goal.selectedSkill,
+              discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+            });
+            if (!skillAuthority.ok) {
+              throw new Error(
+                skillAuthority.reason === "missing"
+                  ? "Goal 绑定的 Skill 已不存在，请重新规划。"
+                  : "Goal 绑定的 Skill 快照已漂移，请重新规划。",
+              );
+            }
+            if (skillAuthority.selectedSkill) {
+              const runContext = await agentWorkspaceService().resolveRunContext({
+                workspaceId: goal.workspaceId,
+                ...(goal.chatSessionId
+                  ? { sessionId: goal.chatSessionId }
+                  : {}),
+              });
+              const inputResolution = resolveSkillInput({
+                skill: skillAuthority.selectedSkill,
+                values: goal.selectedSkillInputValues,
+                runContext,
+              });
+              if (inputResolution.status !== "complete") {
+                throw new Error(
+                  "Goal 绑定的 Skill 输入缺失或已失效，请重新规划。",
+                );
+              }
+            }
+            return skillAuthority.selectedSkill;
+          },
           onEvent(event) {
             for (const window of BrowserWindow.getAllWindows()) {
               if (!window.isDestroyed()) {
@@ -4358,6 +4392,7 @@ export function createAppContainer(options: {
           plan,
         };
       }
+      let canonicalSelectedSkill: GoalSelectedSkill | undefined;
       if ((plan.schemaVersion ?? 1) >= 2) {
         if (!plan.taskProfile || !plan.planningBrief || !plan.qualityReport) {
           return {
@@ -4463,31 +4498,25 @@ export function createAppContainer(options: {
           };
         }
         if (plan.selectedSkill && plan.skillDecision?.snapshotSha256) {
-          const selectedSkillName = plan.selectedSkill.manifest.name;
-          const currentSkill = (await discoverSkills({ skillsDir })).skills.find(
-            (skill) => skill.manifest.name === selectedSkillName,
-          );
-          if (!currentSkill) {
+          const skillAuthority = verifySelectedSkillAuthority({
+            selectedSkill: plan.selectedSkill,
+            snapshotSha256: plan.skillDecision.snapshotSha256,
+            requireDigest: true,
+            discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+          });
+          if (!skillAuthority.ok) {
             return {
               ok: false,
-              message: "计划绑定的 Skill 已不存在，请重新规划后再确认。",
+              message:
+                skillAuthority.reason === "missing"
+                  ? "计划绑定的 Skill 已不存在，请重新规划后再确认。"
+                  : "计划绑定的 Skill 快照已漂移，请重新规划后再确认。",
               plan,
             };
           }
-          const currentSkillHash = createHash("sha256")
-            .update(
-              JSON.stringify(currentSkill.manifest) + currentSkill.body,
-            )
-            .digest("hex");
-          if (currentSkillHash !== plan.skillDecision.snapshotSha256) {
-            return {
-              ok: false,
-              message: "计划绑定的 Skill 快照已漂移，请重新规划后再确认。",
-              plan,
-            };
-          }
+          canonicalSelectedSkill = skillAuthority.selectedSkill;
           const inputResolution = resolveSkillInput({
-            skill: plan.selectedSkill,
+            skill: canonicalSelectedSkill!,
             values: plan.selectedSkillInputValues,
             runContext: plan.workspaceRoot
               ? {
@@ -4515,6 +4544,23 @@ export function createAppContainer(options: {
             };
           }
         }
+      }
+      if ((plan.schemaVersion ?? 1) < 2 && plan.selectedSkill) {
+        const skillAuthority = verifySelectedSkillAuthority({
+          selectedSkill: plan.selectedSkill,
+          discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+        });
+        if (!skillAuthority.ok) {
+          return {
+            ok: false,
+            message:
+              skillAuthority.reason === "missing"
+                ? "计划绑定的 Skill 已不存在，请重新规划后再确认。"
+                : "计划绑定的 Skill 快照已漂移，请重新规划后再确认。",
+            plan,
+          };
+        }
+        canonicalSelectedSkill = skillAuthority.selectedSkill;
       }
       let milestoneGraph: ReturnType<typeof validatePlanMilestoneGraph>;
       try {
@@ -4593,8 +4639,8 @@ export function createAppContainer(options: {
         sessionId: plan.sessionId,
         ...(plan.workspaceId ? { workspaceId: plan.workspaceId } : {}),
         sourceMessage: plan.sourceMessage,
-        ...(plan.selectedSkill
-          ? { selectedSkill: structuredClone(plan.selectedSkill) }
+        ...(canonicalSelectedSkill
+          ? { selectedSkill: structuredClone(canonicalSelectedSkill) }
           : {}),
         ...((plan.schemaVersion ?? 1) >= 2
           ? plan.selectedSkillInputValues &&
@@ -5493,6 +5539,62 @@ export function createAppContainer(options: {
         return { ok: false, message: "Plan 反馈证据已漂移，请重新规划。", plan };
       }
       if (
+        plan.skillDecision?.selectedSkillName !==
+        plan.selectedSkill?.manifest.name
+      ) {
+        return {
+          ok: false,
+          message: "Plan 的 Skill 决策与绑定快照不一致，请重新规划。",
+          plan,
+        };
+      }
+      const adoptedSkillAuthority = verifySelectedSkillAuthority({
+        selectedSkill: plan.selectedSkill,
+        snapshotSha256: plan.skillDecision?.snapshotSha256,
+        requireDigest: Boolean(plan.selectedSkill),
+        discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+      });
+      if (!adoptedSkillAuthority.ok) {
+        return {
+          ok: false,
+          message:
+            adoptedSkillAuthority.reason === "missing"
+              ? "Plan 绑定的 Skill 已不存在，请重新规划。"
+              : "Plan 绑定的 Skill 快照已漂移，请重新规划。",
+          plan,
+        };
+      }
+      if (adoptedSkillAuthority.selectedSkill) {
+        const inputResolution = resolveSkillInput({
+          skill: adoptedSkillAuthority.selectedSkill,
+          values: plan.selectedSkillInputValues,
+          runContext: plan.workspaceRoot
+            ? {
+                workspaceId: plan.workspaceId ?? "planner-workspace",
+                workspaceRoot: plan.workspaceRoot,
+                runMode: "plan",
+                agentRole: "planner",
+                depth: 0,
+                sandbox: {
+                  mode: "read_only",
+                  network: "none",
+                  shell: "disabled",
+                  allowWorkspaceEscape: false,
+                  extraReadRoots: [],
+                  extraWriteRoots: [],
+                },
+              }
+            : undefined,
+        });
+        if (inputResolution.status !== "complete") {
+          return {
+            ok: false,
+            message: "Plan 绑定的 Skill 输入缺失或已失效，请重新规划。",
+            plan,
+          };
+        }
+      }
+      if (
         !recoveringAdoption &&
         (goal.status === "achieved" || goal.status === "canceled")
       ) {
@@ -5656,8 +5758,12 @@ export function createAppContainer(options: {
           stopReason: undefined,
           runtimeCheckpoint: undefined,
           executionModelBinding: selectPlanExecutionModelBinding(plan),
-          ...(plan.selectedSkill
-            ? { selectedSkill: structuredClone(plan.selectedSkill) }
+          ...(adoptedSkillAuthority.selectedSkill
+            ? {
+                selectedSkill: structuredClone(
+                  adoptedSkillAuthority.selectedSkill,
+                ),
+              }
             : {}),
           selectedSkillInputValues: plan.selectedSkillInputValues,
           executionUsage: {

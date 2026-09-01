@@ -4022,33 +4022,6 @@ describe("app container goal drafts", () => {
       sessionId: session.session.id,
       workspaceRoot,
       sourceMessage: "Implement one local milestone.",
-      selectedSkill: {
-        rootDir: path.join(tempDir, "skills", "dbs"),
-        skillFile: path.join(tempDir, "skills", "dbs", "SKILL.md"),
-        body: "Follow the DBS execution workflow.",
-        manifest: {
-          name: "dbs",
-          displayName: "DBS",
-          description: "Database workflow",
-          version: "1.0.0",
-          execution: { mode: "agent", entrypoint: null },
-          inputs: [
-            {
-              name: "target",
-              label: "Target",
-              type: "string",
-              required: true,
-              defaultValue: "local-db",
-            },
-          ],
-          permissions: {
-            files: { read: [], write: [] },
-            shell: { commands: [] },
-            web: { search: false, fetchDomains: [] },
-            memory: { read: false, write: false },
-          },
-        },
-      },
       mode: "direct",
       status: "awaiting_confirmation",
       actionGate: "ready",
@@ -4156,11 +4129,6 @@ describe("app container goal drafts", () => {
         planId: basePlan.id,
         sha256: projection.sha256,
       }),
-      selectedSkill: {
-        manifest: expect.objectContaining({ name: "dbs" }),
-        body: "Follow the DBS execution workflow.",
-      },
-      selectedSkillInputValues: { target: "local-db" },
     });
     expect(
       confirmedGoal?.milestones.find(

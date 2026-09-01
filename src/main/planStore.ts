@@ -83,6 +83,31 @@ export type PlanStore = {
 };
 
 const SESSION_INDEX_FILENAME = "session-index.json";
+const SQLITE_PLAN_SELECT_COLUMNS =
+  "id, session_id, mode, status, action_gate, revision, payload, created_at, updated_at";
+
+type SqlitePlanRow = {
+  id: string;
+  session_id: string;
+  mode: string;
+  status: string;
+  action_gate: string;
+  revision: number;
+  payload: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type PlanStorageEnvelope = {
+  id: string;
+  sessionId?: string;
+  mode?: string;
+  status?: string;
+  actionGate?: string;
+  revision?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 type SessionPlanIndex = {
   version: 1;
@@ -148,12 +173,21 @@ export function createPlanStore(options: {
   }
 
   async function readSqlitePlanPayload(
-    row: { id: string; session_id: string; payload: string },
+    row: SqlitePlanRow,
     recoverProjection = true,
   ): Promise<PlanRecord> {
     const { parsed, diagnosticSafe, validated } = decodeAndValidatePlan(
       row.payload,
-      { id: row.id, sessionId: row.session_id },
+      {
+        id: row.id,
+        sessionId: row.session_id,
+        mode: row.mode,
+        status: row.status,
+        actionGate: row.action_gate,
+        revision: row.revision,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      },
     );
     const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
     let migrated = validated;
@@ -184,10 +218,10 @@ export function createPlanStore(options: {
     }
     if (options.storage) {
       const row = options.storage.db
-        .prepare("SELECT id, session_id, payload FROM plan_records WHERE id = ?")
-        .get<{ id: string; session_id: string; payload: string }>(
-          normalizedPlanId,
-        );
+        .prepare(
+          `SELECT ${SQLITE_PLAN_SELECT_COLUMNS} FROM plan_records WHERE id = ?`,
+        )
+        .get<SqlitePlanRow>(normalizedPlanId);
       if (!row) return null;
       return readSqlitePlanPayload(row, recoverProjection);
     }
@@ -314,7 +348,7 @@ export function createPlanStore(options: {
 
   function decodeAndValidatePlan(
     payload: string,
-    envelope?: { id: string; sessionId?: string },
+    envelope?: PlanStorageEnvelope,
   ): {
     parsed: unknown;
     diagnosticSafe: PlanRecord;
@@ -331,11 +365,7 @@ export function createPlanStore(options: {
       const validated = validatePlanRecord(diagnosticSafe);
       if (
         envelope
-        && (
-          safePlanId(envelope.id) !== validated.id
-          || (envelope.sessionId !== undefined
-            && envelope.sessionId !== validated.sessionId)
-        )
+        && !planMatchesStorageEnvelope(validated, envelope)
       ) {
         throw new InvalidPersistedPlanRecordError("$.storageEnvelope");
       }
@@ -673,9 +703,9 @@ export function createPlanStore(options: {
       if (options.storage) {
         const rows = options.storage.db
           .prepare(
-            "SELECT id, session_id, payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
+            `SELECT ${SQLITE_PLAN_SELECT_COLUMNS} FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC`,
           )
-          .all<{ id: string; session_id: string; payload: string }>(sessionId);
+          .all<SqlitePlanRow>(sessionId);
         return collectValidPlans(
           rows.map((row) => readSqlitePlanPayload(row)),
         );
@@ -710,9 +740,9 @@ export function createPlanStore(options: {
       if (options.storage) {
         const rows = options.storage.db
           .prepare(
-            "SELECT id, session_id, payload FROM plan_records ORDER BY updated_at DESC",
+            `SELECT ${SQLITE_PLAN_SELECT_COLUMNS} FROM plan_records ORDER BY updated_at DESC`,
           )
-          .all<{ id: string; session_id: string; payload: string }>();
+          .all<SqlitePlanRow>();
         return collectValidPlans(
           rows.map((row) => readSqlitePlanPayload(row)),
         );
@@ -744,9 +774,9 @@ export function createPlanStore(options: {
       if (options.storage) {
         const rows = options.storage.db
           .prepare(
-            "SELECT id, session_id, payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
+            `SELECT ${SQLITE_PLAN_SELECT_COLUMNS} FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC`,
           )
-          .all<{ id: string; session_id: string; payload: string }>(sessionId);
+          .all<SqlitePlanRow>(sessionId);
         return (await collectValidPlans(
           rows.map((row) => readSqlitePlanPayload(row)),
         ))[0] ?? null;
@@ -912,6 +942,25 @@ function safePlanId(planId: string): string {
 
 function recordsEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
+}
+
+function planMatchesStorageEnvelope(
+  plan: PlanRecord,
+  envelope: PlanStorageEnvelope,
+): boolean {
+  return safePlanId(envelope.id) === plan.id
+    && (envelope.sessionId === undefined
+      || envelope.sessionId === plan.sessionId)
+    && (envelope.mode === undefined || envelope.mode === plan.mode)
+    && (envelope.status === undefined || envelope.status === plan.status)
+    && (envelope.actionGate === undefined
+      || envelope.actionGate === plan.actionGate)
+    && (envelope.revision === undefined
+      || envelope.revision === plan.revision)
+    && (envelope.createdAt === undefined
+      || envelope.createdAt === plan.createdAt)
+    && (envelope.updatedAt === undefined
+      || envelope.updatedAt === plan.updatedAt);
 }
 
 function canonicalJson(value: unknown): string {

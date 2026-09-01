@@ -31,7 +31,10 @@ import type {
   BoundModelClient,
   ModelRouter,
 } from "./providers/modelRouter";
-import type { SkillRecord } from "../shared/skills";
+import {
+  createPublicSkillSnapshotSha256,
+  type SkillRecord,
+} from "../shared/skills";
 import {
   PlanInvestigationError,
   type PlanInvestigatorService,
@@ -1222,6 +1225,13 @@ describe("plan debate orchestrator", () => {
         kind: "skill",
       }),
     );
+    expect(plan.skillDecision?.snapshotSha256).toBe(
+      createPublicSkillSnapshotSha256(plan.selectedSkill!),
+    );
+    expect(
+      plan.evidence.find((item) => item.id === "evidence_selected_skill")
+        ?.sha256,
+    ).toBe(plan.skillDecision?.snapshotSha256);
     expect(calls[0]?.request.messages[1]?.content).toContain(
       "DBS_SKILL_PLANNING_CONTEXT",
     );

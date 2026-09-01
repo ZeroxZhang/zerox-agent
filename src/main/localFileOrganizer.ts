@@ -55,6 +55,7 @@ export type SafeFsHelperRuntimeOptions = {
   safeFsTestDelayMs?: number;
   safeFsTestReadyStage?: string;
   safeFsTestCrashStage?: string;
+  safeFsTestFailStage?: string;
   safeFsTestOnReady?: (command: string) => void;
 };
 
@@ -1295,6 +1296,9 @@ export async function runSafeFsHelper(
           : {}),
         ...(options.safeFsTestCrashStage
           ? { ZEROX_SAFE_FS_TEST_CRASH_STAGE: options.safeFsTestCrashStage }
+          : {}),
+        ...(options.safeFsTestFailStage
+          ? { ZEROX_SAFE_FS_TEST_FAIL_STAGE: options.safeFsTestFailStage }
           : {}),
       },
       stdio: ["pipe", "pipe", "pipe"],

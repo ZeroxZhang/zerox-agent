@@ -295,6 +295,49 @@ describe("plan artifact writer", () => {
     await expect(readFile(transactionPath, "utf8")).resolves.toBe("");
   });
 
+  it("preserves retired authority across failed swap sync and recovery crash", async () => {
+    const baseWriter = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await baseWriter.write(plan, createArtifact());
+    const revised = { ...createArtifact(), summary: "retry durable next" };
+    const failingWriter = createPlanArtifactWriter({
+      safeFsTestFailStage: "projection-swap-sync",
+    });
+
+    await expect(
+      failingWriter.write({ ...plan, projection: first }, revised),
+    ).rejects.toThrow(/cannot synchronize plan projection exchange/i);
+    const transactionPath = path.join(
+      path.dirname(first.path),
+      `.${plan.id}.projection.transaction`,
+    );
+    await expect(readFile(first.path, "utf8")).resolves.toContain(
+      "retry durable next",
+    );
+    await expect(readFile(transactionPath, "utf8")).resolves.toContain(
+      "# Writer Test",
+    );
+
+    const crashingRecovery = createPlanArtifactWriter({
+      safeFsTestReadyStage: "projection-recovery-durable",
+      safeFsTestCrashStage: "projection-recovery-durable",
+    });
+    await expect(
+      crashingRecovery.write({ ...plan, projection: first }, revised),
+    ).rejects.toThrow(/helper failed \(86\)/i);
+    await expect(readFile(first.path, "utf8")).resolves.toContain(
+      "retry durable next",
+    );
+    await expect(readFile(transactionPath, "utf8")).resolves.toContain(
+      "# Writer Test",
+    );
+
+    await expect(
+      baseWriter.write({ ...plan, projection: first }, revised),
+    ).resolves.toMatchObject({ path: first.path });
+    await expect(readFile(transactionPath, "utf8")).resolves.toBe("");
+  });
+
   it("never swaps an attacker replacement from the retired leaf back into the canonical path", async () => {
     const baseWriter = createPlanArtifactWriter();
     const plan = createPlan(workspaceRoot);

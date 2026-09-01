@@ -14010,3 +14010,43 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `sha256:e8572caab28d66f82d97fa70479c141a88a721ed91a3a123ba99935006c0eff6`.
   Production smoke, caller-pinned Program/Harness, zero-vulnerability audit,
   and whitespace checks pass. A new exact-byte review candidate is required.
+
+## 2026-09-02 - v3.9.2 end-to-end persisted-authority closure
+
+- Candidate `323c47980fccfc554926cb66db652fed6234739f` was rejected and no PASS
+  receipts were issued. Review found that retry recovery could still scrub a
+  retired Plan inode before the recovered namespace was durable, SQLite query
+  ordering trusted an unbound outer `updated_at`, and persisted public Skill
+  snapshots were not rebound to current runtime authority at every Plan/Goal
+  lifecycle entry.
+- Both first publication and already-published recovery now synchronize the
+  capability-bound `plans` directory before destroying non-empty retired
+  authority. A failed first synchronization preserves the old inode; a crash
+  after recovery durability and a final retry are covered as one adversarial
+  sequence.
+- SQLite Plan reads bind every duplicated storage-envelope field (`id`,
+  `session_id`, `mode`, `status`, `action_gate`, `revision`, `created_at`, and
+  `updated_at`) to the decoded payload. Invalid rows are isolated before they
+  can affect latest/list selection, including an older row forged with a
+  far-future outer timestamp.
+- Skill planning sanitizes the selected Skill before evidence collection or
+  routing. Public Skill hashes cover only the canonical public snapshot, so
+  different private MCP arguments, environment values, URLs, and headers
+  produce the same public digest and never become persisted secret verifiers.
+  Parser failures crossing renderer IPC are ordinal and content-free.
+- Initial Plan confirmation and runtime Plan adoption now share canonical
+  current-Skill verification and copy only the rediscovered public snapshot.
+  Goal start/resume repeats this authority binding before any run, trajectory,
+  prompt, or permission construction and validates persisted Skill inputs
+  against the current workspace context.
+- Focused validation passes `321/321` tests across ten files. Full
+  `npm run verify` passes strict test type coverage `435/435`, `326` current
+  test files / `3953` current tests with declared skips, every Round2-Round12
+  historical lane, production build, Agent eval `26/26`, and Memory eval
+  `2/2`. The native helper is `53568` bytes with digest
+  `sha256:ad380a8b9d7ee3b331c2ccb819774964bd5a4aeb3c8d19e5e8d79d33280fe9af`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration. Caller-pinned Program/Harness, zero-vulnerability audit, and
+  whitespace checks pass. Fresh exact-byte code and security PASS receipts
+  remain mandatory before package acceptance and release.

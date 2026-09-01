@@ -130,7 +130,7 @@ import type {
   UpdateScheduledTaskResult,
   UpdateScheduledTaskEnabledResult,
 } from "../shared/scheduledTasks";
-import type { SkillDiscoveryResult } from "../shared/skills";
+import type { PublicSkillDiscoveryResult } from "../shared/skills";
 import type {
   AuthorizeTaskToolCallResult,
   ToolAuditEvent,
@@ -275,7 +275,7 @@ const buildingAgent = {
     input: TestProviderConnectionInput,
   ): Promise<TestProviderConnectionResult> =>
     ipcRenderer.invoke("modelCatalog:testProvider", input),
-  listSkills: (): Promise<SkillDiscoveryResult> =>
+  listSkills: (): Promise<PublicSkillDiscoveryResult> =>
     ipcRenderer.invoke("skills:list"),
   listScheduledTasks: (): Promise<ScheduledTask[]> =>
     ipcRenderer.invoke("scheduledTasks:list"),

@@ -118,6 +118,34 @@ describe("chat IPC handlers", () => {
     );
   });
 
+  it("returns content-free Skill discovery failures across renderer IPC", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const container = {
+      appMeta: { productName: "Zerox Agent" },
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      discoverSkills: vi.fn(async () => ({
+        skills: [],
+        errors: [{
+          folderName: "PRIVATE_SKILL_FOLDER",
+          message: 'YAML error near env: "IPC_SKILL_SECRET"',
+        }],
+      })),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
+
+    await expect(
+      electronState.ipcHandlers.get("skills:list")?.({ sender: {} }),
+    ).resolves.toEqual({
+      skills: [],
+      errors: [{
+        folderName: "invalid-skill-1",
+        message: "技能清单解析失败。",
+      }],
+    });
+  });
+
   it("forwards guided skill continuation status and stream events to the invoking renderer", async () => {
     electronState.ipcHandlers.clear();
     const { registerAllIpcHandlers } = await import("./index");

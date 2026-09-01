@@ -769,6 +769,50 @@ describe("goal runtime engine", () => {
     });
   });
 
+  it("blocks a restored Goal before execution when its Skill authority cannot be rebound", async () => {
+    const selectedSkill = createSkillRecord({ name: "drifted-skill" });
+    const goal = createGoal({ selectedSkill });
+    let runtimeTouched = false;
+    const engine = createGoalRuntimeEngine({
+      workspaceRoot: "/Users/demo/project",
+      chatClient: {
+        async complete() {
+          runtimeTouched = true;
+          return { content: "unexpected", toolCalls: [], finishReason: "stop" };
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret",
+        model: "agent-model",
+        temperature: 0,
+        maxTokens: 4096,
+      }),
+      toolExecutor: createAgentToolExecutor(),
+      runStore: {
+        async append(run) {
+          runtimeTouched = true;
+          return run;
+        },
+      },
+      trajectoryStore: {
+        async append(_runId, event) {
+          runtimeTouched = true;
+          return event;
+        },
+      },
+      goalContext: createAgentGoalContext(),
+      async resolveSelectedSkill() {
+        throw new Error("Goal 绑定的 Skill 快照已漂移，请重新规划。");
+      },
+    });
+
+    await expect(
+      engine.runMilestone(goal, goal.milestones[0]!),
+    ).rejects.toThrow("Goal 绑定的 Skill 快照已漂移");
+    expect(runtimeTouched).toBe(false);
+  });
+
   it("executes a typed JSON deterministic contract with real file tools and provenance", async () => {
     const configDir = await mkdtemp(path.join(os.tmpdir(), "goal-json-authz-"));
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "goal-workspace-"));

@@ -21,7 +21,11 @@ import type {
   PlanningBrief,
 } from "../shared/planMode";
 import type { SkillInputValue } from "../shared/skillExecutionContract";
-import type { SkillSnapshotSource } from "../shared/skills";
+import {
+  createPublicSkillSnapshot,
+  createPublicSkillSnapshotSha256,
+  type SkillSnapshotSource,
+} from "../shared/skills";
 import type {
   GoalContractIssue,
   GoalContractRef,
@@ -372,9 +376,7 @@ export function routePlannerSkill(
       .map((candidate) => ({ ...candidate })),
     ...(selected
       ? {
-          snapshotSha256: hash(
-            JSON.stringify(selected.manifest) + selected.body,
-          ),
+          snapshotSha256: createPublicSkillSnapshotSha256(selected),
           permissions: summarizePermissions(selected),
         }
       : {}),
@@ -1181,12 +1183,7 @@ function commonWorkspaceRoot(
 }
 
 function snapshotSkill(skill: GoalSelectedSkill): GoalSelectedSkill {
-  return {
-    rootDir: skill.rootDir,
-    skillFile: skill.skillFile,
-    body: skill.body,
-    manifest: structuredClone(skill.manifest),
-  };
+  return createPublicSkillSnapshot(skill);
 }
 
 function summarizePermissions(

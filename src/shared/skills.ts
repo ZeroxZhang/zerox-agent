@@ -1,4 +1,5 @@
 import { parse as parseYaml } from "yaml";
+import { sha256Hex } from "./sha256";
 
 export type SkillExecutionMode = "agent" | "script";
 
@@ -131,6 +132,11 @@ export type SkillDiscoveryResult = {
   errors: SkillDiscoveryError[];
 };
 
+export type PublicSkillDiscoveryResult = {
+  skills: PublicSkillSnapshot[];
+  errors: SkillDiscoveryError[];
+};
+
 export function createPublicSkillSnapshot(
   skill: SkillSnapshotSource,
 ): PublicSkillSnapshot {
@@ -215,14 +221,37 @@ export function createPublicSkillSnapshot(
   };
 }
 
+export function createPublicSkillSnapshotSha256(
+  skill: SkillSnapshotSource,
+): string {
+  return sha256Hex(
+    new TextEncoder().encode(
+      JSON.stringify(createPublicSkillSnapshot(skill)),
+    ),
+  );
+}
+
+export function publicSkillSnapshotsEqual(
+  left: SkillSnapshotSource,
+  right: SkillSnapshotSource,
+): boolean {
+  return (
+    JSON.stringify(createPublicSkillSnapshot(left)) ===
+    JSON.stringify(createPublicSkillSnapshot(right))
+  );
+}
+
 export function createPublicSkillDiscoveryResult(
   result: SkillDiscoveryResult,
-): SkillDiscoveryResult {
+): PublicSkillDiscoveryResult {
   return {
-    skills: result.skills.map(
-      (skill) => createPublicSkillSnapshot(skill) as SkillRecord,
-    ),
-    errors: structuredClone(result.errors),
+    skills: result.skills.map(createPublicSkillSnapshot),
+    // Parser errors can quote malformed YAML source lines, including MCP
+    // credentials. The renderer receives only ordinal, content-free failures.
+    errors: result.errors.map((_error, index) => ({
+      folderName: `invalid-skill-${index + 1}`,
+      message: "技能清单解析失败。",
+    })),
   };
 }
 

@@ -46,6 +46,7 @@ import {
 import type { PlanStore } from "./planStore";
 import {
   createPublicSkillSnapshot,
+  createPublicSkillSnapshotSha256,
   type SkillDiscoveryResult,
   type SkillSnapshotSource,
 } from "../shared/skills";
@@ -164,7 +165,14 @@ export function createPlanDebateOrchestrator(options: {
     const createdAt = now();
     const planId = `plan_${createId()}`;
     const baseSourceMessage = normalizePlanSource(input.sourceMessage);
-    const normalizedInput = { ...input, sourceMessage: baseSourceMessage };
+    input = {
+      ...input,
+      sourceMessage: baseSourceMessage,
+      ...(input.selectedSkill
+        ? { selectedSkill: createPublicSkillSnapshot(input.selectedSkill) }
+        : {}),
+    };
+    const normalizedInput = input;
     const evidence = mergePlanEvidence(
       await collectEvidence(normalizedInput),
       input.feedbackEvidence ?? [],
@@ -488,10 +496,7 @@ export function createPlanDebateOrchestrator(options: {
                 ),
               ].join("\n\n"),
             ),
-            sha256: hash(
-              JSON.stringify(routing.selectedSkill.manifest) +
-                routing.selectedSkill.body,
-            ),
+            sha256: createPublicSkillSnapshotSha256(routing.selectedSkill),
           },
         ];
       }
@@ -1160,10 +1165,7 @@ export function createPlanDebateOrchestrator(options: {
               routing.selectedSkill.body.slice(0, MAX_SKILL_PLANNING_BODY_CHARS),
             ].join("\n\n"),
           ),
-          sha256: hash(
-            JSON.stringify(routing.selectedSkill.manifest) +
-              routing.selectedSkill.body,
-          ),
+          sha256: createPublicSkillSnapshotSha256(routing.selectedSkill),
         },
       ];
       planningBrief = {
@@ -3044,9 +3046,7 @@ async function collectBoundedWorkspaceEvidence(
       title: `Selected Skill: ${input.selectedSkill.manifest.name}`,
       summary: redactPlanningText(planningSummary),
       sourceRef: input.selectedSkill.skillFile,
-      sha256: hash(
-        JSON.stringify(input.selectedSkill.manifest) + input.selectedSkill.body,
-      ),
+      sha256: createPublicSkillSnapshotSha256(input.selectedSkill),
     });
   }
   if (!input.workspaceRoot) {
