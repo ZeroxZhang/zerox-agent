@@ -36,6 +36,25 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     }
   });
 
+  it("keeps the complete safe-fs toolchain boundary in the active P113 roster", () => {
+    const featureList = JSON.parse(readFileSync(
+      path.join(process.cwd(), ".zerox/feature_list.json"),
+      "utf8",
+    ));
+    const p113 = featureList.features.find(
+      (feature: { id?: string }) =>
+        feature.id === "P113-v3.9.2-disclosure-adversarial-acceptance",
+    );
+
+    expect(p113?.files).toEqual(expect.arrayContaining([
+      "native/macos/zerox-safe-fs.c",
+      "scripts/build-safe-fs-helper.mjs",
+      "scripts/safe-fs-toolchain-selection.mjs",
+      "scripts/inspect-safe-fs-helper.mjs",
+      "src/shared/safeFsHelperInspection.test.ts",
+    ]));
+  });
+
   it("builds reproducibly with the constrained Mach-O contract", () => {
     const helperPath = path.join(
       process.cwd(),

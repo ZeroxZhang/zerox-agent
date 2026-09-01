@@ -25,6 +25,7 @@
         "electron-builder.yml",
         "native/macos/zerox-safe-fs.c",
         "scripts/build-safe-fs-helper.mjs",
+        "scripts/safe-fs-toolchain-selection.mjs",
         "scripts/inspect-safe-fs-helper.mjs",
         "scripts/run-conversation-disclosure-acceptance.mjs",
         "scripts/run-conversation-disclosure-real-app.mjs",

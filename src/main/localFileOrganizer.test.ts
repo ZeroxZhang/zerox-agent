@@ -25,6 +25,7 @@ import {
   readLocalFileOrganizationTransaction,
   rollbackLocalFileOrganization,
   runSafeFsHelper,
+  selectSafeFsHelperStdio,
   verifyLocalFileOrganization,
 } from "./localFileOrganizer";
 
@@ -637,7 +638,10 @@ describe("local file organizer", () => {
     )).rejects.toThrow(/unknown command/i);
   });
 
-  it("requires non-empty helper input delivery but permits an unused empty pipe", async () => {
+  it("eliminates empty helper stdin pipes and requires non-empty input delivery", async () => {
+    expect(selectSafeFsHelperStdio("")).toEqual(["ignore", "pipe", "pipe"]);
+    expect(selectSafeFsHelperStdio("payload")).toEqual(["pipe", "pipe", "pipe"]);
+
     const immediateHelper = path.join(tempDir, "immediate-success-helper");
     await writeFile(
       immediateHelper,

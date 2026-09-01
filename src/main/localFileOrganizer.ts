@@ -59,6 +59,12 @@ export type SafeFsHelperRuntimeOptions = {
   safeFsTestOnReady?: (command: string) => void;
 };
 
+export function selectSafeFsHelperStdio(
+  inputBody: string,
+): ["ignore" | "pipe", "pipe", "pipe"] {
+  return [inputBody.length === 0 ? "ignore" : "pipe", "pipe", "pipe"];
+}
+
 type LocalDirectoryIdentity = {
   dev: string;
   ino: string;
@@ -1282,7 +1288,8 @@ export async function runSafeFsHelper(
     throw new Error("Local file organization helper input exceeds its safe size limit.");
   }
   return new Promise((resolve, reject) => {
-    const child = spawn(helperPath, [command, ...args], {
+    const stdio = selectSafeFsHelperStdio(inputBody);
+    const childOptions = {
       cwd: "/",
       env: {
         ...(options.safeFsTestDelayMs === undefined
@@ -1301,8 +1308,16 @@ export async function runSafeFsHelper(
           ? { ZEROX_SAFE_FS_TEST_FAIL_STAGE: options.safeFsTestFailStage }
           : {}),
       },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    };
+    const child = stdio[0] === "pipe"
+      ? spawn(helperPath, [command, ...args], {
+          ...childOptions,
+          stdio: ["pipe", "pipe", "pipe"],
+        })
+      : spawn(helperPath, [command, ...args], {
+          ...childOptions,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
     let stdout = "";
     let stderr = "";
     let outputOverflow = false;
@@ -1351,9 +1366,11 @@ export async function runSafeFsHelper(
       }
       rejectOnce(error);
     });
-    child.stdin.on("error", (error) => {
-      stdinError = error;
-    });
+    if (child.stdin) {
+      child.stdin.on("error", (error) => {
+        stdinError = error;
+      });
+    }
     child.on("close", (code, signal) => {
       if (outputOverflow) {
         rejectOnce(new Error("Local file organization helper output exceeded its limit."));
@@ -1366,7 +1383,7 @@ export async function runSafeFsHelper(
         ));
         return;
       }
-      if (stdinError && inputBody.length > 0) {
+      if (stdinError) {
         rejectOnce(new Error(
           `Local file organization helper input failed: ${stdinError.message}`,
         ));
@@ -1385,7 +1402,16 @@ export async function runSafeFsHelper(
         rejectOnce(error);
       }
     });
-    child.stdin.end(inputBody);
+    if (stdio[0] === "pipe") {
+      if (!child.stdin) {
+        child.kill();
+        rejectOnce(new Error(
+          "Local file organization helper input pipe is unavailable.",
+        ));
+        return;
+      }
+      child.stdin.end(inputBody);
+    }
   });
 }
 

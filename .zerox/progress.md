@@ -14561,3 +14561,29 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   ABI `146`, SQLite `3.53.2`, seven migrations, eight authority domains,
   renderer startup, and Node ABI `137` restoration; the production dependency
   audit reports zero vulnerabilities and whitespace validation is clean.
+
+## 2026-09-02 - P113/CD09 final stdin lifecycle and ownership closure
+
+- Candidate `e47136e3f111aa0141a0b7189101e319990fbf77` passed the independent
+  security lane at `0C/0M/0m` but was rejected before receipts after the code
+  lane reported `0C/1M/1m`. The empty-input regression did not deterministically
+  produce its claimed `EPIPE`, and the newly imported toolchain-selection
+  boundary was missing from P113's owned-file roster.
+- Empty helper input now selects `stdio: ignore`, so no writable stdin pipe or
+  empty-write race exists. Non-empty input alone selects `stdio: pipe`, and any
+  delivery error is still considered after the authoritative child exit and
+  bounded diagnostics. The exact stdio tuple is a tested production selector;
+  the real early-close helper still proves non-empty delivery fails closed.
+- P113 again owns `scripts/safe-fs-toolchain-selection.mjs`; a roster regression
+  locks the native source, builder, selector, inspector, and their focused test
+  together. The stable P113 definition digest and external runner control pin
+  were re-bound to these reviewed bytes.
+- Focused organizer, safe-fs inspection, and package-script validation passes
+  `76/76`; strict test type coverage passes `437/437`; the organizer suite
+  passes `20/20` repeated real-helper runs and whitespace validation is clean.
+- Fresh full `npm run verify` passes `4028` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2–Round12 compatibility lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration;
+  the production dependency audit reports zero vulnerabilities.
