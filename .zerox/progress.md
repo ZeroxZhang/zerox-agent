@@ -14652,3 +14652,10 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   including S07 through the native helper and isolated Plan workspace. Its
   machine-readable receipts and screenshots were regenerated for the current
   candidate.
+- Frozen candidate `9b6fcfd7e8a2141073dad2afd307c5590126980a` passed fresh
+  independent code and security review at `0C/0M/0m` against review manifest
+  `sha256:0a45ac01cbb26095ed99d094d9f3b9d269f86d98e9cc62ae9bbc7116b68abfcf`
+  (`1461` files). The caller-pinned receipt digests are
+  `sha256:2054e4158c9cad3c3c00605462d395017619ec153bf788131c80fad6ef83e156`
+  and
+  `sha256:1380bd376500013daefbe2830093e1a4a65e0b7c4664967803400bbcc0fcd2d5`.
