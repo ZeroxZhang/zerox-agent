@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
@@ -135,6 +135,30 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       configuredCompiler: EXPECTED_SAFE_FS_COMPILER.configuredPath,
       configuredSdkRoot: EXPECTED_SAFE_FS_SDK.configuredPath,
     });
+  });
+
+  it("does not parse successful otool stderr diagnostics as libraries", () => {
+    const helperPath = path.join(
+      process.cwd(),
+      `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+    );
+    const inspected = inspectSafeFsHelper(helperPath, {
+      run: (command: string, args: string[]) => {
+        const result = spawnSync(command, args, {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        if (command !== "/usr/bin/otool" || result.status !== 0) return result;
+        return {
+          ...result,
+          stderr: `${result.stderr ?? ""}otool: error: couldn't create cache file '/private/tmp/xcrun_db-denied'\n`,
+        };
+      },
+    });
+
+    expect(inspected.linkedLibraries).toEqual([
+      "/usr/lib/libSystem.B.dylib",
+    ]);
   });
 
   it("discovers and fail-closes the caller-owned toolchain policy", () => {

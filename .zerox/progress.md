@@ -14534,3 +14534,30 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Program and harness validation pass with the pinned CD04 anchor and these
   fresh receipts; `releaseReady` remains false until the isolated external
   package acceptance anchor is issued and promoted.
+- External acceptance attempt in `/private/tmp/zerox-v392-final3.WiNFUA`
+  correctly stopped before issuing an anchor. A full preserved-log reproduction
+  showed all three failures had one cause: successful `otool` output on stdout
+  was concatenated with non-fatal stderr diagnostics produced when Seatbelt
+  denied shared `xcrun_db` cache refresh, and the diagnostics were then parsed
+  as dependency names. The inspector now separates command status/diagnostics
+  from semantic output: failures retain both streams, while successful
+  `file`/`otool` inspection parses stdout only. No cache-write authority was
+  restored. A synthetic success-plus-stderr regression passes locally, and the
+  three formerly failing inspection paths pass `4/4` inside the actual retained
+  external command profile.
+- The next local full verification exposed the complementary empty-input edge:
+  a successful read-only `projection-verify` helper may close its unused stdin
+  before Node finishes closing the empty pipe. Treating that zero-byte `EPIPE`
+  as delivery failure caused the caller to report a false Markdown projection
+  drift instead of reaching milestone-graph validation. The lifecycle contract
+  now requires delivery only when the helper input body is non-empty; a
+  non-empty early close still fails, while an unused empty pipe cannot override
+  a successful child result. Deterministic success/failure coverage passes, and
+  the projection/pipe pair passes `20/20` repeated parallel runs.
+- Fresh full `npm run verify` now passes `4027` current tests with declared
+  skips, strict test type coverage `437/437`, every Round2–Round12 compatibility
+  lane, production build, Agent eval `26/26`, and Memory eval `2/2` after both
+  lifecycle corrections. Production smoke again passes Electron `42.9.0` /
+  ABI `146`, SQLite `3.53.2`, seven migrations, eight authority domains,
+  renderer startup, and Node ABI `137` restoration; the production dependency
+  audit reports zero vulnerabilities and whitespace validation is clean.

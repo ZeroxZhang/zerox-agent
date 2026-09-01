@@ -637,6 +637,29 @@ describe("local file organizer", () => {
     )).rejects.toThrow(/unknown command/i);
   });
 
+  it("requires non-empty helper input delivery but permits an unused empty pipe", async () => {
+    const immediateHelper = path.join(tempDir, "immediate-success-helper");
+    await writeFile(
+      immediateHelper,
+      "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n",
+      "utf8",
+    );
+    await chmod(immediateHelper, 0o755);
+
+    await expect(runSafeFsHelper(
+      "ignored",
+      [],
+      undefined,
+      { safeFsHelperPath: immediateHelper },
+    )).resolves.toEqual({ ok: true });
+    await expect(runSafeFsHelper(
+      "ignored",
+      [],
+      "x".repeat(4 * 1024 * 1024),
+      { safeFsHelperPath: immediateHelper },
+    )).rejects.toThrow(/input failed/i);
+  });
+
   it("rejects FIFO leaves without waiting for a writer", async () => {
     const transactionId = "tx_fifo_leaf";
     const source = path.join(tempDir, "photo.jpg");

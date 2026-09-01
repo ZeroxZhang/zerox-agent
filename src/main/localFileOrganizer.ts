@@ -1366,7 +1366,7 @@ export async function runSafeFsHelper(
         ));
         return;
       }
-      if (stdinError) {
+      if (stdinError && inputBody.length > 0) {
         rejectOnce(new Error(
           `Local file organization helper input failed: ${stdinError.message}`,
         ));

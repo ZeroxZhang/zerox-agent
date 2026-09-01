@@ -16,21 +16,36 @@ export function inspectSafeFsHelper(helperPath, options = {}) {
     throw new Error("safe-fs helper must be a canonical 0755 regular file");
   }
   const bytes = readFileSync(absolutePath);
-  const fileOutput = runChecked(run, "/usr/bin/file", [absolutePath]);
+  const fileOutput = runChecked(
+    run,
+    "/usr/bin/file",
+    [absolutePath],
+    { output: "stdout" },
+  );
   const architecture = fileOutput.match(
     /Mach-O 64-bit executable (arm64|x86_64)\b/,
   )?.[1];
   if (!architecture) {
     throw new Error(`safe-fs helper architecture is invalid: ${fileOutput}`);
   }
-  const loadCommands = runChecked(run, "/usr/bin/otool", ["-l", absolutePath]);
+  const loadCommands = runChecked(
+    run,
+    "/usr/bin/otool",
+    ["-l", absolutePath],
+    { output: "stdout" },
+  );
   const minimumSystemVersion = loadCommands.match(
     /cmd LC_BUILD_VERSION[\s\S]*?minos (12\.0(?:\.0)?)\b/,
   )?.[1];
   if (!minimumSystemVersion) {
     throw new Error("safe-fs helper does not preserve the macOS 12.0 target");
   }
-  const libraryOutput = runChecked(run, "/usr/bin/otool", ["-L", absolutePath]);
+  const libraryOutput = runChecked(
+    run,
+    "/usr/bin/otool",
+    ["-L", absolutePath],
+    { output: "stdout" },
+  );
   const linkedLibraries = libraryOutput
     .split("\n")
     .slice(1)
@@ -98,13 +113,15 @@ function runCommand(command, args) {
   });
 }
 
-function runChecked(run, command, args) {
+function runChecked(run, command, args, options = {}) {
   const result = run(command, args);
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  const diagnosticOutput = `${stdout}${stderr}`.trim();
   if (result.error || result.signal || result.status !== 0) {
     throw new Error(
-      `${command} failed${output ? `: ${output}` : result.error ? `: ${result.error.message}` : ""}`,
+      `${command} failed${diagnosticOutput ? `: ${diagnosticOutput}` : result.error ? `: ${result.error.message}` : ""}`,
     );
   }
-  return output;
+  return (options.output === "stdout" ? stdout : diagnosticOutput).trim();
 }
