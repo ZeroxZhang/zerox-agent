@@ -216,6 +216,8 @@ const expectedFinalAnchorKeys = [
   "sourceFileCount",
   "unsignedSafeFsHelperDigest",
   "packagedSafeFsHelperDigest",
+  "packagedSafeFsUnsignedCodeDigest",
+  "packagedSafeFsCodeLimit",
   "controlDigests",
   "verification",
   "fileDigests",
@@ -271,6 +273,8 @@ const releaseAttestationEvidencePaths = Object.freeze({
 const expectedExternalControlFiles = [
   "package.json",
   "package-lock.json",
+  "electron-builder.yml",
+  "scripts/after-pack-mac.mjs",
   "scripts/check-conversation-disclosure-successor-program.mjs",
   "scripts/check-harness-state.mjs",
   "scripts/run-conversation-disclosure-acceptance.mjs",
@@ -286,7 +290,7 @@ const expectedExternalControlFiles = [
   "scripts/local-candidate-source-manifest.mjs",
 ];
 if (
-  expectedExternalControlFiles.length !== 15
+  expectedExternalControlFiles.length !== 17
   || expectedFinalAnchorFiles.length !== 70
 ) {
   throw new Error("v3.9.2 final acceptance roster invariant changed");
@@ -903,6 +907,10 @@ async function validateFinalAcceptanceAnchor(options, canonicalRoot, errors) {
     )
     || anchor?.packagedSafeFsHelperDigest
       === expectedUnsignedSafeFsHelperDigest
+    || anchor?.packagedSafeFsUnsignedCodeDigest
+      !== expectedUnsignedSafeFsHelperDigest
+    || !Number.isInteger(anchor?.packagedSafeFsCodeLimit)
+    || anchor.packagedSafeFsCodeLimit <= 0
     || JSON.stringify(anchor?.verification)
       !== JSON.stringify(expectedFinalVerification)
     || anchor?.fileDigests?.["scripts/build-v392-acceptance-anchor.mjs"]

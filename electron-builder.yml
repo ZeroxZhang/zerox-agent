@@ -20,10 +20,13 @@ files:
 extraMetadata:
   main: dist-electron/main/main.js
 afterSign: ./scripts/after-sign-mac.mjs
+afterPack: ./scripts/after-pack-mac.mjs
 extraResources:
   - from: build/update-signing-public-key.pem
     to: update-signing-public-key.pem
-  - from: dist-native/darwin-${arch}/zerox-safe-fs
+  # Packaging wrappers pass a read-only descriptor capability here. The
+  # builder never reopens the mutable dist-native pathname.
+  - from: ${env.ZEROX_SAFE_FS_SOURCE}
     to: safe-fs/zerox-safe-fs
 publish:
   provider: github

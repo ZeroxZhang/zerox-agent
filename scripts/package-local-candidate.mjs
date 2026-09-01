@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
   existsSync,
   lstatSync,
   readFileSync,
@@ -20,6 +21,7 @@ import {
   assertUnchangedUnsignedSafeFsHelper,
   inspectSafeFsHelper,
   inspectPinnedUnsignedSafeFsHelper,
+  openPinnedSafeFsHelperCapability,
 } from "./inspect-safe-fs-helper.mjs";
 import { loadPinnedSafeFsToolchainPolicy } from "./safe-fs-toolchain-selection.mjs";
 
@@ -69,7 +71,9 @@ async function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: root,
     encoding: "utf8",
-    stdio: options.capture ? "pipe" : "inherit",
+    stdio: options.inheritDescriptor === undefined
+      ? options.capture ? "pipe" : "inherit"
+      : ["ignore", "inherit", "inherit", options.inheritDescriptor],
     env: { ...process.env, ...options.env },
   });
   const commandError = result.error
@@ -102,6 +106,20 @@ const unsignedSafeFsHelperPath = path.join(
   root,
   `dist-native/darwin-${process.arch}/zerox-safe-fs`,
 );
+const callerSafeFsHelperPath =
+  process.env.ZEROX_LOCAL_CANDIDATE_SAFE_FS_SOURCE;
+if (
+  callerSafeFsHelperPath
+  && (
+    !path.isAbsolute(callerSafeFsHelperPath)
+    || callerSafeFsHelperPath === unsignedSafeFsHelperPath
+    || callerSafeFsHelperPath.startsWith(`${root}${path.sep}`)
+  )
+) {
+  throw new Error(
+    "caller-owned safe-fs helper source must be absolute and outside the candidate",
+  );
+}
 
 await run(process.execPath, [npmCli, "run", "build"]);
 const builtUnsignedSafeFsHelper = inspectPinnedUnsignedSafeFsHelper(
@@ -121,9 +139,18 @@ try {
     builtUnsignedSafeFsHelper,
     prePackageUnsignedSafeFsHelper,
   );
-  await run(path.join(root, "node_modules/.bin/electron-builder"), [
-    "--mac", "dir",
-    "--publish", "never",
+  const packagingSourcePath =
+    callerSafeFsHelperPath ?? unsignedSafeFsHelperPath;
+  const safeFsCapability = openPinnedSafeFsHelperCapability(
+    packagingSourcePath,
+    safeFsToolchainPolicy ?? {
+      safeFsHelperDigest: builtUnsignedSafeFsHelper.sha256,
+    },
+  );
+  try {
+    await run(path.join(root, "node_modules/.bin/electron-builder"), [
+      "--mac", "dir",
+      "--publish", "never",
     // Point electron-builder at the already-present, caller-reviewed unpacked
     // Electron distribution so it never invokes @electron/get, which (even on a
     // pre-staged cache hit) fetches SHASUMS256.txt fresh from github and breaks
@@ -136,12 +163,19 @@ try {
     "--config.extraMetadata.releaseMode=local-candidate",
     "--config.mac.identity=-",
     "--config.mac.hardenedRuntime=false",
-    "--config.mac.notarize=false",
-  ], {
-    env: { CSC_IDENTITY_AUTO_DISCOVERY: "false" },
-    requireNativeCacheBefore: true,
-    requireNativeCacheAfter: true,
-  });
+      "--config.mac.notarize=false",
+    ], {
+      env: {
+        CSC_IDENTITY_AUTO_DISCOVERY: "false",
+        ZEROX_SAFE_FS_SOURCE: path.relative(root, "/dev/fd/3"),
+      },
+      inheritDescriptor: safeFsCapability.descriptor,
+      requireNativeCacheBefore: true,
+      requireNativeCacheAfter: true,
+    });
+  } finally {
+    closeSync(safeFsCapability.descriptor);
+  }
   assertUnchangedUnsignedSafeFsHelper(
     builtUnsignedSafeFsHelper,
     inspectPinnedUnsignedSafeFsHelper(

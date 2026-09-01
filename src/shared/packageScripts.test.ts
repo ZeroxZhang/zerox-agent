@@ -145,11 +145,14 @@ describe("package scripts", () => {
       "utf8",
     );
     expect(builderConfig).toContain("afterSign: ./scripts/after-sign-mac.mjs");
+    expect(builderConfig).toContain("afterPack: ./scripts/after-pack-mac.mjs");
     expect(builderConfig).toContain(
       "!node_modules/better-sqlite3/bin{,/**/*}",
     );
     expect(builderConfig).toContain("from: build/update-signing-public-key.pem");
-    expect(builderConfig).toContain("from: dist-native/darwin-${arch}/zerox-safe-fs");
+    expect(builderConfig).toContain("from: ${env.ZEROX_SAFE_FS_SOURCE}");
+    expect(source).toContain('ZEROX_SAFE_FS_SOURCE: relative(rootDir, "/dev/fd/3")');
+    expect(source).toContain("openPinnedSafeFsHelperCapability(");
     expect(builderConfig).toContain("sign: ./scripts/mac-sign.mjs");
     expect(builderConfig).toContain("Contents/Resources/safe-fs/zerox-safe-fs");
 
@@ -548,9 +551,13 @@ describe("package scripts", () => {
     expect(runner).toContain(
       "anchor.packagedSafeFsHelperDigest !== safeFsCapture.digest",
     );
+    expect(runner).toContain("verifyPackagedSafeFsCodeBinding({");
+    expect(runner).toContain("packagedSafeFsUnsignedCodeDigest:");
+    expect(runner).toContain("--self-test-safe-fs-code-binding");
     expect(runner).toContain("--self-test-safe-fs-package-identity");
     expect(runner).toContain("--self-test-safe-fs-toolchain-policy");
     expect(checker).toContain('"packagedSafeFsHelperDigest",');
+    expect(checker).toContain('"packagedSafeFsUnsignedCodeDigest",');
     expect(runner).toContain("await verifyHostToolchainIsolation({");
     expect(runner).toContain('process.argv[2] === "--self-test-host-toolchain-isolation"');
     expect(runner).toContain('"host-toolchain-command-success-isolation"');
@@ -592,7 +599,7 @@ describe("package scripts", () => {
     );
     expect(runner).toContain("FINAL_FILES.length !== 70");
     expect(runner).toContain("GENERATED_PUBLICATION_FILES.length !== 55");
-    expect(checker).toContain("expectedExternalControlFiles.length !== 15");
+    expect(checker).toContain("expectedExternalControlFiles.length !== 17");
     expect(checker).toContain("expectedFinalAnchorFiles.length !== 70");
     expect(runner).toContain("post-commit final file drift");
     expect(runner).toContain("post-commit local package tree drifted");

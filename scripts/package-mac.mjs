@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { closeSync, existsSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openPinnedSafeFsHelperCapability } from "./inspect-safe-fs-helper.mjs";
+import { EXPECTED_SAFE_FS_HELPER_DIGEST } from "./safe-fs-toolchain-selection.mjs";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const targets = process.argv.slice(2);
@@ -38,11 +40,13 @@ const electronBuilderBin = resolve(
 );
 const finalizeMacZipScript = resolve(rootDir, "scripts", "finalize-mac-zip.mjs");
 
-function run(command, args, env = {}) {
+function run(command, args, env = {}, inheritDescriptor) {
   const result = spawnSync(command, args, {
     cwd: rootDir,
     env: { ...process.env, ...env },
-    stdio: "inherit",
+    stdio: inheritDescriptor === undefined
+      ? "inherit"
+      : ["ignore", "inherit", "inherit", inheritDescriptor],
   });
 
   if (result.error) {
@@ -124,6 +128,10 @@ if (status === 0) {
 }
 
 if (status === 0) {
+  const safeFsCapability = openPinnedSafeFsHelperCapability(
+    resolve(rootDir, `dist-native/darwin-${process.arch}/zerox-safe-fs`),
+    { safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST },
+  );
   const builderArgs = [
     "--mac",
     ...targets,
@@ -139,13 +147,21 @@ if (status === 0) {
         ]
       : []),
   ];
-  status = run(
-    electronBuilderBin,
-    builderArgs,
-    releaseMode === "legacy-adhoc"
-      ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" }
-      : {},
-  );
+  try {
+    status = run(
+      electronBuilderBin,
+      builderArgs,
+      {
+        ...(releaseMode === "legacy-adhoc"
+          ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" }
+          : {}),
+        ZEROX_SAFE_FS_SOURCE: relative(rootDir, "/dev/fd/3"),
+      },
+      safeFsCapability.descriptor,
+    );
+  } finally {
+    closeSync(safeFsCapability.descriptor);
+  }
 }
 
 if (status === 0 && targets.includes("zip")) {

@@ -8,6 +8,7 @@ type ElectronBuilderConfig = {
   productName?: string;
   artifactName?: string;
   asar?: boolean;
+  afterPack?: string;
   directories?: {
     output?: string;
     buildResources?: string;
@@ -34,6 +35,7 @@ describe("electron-builder config", () => {
       productName: "Zerox Agent",
       artifactName: "Zerox-Agent-${version}-${arch}.${ext}",
       asar: true,
+      afterPack: "./scripts/after-pack-mac.mjs",
       directories: {
         output: "release",
         buildResources: "build",
@@ -56,7 +58,7 @@ describe("electron-builder config", () => {
     );
     expect(config.extraResources).toEqual(expect.arrayContaining([
       {
-        from: "dist-native/darwin-${arch}/zerox-safe-fs",
+        from: "${env.ZEROX_SAFE_FS_SOURCE}",
         to: "safe-fs/zerox-safe-fs",
       },
     ]));

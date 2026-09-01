@@ -1,11 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -14,7 +16,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error Local helper integrity utilities intentionally remain executable JavaScript.
-import { assertUnchangedUnsignedSafeFsHelper, inspectSafeFsHelper, inspectPinnedUnsignedSafeFsHelper } from "../../scripts/inspect-safe-fs-helper.mjs";
+import { assertUnchangedUnsignedSafeFsHelper, inspectSafeFsHelper, inspectPinnedUnsignedSafeFsHelper, openPinnedSafeFsHelperCapability } from "../../scripts/inspect-safe-fs-helper.mjs";
 // @ts-expect-error Local toolchain selection intentionally remains executable JavaScript.
 import * as safeFsToolchain from "../../scripts/safe-fs-toolchain-selection.mjs";
 
@@ -345,6 +347,39 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       built,
       { ...built, sha256: `sha256:${"0".repeat(64)}` },
     )).toThrowError("unsigned safe-fs helper changed before packaging");
+  });
+
+  it("copies from the pinned descriptor when the source pathname is replaced", () => {
+    const directory = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-capability-")),
+    );
+    temporaryDirectories.push(directory);
+    const builtPath = path.join(
+      process.cwd(),
+      `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+    );
+    const sourcePath = path.join(directory, "zerox-safe-fs");
+    const replacementPath = path.join(directory, "replacement");
+    const copiedPath = path.join(directory, "copied");
+    copyFileSync(builtPath, sourcePath);
+    chmodSync(sourcePath, 0o755);
+    writeFileSync(replacementPath, "replacement-safe-fs", { mode: 0o755 });
+    const capability = openPinnedSafeFsHelperCapability(sourcePath, {
+      safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
+    });
+    try {
+      renameSync(replacementPath, sourcePath);
+      const copy = spawnSync(
+        "/bin/cp",
+        ["/dev/fd/3", copiedPath],
+        { stdio: ["ignore", "pipe", "pipe", capability.descriptor] },
+      );
+      expect(copy.status).toBe(0);
+      expect(readFileSync(copiedPath)).toEqual(readFileSync(builtPath));
+      expect(readFileSync(sourcePath).toString()).toBe("replacement-safe-fs");
+    } finally {
+      closeSync(capability.descriptor);
+    }
   });
 
   it("loads the external runner's generated toolchain policy with the production parser", () => {

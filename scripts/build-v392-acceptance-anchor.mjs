@@ -88,6 +88,11 @@ const EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST =
   "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6";
 const PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME =
   ".v392-pinned-safe-fs-toolchain.json";
+const PINNED_SAFE_FS_HELPER_NAME = ".v392-pinned-safe-fs-helper";
+const EXPECTED_CODESIGN_ALLOCATE = Object.freeze({
+  path: "/Library/Developer/CommandLineTools/usr/bin/codesign_allocate",
+  digest: "sha256:eeddb75f487c98a42489fd4fa39c2392f805aac3a35ead20ad5d2929deb33eb4",
+});
 const EXPECTED_NODE_HEADERS = Object.freeze({
   digest: "sha256:608964880bdb0f636deeb9486ecbd08478625a291ac17f10613f1189016ee9fb",
   entryCount: 3325,
@@ -113,8 +118,12 @@ const CONTROL_DIGESTS = Object.freeze({
     "sha256:61869c59a56cbba80cfe4fc327c0e5b542db4b01a06e3d4deec2ae350872e3ef",
   "package-lock.json":
     "sha256:c5cd81cff944c33d2a1bcd785cba49fd3a34f0c7279a701989e6fa9e3c448beb",
+  "electron-builder.yml":
+    "sha256:f6b3347462c9a1a0eb21dd6853f7ff8bcfecea7f85008e9d13a968e05b98d973",
+  "scripts/after-pack-mac.mjs":
+    "sha256:376f81d437bc6b06876ed4bcbcc7889d698103b9a91b9fc46f96512d0b52901b",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:cd70260a32a245bf2c08d658fbeed795248740aad45be1d4878069d618f6b9e2",
+    "sha256:bdac730df8f5cae1cd572aa513d75b59c5134385e6eb58892de852e0af25bca1",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
@@ -136,7 +145,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/probe-native-sqlite.mjs":
     "sha256:41925fe9c348540d46abb43f275ffbf40ea86139304a27e33da465b4f220f34b",
   "scripts/package-local-candidate.mjs":
-    "sha256:291b515be6a3072eac6409b08d2d8fa140973bbae33ea47cd5115e9c899dd5f6",
+    "sha256:3fb47885a4381139f7c0ef4a65788aa7d99dddbacbd5e13b8ef12fd333faf25d",
   "scripts/local-candidate-source-manifest.mjs":
     "sha256:62198db25f2246fa45baba16534a4d912437e253d5d135690d3eb940a7ccbc91",
 });
@@ -272,7 +281,7 @@ const GENERATED_PUBLICATION_FILES = Object.freeze(FINAL_FILES.filter(
     ),
 ));
 if (
-  Object.keys(CONTROL_DIGESTS).length !== 15
+  Object.keys(CONTROL_DIGESTS).length !== 17
   || FINAL_FILES.length !== 70
   || GENERATED_PUBLICATION_FILES.length !== 55
 ) {
@@ -291,6 +300,13 @@ if (
   && process.argv[2] === "--self-test-host-toolchain-isolation"
 ) {
   await runHostToolchainIsolationSelfTest();
+  process.exit(0);
+}
+if (
+  process.argv.length === 3
+  && process.argv[2] === "--self-test-safe-fs-code-binding"
+) {
+  await runSafeFsCodeBindingSelfTest();
   process.exit(0);
 }
 if (
@@ -435,6 +451,10 @@ if (
 const pinnedToolchainPolicyPath = path.join(
   outputParent,
   PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME,
+);
+const pinnedSafeFsHelperPath = path.join(
+  outputParent,
+  PINNED_SAFE_FS_HELPER_NAME,
 );
 await writePrivateFile(
   pinnedToolchainPolicyPath,
@@ -581,7 +601,7 @@ await writePrivateFile(
   commandSandboxProfile,
   Buffer.from(buildAcceptanceSandboxProfile({
     readableRoots: sandboxReadableRoots,
-    readableFiles: [pinnedToolchainPolicyPath],
+    readableFiles: [pinnedToolchainPolicyPath, pinnedSafeFsHelperPath],
     metadataRoots: ["/Users"],
     writableRoots: sandboxWritableRoots,
     network: false,
@@ -600,7 +620,7 @@ await writePrivateFile(
   electronSandboxProfile,
   Buffer.from(buildAcceptanceSandboxProfile({
     readableRoots: sandboxReadableRoots,
-    readableFiles: [pinnedToolchainPolicyPath],
+    readableFiles: [pinnedToolchainPolicyPath, pinnedSafeFsHelperPath],
     readablePrefixes: electronEphemeralPrefixes,
     metadataRoots: ["/Users"],
     writableRoots: sandboxWritableRoots,
@@ -715,6 +735,7 @@ const trustedEnvironment = {
   ZEROX_LOCAL_CANDIDATE_TOOLCHAIN_DIGEST: EXPECTED_TOOLCHAIN.digest,
   ZEROX_LOCAL_CANDIDATE_TOOLCHAIN_ENTRY_COUNT:
     String(EXPECTED_TOOLCHAIN.entryCount),
+  ZEROX_LOCAL_CANDIDATE_SAFE_FS_SOURCE: pinnedSafeFsHelperPath,
 };
 await verifyHostToolchainIsolation({
   profiles: [
@@ -745,6 +766,25 @@ await run(
   executionRoot,
   trustedEnvironment,
 );
+const generatedSafeFsHelper = await captureRegularFile(
+  path.join(
+    executionRoot,
+    `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+  ),
+  "generated unsigned safe-fs helper",
+);
+if (generatedSafeFsHelper.digest !== EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST) {
+  fail("generated unsigned safe-fs helper differs from the caller-reviewed bytes");
+}
+await writePrivateFile(pinnedSafeFsHelperPath, generatedSafeFsHelper.bytes);
+await chmod(pinnedSafeFsHelperPath, 0o755);
+const pinnedSafeFsHelper = await captureRegularFile(
+  pinnedSafeFsHelperPath,
+  "caller-owned unsigned safe-fs helper capability",
+);
+if (pinnedSafeFsHelper.digest !== EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST) {
+  fail("caller-owned unsigned safe-fs helper capability drifted");
+}
 await run(
   nodePath,
   ["scripts/package-local-candidate.mjs"],
@@ -784,6 +824,14 @@ await scanPathsForEnvironmentSecrets([
 ], trustedEnvironment);
 await verifyPinnedMacosSdkManifest(macosCompiler);
 await assertExecutionQuiescent("before publication");
+const safeFsCodeBinding = await verifyPackagedSafeFsCodeBinding({
+  unsignedPath: pinnedSafeFsHelperPath,
+  signedPath: path.join(
+    appPath,
+    "Contents/Resources/safe-fs/zerox-safe-fs",
+  ),
+  outputParent,
+});
 let publication;
 let completedAnchor;
 let temporaryOutput;
@@ -879,6 +927,9 @@ try {
     sourceFileCount: options.expectedSourceFileCount,
     unsignedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
     packagedSafeFsHelperDigest,
+    packagedSafeFsUnsignedCodeDigest:
+      safeFsCodeBinding.unsignedSafeFsHelperDigest,
+    packagedSafeFsCodeLimit: safeFsCodeBinding.codeLimit,
     controlDigests: CONTROL_DIGESTS,
     verification: {
       fullVerify: "split-equivalent-passed",
@@ -1054,6 +1105,7 @@ await Promise.all([
   rm(electronSandboxProfile, { force: true }),
   rm(repositoryCheckSandboxProfile, { force: true }),
   rm(pinnedToolchainPolicyPath, { force: true }),
+  rm(pinnedSafeFsHelperPath, { force: true }),
 ]);
 await settleMutationWatchers();
 await verifyCanonicalRepositoryPostflight();
@@ -1230,6 +1282,10 @@ function assertPackagedSafeFsIdentity({
     || anchor.packagedSafeFsHelperDigest !== safeFsCapture.digest
     || anchor.packagedSafeFsHelperDigest
       === EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || anchor.packagedSafeFsUnsignedCodeDigest
+      !== EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || !Number.isInteger(anchor.packagedSafeFsCodeLimit)
+    || anchor.packagedSafeFsCodeLimit <= 0
     || packageReceipt.safeFsHelper?.path !== safeFsRelativePath
     || packageReceipt.safeFsHelper?.bytes !== safeFsCapture.bytes.length
     || packageReceipt.safeFsHelper?.sha256 !== safeFsCapture.digest
@@ -1243,6 +1299,178 @@ function assertPackagedSafeFsIdentity({
   }
 }
 
+async function verifyPackagedSafeFsCodeBinding({
+  unsignedPath,
+  signedPath,
+  outputParent,
+}) {
+  const [unsignedCapture, signedCapture, allocatorCapture] = await Promise.all([
+    captureRegularFile(unsignedPath, "caller-owned unsigned safe-fs helper"),
+    captureRegularFile(signedPath, "signed packaged safe-fs helper"),
+    captureRegularFile(
+      EXPECTED_CODESIGN_ALLOCATE.path,
+      "caller-reviewed codesign_allocate",
+    ),
+  ]);
+  if (
+    unsignedCapture.digest !== EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || allocatorCapture.digest !== EXPECTED_CODESIGN_ALLOCATE.digest
+  ) {
+    fail("safe-fs code-binding inputs differ from caller-reviewed bytes");
+  }
+  const signature = parseThinMachOCodeSignature(
+    signedCapture.bytes,
+    "signed packaged safe-fs helper",
+  );
+  const allocatedPath = path.join(
+    outputParent,
+    `.v392-safe-fs-code-binding-${process.pid}-${randomUUID()}`,
+  );
+  try {
+    await execFile(
+      EXPECTED_CODESIGN_ALLOCATE.path,
+      [
+        "-i",
+        unsignedPath,
+        "-a",
+        "arm64",
+        String(signature.dataSize),
+        "-o",
+        allocatedPath,
+      ],
+      {
+        cwd: outputParent,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+    const allocatedCapture = await captureRegularFile(
+      allocatedPath,
+      "allocated unsigned safe-fs comparison image",
+    );
+    if (
+      allocatedCapture.bytes.length !== signedCapture.bytes.length
+      || signature.dataOffset <= 0
+      || signature.dataOffset >= signedCapture.bytes.length
+      || !allocatedCapture.bytes.subarray(0, signature.dataOffset).equals(
+        signedCapture.bytes.subarray(0, signature.dataOffset),
+      )
+    ) {
+      fail("signed packaged safe-fs code does not derive from pinned unsigned bytes");
+    }
+    return {
+      unsignedSafeFsHelperDigest: unsignedCapture.digest,
+      signedSafeFsHelperDigest: signedCapture.digest,
+      codeLimit: signature.dataOffset,
+      signatureBytes: signature.dataSize,
+    };
+  } finally {
+    await rm(allocatedPath, { force: true });
+  }
+}
+
+async function runSafeFsCodeBindingSelfTest() {
+  const testRoot = await realpath(await mkdtemp(
+    "/private/tmp/zerox-safe-fs-code-binding-",
+  ));
+  const unsignedPath = path.join(
+    process.cwd(),
+    `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+  );
+  const signedPath = path.join(
+    process.cwd(),
+    "release-local/mac-arm64/Zerox Agent.app/Contents/Resources/safe-fs/zerox-safe-fs",
+  );
+  const tamperedPath = path.join(testRoot, "tampered-safe-fs");
+  try {
+    const binding = await verifyPackagedSafeFsCodeBinding({
+      unsignedPath,
+      signedPath,
+      outputParent: testRoot,
+    });
+    await cp(signedPath, tamperedPath);
+    const tampered = await open(tamperedPath, "r+");
+    try {
+      const original = Buffer.alloc(1);
+      await tampered.read(original, 0, 1, 4096);
+      await tampered.write(
+        Buffer.from([original[0] ^ 0xff]),
+        0,
+        1,
+        4096,
+      );
+      await tampered.sync();
+    } finally {
+      await tampered.close();
+    }
+    let tamperRejected = false;
+    try {
+      await verifyPackagedSafeFsCodeBinding({
+        unsignedPath,
+        signedPath: tamperedPath,
+        outputParent: testRoot,
+      });
+    } catch (error) {
+      tamperRejected = error?.message
+        === "signed packaged safe-fs code does not derive from pinned unsigned bytes";
+    }
+    if (!tamperRejected) {
+      fail("safe-fs code-binding self-test did not reject code drift");
+    }
+    console.log(JSON.stringify({
+      safeFsCodeBindingSelfTest: "passed",
+      tamperRejected,
+      ...binding,
+    }));
+  } finally {
+    await rm(testRoot, { recursive: true, force: true });
+  }
+}
+
+function parseThinMachOCodeSignature(bytes, label) {
+  const MACH_O_64_LE = 0xfeedfacf;
+  const LC_CODE_SIGNATURE = 0x1d;
+  if (bytes.length < 32 || bytes.readUInt32LE(0) !== MACH_O_64_LE) {
+    fail(`${label} must be a thin little-endian 64-bit Mach-O image`);
+  }
+  const commandCount = bytes.readUInt32LE(16);
+  const commandBytes = bytes.readUInt32LE(20);
+  const commandEnd = 32 + commandBytes;
+  if (commandEnd > bytes.length || commandCount <= 0) {
+    fail(`${label} has invalid Mach-O load commands`);
+  }
+  let offset = 32;
+  let signature = null;
+  for (let index = 0; index < commandCount; index += 1) {
+    if (offset + 8 > commandEnd) {
+      fail(`${label} has truncated Mach-O load commands`);
+    }
+    const command = bytes.readUInt32LE(offset);
+    const commandSize = bytes.readUInt32LE(offset + 4);
+    if (commandSize < 8 || offset + commandSize > commandEnd) {
+      fail(`${label} has an invalid Mach-O load command size`);
+    }
+    if (command === LC_CODE_SIGNATURE) {
+      if (signature || commandSize !== 16) {
+        fail(`${label} has an ambiguous LC_CODE_SIGNATURE command`);
+      }
+      signature = {
+        dataOffset: bytes.readUInt32LE(offset + 8),
+        dataSize: bytes.readUInt32LE(offset + 12),
+      };
+    }
+    offset += commandSize;
+  }
+  if (
+    !signature
+    || signature.dataOffset + signature.dataSize !== bytes.length
+    || signature.dataSize <= 0
+  ) {
+    fail(`${label} has an invalid embedded code-signature extent`);
+  }
+  return signature;
+}
+
 function verifySafeFsPackageIdentitySelfTest() {
   const safeFsRelativePath =
     "release-local/mac-arm64/Zerox Agent.app/Contents/Resources/safe-fs/zerox-safe-fs";
@@ -1251,6 +1479,9 @@ function verifySafeFsPackageIdentitySelfTest() {
   const anchor = {
     unsignedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
     packagedSafeFsHelperDigest: signedDigest,
+    packagedSafeFsUnsignedCodeDigest:
+      EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
+    packagedSafeFsCodeLimit: 1,
   };
   const packageReceipt = {
     safeFsHelper: {
@@ -1382,6 +1613,10 @@ async function validateRecoveredCommittedAcceptance({
     )
     || anchor.packagedSafeFsHelperDigest
       === EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || anchor.packagedSafeFsUnsignedCodeDigest
+      !== EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || !Number.isInteger(anchor.packagedSafeFsCodeLimit)
+    || anchor.packagedSafeFsCodeLimit <= 0
     || anchor.gitHead !== expected.expectedGitHead
     || anchor.gitTree !== expected.expectedGitTree
     || JSON.stringify(anchor.reviewPins) !== JSON.stringify(reviewPins)

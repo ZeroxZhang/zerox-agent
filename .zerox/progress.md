@@ -14776,3 +14776,42 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   dependency audit reports zero vulnerabilities and dependency-tree and
   whitespace checks pass. Fresh exact-byte dual review and the isolated
   package-to-postflight acceptance remain mandatory before release.
+
+## 2026-09-02 - P113/CD09 immutable packaging capability and code binding
+
+- Frozen candidate `f44d2ec695f964ff80c362ad9f7918ebc0f194ea` was
+  independently rejected by both code and security review at `0C/1M/0m`.
+  Although the build and package pre/postflights all matched the reviewed
+  unsigned digest, Electron Builder still reopened the mutable
+  `dist-native` pathname during its copy. A candidate descendant could perform
+  an ABA replacement only during that copy window, restore the expected file,
+  and leave a different signed helper whose newly observed digest remained
+  internally consistent with the package receipt.
+- Packaging now passes the reviewed helper as an inherited read-only file
+  descriptor and Electron Builder reads `/dev/fd/3`; pathname replacement no
+  longer changes the inode being copied. The authoritative external runner
+  first materializes the exact reviewed bytes in its caller-owned directory,
+  which the candidate Seatbelt can read but cannot write. An `afterPack` gate
+  verifies the copied unsigned bytes before signing and restores the reviewed
+  executable mode.
+- After the complete candidate process group has exited, the external runner
+  independently parses the signed Mach-O `LC_CODE_SIGNATURE`, invokes the
+  caller-pinned `codesign_allocate`, and compares every byte before the code
+  signature with an allocation derived from the caller-owned unsigned image.
+  The anchor now records both the signed digest and the proven unsigned-code
+  digest/code limit. A real pathname-replacement regression proves the child
+  copy still receives the pinned descriptor bytes, and a signed-code mutation
+  self-test fails closed.
+- Focused capability, package, Electron Builder, and after-sign controls pass
+  `35/35`. A real local package passes with unsigned digest
+  `sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6`,
+  signed digest
+  `sha256:19336a5eb5b1a5d2e47b513e0a3a7e909e1360656b9193d2fd969feefe49014c`,
+  code limit `53024`, and signature extent `18784`; direct code mutation is
+  rejected. Fresh full `npm run verify` passes `4035` current tests with six
+  declared skips, strict test type coverage `437/437`, every Round2-Round12
+  compatibility lane, production build, Agent eval `26/26`, and Memory eval
+  `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`, SQLite
+  `3.53.2`, seven migrations, eight authority domains, renderer startup, and
+  Node ABI `137` restoration; dependency audit reports zero vulnerabilities
+  and dependency-tree and whitespace checks pass.

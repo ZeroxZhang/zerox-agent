@@ -7,6 +7,7 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  readSync,
   realpathSync,
 } from "node:fs";
 import path from "node:path";
@@ -148,51 +149,100 @@ export function assertUnchangedUnsignedSafeFsHelper(before, after) {
   }
 }
 
+export function openPinnedSafeFsHelperCapability(
+  helperPath,
+  policy,
+  options = {},
+) {
+  const inspection = inspectPinnedUnsignedSafeFsHelper(
+    helperPath,
+    policy,
+    options,
+  );
+  const absolutePath = path.resolve(helperPath);
+  const descriptor = openSync(
+    absolutePath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const capture = captureOpenSafeFsHelper(descriptor, absolutePath);
+    if (capture.digest !== inspection.sha256) {
+      throw new Error("safe-fs helper changed before capability acquisition");
+    }
+    return {
+      descriptor,
+      inspection,
+      sha256: capture.digest,
+    };
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
 function captureSafeFsHelper(absolutePath) {
   const descriptor = openSync(
     absolutePath,
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
   );
   try {
-    const before = fstatSync(descriptor);
-    if (
-      !before.isFile()
-      || before.nlink !== 1
-      || (before.mode & 0o777) !== 0o755
-    ) {
-      throw new Error("safe-fs helper must be a canonical 0755 regular file");
-    }
-    const bytes = readFileSync(descriptor);
-    const after = fstatSync(descriptor);
-    const leaf = lstatSync(absolutePath);
-    if (
-      !after.isFile()
-      || after.dev !== before.dev
-      || after.ino !== before.ino
-      || after.size !== before.size
-      || after.mtimeMs !== before.mtimeMs
-      || after.ctimeMs !== before.ctimeMs
-      || !leaf.isFile()
-      || leaf.isSymbolicLink()
-      || leaf.nlink !== 1
-      || leaf.dev !== before.dev
-      || leaf.ino !== before.ino
-      || realpathSync(absolutePath) !== absolutePath
-    ) {
-      throw new Error("safe-fs helper identity changed while reading");
-    }
-    return {
-      bytes,
-      dev: before.dev,
-      ino: before.ino,
-      size: before.size,
-      mtimeMs: before.mtimeMs,
-      ctimeMs: before.ctimeMs,
-      digest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
-    };
+    return captureOpenSafeFsHelper(descriptor, absolutePath);
   } finally {
     closeSync(descriptor);
   }
+}
+
+function captureOpenSafeFsHelper(descriptor, absolutePath) {
+  const before = fstatSync(descriptor);
+  if (
+    !before.isFile()
+    || before.nlink !== 1
+    || (before.mode & 0o777) !== 0o755
+  ) {
+    throw new Error("safe-fs helper must be a canonical 0755 regular file");
+  }
+  const bytes = Buffer.alloc(before.size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = readSync(
+      descriptor,
+      bytes,
+      offset,
+      bytes.length - offset,
+      offset,
+    );
+    if (count === 0) {
+      throw new Error("safe-fs helper ended while reading capability bytes");
+    }
+    offset += count;
+  }
+  const after = fstatSync(descriptor);
+  const leaf = lstatSync(absolutePath);
+  if (
+    !after.isFile()
+    || after.dev !== before.dev
+    || after.ino !== before.ino
+    || after.size !== before.size
+    || after.mtimeMs !== before.mtimeMs
+    || after.ctimeMs !== before.ctimeMs
+    || !leaf.isFile()
+    || leaf.isSymbolicLink()
+    || leaf.nlink !== 1
+    || leaf.dev !== before.dev
+    || leaf.ino !== before.ino
+    || realpathSync(absolutePath) !== absolutePath
+  ) {
+    throw new Error("safe-fs helper identity changed while reading");
+  }
+  return {
+    bytes,
+    dev: before.dev,
+    ino: before.ino,
+    size: before.size,
+    mtimeMs: before.mtimeMs,
+    ctimeMs: before.ctimeMs,
+    digest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+  };
 }
 
 function assertSameSafeFsCapture(before, after) {
