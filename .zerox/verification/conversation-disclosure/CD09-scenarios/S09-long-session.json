@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S09-long-session",
   "scenarioDigest": "sha256:391645bd0c600e15825713b417f169204e755588942cde863dd80d527b095ae8",
-  "executionId": "441f0ecd-c257-43a3-990d-d416a3da9cda",
+  "executionId": "4a3a75d4-3831-442c-8b07-70eee71683b4",
   "processEpochs": [
-    "main_5b687ea3-4d97-4ced-b2d1-977f4142ca40"
+    "main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
   ],
   "attemptNonces": [
-    "fdd8aff5-9adb-4566-9c6f-444931a9afff"
+    "188c0af1-b59e-4e0a-8478-f733c1bb94f4"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "f1648e65-dec4-43ec-88f4-e83e7ea12598",
+        "c65e8c4c-5ffc-4f74-b537-79ac2bccf58b",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_5b687ea3-4d97-4ced-b2d1-977f4142ca40"
+        "process:main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -55,10 +55,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "f1648e65-dec4-43ec-88f4-e83e7ea12598",
+        "c65e8c4c-5ffc-4f74-b537-79ac2bccf58b",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_5b687ea3-4d97-4ced-b2d1-977f4142ca40"
+        "process:main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -79,10 +79,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "f1648e65-dec4-43ec-88f4-e83e7ea12598",
+        "c65e8c4c-5ffc-4f74-b537-79ac2bccf58b",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_5b687ea3-4d97-4ced-b2d1-977f4142ca40"
+        "process:main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -93,14 +93,14 @@
         "streamEventCount": 17,
         "renderedRowCount": 81,
         "renderedRowsBounded": true,
-        "renderDurationMs": 109.2000000178814,
+        "renderDurationMs": 84,
         "postUpdateTailCount": 50,
         "performanceBounded": true,
         "rendererMetricsAvailable": true,
-        "cpuTaskDurationMs": 44.824999999999996,
-        "heapBeforeBytes": 7206672,
-        "heapAfterBytes": 11443236,
-        "heapGrowthBytes": 4236564,
+        "cpuTaskDurationMs": 29.681999999999995,
+        "heapBeforeBytes": 7453776,
+        "heapAfterBytes": 9452220,
+        "heapGrowthBytes": 1998444,
         "domNodeCount": 2744,
         "domNodeGrowth": 1094,
         "cpuHeapDomBounded": true
@@ -114,7 +114,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:fe56335ed0de87c1fc646078abbb93733c15e3890390807f04c1bcfe30ee958c",
-        "screenshot:sha256:c1f9dd9a733c7081bf67a9e7274d6cc8e6a4a19416cc735324ce0569ab1d9092"
+        "screenshot:sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
       ]
     },
     {
@@ -123,7 +123,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:e17ae8f2e63c4ff2f3854b66ef6931efcdcddcdb115cc09c492f25865951803c",
-        "screenshot:sha256:c1f9dd9a733c7081bf67a9e7274d6cc8e6a4a19416cc735324ce0569ab1d9092"
+        "screenshot:sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
       ]
     },
     {
@@ -131,8 +131,8 @@
       "requirement": "raw payloads are paged truncated or offloaded",
       "ok": true,
       "evidenceIds": [
-        "action:2:sha256:2aebe339bd563b0e344ecbec3bd764c3459d4fafd9600b002fb7699385a89b9d",
-        "screenshot:sha256:c1f9dd9a733c7081bf67a9e7274d6cc8e6a4a19416cc735324ce0569ab1d9092"
+        "action:2:sha256:fe364255d86dae7b1ac3d1afc1303be6eca4bcfe08427f46ab45731909cfc4cb",
+        "screenshot:sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
       ]
     }
   ],
@@ -354,42 +354,42 @@
     },
     {
       "ordinal": 44,
-      "channel": "skills:list",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 45,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 46,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 47,
+      "ordinal": 46,
       "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
-      "ordinal": 48,
+      "ordinal": 47,
       "channel": "scheduledTasks:list",
       "ok": true
     },
     {
-      "ordinal": 49,
+      "ordinal": 48,
       "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
-      "ordinal": 50,
+      "ordinal": 49,
       "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
-      "ordinal": 51,
+      "ordinal": 50,
       "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 51,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -399,18 +399,18 @@
     },
     {
       "ordinal": 53,
-      "channel": "skills:list",
+      "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
       "ordinal": 54,
-      "channel": "chatSessions:getTranscriptPage",
+      "channel": "skills:list",
       "ok": true
     }
   ],
   "screenshotDigests": [
-    "sha256:c1f9dd9a733c7081bf67a9e7274d6cc8e6a4a19416cc735324ce0569ab1d9092"
+    "sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
   ],
   "status": "passed",
-  "digest": "sha256:0aac39bf36a9a124b1c3e19413779398e17d544736eb225011f17836297f9368"
+  "digest": "sha256:947699e75b1cb30559f878f9b7e70f3d3491924b1e049327bdfc80707ae80a66"
 }

@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S06-pause-reload-recovery",
   "scenarioDigest": "sha256:735d4a84adf2b87e2081d1a81638aaf9a96d79b5b6328f3c9cf6a6516d9a98ed",
-  "executionId": "3edd3e12-d152-4014-889f-28e6cee87dde",
+  "executionId": "de5c23cf-be15-46ed-b842-3023ef8bd5f8",
   "processEpochs": [
-    "main_c528322f-3270-46d8-8336-2471a3a667f0"
+    "main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
   ],
   "attemptNonces": [
-    "3ee208ec-bc9e-451f-8601-fc61ad238527"
+    "7f1f4282-5883-4d09-9b70-cac078bd8a87"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "9928380a-c3d2-4c79-8faf-e6382f8d15a0",
+        "10e37a9a-afd9-4fbd-822d-e71e8e86a609",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "4bf4f868-3576-4a2a-b736-aa5c70452c56",
-        "process:main_c528322f-3270-46d8-8336-2471a3a667f0"
+        "d348796a-0fdf-40e5-8b91-c2f01c1df5cd",
+        "process:main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -51,11 +51,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "9928380a-c3d2-4c79-8faf-e6382f8d15a0",
+        "10e37a9a-afd9-4fbd-822d-e71e8e86a609",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "4bf4f868-3576-4a2a-b736-aa5c70452c56",
-        "process:main_c528322f-3270-46d8-8336-2471a3a667f0"
+        "d348796a-0fdf-40e5-8b91-c2f01c1df5cd",
+        "process:main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,11 +72,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "9928380a-c3d2-4c79-8faf-e6382f8d15a0",
+        "10e37a9a-afd9-4fbd-822d-e71e8e86a609",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "4bf4f868-3576-4a2a-b736-aa5c70452c56",
-        "process:main_c528322f-3270-46d8-8336-2471a3a667f0"
+        "d348796a-0fdf-40e5-8b91-c2f01c1df5cd",
+        "process:main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,7 +96,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:dc8944961296d113ae68e87923d8a0b35963a3bee7b4219c75ece92d13cb46cd",
-        "screenshot:sha256:600336dea49e50fc5764a3f2a8f8088f46a4952bef77b7c1f25a50f9f29a8409"
+        "screenshot:sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
       ]
     },
     {
@@ -105,7 +105,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:a6ec076aaccb7730677ddad1c3661f70dc9060d81b40d9dc768b607bb2c1848f",
-        "screenshot:sha256:600336dea49e50fc5764a3f2a8f8088f46a4952bef77b7c1f25a50f9f29a8409"
+        "screenshot:sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
       ]
     },
     {
@@ -114,7 +114,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:11e70d7f8572dfea7ca1cc0d79c32579f00c7f4387ce496c457769e6be356ec4",
-        "screenshot:sha256:600336dea49e50fc5764a3f2a8f8088f46a4952bef77b7c1f25a50f9f29a8409"
+        "screenshot:sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
       ]
     }
   ],
@@ -206,52 +206,52 @@
     },
     {
       "ordinal": 18,
-      "channel": "agentRuns:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 19,
-      "channel": "memory:list",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 20,
-      "channel": "agentWorkspaces:list",
+      "channel": "memory:list",
       "ok": true
     },
     {
       "ordinal": 21,
-      "channel": "agentBootstrap:loadValidation",
+      "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
       "ordinal": 22,
-      "channel": "app:getMeta",
+      "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
       "ordinal": 23,
-      "channel": "app:getRuntimeInfo",
+      "channel": "app:getMeta",
       "ok": true
     },
     {
       "ordinal": 24,
-      "channel": "navigation:list",
+      "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
       "ordinal": 25,
-      "channel": "chatSessions:list",
+      "channel": "navigation:list",
       "ok": true
     },
     {
       "ordinal": 26,
-      "channel": "app:getUpdateState",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 27,
-      "channel": "modelSettings:load",
+      "channel": "app:getUpdateState",
       "ok": true
     },
     {
@@ -351,52 +351,52 @@
     },
     {
       "ordinal": 47,
-      "channel": "agentRuns:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 48,
-      "channel": "memory:list",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 49,
-      "channel": "agentWorkspaces:list",
+      "channel": "memory:list",
       "ok": true
     },
     {
       "ordinal": 50,
-      "channel": "agentBootstrap:loadValidation",
+      "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
       "ordinal": 51,
-      "channel": "app:getMeta",
+      "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
       "ordinal": 52,
-      "channel": "app:getRuntimeInfo",
+      "channel": "app:getMeta",
       "ok": true
     },
     {
       "ordinal": 53,
-      "channel": "navigation:list",
+      "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
       "ordinal": 54,
-      "channel": "chatSessions:list",
+      "channel": "navigation:list",
       "ok": true
     },
     {
       "ordinal": 55,
-      "channel": "app:getUpdateState",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 56,
-      "channel": "modelSettings:load",
+      "channel": "app:getUpdateState",
       "ok": true
     },
     {
@@ -476,8 +476,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:600336dea49e50fc5764a3f2a8f8088f46a4952bef77b7c1f25a50f9f29a8409"
+    "sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
   ],
   "status": "passed",
-  "digest": "sha256:6fc0815af8dce7407db5560274a573acdac35575d3d9b778babbcb4ca620e693"
+  "digest": "sha256:b48ae27c2e99dedca48e047a8230df5d0380a746664d6e51a0eb708a12c80d79"
 }

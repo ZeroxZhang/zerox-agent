@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S18-context-usage",
   "scenarioDigest": "sha256:92d314124b29cb75fc76cfde7e01c1f0db84def2db643209a4b9fcfff2112514",
-  "executionId": "0172396e-eaf3-4164-b084-52547dda8126",
+  "executionId": "c9b17334-6649-4950-9ac2-0ecc6ede9f7d",
   "processEpochs": [
-    "main_51f321a6-aec5-4d5e-9e0b-011fca7f0ec8"
+    "main_d5d14e49-faad-42b6-9422-71bd65a9c8a0"
   ],
   "attemptNonces": [
-    "46dfb584-b61e-47e8-94fd-506ae3d3ccd0"
+    "1117fa0b-7543-4090-bf06-e869f8189a4a"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "b77a2d33-9c6d-40a7-8f09-625393e5aceb",
+        "8b68ac41-bedf-4541-ac61-f3b54a3ed70f",
         "cd09-run-S18-context-usage",
         "trajectory-S18-context-usage",
-        "process:main_51f321a6-aec5-4d5e-9e0b-011fca7f0ec8"
+        "process:main_d5d14e49-faad-42b6-9422-71bd65a9c8a0"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -50,10 +50,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "b77a2d33-9c6d-40a7-8f09-625393e5aceb",
+        "8b68ac41-bedf-4541-ac61-f3b54a3ed70f",
         "cd09-run-S18-context-usage",
         "trajectory-S18-context-usage",
-        "process:main_51f321a6-aec5-4d5e-9e0b-011fca7f0ec8"
+        "process:main_d5d14e49-faad-42b6-9422-71bd65a9c8a0"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -73,10 +73,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "b77a2d33-9c6d-40a7-8f09-625393e5aceb",
+        "8b68ac41-bedf-4541-ac61-f3b54a3ed70f",
         "cd09-run-S18-context-usage",
         "trajectory-S18-context-usage",
-        "process:main_51f321a6-aec5-4d5e-9e0b-011fca7f0ec8"
+        "process:main_d5d14e49-faad-42b6-9422-71bd65a9c8a0"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,7 +96,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:0c92509f9a4647a684547eb633b10d175384d10c9758b422c78588a9e989f7fd",
-        "screenshot:sha256:b2c36b13807097df09cad4a102cd89da4311f1d25ca4f0cd249c747b933e597c"
+        "screenshot:sha256:19a0e66d9fc773ff0865acce16a25f66bd734ab0980943359c8996a3c98f9e06"
       ]
     },
     {
@@ -105,7 +105,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:50920b83b74e9491179bb6365d3fdd69b6317b46fffecb307e3b2b13b64bc512",
-        "screenshot:sha256:b2c36b13807097df09cad4a102cd89da4311f1d25ca4f0cd249c747b933e597c"
+        "screenshot:sha256:19a0e66d9fc773ff0865acce16a25f66bd734ab0980943359c8996a3c98f9e06"
       ]
     },
     {
@@ -114,7 +114,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:78ec6464c8aeeb1f8b36b8f9bffa7fbbfb53e0bb8df61b02a0677772ec5b20f9",
-        "screenshot:sha256:b2c36b13807097df09cad4a102cd89da4311f1d25ca4f0cd249c747b933e597c"
+        "screenshot:sha256:19a0e66d9fc773ff0865acce16a25f66bd734ab0980943359c8996a3c98f9e06"
       ]
     }
   ],
@@ -301,98 +301,98 @@
     },
     {
       "ordinal": 37,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 38,
       "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
-      "ordinal": 39,
+      "ordinal": 38,
       "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
-      "ordinal": 40,
+      "ordinal": 39,
       "channel": "app:getMeta",
       "ok": true
     },
     {
-      "ordinal": 41,
+      "ordinal": 40,
       "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
-      "ordinal": 42,
+      "ordinal": 41,
       "channel": "navigation:list",
       "ok": true
     },
     {
-      "ordinal": 43,
+      "ordinal": 42,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 44,
+      "ordinal": 43,
       "channel": "app:getUpdateState",
       "ok": true
     },
     {
-      "ordinal": 45,
+      "ordinal": 44,
       "channel": "modelSettings:load",
       "ok": true
     },
     {
-      "ordinal": 46,
+      "ordinal": 45,
       "channel": "modelCatalog:load",
       "ok": true
     },
     {
-      "ordinal": 47,
+      "ordinal": 46,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 48,
+      "ordinal": 47,
       "channel": "chatSessions:get",
       "ok": true
     },
     {
-      "ordinal": 49,
+      "ordinal": 48,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 50,
+      "ordinal": 49,
       "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
-      "ordinal": 51,
+      "ordinal": 50,
       "channel": "scheduledTasks:list",
       "ok": true
     },
     {
-      "ordinal": 52,
+      "ordinal": 51,
       "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
-      "ordinal": 53,
+      "ordinal": 52,
       "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
-      "ordinal": 54,
+      "ordinal": 53,
       "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 54,
+      "channel": "skills:list",
       "ok": true
     }
   ],
   "screenshotDigests": [
-    "sha256:b2c36b13807097df09cad4a102cd89da4311f1d25ca4f0cd249c747b933e597c"
+    "sha256:19a0e66d9fc773ff0865acce16a25f66bd734ab0980943359c8996a3c98f9e06"
   ],
   "status": "passed",
-  "digest": "sha256:6183236b9543c6154fe6db60a75844f7ac451f5de0be552cde191953fcdabd00"
+  "digest": "sha256:3dd02623491038631e69fb3541a33daab2f48414d3dbac628db39930822c750b"
 }

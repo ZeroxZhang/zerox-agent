@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S04-failure-attention",
   "scenarioDigest": "sha256:9c7eb05998e2d24ecc2a53e27d8dfce91df3d7d5f84d54085f0dea50bcd37d00",
-  "executionId": "3f9a4a5f-f673-46e7-b386-f808eccade09",
+  "executionId": "dad5fe0e-4f7f-422d-82d6-5b71266ebdf3",
   "processEpochs": [
-    "main_fd72cab6-9d7a-4cb4-a46f-c42581da664c"
+    "main_403647a3-9589-4642-9aab-dd11e7f3e016"
   ],
   "attemptNonces": [
-    "41c8ac1c-d33b-4cc7-a5b1-5c3fdb964612"
+    "ed22af3c-87b0-4a9b-8131-6b3cea3d0aef"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "6aa20437-c78a-495d-93e0-0e8193852aeb",
+        "dafc3a8d-3d94-4c3c-b914-fbe304270b9c",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_fd72cab6-9d7a-4cb4-a46f-c42581da664c"
+        "process:main_403647a3-9589-4642-9aab-dd11e7f3e016"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -50,10 +50,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "6aa20437-c78a-495d-93e0-0e8193852aeb",
+        "dafc3a8d-3d94-4c3c-b914-fbe304270b9c",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_fd72cab6-9d7a-4cb4-a46f-c42581da664c"
+        "process:main_403647a3-9589-4642-9aab-dd11e7f3e016"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -219,42 +219,42 @@
     },
     {
       "ordinal": 25,
-      "channel": "modelSettings:load",
-      "ok": true
-    },
-    {
-      "ordinal": 26,
       "channel": "scheduledTasks:list",
       "ok": true
     },
     {
-      "ordinal": 27,
+      "ordinal": 26,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 28,
+      "ordinal": 27,
       "channel": "memory:list",
       "ok": true
     },
     {
-      "ordinal": 29,
+      "ordinal": 28,
       "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
-      "ordinal": 30,
+      "ordinal": 29,
       "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
-      "ordinal": 31,
+      "ordinal": 30,
       "channel": "app:getMeta",
       "ok": true
     },
     {
-      "ordinal": 32,
+      "ordinal": 31,
       "channel": "app:getRuntimeInfo",
+      "ok": true
+    },
+    {
+      "ordinal": 32,
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
@@ -337,5 +337,5 @@
     "sha256:9c9adab49c998b5205ca85134c0a3e7095047f1ed1429d1c7db635a05970b366"
   ],
   "status": "passed",
-  "digest": "sha256:9b23bcc9f6c412480b8b705a8ca5bfbeea0433b551ed5851b8c512106cdb4503"
+  "digest": "sha256:9f499168d6338986b8c79f6f17f2899a3bf34c3661d13364cadf28cd82f9e4b3"
 }

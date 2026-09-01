@@ -24,6 +24,7 @@ import {
   previewLocalFileOrganization,
   readLocalFileOrganizationTransaction,
   rollbackLocalFileOrganization,
+  resolveSafeFsHelper,
   runSafeFsHelper,
   selectSafeFsHelperStdio,
   verifyLocalFileOrganization,
@@ -1629,6 +1630,50 @@ describe("local file organizer", () => {
         Object.defineProperty(process, "resourcesPath", previousDescriptor);
       } else {
         Reflect.deleteProperty(process, "resourcesPath");
+      }
+    }
+  });
+
+  it("uses the built helper instead of Electron framework resources in development", async () => {
+    const unrelatedResources = path.join(tempDir, "electron-framework-resources");
+    const unrelatedHelperDirectory = path.join(unrelatedResources, "safe-fs");
+    const unrelatedHelper = path.join(unrelatedHelperDirectory, "zerox-safe-fs");
+    await mkdir(unrelatedHelperDirectory, { recursive: true });
+    await writeFile(unrelatedHelper, "#!/bin/sh\nexit 1\n", "utf8");
+    await chmod(unrelatedHelper, 0o755);
+    const resourcesDescriptor = Object.getOwnPropertyDescriptor(
+      process,
+      "resourcesPath",
+    );
+    const defaultAppDescriptor = Object.getOwnPropertyDescriptor(
+      process,
+      "defaultApp",
+    );
+    Object.defineProperties(process, {
+      resourcesPath: {
+        configurable: true,
+        value: unrelatedResources,
+      },
+      defaultApp: {
+        configurable: true,
+        value: true,
+      },
+    });
+    try {
+      await expect(resolveSafeFsHelper()).resolves.toBe(await realpath(path.join(
+        process.cwd(),
+        `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+      )));
+    } finally {
+      if (resourcesDescriptor) {
+        Object.defineProperty(process, "resourcesPath", resourcesDescriptor);
+      } else {
+        Reflect.deleteProperty(process, "resourcesPath");
+      }
+      if (defaultAppDescriptor) {
+        Object.defineProperty(process, "defaultApp", defaultAppDescriptor);
+      } else {
+        Reflect.deleteProperty(process, "defaultApp");
       }
     }
   });

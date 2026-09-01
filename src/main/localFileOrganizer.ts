@@ -1419,18 +1419,22 @@ export async function resolveSafeFsHelper(override?: string): Promise<string> {
   if (process.platform !== "darwin") {
     throw new Error("Secure local file organization is supported only on macOS.");
   }
-  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string })
-    .resourcesPath;
+  const electronProcess = process as NodeJS.Process & {
+    defaultApp?: boolean;
+    resourcesPath?: string;
+  };
+  const resourcesPath = electronProcess.resourcesPath;
+  const developmentHelperPath = path.resolve(
+    __dirname,
+    "..",
+    "..",
+    `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+  );
   const candidates = override
     ? [override]
-    : resourcesPath
+    : resourcesPath && electronProcess.defaultApp !== true
       ? [path.join(resourcesPath, "safe-fs", "zerox-safe-fs")]
-      : [path.resolve(
-          __dirname,
-          "..",
-          "..",
-          `dist-native/darwin-${process.arch}/zerox-safe-fs`,
-        )];
+      : [developmentHelperPath];
   for (const candidate of candidates) {
     try {
       const metadata = await lstat(candidate);

@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S10-accessibility",
   "scenarioDigest": "sha256:3fdfc7cd9183c89b18b5cb2771543213dfe031e31abcf33f86c2e8d9a4b09065",
-  "executionId": "69ac0803-4c64-491c-92d9-3f8a4758fde1",
+  "executionId": "f4e7aa27-8b2a-4b2b-b3ca-ed2c78485c8a",
   "processEpochs": [
-    "main_25580c86-43ad-4cf5-9a4b-90605a110303"
+    "main_330d3acc-4ab5-4951-86e6-1d93c60fb1ca"
   ],
   "attemptNonces": [
-    "7af55a8e-0980-45e9-9670-1f32c13e12cf"
+    "2a20830b-aa28-4638-976d-69e052e4a81d"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "340e411f-dcd2-4178-a538-514d6cf0c857",
+        "f6d21ed3-86ea-47f7-8954-01073b4a188e",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_25580c86-43ad-4cf5-9a4b-90605a110303"
+        "process:main_330d3acc-4ab5-4951-86e6-1d93c60fb1ca"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -62,10 +62,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "340e411f-dcd2-4178-a538-514d6cf0c857",
+        "f6d21ed3-86ea-47f7-8954-01073b4a188e",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_25580c86-43ad-4cf5-9a4b-90605a110303"
+        "process:main_330d3acc-4ab5-4951-86e6-1d93c60fb1ca"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -86,10 +86,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "340e411f-dcd2-4178-a538-514d6cf0c857",
+        "f6d21ed3-86ea-47f7-8954-01073b4a188e",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_25580c86-43ad-4cf5-9a4b-90605a110303"
+        "process:main_330d3acc-4ab5-4951-86e6-1d93c60fb1ca"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -113,7 +113,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:8f0557f59ea5ba72cae59debfacb446c8f4181086e5396e671965fbbc00e5fac",
-        "screenshot:sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
+        "screenshot:sha256:ded0ba8e811d68c3a0c2f67ac1e34a5c9715f94be95974b620d658128f403fe1"
       ]
     },
     {
@@ -122,7 +122,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:9ba031c97a64af3b6aa74eb80dd5d29918655b633142db81b9afaf880bc6221d",
-        "screenshot:sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
+        "screenshot:sha256:ded0ba8e811d68c3a0c2f67ac1e34a5c9715f94be95974b620d658128f403fe1"
       ]
     },
     {
@@ -131,7 +131,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:d585182d23b67c8ab06b3ef528d060b858720e75bbd147d7aabf558459e70001",
-        "screenshot:sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
+        "screenshot:sha256:ded0ba8e811d68c3a0c2f67ac1e34a5c9715f94be95974b620d658128f403fe1"
       ]
     }
   ],
@@ -288,22 +288,22 @@
     },
     {
       "ordinal": 31,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 32,
       "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
-      "ordinal": 33,
+      "ordinal": 32,
       "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
-      "ordinal": 34,
+      "ordinal": 33,
       "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 34,
+      "channel": "modelCatalog:load",
       "ok": true
     },
     {
@@ -313,7 +313,7 @@
     },
     {
       "ordinal": 36,
-      "channel": "modelCatalog:load",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
@@ -323,52 +323,52 @@
     },
     {
       "ordinal": 38,
-      "channel": "chatSessions:list",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 39,
-      "channel": "chatSessions:get",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 40,
-      "channel": "agentRuns:list",
+      "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
       "ordinal": 41,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
       "ordinal": 42,
-      "channel": "scheduledTasks:list",
-      "ok": true
-    },
-    {
-      "ordinal": 43,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 44,
+      "ordinal": 43,
       "channel": "chatSessions:get",
       "ok": true
     },
     {
-      "ordinal": 45,
+      "ordinal": 44,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 46,
+      "ordinal": 45,
       "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
-      "ordinal": 47,
+      "ordinal": 46,
       "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 47,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -468,42 +468,42 @@
     },
     {
       "ordinal": 67,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 68,
       "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
-      "ordinal": 69,
+      "ordinal": 68,
       "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
-      "ordinal": 70,
+      "ordinal": 69,
       "channel": "modelSettings:load",
       "ok": true
     },
     {
-      "ordinal": 71,
+      "ordinal": 70,
       "channel": "modelCatalog:load",
       "ok": true
     },
     {
-      "ordinal": 72,
+      "ordinal": 71,
       "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
-      "ordinal": 73,
+      "ordinal": 72,
       "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
-      "ordinal": 74,
+      "ordinal": 73,
       "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 74,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -533,8 +533,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:da72d4461961619fed560ba934a727164df7f8d9279b3f9dd9f248e472fb34fe"
+    "sha256:ded0ba8e811d68c3a0c2f67ac1e34a5c9715f94be95974b620d658128f403fe1"
   ],
   "status": "passed",
-  "digest": "sha256:9c2dbb08ab4ea68ca5ea91984f09dcc56dd7ea69e8f7163bd06fb9ae39508e75"
+  "digest": "sha256:8a5ebd6fd534c0832cb917c97021733172bec77861bed019d2f970bde542b314"
 }

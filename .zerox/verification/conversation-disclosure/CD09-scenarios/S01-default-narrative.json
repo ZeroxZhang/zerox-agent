@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S01-default-narrative",
   "scenarioDigest": "sha256:812a9c61836bd4c33b5d8b518cfc3390b8e2db929ad3d78aea5beff68bd4a8d0",
-  "executionId": "8cf68e03-16c0-4fef-9590-a8ae837292f2",
+  "executionId": "33207abf-41eb-4e2d-b272-0a57e838587d",
   "processEpochs": [
-    "main_b09c09e8-d11c-41b6-8582-71b1942b61a1"
+    "main_9b22d215-fcb2-41e6-8ff6-48624f6b0b84"
   ],
   "attemptNonces": [
-    "9f1e0af3-5ad9-473b-956d-a4fe5df7b377"
+    "3448e3d7-77ad-420f-89c5-dfb8a8154d73"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "503aae42-0180-4033-af04-30aed1d6cee4",
+        "0e1496f0-af37-4493-863e-474d80854c10",
         "cd09-run-S01-default-narrative",
         "trajectory-S01-default-narrative",
-        "process:main_b09c09e8-d11c-41b6-8582-71b1942b61a1"
+        "process:main_9b22d215-fcb2-41e6-8ff6-48624f6b0b84"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -56,10 +56,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "503aae42-0180-4033-af04-30aed1d6cee4",
+        "0e1496f0-af37-4493-863e-474d80854c10",
         "cd09-run-S01-default-narrative",
         "trajectory-S01-default-narrative",
-        "process:main_b09c09e8-d11c-41b6-8582-71b1942b61a1"
+        "process:main_9b22d215-fcb2-41e6-8ff6-48624f6b0b84"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -80,7 +80,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:403d2befb38c00c2791f9b546d8056951e0c8f9c9addce5cb4e3bb81cef08459",
-        "screenshot:sha256:c8dc85051de6a58a71eaef60f2ac9633109a7a50337b94c415611726f906eeef"
+        "screenshot:sha256:253fb8c644e6d4ea728ec324a8ad802bfa7c7453abe568b6aee097fbdc595342"
       ]
     },
     {
@@ -89,7 +89,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:d9e671a997f4924e047f6c38b56586c9e2f977cd7bc1939ee2bb7f1898de0e37",
-        "screenshot:sha256:c8dc85051de6a58a71eaef60f2ac9633109a7a50337b94c415611726f906eeef"
+        "screenshot:sha256:253fb8c644e6d4ea728ec324a8ad802bfa7c7453abe568b6aee097fbdc595342"
       ]
     },
     {
@@ -98,7 +98,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:d9e671a997f4924e047f6c38b56586c9e2f977cd7bc1939ee2bb7f1898de0e37",
-        "screenshot:sha256:c8dc85051de6a58a71eaef60f2ac9633109a7a50337b94c415611726f906eeef"
+        "screenshot:sha256:253fb8c644e6d4ea728ec324a8ad802bfa7c7453abe568b6aee097fbdc595342"
       ]
     }
   ],
@@ -260,32 +260,32 @@
     },
     {
       "ordinal": 32,
-      "channel": "app:getMeta",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 33,
-      "channel": "app:getRuntimeInfo",
+      "channel": "app:getMeta",
       "ok": true
     },
     {
       "ordinal": 34,
-      "channel": "navigation:list",
+      "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
       "ordinal": 35,
-      "channel": "chatSessions:list",
+      "channel": "navigation:list",
       "ok": true
     },
     {
       "ordinal": 36,
-      "channel": "app:getUpdateState",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 37,
-      "channel": "modelSettings:load",
+      "channel": "app:getUpdateState",
       "ok": true
     },
     {
@@ -345,8 +345,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:c8dc85051de6a58a71eaef60f2ac9633109a7a50337b94c415611726f906eeef"
+    "sha256:253fb8c644e6d4ea728ec324a8ad802bfa7c7453abe568b6aee097fbdc595342"
   ],
   "status": "passed",
-  "digest": "sha256:a6b1d1d0a4178c3bddc883ef810c099e7a60983a699c0327fc060ebee24f9674"
+  "digest": "sha256:93dbde01224acd992804fbeff725bd55606c93e9b6bdcc60030f1339f2d9cb6f"
 }

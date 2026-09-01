@@ -14619,3 +14619,36 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `sha256:bd30a90a0223f65d602b3db347fe112c3946057f709ed1bb30f8c534869aba57`
   and
   `sha256:250caed5fe801cfb1b52bc785de2e163c5e1ce8923be5dcadf6f0289b9dda7fe`.
+
+## 2026-09-02 - P113/CD09 development helper and acceptance workspace isolation
+
+- External acceptance attempt in `/private/tmp/zerox-v392-final5.QaEZS7`
+  passed the isolated full verification, production smoke, dependency audit,
+  and real-app scenarios S01-S06, then stopped without issuing an anchor at
+  S07. The Electron development process exposed `process.resourcesPath`, so
+  helper discovery incorrectly treated the framework resources directory as a
+  packaged app and never considered the built `dist-native` helper.
+- Helper discovery now uses Electron's `process.defaultApp` boundary:
+  packaged runs remain restricted to the signed helper in app resources,
+  development runs select the reviewed `dist-native` helper, and explicit
+  overrides remain exact. A regression supplies an executable decoy under the
+  framework resources path and proves development mode does not select it.
+- The first direct S07 retry then exposed a stale acceptance-fixture authority:
+  its fixed Plan id projected into `process.cwd()`, so repeat runs could collide
+  with a prior repository-local projection while claiming `absent` authority.
+  S07 now creates its Plan workspace inside the scenario attempt root derived
+  from the already validated isolated user-data path. Production projection
+  semantics remain unchanged and every attempt starts with independent file
+  authority.
+- Focused organizer, projection, helper-inspection, and package-script tests
+  pass `94/94`. A production build followed by the real Electron S07 scenario
+  passes. Fresh full `npm run verify` passes `4030` current tests with declared
+  skips, strict test type coverage `437/437`, every Round2-Round12 compatibility
+  lane, production build, Agent eval `26/26`, and Memory eval `2/2`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration; the production dependency audit reports zero vulnerabilities.
+- The fresh full real-app acceptance passes all `19/19` governed scenarios,
+  including S07 through the native helper and isolated Plan workspace. Its
+  machine-readable receipts and screenshots were regenerated for the current
+  candidate.

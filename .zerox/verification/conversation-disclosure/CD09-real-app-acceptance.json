@@ -29,25 +29,25 @@
     {
       "command": "/Users/zeorx/.nvm/versions/node/v24.18.0/bin/node scripts/run-conversation-disclosure-hardening.mjs",
       "status": "passed",
-      "stdoutSha256": "sha256:0879f3fd558e68d6ab2cf9d03d7f7a023d353426548151e0c85005dc0014445d",
+      "stdoutSha256": "sha256:8e95f915641e8054b130e102d9e5fa82d8ccc32df8121182398f69493845b300",
       "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "command": "/Users/zeorx/.nvm/versions/node/v24.18.0/bin/node scripts/run-production-smoke.mjs --skip-build",
       "status": "passed",
-      "stdoutSha256": "sha256:7acb61359340f386839e3983244b8e7d220c491ff7c2508a247b3e8afc0d068f",
+      "stdoutSha256": "sha256:8b57586a457318eaa798365b2a88c15d1f8c1470d6e421f1f42f4cd7874b6821",
       "stderrSha256": "sha256:e327f3f386d1e62d0832199f0c96042a9fc60b6ecafc41c13b3b5f448c5193d3"
     },
     {
       "command": "/Users/zeorx/.nvm/versions/node/v24.18.0/bin/node scripts/run-conversation-disclosure-real-app.mjs",
       "status": "passed",
-      "stdoutSha256": "sha256:81f1d9e64eac46f4a0bf4301b0c29269eeb3241632614669408c08ec3ca66830",
+      "stdoutSha256": "sha256:2908a694721494db6a4129d6349db67db040ae498f48150c20a049f0917f30fa",
       "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "command": "/Users/zeorx/.nvm/versions/node/v24.18.0/bin/node node_modules/vitest/vitest.mjs run --run src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts src/renderer/toolApprovalProjection.test.ts src/renderer/toolApprovalVisibility.test.ts src/renderer/goalAcceptanceInteraction.test.ts src/renderer/goalTerminalTruth.test.ts src/renderer/chatTaskActivityRestore.test.ts src/main/conversationEvidenceResolver.test.ts src/main/planStore.test.ts src/main/chatSessionStore.test.ts src/main/jsonlRecovery.test.ts --maxWorkers=1 --reporter=json",
       "status": "passed",
-      "stdoutSha256": "sha256:7654260475eb84ef406ed6b72f8e82c1ac9d21372041f09cfce569b12e63c465",
+      "stdoutSha256": "sha256:1a3e1606d467efcc2b235da58645c600c55ad519034b89aa184266d0863357e7",
       "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "testFiles": [
         "src/renderer/chatStreamReducer.test.ts",
@@ -321,7 +321,31 @@
         },
         {
           "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity classifies replay read failures without retaining arbitrary parser input"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity keeps both Plan replay failure paths on the fixed classifier boundary"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
           "fullName": "plan store parity keeps JSON and SQLite backends behaviorally equivalent"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity sanitizes and migrates Plan diagnostics at every storage boundary"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity cleans stored diagnostics even when the legacy workspace is offline"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity tombstones a legacy diagnostic projection without a final artifact"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity keeps a non-confirmable recovery intent without overwriting a drifted legacy projection"
         },
         {
           "testFile": "src/main/planStore.test.ts",
@@ -342,6 +366,58 @@
         {
           "testFile": "src/main/planStore.test.ts",
           "fullName": "plan store parity uses the durable session index without parsing unrelated Plan files"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity recovers a durable projection intent before exposing a confirmable Plan"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity serializes json recovery writes with concurrent abandonment"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity serializes sqlite recovery writes with concurrent abandonment"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rebinds SQLite session selection after queued authoritative reads"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity samples cancellation once at projection commit and returns the stored outcome"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rejects a mismatched prepared projection before persisting or publishing it"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity atomically abandons an unrecoverable projection intent so the Plan can be discarded"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity isolates only corrupt records and propagates systemic Plan I/O failures"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity converts malformed JSON parser output to a content-free record error"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity converts malformed SQLite JSON parser output to a content-free record error"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity binds decoded payload identity to its JSON or SQLite storage envelope"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity quarantines malformed JSON Plans without blocking valid list queries"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity quarantines malformed SQLite Plans and skips a corrupt newest session record"
         },
         {
           "testFile": "src/main/planStore.test.ts",
@@ -933,10 +1009,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S01-default-narrative.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S01-default-narrative.png",
-        "receiptDigest": "sha256:a6b1d1d0a4178c3bddc883ef810c099e7a60983a699c0327fc060ebee24f9674",
-        "executionId": "8cf68e03-16c0-4fef-9590-a8ae837292f2",
+        "receiptDigest": "sha256:93dbde01224acd992804fbeff725bd55606c93e9b6bdcc60030f1339f2d9cb6f",
+        "executionId": "33207abf-41eb-4e2d-b272-0a57e838587d",
         "processEpochs": [
-          "main_b09c09e8-d11c-41b6-8582-71b1942b61a1"
+          "main_9b22d215-fcb2-41e6-8ff6-48624f6b0b84"
         ],
         "validationErrors": []
       },
@@ -978,10 +1054,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S02-inline-expansion.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S02-inline-expansion.png",
-        "receiptDigest": "sha256:2e6220245736399eff9f48ea15cb5f9edc33273914d70e368eac7c4ac1fa8ca6",
-        "executionId": "a4ece93d-4ac5-4cc2-a5d3-7501cd24c77a",
+        "receiptDigest": "sha256:26d139898939ec3b917f17a64cd5755a02d19f1b95dcf4876f4fc7966e56bfaa",
+        "executionId": "be57add5-8cee-4cf2-9d3f-377e975ca0c8",
         "processEpochs": [
-          "main_a2686ee8-b1f2-47c2-a114-9ce6b21cfab4"
+          "main_d581285b-5f45-4946-96e5-3d13669b1031"
         ],
         "validationErrors": []
       },
@@ -1027,10 +1103,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S03-evidence-handoff.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S03-evidence-handoff.png",
-        "receiptDigest": "sha256:f5ceaa24f28e198ed4714aa422705f24458813c5bc7eff2371df5d7207c146fe",
-        "executionId": "acb60280-3457-40cf-a05e-c36dafe18cbb",
+        "receiptDigest": "sha256:b26193d585739f86e82d63c9c838f723e90f52c978b51f1ac7b52fb07204fe9e",
+        "executionId": "b51b8bf7-e8d8-4a8e-b6d0-5b19440bc3ce",
         "processEpochs": [
-          "main_47c2519a-d48a-42f7-bd4c-c36252118f80"
+          "main_d413abbd-e7fb-4fe6-9cfd-8ec0ed1d917b"
         ],
         "validationErrors": []
       },
@@ -1076,10 +1152,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S04-failure-attention.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S04-failure-attention.png",
-        "receiptDigest": "sha256:9b23bcc9f6c412480b8b705a8ca5bfbeea0433b551ed5851b8c512106cdb4503",
-        "executionId": "3f9a4a5f-f673-46e7-b386-f808eccade09",
+        "receiptDigest": "sha256:9f499168d6338986b8c79f6f17f2899a3bf34c3661d13364cadf28cd82f9e4b3",
+        "executionId": "dad5fe0e-4f7f-422d-82d6-5b71266ebdf3",
         "processEpochs": [
-          "main_fd72cab6-9d7a-4cb4-a46f-c42581da664c"
+          "main_403647a3-9589-4642-9aab-dd11e7f3e016"
         ],
         "validationErrors": []
       },
@@ -1126,10 +1202,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S05-approval-attention.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S05-approval-attention.png",
-        "receiptDigest": "sha256:4946be4cffbfff437c7f6129153cab9a0c10709b0b159d2cbf3b1e7290166c12",
-        "executionId": "262a565b-43d1-4989-b32a-2f463a5784ac",
+        "receiptDigest": "sha256:3f1dd76dae602c05c095a240f7b9a2ce6461f2b1834055e25ce2b2ec86fc232d",
+        "executionId": "875afbf5-a6e0-4897-bbaa-a15d2f722f0d",
         "processEpochs": [
-          "main_5d7a9beb-6322-4b6c-b509-7954bd1a5953"
+          "main_4dc05caf-98b1-4710-9fe6-c10e07b1af94"
         ],
         "validationErrors": []
       },
@@ -1178,10 +1254,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S06-pause-reload-recovery.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S06-pause-reload-recovery.png",
-        "receiptDigest": "sha256:6fc0815af8dce7407db5560274a573acdac35575d3d9b778babbcb4ca620e693",
-        "executionId": "3edd3e12-d152-4014-889f-28e6cee87dde",
+        "receiptDigest": "sha256:b48ae27c2e99dedca48e047a8230df5d0380a746664d6e51a0eb708a12c80d79",
+        "executionId": "de5c23cf-be15-46ed-b842-3023ef8bd5f8",
         "processEpochs": [
-          "main_c528322f-3270-46d8-8336-2471a3a667f0"
+          "main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
         ],
         "validationErrors": []
       },
@@ -1223,10 +1299,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S07-plan-progress.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S07-plan-progress.png",
-        "receiptDigest": "sha256:492a0ca50a8792f8f31b805a8d88bc179ae9ac698cbad1885758008dbedb6407",
-        "executionId": "9fff8499-0481-4fdc-8fa7-34d10aac4bda",
+        "receiptDigest": "sha256:68f69ae4204e89df9982c6dae9c180c339eadc82883bbf011f0968d69da9c891",
+        "executionId": "6ef748be-f178-40b4-85eb-615b308b471e",
         "processEpochs": [
-          "main_5bf7252e-d106-4902-ac2a-b0ca1119630b"
+          "main_858a80e9-fd58-4a26-b9e0-4181d42cb678"
         ],
         "validationErrors": []
       },
@@ -1270,10 +1346,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S08-scheduled-progress.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S08-scheduled-progress.png",
-        "receiptDigest": "sha256:cb0257538415c2cbf5f345880d72c8e9022ff5436bdcb000b56ec17298929b92",
-        "executionId": "8067fa7b-5e51-43f6-bd45-ab6f493d0348",
+        "receiptDigest": "sha256:2234947edc7e21593df62f7c9dd97d61f61474936b9c13e366e103134c3579c1",
+        "executionId": "8933c6c2-fe31-42b2-a0fd-e0393030e6fb",
         "processEpochs": [
-          "main_f5f042b2-a6a1-4ab1-ae95-656bcaf3c59b"
+          "main_5bd99a4b-080f-42b3-ac57-0969c75f1c7d"
         ],
         "validationErrors": []
       },
@@ -1319,10 +1395,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S09-long-session.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S09-long-session.png",
-        "receiptDigest": "sha256:0aac39bf36a9a124b1c3e19413779398e17d544736eb225011f17836297f9368",
-        "executionId": "441f0ecd-c257-43a3-990d-d416a3da9cda",
+        "receiptDigest": "sha256:947699e75b1cb30559f878f9b7e70f3d3491924b1e049327bdfc80707ae80a66",
+        "executionId": "4a3a75d4-3831-442c-8b07-70eee71683b4",
         "processEpochs": [
-          "main_5b687ea3-4d97-4ced-b2d1-977f4142ca40"
+          "main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
         ],
         "validationErrors": []
       },
@@ -1368,10 +1444,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S10-accessibility.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S10-accessibility.png",
-        "receiptDigest": "sha256:9c2dbb08ab4ea68ca5ea91984f09dcc56dd7ea69e8f7163bd06fb9ae39508e75",
-        "executionId": "69ac0803-4c64-491c-92d9-3f8a4758fde1",
+        "receiptDigest": "sha256:8a5ebd6fd534c0832cb917c97021733172bec77861bed019d2f970bde542b314",
+        "executionId": "f4e7aa27-8b2a-4b2b-b3ca-ed2c78485c8a",
         "processEpochs": [
-          "main_25580c86-43ad-4cf5-9a4b-90605a110303"
+          "main_330d3acc-4ab5-4951-86e6-1d93c60fb1ca"
         ],
         "validationErrors": []
       },
@@ -1432,10 +1508,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S11-secret-safety.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S11-secret-safety.png",
-        "receiptDigest": "sha256:bdbcbfadb0e0ba39e39b2dcdd0d269c572b8396563a9b12c81bb36aca62b4303",
-        "executionId": "07682a24-4129-496b-865f-dd1e9636fa5e",
+        "receiptDigest": "sha256:e2e24b3649a4eeed8cc773ec0b5bfee4b3bf8272cc42c64de34dc1f0ad9aa9f7",
+        "executionId": "3b15742f-4ec9-45f1-bba5-ab0bfd583a5b",
         "processEpochs": [
-          "main_b75dac48-9d23-48e7-b6e0-9fdaf5323f4f"
+          "main_f3a1455b-9eab-4eca-bede-662176efe0be"
         ],
         "validationErrors": []
       },
@@ -1486,10 +1562,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S12-retry-attempt.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S12-retry-attempt.png",
-        "receiptDigest": "sha256:e8e9c691c6ef5096eeaf863b19dc11c96b2dbd764f229a0b1d4c619a20470e39",
-        "executionId": "e0e68e92-950b-4d21-be35-2575c45e1b2b",
+        "receiptDigest": "sha256:9c5940a47e9c1b34a4d9f928f5134a5685ab5e9cbe6a7ba0cc26366863ec9c6c",
+        "executionId": "75578ed8-2f10-4284-8fa8-f2137c25128f",
         "processEpochs": [
-          "main_df69c47c-6db8-43c8-8870-1ee27c9cace9"
+          "main_d1310e12-92c7-48aa-90a8-d23a05939788"
         ],
         "validationErrors": []
       },
@@ -1538,11 +1614,11 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S13-legacy-coverage.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S13-legacy-coverage.png",
-        "receiptDigest": "sha256:972b927788f6ac2d0dc0123345632a2a66b06f4e342c45b4dcc247c2d32f3403",
-        "executionId": "9a8709e1-dcff-4472-92bb-a0eb7d5a53cf",
+        "receiptDigest": "sha256:aec2874e2b770ca1dadc9d3e7931636a6aee1c38bcacd72729f1fdba16af8ea8",
+        "executionId": "594b39a8-ff3f-4923-bbcf-a80376f75df0",
         "processEpochs": [
-          "main_6ae85b84-ea07-4656-b163-39b50304f2bf",
-          "main_f8c5cbaf-2ba0-4a58-b571-045107534573"
+          "main_86887b9c-0084-4f77-8dcb-8da9bc5a46e8",
+          "main_90da6516-7119-45c4-abd9-b394be294910"
         ],
         "validationErrors": []
       },
@@ -1584,10 +1660,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S14-guided-input.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S14-guided-input.png",
-        "receiptDigest": "sha256:29c61fc2ab1ea341524d1189569814be7097f8e208cdbab5d377deeba2b95796",
-        "executionId": "d1f3c0ba-a13c-4354-bfd5-b0a862c65a86",
+        "receiptDigest": "sha256:33cca9815d5dfbd945743267c08ebaeb527467312746c8932e606125c8b18ce3",
+        "executionId": "e5efd65a-f60b-4e9f-9c75-7c1288dfc53d",
         "processEpochs": [
-          "main_ded17195-6f9d-4c29-aaa3-a72891015e60"
+          "main_60b360dc-e07d-4503-b380-3e4f1a384171"
         ],
         "validationErrors": []
       },
@@ -1631,10 +1707,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S15-goal-acceptance.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S15-goal-acceptance.png",
-        "receiptDigest": "sha256:9a50dd8ad03bd993f918bd1f31f74a290993cba8a84adda1acab2e0e7be205b8",
-        "executionId": "e9933ba0-930d-4676-9f56-63fafed9ec67",
+        "receiptDigest": "sha256:01f1469ca7bf2898b1e6ac9edfbda72f4e5683dbe36d0e413f29694e6ae4ed82",
+        "executionId": "efafb4a3-617f-4a05-94d8-18d92ca5ff57",
         "processEpochs": [
-          "main_beb92209-800a-4141-9b68-95a36b5b2de7"
+          "main_0d182ccf-c4a6-49a9-bcc8-a1efce91943a"
         ],
         "validationErrors": []
       },
@@ -1683,10 +1759,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S16-plan-confirmation.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S16-plan-confirmation.png",
-        "receiptDigest": "sha256:72292c0dc7e2ec91bf7ad2bd91f8f6111dcaf6a4b4eb7a699ab958e6b747b312",
-        "executionId": "82c7c2da-b7f3-4254-9343-84ae5c1939bc",
+        "receiptDigest": "sha256:7819cd3be1f31ebc8448b8c2a3b95869aba02b2cd08ecdf0e5955261b28ebddd",
+        "executionId": "06299cb5-2af8-4918-8eee-542881562df4",
         "processEpochs": [
-          "main_4deb8219-ce14-429b-bb74-4e2c8a36ddf3"
+          "main_cd9eb423-f58e-4f85-928a-689b77372642"
         ],
         "validationErrors": []
       },
@@ -1735,11 +1811,11 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S17-cancel-interruption.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S17-cancel-interruption.png",
-        "receiptDigest": "sha256:9b342ac09a20bd079e98a3f77c1effe4992087434ccbb253ba7bff8b48bbec4d",
-        "executionId": "2315873b-3a8f-472e-92d0-084db907a817",
+        "receiptDigest": "sha256:15a6d88df52533ccc016e76dac27c47be32904095ca8ec9769e6600d71172473",
+        "executionId": "45ce9a08-35ce-4b41-a62c-321e3fbf93b8",
         "processEpochs": [
-          "main_190a9dae-b02f-4b8d-affe-81a76477f66b",
-          "main_a0d7d688-ca1e-48b1-852e-389bb6fbd720"
+          "main_8ea8a7b4-ca06-45b9-8e77-97832acaf666",
+          "main_38c15815-0330-4547-b24d-73ec6815a1e8"
         ],
         "validationErrors": []
       },
@@ -1786,10 +1862,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S18-context-usage.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S18-context-usage.png",
-        "receiptDigest": "sha256:6183236b9543c6154fe6db60a75844f7ac451f5de0be552cde191953fcdabd00",
-        "executionId": "0172396e-eaf3-4164-b084-52547dda8126",
+        "receiptDigest": "sha256:3dd02623491038631e69fb3541a33daab2f48414d3dbac628db39930822c750b",
+        "executionId": "c9b17334-6649-4950-9ac2-0ecc6ede9f7d",
         "processEpochs": [
-          "main_51f321a6-aec5-4d5e-9e0b-011fca7f0ec8"
+          "main_d5d14e49-faad-42b6-9422-71bd65a9c8a0"
         ],
         "validationErrors": []
       },
@@ -1841,10 +1917,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S19-unknown-coverage.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S19-unknown-coverage.png",
-        "receiptDigest": "sha256:73118777bcf36a549816e00c8ba034b44e8e0be714640ff6dc4da6880fa841a1",
-        "executionId": "5751f949-2d72-4ed2-ad9d-e99810fc8441",
+        "receiptDigest": "sha256:1dc697257fa0ca73314deffb4cee5ebaf4eac12580100b29cafd8ffce925276a",
+        "executionId": "79406958-f578-4590-9ea5-b1b6e7aabe9e",
         "processEpochs": [
-          "main_0da12def-e258-453e-8583-32bb38d6d763"
+          "main_e5d0d7f7-76b8-487d-82c8-ebe05f7ab150"
         ],
         "validationErrors": []
       },

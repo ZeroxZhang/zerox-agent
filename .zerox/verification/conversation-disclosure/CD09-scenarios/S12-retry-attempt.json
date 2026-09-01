@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S12-retry-attempt",
   "scenarioDigest": "sha256:49d4fb731a204d7b797ede14668b357e45234789b55325523987a21b05d43ef7",
-  "executionId": "e0e68e92-950b-4d21-be35-2575c45e1b2b",
+  "executionId": "75578ed8-2f10-4284-8fa8-f2137c25128f",
   "processEpochs": [
-    "main_df69c47c-6db8-43c8-8870-1ee27c9cace9"
+    "main_d1310e12-92c7-48aa-90a8-d23a05939788"
   ],
   "attemptNonces": [
-    "05377cb6-ef97-4794-b443-ec35be586a09"
+    "6156558c-df6a-4a54-bed7-621c5e0e1bfb"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "64fb2077-82ee-4898-805f-2e4c1f7e02fc",
+        "f1aba1e5-1ff5-4444-8d19-97285c57869d",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_df69c47c-6db8-43c8-8870-1ee27c9cace9"
+        "process:main_d1310e12-92c7-48aa-90a8-d23a05939788"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,10 +52,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "64fb2077-82ee-4898-805f-2e4c1f7e02fc",
+        "f1aba1e5-1ff5-4444-8d19-97285c57869d",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_df69c47c-6db8-43c8-8870-1ee27c9cace9"
+        "process:main_d1310e12-92c7-48aa-90a8-d23a05939788"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,10 +72,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "64fb2077-82ee-4898-805f-2e4c1f7e02fc",
+        "f1aba1e5-1ff5-4444-8d19-97285c57869d",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_df69c47c-6db8-43c8-8870-1ee27c9cace9"
+        "process:main_d1310e12-92c7-48aa-90a8-d23a05939788"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -94,7 +94,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:5cb2bd5c1aa0719064d1cae7e4a5902391fa2ca29bd8d2830185406a3a978688",
-        "screenshot:sha256:f5769675e7a9828a1568af2b67f63ca2dc6bda997cc13bc0443deed875416b29"
+        "screenshot:sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
       ]
     },
     {
@@ -103,7 +103,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:a1c37cf4b092f17dff3fb80b865cae4e5d8ec1f28d50929f794bfebeec36039a",
-        "screenshot:sha256:f5769675e7a9828a1568af2b67f63ca2dc6bda997cc13bc0443deed875416b29"
+        "screenshot:sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
       ]
     },
     {
@@ -112,7 +112,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:b763fc738a8b416d406fce6fad85cb36c809408c30a557057cb8949d2423f6c6",
-        "screenshot:sha256:f5769675e7a9828a1568af2b67f63ca2dc6bda997cc13bc0443deed875416b29"
+        "screenshot:sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
       ]
     }
   ],
@@ -259,12 +259,12 @@
     },
     {
       "ordinal": 29,
-      "channel": "skills:list",
+      "channel": "chat:sendMessage",
       "ok": true
     },
     {
       "ordinal": 30,
-      "channel": "chat:sendMessage",
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -294,103 +294,103 @@
     },
     {
       "ordinal": 36,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 37,
       "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
-      "ordinal": 38,
+      "ordinal": 37,
       "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
-      "ordinal": 39,
+      "ordinal": 38,
       "channel": "app:getMeta",
       "ok": true
     },
     {
-      "ordinal": 40,
+      "ordinal": 39,
       "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
-      "ordinal": 41,
+      "ordinal": 40,
       "channel": "navigation:list",
       "ok": true
     },
     {
-      "ordinal": 42,
+      "ordinal": 41,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 43,
+      "ordinal": 42,
       "channel": "app:getUpdateState",
       "ok": true
     },
     {
-      "ordinal": 44,
+      "ordinal": 43,
       "channel": "modelSettings:load",
       "ok": true
     },
     {
-      "ordinal": 45,
+      "ordinal": 44,
       "channel": "modelCatalog:load",
       "ok": true
     },
     {
-      "ordinal": 46,
+      "ordinal": 45,
       "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 46,
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 47,
-      "channel": "chatSessions:get",
-      "ok": true
-    },
-    {
-      "ordinal": 48,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 49,
+      "ordinal": 48,
       "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
-      "ordinal": 50,
+      "ordinal": 49,
       "channel": "scheduledTasks:list",
       "ok": true
     },
     {
-      "ordinal": 51,
+      "ordinal": 50,
       "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
-      "ordinal": 52,
+      "ordinal": 51,
       "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
-      "ordinal": 53,
+      "ordinal": 52,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 54,
+      "ordinal": 53,
       "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 54,
+      "channel": "skills:list",
       "ok": true
     }
   ],
   "screenshotDigests": [
-    "sha256:f5769675e7a9828a1568af2b67f63ca2dc6bda997cc13bc0443deed875416b29"
+    "sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
   ],
   "status": "passed",
-  "digest": "sha256:e8e9c691c6ef5096eeaf863b19dc11c96b2dbd764f229a0b1d4c619a20470e39"
+  "digest": "sha256:9c5940a47e9c1b34a4d9f928f5134a5685ab5e9cbe6a7ba0cc26366863ec9c6c"
 }

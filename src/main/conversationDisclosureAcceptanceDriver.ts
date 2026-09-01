@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { fsync, writeFile as writeFileDescriptor } from "node:fs";
-import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { nativeImage, type BrowserWindow } from "electron";
 import {
@@ -483,7 +483,11 @@ export async function prepareConversationDisclosureScenario(
   }
   let planRuntime: PlanAcceptanceRuntime | undefined;
   if (scenarioId === "S07-plan-progress") {
-    planRuntime = await prepareLivePlanProgressScenario(container, sessionId);
+    planRuntime = await prepareLivePlanProgressScenario(
+      container,
+      sessionId,
+      mode.userDataPath,
+    );
     planId = planRuntime.planId;
   }
   if (scenarioId === "S16-plan-confirmation") {
@@ -756,8 +760,12 @@ export async function prepareConversationDisclosureScenario(
 async function prepareLivePlanProgressScenario(
   container: AppContainer,
   sessionId: string,
+  userDataPath: string,
 ): Promise<PlanAcceptanceRuntime> {
   const planId = "plan_cd09_s07_1";
+  const workspaceRoot = path.join(path.dirname(userDataPath), "plan-workspace");
+  await mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
+  const isolatedWorkspaceRoot = await realpath(workspaceRoot);
   const modelCalls: string[] = [];
   let releaseReviewGate: (() => void) | undefined;
   let reviewReleased = false;
@@ -826,7 +834,7 @@ async function prepareLivePlanProgressScenario(
   });
   const result = orchestrator.createPlan({
     sessionId,
-    workspaceRoot: process.cwd(),
+    workspaceRoot: isolatedWorkspaceRoot,
     sourceMessage: "Complete one bounded local milestone with persisted stage evidence.",
     mode: "direct",
     requestedSkillName: null,
