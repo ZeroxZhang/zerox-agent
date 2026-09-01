@@ -21,7 +21,10 @@ import type {
   ToolCall,
 } from "./openAiCompatibleClient";
 import { IncompleteModelStreamError } from "./openAiCompatibleClient";
-import { ResponseBodyLimitError } from "./fetchWithTimeout";
+import {
+  findResponseBodyLimitError,
+  throwIfResponseBodyLimitError,
+} from "./fetchWithTimeout";
 import {
   completeWithModelRetry,
   type ModelRetryEvent,
@@ -646,7 +649,8 @@ export async function runAgentLoop(
       return Number.isFinite(exact) && exact > 0
         ? Math.floor(exact)
         : localEstimate;
-    } catch {
+    } catch (error) {
+      throwIfResponseBodyLimitError(error);
       return localEstimate;
     }
   }
@@ -948,12 +952,8 @@ export async function runAgentLoop(
             onModelStreamEvent?.(event, turn);
           });
         } catch (error) {
-          if (
-            error instanceof StreamingCompletionError &&
-            error.cause instanceof ResponseBodyLimitError
-          ) {
-            throw error.cause;
-          }
+          const responseLimitError = findResponseBodyLimitError(error);
+          if (responseLimitError) throw responseLimitError;
           if (
             error instanceof StreamingCompletionError &&
             !error.hasMeaningfulStreamEvent &&

@@ -21,6 +21,7 @@ import {
   ModelServiceNoticeError,
   throwForModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 import {
   buildOutputLimitContinuationPrompt,
   escalateOutputBudget,
@@ -111,6 +112,7 @@ export function createAgentGoalPlanner(options: {
         validateMilestonePlan(request.successCriteria, milestones);
         return milestones;
       } catch (error) {
+        throwIfResponseBodyLimitError(error);
         if (error instanceof ModelServiceNoticeError) throw error;
         rejectionReason = (error as Error).message;
         continuationPrefix = "";
@@ -153,7 +155,8 @@ export function createAgentGoalPlanner(options: {
           prompt: buildReplanPrompt(goal, reason),
           successCriteria: goal.successCriteria,
         });
-      } catch {
+      } catch (error) {
+        throwIfResponseBodyLimitError(error);
         replanned = [createFallbackReplanMilestone(goal, reason)];
       }
       const merged = [

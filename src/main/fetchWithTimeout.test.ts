@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchWithTimeout,
+  findResponseBodyLimitError,
   readResponseJsonWithLimit,
   readResponseTextWithLimit,
   ResponseBodyLimitError,
+  throwIfResponseBodyLimitError,
 } from "./fetchWithTimeout";
 
 describe("fetchWithTimeout", () => {
@@ -136,6 +138,16 @@ describe("fetchWithTimeout", () => {
         "fixture",
       ),
     ).resolves.toEqual({ ok: true });
+  });
+
+  it("finds a response limit through nested causes and aggregate failures", () => {
+    const limit = new ResponseBodyLimitError("LLM", 32);
+    const wrapped = new Error("outer", {
+      cause: new AggregateError([new Error("sibling"), limit]),
+    });
+
+    expect(findResponseBodyLimitError(wrapped)).toBe(limit);
+    expect(() => throwIfResponseBodyLimitError(wrapped)).toThrow(limit);
   });
 });
 

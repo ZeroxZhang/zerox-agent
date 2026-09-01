@@ -3,6 +3,8 @@ import { createModelConnectionService } from "./modelConnectionService";
 import type { ChatCompletionRequest, ChatClient } from "./openAiCompatibleClient";
 import type { ModelSettingsStore } from "./modelSettingsStore";
 import type { PublicModelSettings } from "../shared/modelSettings";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
+import { MODEL_METADATA_MAX_BODY_BYTES } from "../shared/limits";
 
 describe("model connection service", () => {
   it("sends a compact chat request with the saved model profile", async () => {
@@ -196,6 +198,44 @@ describe("model connection service", () => {
       "llama3.3:70b",
     ]);
     expect(second).toEqual(first);
+  });
+
+  it("does not convert an oversized Ollama catalog into availability fallback", async () => {
+    const service = createModelConnectionService({
+      modelSettingsStore: createModelSettingsStore(
+        { chatModel: "", hasApiKey: false },
+        null,
+      ) as ModelSettingsStore,
+      chatClient: createChatClient([], "unused"),
+      fetch: (async () => new Response("{}", {
+        headers: {
+          "content-length": String(MODEL_METADATA_MAX_BODY_BYTES + 1),
+        },
+      })) as typeof fetch,
+      now: () => new Date("2026-07-30T00:00:00.000Z"),
+    });
+
+    await expect(service.enrichCatalog({
+      schemaVersion: 2,
+      descriptors: [],
+      entries: [],
+      connections: [{
+        id: "ollama-local",
+        name: "Local",
+        providerKind: "ollama",
+        values: { baseUrl: "http://localhost:11434" },
+        credentialSource: "none",
+        hasCredential: true,
+        revision: 1,
+        createdAt: "2026-07-30T00:00:00.000Z",
+        updatedAt: "2026-07-30T00:00:00.000Z",
+      }],
+      profiles: [],
+      defaultChatProfileId: null,
+      defaultEmbeddingProfileId: null,
+      hiddenRoutedModelIds: [],
+      updatedAt: null,
+    })).rejects.toBeInstanceOf(ResponseBodyLimitError);
   });
 
   it("discovers an Ollama model context window from /api/show", async () => {

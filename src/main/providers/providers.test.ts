@@ -789,9 +789,43 @@ describe("AnthropicProvider", () => {
     const n = await provider.countTokens([{ role: "user", content: [{ type: "text", text: "hello world" }] }]);
     expect(n).toBeGreaterThan(0);
   });
+
+  it("countTokens fails closed when the Anthropic response is oversized", async () => {
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-3" },
+      {
+        fetch: (async () => new Response("{}", {
+          headers: {
+            "content-length": String(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+          },
+        })) as typeof fetch,
+      },
+    );
+
+    await expect(provider.countTokens([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+    ])).rejects.toBeInstanceOf(ResponseBodyLimitError);
+  });
 });
 
 describe("GeminiProvider", () => {
+  it("countTokens fails closed when the Gemini response is oversized", async () => {
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-2.5-pro" },
+      {
+        fetch: (async () => new Response("{}", {
+          headers: {
+            "content-length": String(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+          },
+        })) as typeof fetch,
+      },
+    );
+
+    await expect(provider.countTokens([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+    ])).rejects.toBeInstanceOf(ResponseBodyLimitError);
+  });
+
   it("rejects an oversized successful non-streaming body", async () => {
     const provider = createProvider(
       { providerId: "gemini", apiKey: "k", chatModel: "gemini-2.5-pro" },

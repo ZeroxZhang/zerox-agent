@@ -3,6 +3,7 @@ import type { ChatClient, ChatCompletionRequest } from "./openAiCompatibleClient
 import type { Goal, SuccessCriterion } from "../shared/agentGoal";
 import { compileAgentTaskContract } from "../shared/agentTaskContract";
 import { createAgentGoalPlanner } from "./agentGoalPlanner";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 
 const criterion: SuccessCriterion = {
   id: "criterion_done",
@@ -67,6 +68,27 @@ const deterministicArtifactCriterion: SuccessCriterion = {
 };
 
 describe("agent goal planner", () => {
+  it("does not retry or degrade a response budget violation", async () => {
+    let attempts = 0;
+    const limit = new ResponseBodyLimitError("LLM", 32);
+    const planner = createAgentGoalPlanner({
+      chatClient: {
+        async complete() {
+          attempts += 1;
+          throw new Error("wrapped", { cause: limit });
+        },
+      },
+      modelProfile: fakeModelProfile,
+    });
+
+    await expect(planner.plan("Prepare a report", {
+      successCriteria: [criterion],
+      availableTools: [],
+      availableSkills: [],
+    })).rejects.toBe(limit);
+    expect(attempts).toBe(1);
+  });
+
   it("decomposes a natural-language goal into acceptance-bearing milestones", async () => {
     const requests: ChatCompletionRequest[] = [];
     const planner = createAgentGoalPlanner({

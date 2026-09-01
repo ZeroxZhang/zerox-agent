@@ -150,6 +150,7 @@ import {
   sanitizeModelServiceNotice,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 import {
   extractRequestedSkillQuery,
   matchSkillMentionCandidates,
@@ -3271,7 +3272,8 @@ export function createChatService(options: {
                           provider: profile.providerId,
                           model: profile.model,
                         });
-                      } catch {
+                      } catch (error) {
+                        throwIfResponseBodyLimitError(error);
                         return options.chatClient.complete(request);
                       }
                     },

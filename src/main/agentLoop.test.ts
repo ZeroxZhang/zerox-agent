@@ -434,6 +434,41 @@ describe("agent loop", () => {
     expect(modelCalls).toBe(1);
   });
 
+  it("does not replace a token-count response limit with a local estimate", async () => {
+    const limit = new ResponseBodyLimitError("LLM token count", 32);
+    let modelCalls = 0;
+    const result = await runAgentLoop(
+      [{ role: "user", content: "count the complete request" }],
+      { ...modelProfile, maxTokens: 128, contextWindow: 500 },
+      {
+        chatClient: {
+          async countTokens() {
+            throw new Error("wrapped", { cause: limit });
+          },
+          async complete() {
+            modelCalls += 1;
+            return { content: "unexpected", toolCalls: [], finishReason: "stop" };
+          },
+        },
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+        contextManager: {
+          estimateTokens() {
+            return 300;
+          },
+          compressMessages(messages) {
+            return messages;
+          },
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      status: "failed",
+      summary: "LLM token count response exceeded 32 bytes.",
+    });
+    expect(modelCalls).toBe(0);
+  });
+
   it("uses one-message token deltas instead of rescanning steady-state context", async () => {
     const estimatedBatchSizes: number[] = [];
     const result = await runAgentLoop(

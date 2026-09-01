@@ -33,6 +33,7 @@ describe("readSseLinesUntilTerminal", () => {
     );
     expect(pulls).toBeLessThanOrEqual(5);
     expect(canceled).toBe(true);
+    expect(body.locked).toBe(false);
   });
 
   it("bounds the aggregate stream even when every individual frame is small", async () => {
@@ -60,7 +61,75 @@ describe("readSseLinesUntilTerminal", () => {
       "Model SSE stream response exceeded 31 bytes.",
     );
     expect(canceled).toBe(true);
+    expect(body.locked).toBe(false);
     expect(SSE_MAX_LINE_BYTES).toBe(4 * 1024 * 1024);
     expect(SSE_MAX_STREAM_BYTES).toBe(32 * 1024 * 1024);
   });
+
+  it("releases the reader after a terminal frame without awaiting transport cancellation", async () => {
+    const encoder = new TextEncoder();
+    let canceled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      },
+      cancel() {
+        canceled = true;
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const lines: string[] = [];
+    let terminal = false;
+    const drain = async () => {
+      for await (const line of readSseLinesUntilTerminal(body, {
+        isTerminal: () => terminal,
+      })) {
+        lines.push(line);
+        terminal = line === "data: [DONE]";
+      }
+    };
+
+    await expect(resolvesWithin(drain())).resolves.toBeUndefined();
+    expect(lines).toEqual(["data: [DONE]"]);
+    expect(canceled).toBe(true);
+    expect(body.locked).toBe(false);
+  });
+
+  it("releases the reader when the consumer stops with a parser error", async () => {
+    const encoder = new TextEncoder();
+    let canceled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: invalid\n\n"));
+      },
+      cancel() {
+        canceled = true;
+      },
+    });
+    const consume = async () => {
+      for await (const _line of readSseLinesUntilTerminal(body, {
+        isTerminal: () => false,
+      })) {
+        throw new Error("parser failed");
+      }
+    };
+
+    await expect(consume()).rejects.toThrow("parser failed");
+    expect(canceled).toBe(true);
+    expect(body.locked).toBe(false);
+  });
 });
+
+async function resolvesWithin<T>(promise: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("SSE cleanup timed out")), 250);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}

@@ -13,6 +13,7 @@ import {
   defaultRequestTimeoutMs,
   fetchWithTimeout,
   readResponseJsonWithLimit,
+  throwIfResponseBodyLimitError,
 } from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
 import { readSseLinesUntilTerminal } from "./sseLineReader";
@@ -116,7 +117,8 @@ export function createAnthropicProvider(
           messages: aMsgs,
         }, timeoutMs, undefined);
         return (json as { input_tokens?: number }).input_tokens ?? heuristicCount(messages, opts?.system, opts?.tools);
-      } catch {
+      } catch (error) {
+        throwIfResponseBodyLimitError(error);
         return heuristicCount(messages, opts?.system, opts?.tools);
       }
     },

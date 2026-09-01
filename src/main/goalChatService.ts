@@ -30,6 +30,7 @@ import {
   type GoalDraft,
   type GoalDraftEdit,
 } from "../shared/goalTranslation";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 
 export type GoalChatService = {
   createFromChat(input: {
@@ -882,6 +883,7 @@ export function createGoalChatService(options: {
           : {}),
       });
     } catch (error) {
+      throwIfResponseBodyLimitError(error);
       options.onDiagnostic?.({
         phase: "planning",
         message: "Goal planner failed; using the local structured fallback.",

@@ -6,8 +6,52 @@ import type { ChatSessionListItem } from "../shared/chat";
 import type { MemoryInput, MemoryRecord } from "../shared/memory";
 import type { RawHistoryEntry } from "../shared/rawHistory";
 import { createMemoryIngestionService } from "./memoryIngestionService";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 
 describe("MemoryIngestionService", () => {
+  it("does not replace a model response limit with heuristic candidates", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-memory-ingest-"));
+    const limit = new ResponseBodyLimitError("LLM", 32);
+    const service = createMemoryIngestionService({
+      configDir: tempDir,
+      historyIndexStore: {
+        list: async () => [historyEntry({
+          id: "message_1",
+          sessionId: "session_active",
+          content: "以后默认先给我明确验收标准。",
+        })],
+      },
+      chatSessionStore: { list: async () => [chatSession("session_active")] },
+      memoryStore: { async create() { throw new Error("unused"); } },
+      chatClient: {
+        async complete() {
+          throw new Error("wrapped", { cause: limit });
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "http://localhost",
+        apiKey: "test",
+        model: "test",
+        temperature: 0,
+        maxTokens: 2000,
+      }),
+      now: () => new Date("2026-07-05T02:00:00.000Z"),
+    });
+
+    try {
+      await expect(service.ingestRecent()).resolves.toEqual({
+        ok: false,
+        message: "LLM response exceeded 32 bytes.",
+      });
+      await expect(service.listCandidates()).resolves.toMatchObject({
+        ok: true,
+        candidates: [],
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps ingestion status visible while a job continues across page switches", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "zerox-memory-ingest-"));
     let releaseModel!: () => void;

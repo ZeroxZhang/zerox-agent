@@ -14296,3 +14296,35 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Caller-pinned Harness checks and the zero-vulnerability production audit
   pass. Exact-byte dual review and external package acceptance remain required
   before merge and release.
+
+## 2026-09-02 - v3.9.2 response-budget hard-failure propagation
+
+- Candidate `dfe5b374fca8835d9e04389ba7b3f8ed09e5f2cf` was rejected without PASS
+  receipts. The code lane reported `0 Critical / 2 Major / 1 Minor`, and the
+  security/data lane reported `0 Critical / 1 Major / 0 Minor`. The findings
+  shared two root contracts: typed response-budget violations were still
+  swallowed by upper retry/degradation boundaries, while stream cancellation
+  could retain a reader or lose a pre-aborted parent signal.
+- A shared cause/AggregateError traversal now preserves response-budget hard
+  failures through model retry, token counting, Max Mode, planning and
+  replanning, Goal translation, orchestration, memory ingestion, model catalog
+  discovery, Chat, Agent, and Goal execution. Max Mode now rejects immediately
+  when any parallel candidate exceeds the budget even if another candidate
+  never settles; ordinary transient failures retain their previous bounded
+  degradation behavior.
+- SSE terminal, overflow, and consumer-unwind paths cancel best-effort and
+  release their private reader immediately without awaiting a provider hook.
+  Bedrock rejects already-aborted parents before invoking the SDK, installs its
+  abort race before the SDK send, and cancels invalid Web-stream chunks before
+  releasing the reader.
+- Focused response-budget, provider, planning, orchestration, Chat/Goal, memory,
+  and stream validation passes `207/207`; provider regression validation adds
+  Anthropic and Gemini token-count hard failures. Full `npm test` passes `328`
+  current files / `4006` current tests with declared skips and every
+  Round2–Round12 compatibility lane. Full `npm run verify` passes strict test
+  type coverage `437/437`, production build, Agent eval `26/26`, and Memory
+  eval `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`, SQLite
+  `3.53.2`, seven migrations, eight authority domains, renderer startup, and
+  Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
+  zero-vulnerability production audit pass. Exact-byte dual review and external
+  package acceptance remain required before merge and release.

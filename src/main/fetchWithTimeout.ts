@@ -10,6 +10,32 @@ export class ResponseBodyLimitError extends Error {
   }
 }
 
+export function findResponseBodyLimitError(
+  error: unknown,
+): ResponseBodyLimitError | undefined {
+  const pending = [error];
+  const seen = new Set<object>();
+  while (pending.length) {
+    const candidate = pending.pop();
+    if (candidate instanceof ResponseBodyLimitError) return candidate;
+    if (!candidate || typeof candidate !== "object" || seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    const record = candidate as { cause?: unknown; errors?: unknown };
+    if (record.cause !== undefined) pending.push(record.cause);
+    if (candidate instanceof AggregateError && Array.isArray(record.errors)) {
+      pending.push(...record.errors);
+    }
+  }
+  return undefined;
+}
+
+export function throwIfResponseBodyLimitError(error: unknown): void {
+  const limitError = findResponseBodyLimitError(error);
+  if (limitError) throw limitError;
+}
+
 export async function readResponseTextWithLimit(
   response: Response,
   maxBytes: number,

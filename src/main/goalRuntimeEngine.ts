@@ -69,6 +69,7 @@ import type { AgentContextUsage } from "../shared/contextUsage";
 import type { ProductionKernelDriver } from "./kernel/productionKernelDriver";
 import { runGoalKernelSegment } from "./kernel/goalKernelSegment";
 import { createFailureVisibleSerialQueue } from "./failureVisibleSerialQueue";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 
 export type GoalRuntimeModelProfile = {
   baseUrl: string;
@@ -796,7 +797,8 @@ export function createGoalRuntimeEngine(options: {
                     return toChatCompletionResponse(result.winner, {
                       model: modelProfile.model,
                     });
-                  } catch {
+                  } catch (error) {
+                    throwIfResponseBodyLimitError(error);
                     return goalChatClient.complete(request);
                   }
                 },

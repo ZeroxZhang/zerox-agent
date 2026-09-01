@@ -16,6 +16,7 @@ import {
 import {
   fetchWithTimeout,
   readResponseJsonWithLimit,
+  throwIfResponseBodyLimitError,
 } from "./fetchWithTimeout";
 import type { ModelSettingsStore, ResolvedModelProfile } from "./modelSettingsStore";
 import type { ChatClient, StreamingChatClient } from "./openAiCompatibleClient";
@@ -102,6 +103,7 @@ export function createModelConnectionService(options: {
       ollamaCache.set(base, result);
       return result;
     } catch (error) {
+      throwIfResponseBodyLimitError(error);
       const result = {
         expiresAt: currentTime + 30_000,
         ok: false,
@@ -297,7 +299,8 @@ export function createModelConnectionService(options: {
                 models,
               );
             }
-          } catch {
+          } catch (error) {
+            throwIfResponseBodyLimitError(error);
             if (existing.length) {
               publishedByConnection.set(connection.id, existing);
             }

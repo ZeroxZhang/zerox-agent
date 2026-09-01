@@ -13,6 +13,7 @@ import {
   ModelServiceNoticeError,
   throwForModelServiceNotice,
 } from "../../shared/modelServiceNotice";
+import { throwIfResponseBodyLimitError } from "../fetchWithTimeout";
 
 export interface MaxModeRunStepOptions {
   candidates: number;
@@ -44,8 +45,17 @@ export function createMaxMode(provider: LLMProvider): MaxMode {
         ...input,
         toolChoice: input.toolChoice ?? "auto",
       };
-      const candidateResults = await Promise.allSettled(
-        Array.from({ length: n }, () => provider.complete(proposeReq)),
+      const candidateResults = await Promise.all(
+        Array.from({ length: n }, async (): Promise<PromiseSettledResult<CompleteResponse>> => {
+          try {
+            return { status: "fulfilled", value: await provider.complete(proposeReq) };
+          } catch (error) {
+            // A response-budget violation is a security boundary, not a weak
+            // candidate. Reject promptly even if a sibling proposal stalls.
+            throwIfResponseBodyLimitError(error);
+            return { status: "rejected", reason: error };
+          }
+        }),
       );
       const completedResponses = candidateResults
         .filter((r): r is PromiseFulfilledResult<CompleteResponse> => r.status === "fulfilled")
@@ -109,6 +119,7 @@ async function judgeWinner(
       if (idx >= 0 && idx < candidates.length) return candidates[idx]!;
     }
   } catch (error) {
+    throwIfResponseBodyLimitError(error);
     if (error instanceof ModelServiceNoticeError) throw error;
     // judge failed — fall through to heuristic
   }

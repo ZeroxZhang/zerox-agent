@@ -130,11 +130,15 @@ describe("Bedrock provider", () => {
   });
 
   it("rejects non-byte Web and async-iterable chunks instead of bypassing the budget", async () => {
+    let webCanceled = false;
     const webResponse = {
       headers: {},
       body: new ReadableStream({
         start(controller) {
           controller.enqueue({ not: "bytes" });
+        },
+        cancel() {
+          webCanceled = true;
         },
       }) as unknown,
     };
@@ -143,6 +147,7 @@ describe("Bedrock provider", () => {
     await expect(webReader.read()).rejects.toThrow(
       "Bedrock SDK response stream emitted a non-byte chunk",
     );
+    expect(webCanceled).toBe(true);
 
     const asyncResponse = {
       headers: {},
@@ -335,6 +340,23 @@ describe("Bedrock provider", () => {
       ...request,
       model: "other/amazon.nova-2-pro-v1:0",
     })).rejects.toThrow("Bedrock request timed out after 5ms");
+  });
+
+  it("rejects an already-aborted Bedrock request before invoking the SDK", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("caller canceled"));
+    const send = vi.fn(() => new Promise(() => undefined));
+    const provider = createBedrockProvider({
+      region: "us-east-1",
+      client: { send } as never,
+    });
+
+    await expect(provider.complete({
+      ...request,
+      model: "other/amazon.nova-2-pro-v1:0",
+      signal: controller.signal,
+    })).rejects.toThrow("caller canceled");
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

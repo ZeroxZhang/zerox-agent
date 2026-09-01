@@ -17,6 +17,7 @@ import type {
 import type { RawHistoryEntry } from "../shared/rawHistory";
 import type { ChatClient, ChatMessage } from "./openAiCompatibleClient";
 import { throwForModelServiceNotice } from "../shared/modelServiceNotice";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 import type { AgentModelProfile } from "./agentRunnerService";
 import type { HistoryIndexStore } from "./historyIndexStore";
 import type { MemoryStore } from "./memoryStore";
@@ -403,7 +404,8 @@ async function extractCandidatesWithModel(options: {
     });
     throwForModelServiceNotice(response.modelServiceNotice);
     return parseCandidateJson(response.content);
-  } catch {
+  } catch (error) {
+    throwIfResponseBodyLimitError(error);
     return null;
   }
 }

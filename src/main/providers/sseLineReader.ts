@@ -80,20 +80,23 @@ export async function* readSseLinesUntilTerminal(
       reader.releaseLock();
     } else {
       // Do not wait for a provider's cancellation hook: the protocol response
-      // is already complete (or the consumer is unwinding). Release the lock
-      // after cancellation settles so a pending read cannot make releaseLock
-      // throw and mask the actual stream result.
-      void reader
-        .cancel("SSE consumption ended before transport EOF.")
-        .catch(() => undefined)
-        .finally(() => {
-          try {
-            reader.releaseLock();
-          } catch {
-            // The reader is private to this helper; cleanup errors are not a
-            // valid reason to replace the model's terminal result or failure.
-          }
-        });
+      // is already complete (or the consumer is unwinding). cancel()
+      // synchronously settles pending reads, so release the private lock now;
+      // the provider's cleanup promise may legitimately never settle.
+      try {
+        void reader
+          .cancel("SSE consumption ended before transport EOF.")
+          .catch(() => undefined);
+      } catch {
+        // Cleanup errors cannot replace the terminal result or stream failure.
+      }
+      try {
+        reader.releaseLock();
+      } catch {
+        // cancel() synchronously settles pending reads before its underlying
+        // hook resolves; a defensive release failure still must not mask the
+        // model result.
+      }
     }
   }
 }

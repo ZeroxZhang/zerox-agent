@@ -11,6 +11,7 @@ import {
   defaultRequestTimeoutMs,
   fetchWithTimeout,
   readResponseJsonWithLimit,
+  throwIfResponseBodyLimitError,
 } from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
@@ -178,7 +179,8 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         const { contents } = toGeminiBody(messages, opts?.tools, opts?.system);
         const json = await geminiFetch(fetchImpl, baseUrl, `/v1beta/models/${options.model}:countTokens`, options.apiKey, { contents }, timeoutMs, undefined);
         return (json as { totalTokens?: number }).totalTokens ?? heuristicCount(messages, opts?.system, opts?.tools);
-      } catch {
+      } catch (error) {
+        throwIfResponseBodyLimitError(error);
         return heuristicCount(messages, opts?.system, opts?.tools);
       }
     },

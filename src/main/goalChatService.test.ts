@@ -7,6 +7,7 @@ import type { GoalReviewDecision } from "../shared/agentGoalReview";
 import type { GoalDraft } from "../shared/goalTranslation";
 import type { SkillRecord } from "../shared/skills";
 import { createGoalChatService } from "./goalChatService";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 import {
   createAgentGoalStore,
   type ProgressLedgerEvent,
@@ -114,6 +115,32 @@ describe("goal chat service", () => {
     expect(savedGoals[0]?.milestones[0]?.description).toBe(
       "执行目标并产出可验收结果",
     );
+  });
+
+  it("does not replace a response budget violation with a local milestone", async () => {
+    const savedGoals: Goal[] = [];
+    const limit = new ResponseBodyLimitError("LLM", 32);
+    const service = createGoalChatService({
+      controller: createController(),
+      goalStore: createGoalStore({ savedGoals, ledgerEvents: [] }),
+      planner: {
+        async plan() {
+          throw new Error("wrapped", { cause: limit });
+        },
+        async replan() {
+          throw new Error("unused");
+        },
+      },
+      createId: () => "goal_limit",
+      now: () => "2026-07-11T19:20:00.000Z",
+    });
+
+    await expect(service.createFromChat({
+      sessionId: "chat_1",
+      originMessageId: "message_1",
+      description: "分析项目",
+    })).rejects.toBe(limit);
+    expect(savedGoals).toEqual([]);
   });
 
   it("does not create a second review gate for quick-action goals", async () => {

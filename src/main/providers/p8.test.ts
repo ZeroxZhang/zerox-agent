@@ -8,6 +8,7 @@ import type { AgentRunRecord } from "../../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../../shared/agentTrajectory";
 import type { LLMProvider, CompleteRequest, StreamEvent } from "./provider";
 import { createActorRuntime } from "../actors/actorRuntime";
+import { ResponseBodyLimitError } from "../fetchWithTimeout";
 
 // A fake provider whose stream yields a scripted sequence of StreamEvents.
 function scriptedStreamProvider(events: StreamEvent[]): LLMProvider {
@@ -136,6 +137,58 @@ describe("MaxMode", () => {
     const result = await maxMode.runStep(req, { candidates: 1, judgeModel: "j", actorRuntime, parentRunId: "run-1" });
     expect(result.winner.toolCalls).toHaveLength(1);
     expect(actorRuns).toBe(0);
+  });
+
+  it("fails closed when any candidate exceeds the response budget", async () => {
+    let calls = 0;
+    const limit = new ResponseBodyLimitError("LLM", 32);
+    const provider: LLMProvider = {
+      id: "openai-compatible",
+      capabilities: { toolUse: true, thinking: false, vision: false, promptCache: false, streamingToolCalls: false },
+      async complete() {
+        calls += 1;
+        if (calls === 1) throw new Error("wrapped", { cause: limit });
+        return new Promise(() => undefined);
+      },
+      async *stream() { yield { type: "done" }; },
+      async countTokens() { return 0; },
+      buildCachePrefix(m) { return { system: "", tools: [], messages: m, watermark: m.length }; },
+    };
+
+    const result = createMaxMode(provider).runStep({
+      model: "m",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 100,
+      messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+    }, { candidates: 3, judgeModel: "j" });
+    await expect(Promise.race([
+      result,
+      new Promise((resolve) => setTimeout(() => resolve("timed out"), 250)),
+    ])).rejects.toBe(limit);
+  });
+
+  it("fails closed when the MaxMode judge exceeds the response budget", async () => {
+    const limit = new ResponseBodyLimitError("LLM", 32);
+    const provider: LLMProvider = {
+      id: "openai-compatible",
+      capabilities: { toolUse: true, thinking: false, vision: false, promptCache: false, streamingToolCalls: false },
+      async complete(req) {
+        if (req.maxTokens === 16) throw limit;
+        return { content: "candidate", toolCalls: [], finishReason: "stop", cacheReadTokens: 0, cacheWriteTokens: 0 };
+      },
+      async *stream() { yield { type: "done" }; },
+      async countTokens() { return 0; },
+      buildCachePrefix(m) { return { system: "", tools: [], messages: m, watermark: m.length }; },
+    };
+
+    await expect(createMaxMode(provider).runStep({
+      model: "m",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 100,
+      messages: [{ role: "user", content: [{ type: "text", text: "x" }] }],
+    }, { candidates: 2, judgeModel: "j" })).rejects.toBe(limit);
   });
 
   it("isMaxModeEnabled defaults off", () => {

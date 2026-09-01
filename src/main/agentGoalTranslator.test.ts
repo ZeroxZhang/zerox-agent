@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAgentGoalTranslator } from "./agentGoalTranslator";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 
 describe("agent goal translator degradation", () => {
   it("retries one transient planning failure before falling back", async () => {
@@ -112,5 +113,33 @@ describe("agent goal translator degradation", () => {
         signal: controller.signal,
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("does not retry or locally degrade a response budget violation", async () => {
+    let attempts = 0;
+    const limit = new ResponseBodyLimitError("LLM", 32);
+    const translator = createAgentGoalTranslator({
+      chatClient: {
+        async complete() {
+          attempts += 1;
+          throw new Error("wrapped", { cause: limit });
+        },
+      },
+      getModelProfile: async () => ({
+        baseUrl: "http://localhost",
+        apiKey: "test",
+        model: "test-model",
+        temperature: 0,
+        maxTokens: 2_000,
+      }),
+      retryDelayMs: 0,
+    });
+
+    await expect(translator.translate({
+      sessionId: "session_1",
+      originMessageId: null,
+      message: "分析项目",
+    })).rejects.toBe(limit);
+    expect(attempts).toBe(1);
   });
 });

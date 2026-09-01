@@ -17,6 +17,7 @@ import {
   ModelServiceNoticeError,
   throwForModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 
 type ParsedGoalDraft = {
   normalizedDescription?: unknown;
@@ -168,6 +169,7 @@ async function translateWithModel(
           "Goal translation model returned an invalid goal draft.",
         );
       } catch (error) {
+        throwIfResponseBodyLimitError(error);
         if (error instanceof ModelServiceNoticeError) throw error;
         if (signal?.aborted || isAbortError(error)) {
           throw signal?.reason ?? error;
@@ -189,6 +191,7 @@ async function translateWithModel(
       warning: planningFallbackWarning(),
     };
   } catch (error) {
+    throwIfResponseBodyLimitError(error);
     if (signal?.aborted || isAbortError(error)) {
       throw signal?.reason ?? error;
     }

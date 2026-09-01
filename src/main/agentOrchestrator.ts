@@ -4,6 +4,7 @@ import {
   ModelServiceNoticeError,
   throwForModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 
 export type SubTask = {
   id: string;
@@ -261,6 +262,7 @@ async function decomposeTask(
       parallelizable: parsed.parallelizable ?? false,
     };
   } catch (error) {
+    throwIfResponseBodyLimitError(error);
     if (error instanceof ModelServiceNoticeError) throw error;
     return null;
   }

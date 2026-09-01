@@ -86,6 +86,7 @@ import {
   modelServiceNoticeFromError,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { throwIfResponseBodyLimitError } from "./fetchWithTimeout";
 import type {
   ModelCapabilities,
   ModelContextWindowSource,
@@ -539,7 +540,8 @@ export function createAgentRuntimeEngine(options: {
                       ? { cacheWriteTokens: winner.cacheWriteTokens }
                       : {}),
                   };
-                } catch {
+                } catch (error) {
+                  throwIfResponseBodyLimitError(error);
                   return completeWithModelRetry(
                     options.chatClient,
                     request,
@@ -1134,7 +1136,8 @@ export function createAgentRuntimeEngine(options: {
               ...(w.cacheReadTokens ? { cacheReadTokens: w.cacheReadTokens } : {}),
               ...(w.cacheWriteTokens ? { cacheWriteTokens: w.cacheWriteTokens } : {}),
             };
-          } catch {
+          } catch (error) {
+            throwIfResponseBodyLimitError(error);
             // fall through to the standard single-complete path on any max-mode failure
           }
         }

@@ -226,7 +226,7 @@ function boundWebReadableStream(
         }
         controller.enqueue(result.value);
       } catch (error) {
-        releaseWebReader(reader);
+        cancelWebReaderWithoutWaiting(reader, error);
         controller.error(error);
       }
     },
@@ -694,13 +694,27 @@ async function sendBedrockWithTimeout<T>(
   parentSignal: AbortSignal | undefined,
   timeoutMs: number,
 ): Promise<T> {
-  const controller = new AbortController();
-  const abortFromParent = () => controller.abort(parentSignal?.reason);
   if (parentSignal?.aborted) {
-    abortFromParent();
-  } else {
-    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    throw parentSignal.reason instanceof Error
+      ? parentSignal.reason
+      : new Error("Bedrock request aborted.");
   }
+  const controller = new AbortController();
+  let removeAbortListener: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const onAbort = () => {
+      reject(
+        controller.signal.reason instanceof Error
+          ? controller.signal.reason
+          : new Error("Bedrock request aborted."),
+      );
+    };
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    removeAbortListener = () =>
+      controller.signal.removeEventListener("abort", onAbort);
+  });
+  const abortFromParent = () => controller.abort(parentSignal?.reason);
+  parentSignal?.addEventListener("abort", abortFromParent, { once: true });
   const timer = setTimeout(() => {
     controller.abort(new Error(`Bedrock request timed out after ${timeoutMs}ms.`));
   }, timeoutMs);
@@ -708,20 +722,11 @@ async function sendBedrockWithTimeout<T>(
   try {
     return await Promise.race([
       send(controller.signal),
-      new Promise<never>((_resolve, reject) => {
-        const onAbort = () => {
-          controller.signal.removeEventListener("abort", onAbort);
-          reject(
-            controller.signal.reason instanceof Error
-              ? controller.signal.reason
-              : new Error("Bedrock request aborted."),
-          );
-        };
-        controller.signal.addEventListener("abort", onAbort, { once: true });
-      }),
+      aborted,
     ]);
   } finally {
     clearTimeout(timer);
+    removeAbortListener();
     parentSignal?.removeEventListener("abort", abortFromParent);
   }
 }

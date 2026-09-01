@@ -38,6 +38,25 @@ describe("completeWithModelRetry", () => {
     expect(calls).toBe(1);
   });
 
+  it("does not retry a response limit wrapped by a workflow boundary", async () => {
+    let calls = 0;
+    const limit = new ResponseBodyLimitError("LLM", 32 * 1024 * 1024);
+    const client: ChatClient = {
+      async complete() {
+        calls += 1;
+        throw new Error("workflow failed", {
+          cause: new AggregateError([limit]),
+        });
+      },
+    };
+
+    await expect(completeWithModelRetry(client, request, {
+      maxRetries: 3,
+      sleep: async () => undefined,
+    })).rejects.toThrow("workflow failed");
+    expect(calls).toBe(1);
+  });
+
   it("does not automatically retry provider rate limits", async () => {
     const sleeps: number[] = [];
     const retryEvents: ModelRetryEvent[] = [];
