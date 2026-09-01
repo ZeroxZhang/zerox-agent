@@ -11,6 +11,7 @@ import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
+import { readSseLinesUntilTerminal } from "./sseLineReader";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
 import type {
   CompleteRequest,
@@ -303,114 +304,106 @@ function parseAnthropicResponse(json: Record<string, unknown>): CompleteResponse
 }
 
 async function* parseAnthropicStream(res: Response): AsyncIterable<StreamEvent> {
-  const reader = res.body?.getReader();
-  if (!reader) return;
-  const decoder = new TextDecoder();
-  let buffer = "";
+  if (!res.body) return;
   const acc = { text: "", thinking: "", finish: "stop", cacheRead: 0, cacheWrite: 0 };
   const toolCalls = new Map<
     number,
     { id: string; name: string; arguments: string }
   >();
   let doneEmitted = false;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (!payload) continue;
-      let evt: Record<string, unknown>;
-      try {
-        evt = JSON.parse(payload) as Record<string, unknown>;
-      } catch {
+  for await (const line of readSseLinesUntilTerminal(res.body, {
+    isTerminal: () => doneEmitted,
+  })) {
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (!payload) continue;
+    let evt: Record<string, unknown>;
+    try {
+      evt = JSON.parse(payload) as Record<string, unknown>;
+    } catch {
+      yield {
+        type: "error",
+        error: new Error("Anthropic stream returned malformed JSON."),
+      };
+      return;
+    }
+    const t = evt.type as string;
+    if (t === "content_block_start") {
+      const index = normalizeAnthropicBlockIndex(evt.index);
+      const block = evt.content_block as Record<string, unknown> | undefined;
+      if (index !== undefined && block?.type === "tool_use") {
+        const id = typeof block.id === "string" ? block.id.trim() : "";
+        const name = typeof block.name === "string" ? block.name.trim() : "";
+        if (!id || !name) {
+          yield {
+            type: "error",
+            error: new Error(
+              "Anthropic tool stream started without a valid tool id and name.",
+            ),
+          };
+          return;
+        }
+        toolCalls.set(index, { id, name, arguments: "" });
         yield {
-          type: "error",
-          error: new Error("Anthropic stream returned malformed JSON."),
+          type: "tool_call_delta",
+          toolCallId: id,
+          index,
+          name,
+          argumentsDelta: "",
         };
-        return;
       }
-      const t = evt.type as string;
-      if (t === "content_block_start") {
+    } else if (t === "content_block_delta") {
+      const delta = evt.delta as Record<string, unknown>;
+      if (delta.type === "text_delta") { acc.text += delta.text; yield { type: "text_delta", text: delta.text as string }; }
+      else if (delta.type === "thinking_delta") { acc.thinking += delta.thinking; yield { type: "thinking_delta", text: delta.thinking as string }; }
+      else if (delta.type === "input_json_delta") {
         const index = normalizeAnthropicBlockIndex(evt.index);
-        const block = evt.content_block as Record<string, unknown> | undefined;
-        if (index !== undefined && block?.type === "tool_use") {
-          const id = typeof block.id === "string" ? block.id.trim() : "";
-          const name = typeof block.name === "string" ? block.name.trim() : "";
-          if (!id || !name) {
-            yield {
-              type: "error",
-              error: new Error(
-                "Anthropic tool stream started without a valid tool id and name.",
-              ),
-            };
-            return;
-          }
-          toolCalls.set(index, { id, name, arguments: "" });
+        const toolCall = index === undefined ? undefined : toolCalls.get(index);
+        if (index === undefined || !toolCall) {
           yield {
-            type: "tool_call_delta",
-            toolCallId: id,
-            index,
-            name,
-            argumentsDelta: "",
+            type: "error",
+            error: new Error(
+              "Anthropic tool arguments arrived before the matching tool start event.",
+            ),
           };
+          return;
         }
-      } else if (t === "content_block_delta") {
-        const delta = evt.delta as Record<string, unknown>;
-        if (delta.type === "text_delta") { acc.text += delta.text; yield { type: "text_delta", text: delta.text as string }; }
-        else if (delta.type === "thinking_delta") { acc.thinking += delta.thinking; yield { type: "thinking_delta", text: delta.thinking as string }; }
-        else if (delta.type === "input_json_delta") {
-          const index = normalizeAnthropicBlockIndex(evt.index);
-          const toolCall = index === undefined ? undefined : toolCalls.get(index);
-          if (index === undefined || !toolCall) {
-            yield {
-              type: "error",
-              error: new Error(
-                "Anthropic tool arguments arrived before the matching tool start event.",
-              ),
-            };
-            return;
-          }
-          const argumentsDelta =
-            typeof delta.partial_json === "string" ? delta.partial_json : "";
-          toolCall.arguments += argumentsDelta;
-          yield {
-            type: "tool_call_delta",
-            toolCallId: toolCall.id,
-            index,
-            name: toolCall.name,
-            argumentsDelta,
-          };
-        }
-      } else if (t === "message_delta") {
-        const d = evt.delta as Record<string, unknown>;
-        if (d.stop_reason) acc.finish = d.stop_reason as string;
-        const usage = evt.usage as Record<string, unknown> | undefined;
-        if (usage?.cache_read_input_tokens) acc.cacheRead = usage.cache_read_input_tokens as number;
-        if (usage?.cache_creation_input_tokens) acc.cacheWrite = usage.cache_creation_input_tokens as number;
-      } else if (t === "message_stop") {
-        doneEmitted = true;
+        const argumentsDelta =
+          typeof delta.partial_json === "string" ? delta.partial_json : "";
+        toolCall.arguments += argumentsDelta;
         yield {
-          type: "done",
-          response: {
-            content: acc.text || null,
-            toolCalls: [...toolCalls.values()].map((toolCall) => ({
-              id: toolCall.id,
-              type: "function" as const,
-              function: {
-                name: toolCall.name,
-                arguments: toolCall.arguments || "{}",
-              },
-            })),
-            finishReason: acc.finish,
-            cacheReadTokens: acc.cacheRead,
-            cacheWriteTokens: acc.cacheWrite,
-          },
+          type: "tool_call_delta",
+          toolCallId: toolCall.id,
+          index,
+          name: toolCall.name,
+          argumentsDelta,
         };
       }
+    } else if (t === "message_delta") {
+      const d = evt.delta as Record<string, unknown>;
+      if (d.stop_reason) acc.finish = d.stop_reason as string;
+      const usage = evt.usage as Record<string, unknown> | undefined;
+      if (usage?.cache_read_input_tokens) acc.cacheRead = usage.cache_read_input_tokens as number;
+      if (usage?.cache_creation_input_tokens) acc.cacheWrite = usage.cache_creation_input_tokens as number;
+    } else if (t === "message_stop") {
+      doneEmitted = true;
+      yield {
+        type: "done",
+        response: {
+          content: acc.text || null,
+          toolCalls: [...toolCalls.values()].map((toolCall) => ({
+            id: toolCall.id,
+            type: "function" as const,
+            function: {
+              name: toolCall.name,
+              arguments: toolCall.arguments || "{}",
+            },
+          })),
+          finishReason: acc.finish,
+          cacheReadTokens: acc.cacheRead,
+          cacheWriteTokens: acc.cacheWrite,
+        },
+      };
     }
   }
   if (!doneEmitted) {

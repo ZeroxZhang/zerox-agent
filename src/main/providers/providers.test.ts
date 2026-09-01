@@ -361,6 +361,23 @@ async function expectRejectsBefore(
   expect((outcome.error as Error).message).toMatch(messagePattern);
 }
 
+async function resolvesBefore<T>(promise: Promise<T>, timeoutMs = 250): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`operation did not resolve within ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 describe("AnthropicProvider", () => {
   it("parses a native Messages response into CompleteResponse", async () => {
     const provider = createProvider(
@@ -502,6 +519,71 @@ describe("AnthropicProvider", () => {
       },
       { type: "done", finishReason: "tool_use" },
     ]);
+  });
+
+  it("completes and cancels transport after message_stop without waiting for EOF", async () => {
+    const encoder = new TextEncoder();
+    let transportCanceled = false;
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-sonnet-4-6" },
+      {
+        fetch: (async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(
+                    [
+                      {
+                        type: "content_block_delta",
+                        index: 0,
+                        delta: { type: "text_delta", text: "complete" },
+                      },
+                      {
+                        type: "message_delta",
+                        delta: { stop_reason: "end_turn" },
+                      },
+                      { type: "message_stop" },
+                    ]
+                      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+                      .join(""),
+                  ),
+                );
+              },
+              cancel() {
+                transportCanceled = true;
+              },
+            }),
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          )) as typeof fetch,
+      },
+    );
+
+    const collect = async () => {
+      const events = [];
+      for await (const event of provider.stream({
+        model: "claude-sonnet-4-6",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 100,
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      })) {
+        events.push(event);
+      }
+      return events;
+    };
+
+    await expect(resolvesBefore(collect())).resolves.toEqual([
+      { type: "text_delta", text: "complete" },
+      {
+        type: "done",
+        response: expect.objectContaining({
+          content: "complete",
+          finishReason: "end_turn",
+        }),
+      },
+    ]);
+    expect(transportCanceled).toBe(true);
   });
 
   it("applies the same bounded thinking configuration to complete and stream requests", async () => {
@@ -714,6 +796,70 @@ describe("GeminiProvider", () => {
       })) { /* drain */ }
     };
     await expect(drain()).rejects.toBeInstanceOf(IncompleteModelStreamError);
+  });
+
+  it("completes and cancels transport after finishReason without waiting for EOF", async () => {
+    const encoder = new TextEncoder();
+    let transportCanceled = false;
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-2.5-pro" },
+      {
+        fetch: (async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      candidates: [
+                        {
+                          content: { parts: [{ text: "complete" }] },
+                          finishReason: "STOP",
+                        },
+                      ],
+                      usageMetadata: {
+                        promptTokenCount: 4,
+                        candidatesTokenCount: 2,
+                      },
+                    })}\n\n`,
+                  ),
+                );
+              },
+              cancel() {
+                transportCanceled = true;
+              },
+            }),
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          )) as typeof fetch,
+      },
+    );
+
+    const collect = async () => {
+      const events = [];
+      for await (const event of provider.stream({
+        model: "gemini-2.5-pro",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 100,
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      })) {
+        events.push(event);
+      }
+      return events;
+    };
+
+    await expect(resolvesBefore(collect())).resolves.toEqual([
+      { type: "text_delta", text: "complete" },
+      {
+        type: "done",
+        response: expect.objectContaining({
+          content: "complete",
+          finishReason: "STOP",
+          usage: { inputTokens: 4, outputTokens: 2 },
+        }),
+      },
+    ]);
+    expect(transportCanceled).toBe(true);
   });
 
   it("parses a native generateContent response", async () => {

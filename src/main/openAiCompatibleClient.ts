@@ -1,5 +1,6 @@
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "./fetchWithTimeout";
 import { providerHttpError } from "./providers/providerHttpError";
+import { readSseLinesUntilTerminal } from "./providers/sseLineReader";
 import {
   modelServiceNoticeFromFinishReason,
   type ModelServiceNotice,
@@ -254,9 +255,6 @@ export function createOpenAiCompatibleClient(options?: {
         throw new Error("LLM streaming response did not include a body.");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
       let terminalFinishReason: string | undefined;
       let terminalObserved = false;
       let doneEmitted = false;
@@ -265,149 +263,107 @@ export function createOpenAiCompatibleClient(options?: {
       // the stream stalls without sending [DONE] (CORE-02, NET-14).
       const SSE_READ_IDLE_TIMEOUT_MS = 30_000;
 
-      try {
-        const emitDataLine = async function* (
-          rawLine: string,
-        ): AsyncGenerator<StreamEvent, void, void> {
-          const trimmed = rawLine.trim();
-          if (!trimmed || !trimmed.startsWith("data:")) return;
+      const emitDataLine = async function* (
+        rawLine: string,
+      ): AsyncGenerator<StreamEvent, void, void> {
+        const trimmed = rawLine.trim();
+        if (!trimmed || !trimmed.startsWith("data:")) return;
 
-          const data = trimmed.slice(5).trimStart();
-          if (data === "[DONE]") {
-            terminalObserved = true;
-            terminalFinishReason ??= "stop";
-            return;
-          }
+        const data = trimmed.slice(5).trimStart();
+        if (data === "[DONE]") {
+          terminalObserved = true;
+          terminalFinishReason ??= "stop";
+          return;
+        }
 
-          let chunk: {
-            choices?: Array<{
-              delta?: {
-                content?: string | null;
-                reasoning_content?: unknown;
-                reasoning?: unknown;
-                thinking?: unknown;
-                tool_calls?: Array<{
-                  index?: number;
-                  id?: string;
-                  type?: "function";
-                  function?: { name?: string; arguments?: string };
-                }>;
-              };
-              finish_reason?: string | null;
-            }>;
-          };
-          try {
-            chunk = JSON.parse(data) as typeof chunk;
-          } catch (error) {
-            throw new Error("LLM stream returned malformed JSON.", {
-              cause: error,
-            });
-          }
-
-          const delta = chunk.choices?.[0]?.delta;
-          const finishReason = chunk.choices?.[0]?.finish_reason;
-          const reasoningDelta = normalizeReasoningDelta(delta);
-          if (reasoningDelta) {
-            yield { type: "reasoning_delta", text: reasoningDelta };
-          }
-          if (delta?.content) {
-            yield { type: "content_delta", text: delta.content };
-          }
-          for (const tc of delta?.tool_calls ?? []) {
-            const index = normalizeStreamToolCallIndex(tc.index);
-            yield {
-              type: "tool_call_delta",
-              id: tc.id ?? "",
-              ...(index !== undefined ? { index } : {}),
-              name: tc.function?.name ?? "",
-              arguments: tc.function?.arguments ?? "",
+        let chunk: {
+          choices?: Array<{
+            delta?: {
+              content?: string | null;
+              reasoning_content?: unknown;
+              reasoning?: unknown;
+              thinking?: unknown;
+              tool_calls?: Array<{
+                index?: number;
+                id?: string;
+                type?: "function";
+                function?: { name?: string; arguments?: string };
+              }>;
             };
-          }
-          if (finishReason) {
-            terminalObserved = true;
-            const currentNotice = terminalFinishReason
-              ? modelServiceNoticeFromFinishReason(terminalFinishReason, {
-                  model: request.model,
-                })
-              : undefined;
-            const candidateNotice = modelServiceNoticeFromFinishReason(
-              finishReason,
-              { model: request.model },
-            );
-            if (candidateNotice || !currentNotice) {
-              terminalFinishReason = finishReason;
-            }
-          }
+            finish_reason?: string | null;
+          }>;
         };
-
-        while (true) {
-          // v3.6.0: Wrap reader.read() with an idle timeout that is
-          // properly cleaned up after the race settles (CORE-02, NET-14).
-          let readTimeoutId: ReturnType<typeof setTimeout> | null = null;
-          const readResult = await Promise.race([
-            reader.read(),
-            new Promise<never>((_, reject) => {
-              readTimeoutId = setTimeout(
-                () => reject(new Error("SSE stream idle timeout after 30 s")),
-                SSE_READ_IDLE_TIMEOUT_MS,
-              );
-            }),
-          ]);
-          if (readTimeoutId !== null) clearTimeout(readTimeoutId);
-
-          const { done, value } = readResult;
-          if (done) {
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            for await (const event of emitDataLine(line)) {
-              yield event;
-            }
-          }
-
-          if (terminalObserved && trimmedContainsDone(lines)) break;
+        try {
+          chunk = JSON.parse(data) as typeof chunk;
+        } catch (error) {
+          throw new Error("LLM stream returned malformed JSON.", {
+            cause: error,
+          });
         }
 
-        // Flush the decoder into the SSE buffer, then parse a final event even
-        // when the provider omitted the optional trailing newline.
-        buffer += decoder.decode();
-        if (buffer.trim()) {
-          for (const line of buffer.split("\n")) {
-            for await (const event of emitDataLine(line)) {
-              yield event;
-            }
-          }
+        const delta = chunk.choices?.[0]?.delta;
+        const finishReason = chunk.choices?.[0]?.finish_reason;
+        const reasoningDelta = normalizeReasoningDelta(delta);
+        if (reasoningDelta) {
+          yield { type: "reasoning_delta", text: reasoningDelta };
         }
-        if (!terminalObserved) {
-          throw new IncompleteModelStreamError();
+        if (delta?.content) {
+          yield { type: "content_delta", text: delta.content };
         }
-        if (!doneEmitted) {
-          const finishReason = terminalFinishReason ?? "stop";
-          const modelServiceNotice = modelServiceNoticeFromFinishReason(
+        for (const tc of delta?.tool_calls ?? []) {
+          const index = normalizeStreamToolCallIndex(tc.index);
+          yield {
+            type: "tool_call_delta",
+            id: tc.id ?? "",
+            ...(index !== undefined ? { index } : {}),
+            name: tc.function?.name ?? "",
+            arguments: tc.function?.arguments ?? "",
+          };
+        }
+        if (finishReason) {
+          terminalObserved = true;
+          const currentNotice = terminalFinishReason
+            ? modelServiceNoticeFromFinishReason(terminalFinishReason, {
+                model: request.model,
+              })
+            : undefined;
+          const candidateNotice = modelServiceNoticeFromFinishReason(
             finishReason,
             { model: request.model },
           );
-          doneEmitted = true;
-          yield {
-            type: "done",
-            finishReason,
-            ...(modelServiceNotice ? { modelServiceNotice } : {}),
-          };
+          if (candidateNotice || !currentNotice) {
+            terminalFinishReason = finishReason;
+          }
         }
-      } finally {
-        reader.releaseLock();
+      };
+
+      for await (const line of readSseLinesUntilTerminal(response.body, {
+        isTerminal: () => terminalObserved,
+        idleTimeoutMs: SSE_READ_IDLE_TIMEOUT_MS,
+        idleTimeoutMessage: "SSE stream idle timeout after 30 s",
+      })) {
+        for await (const event of emitDataLine(line)) {
+          yield event;
+        }
+      }
+      if (!terminalObserved) {
+        throw new IncompleteModelStreamError();
+      }
+      if (!doneEmitted) {
+        const finishReason = terminalFinishReason ?? "stop";
+        const modelServiceNotice = modelServiceNoticeFromFinishReason(
+          finishReason,
+          { model: request.model },
+        );
+        doneEmitted = true;
+        yield {
+          type: "done",
+          finishReason,
+          ...(modelServiceNotice ? { modelServiceNotice } : {}),
+        };
       }
     },
   };
-}
-
-function trimmedContainsDone(lines: string[]): boolean {
-  return lines.some((line) => line.trim().replace(/^data:\s*/, "") === "[DONE]");
 }
 
 function normalizeReasoningContent(message: {

@@ -14176,3 +14176,31 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Caller-pinned Program/Harness checks and the zero-vulnerability production
   audit pass. Exact-byte dual review and external package acceptance remain
   required before merge and release.
+
+## 2026-09-02 - v3.9.2 protocol-terminal stream finalization
+
+- Candidate `24126b9839708d6c90e2dbf89437fcc074e0e69f` was rejected before review
+  completion after the code lane found one Major stream lifecycle defect; no
+  PASS receipts were issued. OpenAI-compatible and Gemini streams recognized a
+  provider terminal reason but continued reading until transport EOF. A valid
+  completed response on a kept-open connection could therefore hit the later
+  idle or request deadline, be retried, and appear truncated or failed.
+- All native SSE providers now share one line-reader lifecycle contract.
+  OpenAI-compatible `finish_reason` or `[DONE]`, Gemini `finishReason`, and
+  Anthropic `message_stop` are linearization points: the terminal frame is
+  fully parsed first, then the reader stops immediately and initiates transport
+  cancellation without waiting for the server to close the body. Abrupt EOF
+  without a protocol terminal remains incomplete and retryable, and final
+  unterminated frames remain accepted only after actual EOF.
+- Three never-closing transport regressions prove that terminal content,
+  output-limit reasons, Gemini usage metadata, and Anthropic stop reasons are
+  preserved while the body is canceled. Focused provider validation passes
+  `67/67`; the expanded model stream, retry, Agent Loop, and Chat suites pass
+  `253/253`. Full `npm run verify` passes strict test type coverage `435/435`,
+  `326` current files / `3975` current tests with declared skips, every
+  Round2–Round12 lane, production build, Agent eval `26/26`, and Memory eval
+  `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`, SQLite
+  `3.53.2`, seven migrations, eight authority domains, renderer startup, and
+  Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
+  zero-vulnerability production audit pass. Exact-byte dual review and external
+  package acceptance remain required before merge and release.

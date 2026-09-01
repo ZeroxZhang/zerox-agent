@@ -5,6 +5,23 @@ import {
   IncompleteModelStreamError,
 } from "./openAiCompatibleClient";
 
+async function resolvesBefore<T>(promise: Promise<T>, timeoutMs = 250): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`operation did not resolve within ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 describe("OpenAI-compatible chat client", () => {
   it("serializes pasted images as OpenAI multimodal user content", async () => {
     const calls: RequestInit[] = [];
@@ -598,6 +615,57 @@ describe("OpenAI-compatible chat client", () => {
         }),
       },
     ]);
+  });
+
+  it("completes and cancels transport after finish_reason without waiting for EOF", async () => {
+    const encoder = new TextEncoder();
+    let transportCanceled = false;
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    choices: [
+                      {
+                        delta: { content: "complete" },
+                        finish_reason: "stop",
+                      },
+                    ],
+                  })}\n\n`,
+                ),
+              );
+            },
+            cancel() {
+              transportCanceled = true;
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+
+    const collect = async () => {
+      const events = [];
+      for await (const event of client.streamComplete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "agent-model",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: "Run" }],
+      })) {
+        events.push(event);
+      }
+      return events;
+    };
+
+    await expect(resolvesBefore(collect())).resolves.toEqual([
+      { type: "content_delta", text: "complete" },
+      { type: "done", finishReason: "stop" },
+    ]);
+    expect(transportCanceled).toBe(true);
   });
 
   it("streams tool call indexes from SSE chunks", async () => {

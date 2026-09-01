@@ -11,6 +11,7 @@ import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
 import { IncompleteModelStreamError } from "../openAiCompatibleClient";
+import { readSseLinesUntilTerminal } from "./sseLineReader";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -78,10 +79,7 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         yield { type: "error", error: await providerHttpError(res) };
         return;
       }
-      const reader = res.body?.getReader();
-      if (!reader) return;
-      const decoder = new TextDecoder();
-      let buffer = "";
+      if (!res.body) return;
       const acc = {
         text: "",
         thinking: "",
@@ -142,21 +140,10 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         if (um?.promptTokenCount) acc.inputTokens = um.promptTokenCount;
         if (um?.candidatesTokenCount) acc.outputTokens = um.candidatesTokenCount;
       };
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          for await (const event of emitGeminiLine(line)) yield event;
-        }
-      }
-      buffer += decoder.decode();
-      if (buffer.trim()) {
-        for (const line of buffer.split("\n")) {
-          for await (const event of emitGeminiLine(line)) yield event;
-        }
+      for await (const line of readSseLinesUntilTerminal(res.body, {
+        isTerminal: () => terminalObserved,
+      })) {
+        for await (const event of emitGeminiLine(line)) yield event;
       }
       if (!terminalObserved) {
         throw new IncompleteModelStreamError(
