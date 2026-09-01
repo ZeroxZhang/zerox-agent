@@ -500,6 +500,9 @@ const darwinUserTempRoots = [...new Set([
 const xcrunEphemeralPrefixes = darwinUserTempRoots.map((root) =>
   path.join(root, "xcrun_db-")
 );
+const xcrunCacheFiles = darwinUserTempRoots.map((root) =>
+  path.join(root, "xcrun_db")
+);
 const electronEphemeralPrefixes = darwinUserTempRoots.flatMap((root) => [
   path.join(root, "scoped_dir"),
   path.join(root, "xcrun_db-"),
@@ -511,9 +514,11 @@ await writePrivateFile(
   commandSandboxProfile,
   Buffer.from(buildAcceptanceSandboxProfile({
     readableRoots: sandboxReadableRoots,
+    readableFiles: xcrunCacheFiles,
     readablePrefixes: xcrunEphemeralPrefixes,
     metadataRoots: ["/Users"],
     writableRoots: sandboxWritableRoots,
+    writableFiles: xcrunCacheFiles,
     writablePrefixes: xcrunEphemeralPrefixes,
     network: false,
   })),
@@ -2883,6 +2888,7 @@ function buildAcceptanceSandboxProfile({
   readablePrefixes = [],
   metadataRoots = [],
   writableRoots,
+  writableFiles = [],
   writablePrefixes = [],
   localSocketPrefixes = [],
   network,
@@ -2894,6 +2900,7 @@ function buildAcceptanceSandboxProfile({
     ...readableFiles,
     ...readablePrefixes,
     ...metadataRoots,
+    ...writableFiles,
     ...writablePrefixes,
     ...localSocketPrefixes,
   ]) {
@@ -2943,6 +2950,13 @@ function buildAcceptanceSandboxProfile({
   if (readableFiles.length > 0) {
     forms.push(
       `(allow file-read* file-test-existence ${readableFiles
+        .map((file) => `(literal ${JSON.stringify(path.resolve(file))})`)
+        .join(" ")})`,
+    );
+  }
+  if (writableFiles.length > 0) {
+    forms.push(
+      `(allow file-write* ${writableFiles
         .map((file) => `(literal ${JSON.stringify(path.resolve(file))})`)
         .join(" ")})`,
     );

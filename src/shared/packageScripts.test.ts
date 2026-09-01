@@ -485,8 +485,12 @@ describe("package scripts", () => {
     expect(runner).not.toContain('"(allow default)"');
     expect(runner).toContain("TMPDIR: execution.temp");
     expect(runner).toContain("const xcrunEphemeralPrefixes =");
+    expect(runner).toContain("const xcrunCacheFiles =");
+    expect(runner).toContain("readableFiles: xcrunCacheFiles");
     expect(runner).toContain("readablePrefixes: xcrunEphemeralPrefixes");
+    expect(runner).toContain("writableFiles: xcrunCacheFiles");
     expect(runner).toContain("writablePrefixes: xcrunEphemeralPrefixes");
+    expect(runner).toContain("if (writableFiles.length > 0)");
     expect(runner).toContain("args[1] === \"audit\"");
     expect(runner).toContain("repositoryCheckSandboxProfile");
     expect(runner).toContain("isWithin(repositoryRealpath, cwd)");

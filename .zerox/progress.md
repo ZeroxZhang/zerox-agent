@@ -14381,3 +14381,14 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   acceptance runner is part of the reviewed control set, the previous receipts
   are not reused: a new exact-byte dual review and a fresh external acceptance
   run are required before merge and release.
+- Reviewed candidate `7917e900d837a458c87cd4b20fa5307e1a969b0c` also passed
+  both lanes at `0C/0M/0m`, but the next isolated run proved that allowing only
+  the randomized `xcrun_db-*` staging prefix was insufficient: `xcrun` must
+  atomically replace the exact `xcrun_db` cache file after writing the staged
+  file. The gate again failed before publishing an anchor.
+- The sandbox contract now distinguishes writable literal files from writable
+  roots and prefixes. The ordinary command profile may read/write only the
+  exact alias/canonical `xcrun_db` files plus the randomized `xcrun_db-*`
+  staging prefixes; it still cannot access an unrelated sibling or the user
+  temp directory as a subtree. This closes the complete atomic replacement
+  lifecycle without granting a directory capability.
