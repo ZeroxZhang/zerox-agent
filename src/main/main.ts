@@ -74,6 +74,7 @@ import {
 import { createConversationDisclosureScriptedClient } from "./conversationDisclosureScriptedClient";
 import { assertSafeStoreEntityId } from "./storeEntityId";
 import { assertSafePlanId } from "./planStore";
+import { stringifyRedactedCredentials } from "../shared/credentialRedaction";
 
 app.setName("Zerox Agent");
 applyUserDataDirOverride({
@@ -752,7 +753,7 @@ function startGoalReplayDriver() {
   );
   const startedAt = Date.now();
   const log = (message: string, extra?: unknown) => {
-    const suffix = extra === undefined ? "" : ` ${JSON.stringify(extra)}`;
+    const suffix = extra === undefined ? "" : ` ${stringifyRedactedCredentials(extra)}`;
     console.log(`[GOAL-REPLAY] ${message}${suffix}`);
   };
   const readGoalState = async () => {
@@ -865,7 +866,7 @@ function startPlanReplayDriver() {
     `${planId}.json`,
   );
   const log = (message: string, extra?: unknown) => {
-    const suffix = extra === undefined ? "" : ` ${JSON.stringify(extra)}`;
+    const suffix = extra === undefined ? "" : ` ${stringifyRedactedCredentials(extra)}`;
     console.log(`[PLAN-REPLAY] ${message}${suffix}`);
   };
   const readPlan = async () => {

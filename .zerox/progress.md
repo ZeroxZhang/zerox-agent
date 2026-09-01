@@ -13675,3 +13675,37 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Production audit reports zero vulnerabilities; `npm ls --depth=0`,
   caller-pinned Program/Harness, and `git diff --check` pass. A fresh fifth
   exact-byte code/security review is the next mandatory gate.
+
+## 2026-09-01 - v3.9.2 post-move authority, legacy journal, and diagnostic-secret repair
+
+- The fifth frozen candidate was rejected by code and security review with
+  four Majors and no Criticals or Minors. No acceptance receipts were issued.
+  The findings shared one authority-boundary failure class: the parent could
+  kill a native helper after rename, restored paths were trusted without
+  re-proving their contents, v3.9.1 journals had no explicit migration state,
+  and raw planning failures could cross persistence and UI/log projections.
+- Native move failure handling now verifies the restored source digest and all
+  opened root/category/journal capabilities before claiming the original
+  layout was restored. A same-inode target or journal rewrite instead leaves a
+  durable reconciliation marker and automatic rollback/verification fails
+  closed. The parent no longer applies the fixed ten-second `SIGKILL` that
+  could interrupt hashing or a post-rename recovery sequence.
+- Pretty-printed `0644` v3.9.1 transaction journals are recognized as legacy
+  records and projected into an explicit read-only
+  `v3.9.1_transaction_requires_manual_reconciliation` state. Group- or
+  world-writable legacy journals remain rejected, and legacy records cannot
+  authorize automatic rollback.
+- Planning investigation, round/review failure records, structured-repair
+  prompts, legacy UI projections, and Goal/Plan replay logs now use the shared
+  credential redaction boundary. The optional raw failure dump was removed so
+  invalid model output cannot persist unredacted secrets outside the governed
+  plan store.
+- Focused validation passes `7/7` files and `172/172` tests. Full
+  `npm run verify` passes strict test type coverage `433/433`, `324` current
+  files / `3887` current tests with declared skips, every historical lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and final Node ABI `137`
+  restoration. Production audit reports zero vulnerabilities; dependency,
+  caller-pinned Program/Harness, and whitespace checks pass. A fresh sixth
+  exact-byte code/security review is the next mandatory gate.

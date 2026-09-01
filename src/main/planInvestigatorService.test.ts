@@ -648,6 +648,7 @@ describe("plan investigator service", () => {
   });
 
   it("still fails closed when structured-output repairs are exhausted", async () => {
+    const secret = "sk-proj-sixth-round-investigator-secret-123456";
     const registry = {
       getVisibleDefinitions() {
         return [];
@@ -666,7 +667,7 @@ describe("plan investigator service", () => {
       async complete() {
         repairAttempts += 1;
         return {
-          content: "still not json at all",
+          content: `still not json at all api_key=${secret}`,
           toolCalls: [],
           finishReason: "stop",
           usage: { inputTokens: 7, outputTokens: 3 },
@@ -728,11 +729,14 @@ describe("plan investigator service", () => {
     expect(repairAttempts).toBe(1);
     expect(stageStatuses).toEqual(["running", "failed"]);
     expect(failedExcerpt).toContain("still not json at all");
+    expect(failedExcerpt).toContain("[redacted]");
+    expect(failedExcerpt).not.toContain(secret);
     expect(failedRepairAttempted).toBe(true);
     const failure = (await investigation.catch((error) => error)) as
       | PlanInvestigationError
       | undefined;
     expect(failure).toBeInstanceOf(PlanInvestigationError);
+    expect(failure?.message).not.toContain(secret);
     expect(failure?.stages.at(-1)?.usage).toMatchObject({
       inputTokens: 7,
       outputTokens: 13,

@@ -2195,9 +2195,11 @@ describe("plan debate orchestrator", () => {
   it("fails closed after one repair with safe response diagnostics", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
       [];
+    const secret = "sk-proj-sixth-round-secret-123456";
+    const failingResponse = `second invalid response api_key=${secret}`;
     const router = createQueuedRouter(
       {
-        profileDirect: ["first invalid response", "second invalid response"],
+        profileDirect: ["first invalid response", failingResponse],
       },
       calls,
     );
@@ -2222,12 +2224,15 @@ describe("plan debate orchestrator", () => {
 
     expect(plan.status).toBe("paused");
     expect(calls).toHaveLength(2);
-    const error = plan.rounds.find((round) => round.status === "failed")?.error ?? "";
+    const failedRound = plan.rounds.find((round) => round.status === "failed");
+    const error = failedRound?.error ?? "";
     expect(error).toContain("连续两次未返回可用 JSON 对象");
     expect(error).toContain("finishReason=stop");
-    expect(error).toContain("contentLength=23");
+    expect(error).toContain(`contentLength=${failingResponse.length}`);
     expect(error).toMatch(/contentSha256=[a-f0-9]{16}/);
-    expect(error).not.toContain("second invalid response");
+    expect(error).not.toContain(secret);
+    expect(failedRound?.failureExcerpt).toContain("[redacted]");
+    expect(failedRound?.failureExcerpt).not.toContain(secret);
   });
 
   it("reports an output-limit notice without retrying JSON repair or persisting reasoning", async () => {

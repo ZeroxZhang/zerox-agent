@@ -50,7 +50,7 @@ const expectedSuccessorFeatures = new Map([
   }],
   ["P113-v3.9.2-disclosure-adversarial-acceptance", {
     priority: 144,
-    digest: "sha256:a0b3fd5de43cbd719a651400fb85bfabc9e3c6cadfe981572672fd6e375eb808",
+    digest: "sha256:1add27dc3338fa61493966921fcd5fc5e76e5909ed1d1c7159fe55c1bd71ce14",
   }],
 ]);
 const expectedScenarioIds = Array.from(

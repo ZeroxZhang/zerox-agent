@@ -97,7 +97,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "package-lock.json":
     "sha256:c5cd81cff944c33d2a1bcd785cba49fd3a34f0c7279a701989e6fa9e3c448beb",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:8eddc20420dfdafb256f081fcd193a4799c6f0d41cbaf8640964b0949621b86e",
+    "sha256:d78c26d6802bae5697d5c62b411b59ae95c7f4014eb22cfead67488bc211571a",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":

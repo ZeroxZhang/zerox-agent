@@ -202,6 +202,31 @@ describe("plan failure presentation", () => {
     expect(presentation?.detail).not.toContain("stack trace");
     expect(presentation?.nextAction).not.toContain("raw payload");
   });
+
+  it("redacts credentials from legacy persisted planning diagnostics", () => {
+    const secret = "sk-proj-legacy-plan-secret-123456";
+    const presentation = getPlanFailurePresentation(
+      planWithFailure({
+        planningStages: [
+          {
+            id: "investigation-legacy-secret",
+            kind: "investigation",
+            runId: "investigation-legacy-secret-run",
+            status: "failed",
+            evidenceRefs: [],
+            startedAt: "2026-07-31T00:00:00.000Z",
+            completedAt: "2026-07-31T00:00:01.000Z",
+            revisionAttempted: true,
+            error: `provider rejected api_key=${secret}`,
+            failureExcerpt: `raw response api_key=${secret}`,
+          },
+        ],
+      }),
+    );
+
+    expect(presentation?.technicalDetail).toContain("[redacted]");
+    expect(presentation?.technicalDetail).not.toContain(secret);
+  });
 });
 
 function planWithFailure(

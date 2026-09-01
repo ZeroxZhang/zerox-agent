@@ -86,7 +86,9 @@ export type LocalFileOrganizationTransaction = {
   logIdentity?: LocalFileIdentity;
   reconciliation?: {
     required: true;
-    markerPath: string;
+    kind: "marker" | "legacy_journal";
+    markerPath?: string;
+    reason?: "v3.9.1_transaction_requires_manual_reconciliation";
   };
   history: Array<{ status: "pending" | "applied" | "rolled_back"; at: string }>;
 };
@@ -297,13 +299,13 @@ export async function rollbackLocalFileOrganization(
     transaction.logPath,
     ...transaction.moves.flatMap((move) => [move.from, move.to]),
   ]);
-  if (!transaction.rootIdentity || !transaction.logIdentity) {
-    throw new Error("Local file organization transaction lacks native identities.");
-  }
   if (transaction.status === "reconciliation_required") {
     throw new Error(
       "Local file organization requires manual reconciliation before rollback.",
     );
+  }
+  if (!transaction.rootIdentity || !transaction.logIdentity) {
+    throw new Error("Local file organization transaction lacks native identities.");
   }
 
   const rollbackSteps: Array<{
@@ -401,6 +403,16 @@ export async function verifyLocalFileOrganization(
   const changedTargets: string[] = [];
   const unmovedSources: string[] = [];
   const sourceConflicts: string[] = [];
+  if (transaction.status === "reconciliation_required") {
+    return {
+      verified: false,
+      checked: transaction.moves.length,
+      missingTargets,
+      changedTargets,
+      unmovedSources,
+      sourceConflicts,
+    };
+  }
   if (!transaction.rootIdentity || !transaction.logIdentity) {
     throw new Error("Local file organization transaction lacks native identities.");
   }
@@ -497,16 +509,15 @@ export async function readLocalFileOrganizationTransaction(
       realpath(resolvedLogPath),
     ]);
     if (
-      (before.mode & 0o777n) !== 0o600n
-      || !directory.isDirectory()
+      !directory.isDirectory()
       || directory.isSymbolicLink()
       || before.uid !== directory.uid
       || !after.isFile()
       || after.nlink !== 1n
-      || (after.mode & 0o777n) !== 0o600n
       || after.uid !== before.uid
       || after.dev !== before.dev
       || after.ino !== before.ino
+      || (after.mode & 0o777n) !== (before.mode & 0o777n)
       || after.size !== before.size
       || after.mtimeNs !== before.mtimeNs
       || after.ctimeNs !== before.ctimeNs
@@ -518,7 +529,21 @@ export async function readLocalFileOrganizationTransaction(
     ) {
       throw new Error("Local file organization journal identity changed while reading.");
     }
-    const transaction = parseLastJournalTransaction(body);
+    const parsed = parseTransactionJournal(body);
+    const transaction = parsed.transaction;
+    if (parsed.format === "current") {
+      if (
+        (before.mode & 0o777n) !== 0o600n
+        || (after.mode & 0o777n) !== 0o600n
+      ) {
+        throw new Error("Local file organization journal identity changed while reading.");
+      }
+    } else if (
+      (before.mode & 0o022n) !== 0n
+      || (after.mode & 0o022n) !== 0n
+    ) {
+      throw new Error("Legacy local file organization journal permissions are unsafe.");
+    }
     assertSafeStoreEntityId(
       transaction.id,
       "Local file organization transaction id",
@@ -544,17 +569,31 @@ export async function readLocalFileOrganizationTransaction(
             status: "reconciliation_required" as const,
             reconciliation: {
               required: true as const,
+              kind: "marker" as const,
               markerPath,
             },
           }
-        : {}),
-      logIdentity: {
-        dev: after.dev.toString(),
-        ino: after.ino.toString(),
-        size: after.size.toString(),
-        uid: after.uid.toString(),
-        sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
-      },
+        : parsed.format === "legacy_v3.9.1"
+          ? {
+              status: "reconciliation_required" as const,
+              reconciliation: {
+                required: true as const,
+                kind: "legacy_journal" as const,
+                reason: "v3.9.1_transaction_requires_manual_reconciliation" as const,
+              },
+            }
+          : {}),
+      ...(parsed.format === "current"
+        ? {
+            logIdentity: {
+              dev: after.dev.toString(),
+              ino: after.ino.toString(),
+              size: after.size.toString(),
+              uid: after.uid.toString(),
+              sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+            },
+          }
+        : { logIdentity: undefined }),
     };
   } finally {
     await handle.close();
@@ -592,6 +631,38 @@ async function loadAuthoritativeTransaction(
   return authoritative;
 }
 
+function parseTransactionJournal(body: string): {
+  transaction: LocalFileOrganizationTransaction;
+  format: "current" | "legacy_v3.9.1";
+} {
+  let transaction: LocalFileOrganizationTransaction | undefined;
+  try {
+    transaction = parseLastJournalTransaction(body);
+  } catch {
+    try {
+      const parsed = JSON.parse(body) as Partial<LocalFileOrganizationTransaction>;
+      if (isJournalTransactionShape(parsed)) {
+        transaction = parsed as LocalFileOrganizationTransaction;
+      }
+    } catch {
+      // The canonical error below covers malformed legacy and current logs.
+    }
+  }
+  if (!transaction) {
+    throw new Error("Local file organization journal has no complete transaction record.");
+  }
+  const current = Boolean(
+    transaction.rootIdentity
+    && transaction.moves.every((move) =>
+      /^sha256:[0-9a-f]{64}$/.test(move.sourceIdentity?.sha256 ?? "")
+    ),
+  );
+  return {
+    transaction,
+    format: current ? "current" : "legacy_v3.9.1",
+  };
+}
+
 function parseLastJournalTransaction(body: string): LocalFileOrganizationTransaction {
   const records = body.split("\n");
   for (let index = records.length - 1; index >= 0; index -= 1) {
@@ -599,14 +670,7 @@ function parseLastJournalTransaction(body: string): LocalFileOrganizationTransac
     if (!record) continue;
     try {
       const value = JSON.parse(record) as Partial<LocalFileOrganizationTransaction>;
-      if (
-        typeof value.id === "string"
-        && typeof value.root === "string"
-        && typeof value.logPath === "string"
-        && ["pending", "applied", "rolled_back"].includes(value.status ?? "")
-        && Array.isArray(value.moves)
-        && Array.isArray(value.history)
-      ) {
+      if (isJournalTransactionShape(value)) {
         return value as LocalFileOrganizationTransaction;
       }
     } catch {
@@ -615,6 +679,24 @@ function parseLastJournalTransaction(body: string): LocalFileOrganizationTransac
     }
   }
   throw new Error("Local file organization journal has no complete transaction record.");
+}
+
+function isJournalTransactionShape(
+  value: Partial<LocalFileOrganizationTransaction>,
+): boolean {
+  return typeof value.id === "string"
+    && typeof value.root === "string"
+    && typeof value.logPath === "string"
+    && ["pending", "applied", "rolled_back"].includes(value.status ?? "")
+    && Array.isArray(value.moves)
+    && value.moves.every((move) =>
+      move
+      && typeof move.from === "string"
+      && typeof move.to === "string"
+      && typeof move.category === "string"
+      && typeof move.reason === "string"
+    )
+    && Array.isArray(value.history);
 }
 
 function categorizeFile(fileName: string): LocalFileCategory {
@@ -1040,16 +1122,12 @@ async function runSafeFsHelper(
     let stderr = "";
     let outputOverflow = false;
     let readySignaled = false;
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-    }, 10_000);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       const next = appendBoundedOutput(stdout, chunk);
       if (next === null) {
         outputOverflow = true;
-        child.kill("SIGKILL");
       } else {
         stdout = next;
       }
@@ -1058,7 +1136,6 @@ async function runSafeFsHelper(
       const next = appendBoundedOutput(stderr, chunk);
       if (next === null) {
         outputOverflow = true;
-        child.kill("SIGKILL");
       } else {
         stderr = next;
       }
@@ -1071,7 +1148,6 @@ async function runSafeFsHelper(
       }
     });
     child.on("error", (error) => {
-      clearTimeout(timeout);
       if (outputOverflow) {
         reject(new Error("Local file organization helper output exceeded its limit."));
         return;
@@ -1079,7 +1155,10 @@ async function runSafeFsHelper(
       reject(error);
     });
     child.on("close", (code, signal) => {
-      clearTimeout(timeout);
+      if (outputOverflow) {
+        reject(new Error("Local file organization helper output exceeded its limit."));
+        return;
+      }
       if (code !== 0) {
         reject(new Error(
           stderr.trim()

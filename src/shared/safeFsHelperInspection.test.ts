@@ -65,6 +65,12 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(source).not.toContain("linkat(");
     expect(source).not.toContain("unlinkat(");
     expect(source).not.toContain("remove-category-duplicate");
+    const organizerSource = readFileSync(
+      path.join(process.cwd(), "src/main/localFileOrganizer.ts"),
+      "utf8",
+    );
+    expect(organizerSource).not.toContain('child.kill("SIGKILL")');
+    expect(organizerSource).not.toMatch(/setTimeout\([^]*10_000/);
   });
 
   it("requires hardened signing and an empty entitlement set", () => {

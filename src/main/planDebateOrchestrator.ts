@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type {
   AcceptanceCheck,
@@ -72,6 +72,7 @@ import {
   deriveGoalContractFromPlan,
   goalContractMatchesRef,
 } from "./goalPlanContractService";
+import { redactCredentialString } from "../shared/credentialRedaction";
 
 const MAX_PLAN_SOURCE_CHARS = 32_000;
 const MAX_CLARIFICATION_CHARS = 4_000;
@@ -409,7 +410,9 @@ export function createPlanDebateOrchestrator(options: {
         startedAt: now(),
         completedAt: now(),
         error:
-          error instanceof Error ? error.message : "规划调查失败。",
+          error instanceof Error
+            ? redactCredentialString(error.message)
+            : "规划调查失败。",
       };
       const saved = await options.planStore.save(
         {
@@ -686,9 +689,11 @@ export function createPlanDebateOrchestrator(options: {
           ...round,
           status: "failed",
           error:
-            error instanceof Error ? error.message : "规划模型调用失败。",
+            error instanceof Error
+              ? redactCredentialString(error.message)
+              : "规划模型调用失败。",
           ...(error instanceof PlanRoundFailureError && error.failureExcerpt
-            ? { failureExcerpt: error.failureExcerpt }
+            ? { failureExcerpt: redactCredentialString(error.failureExcerpt) }
             : {}),
           completedAt: now(),
           latencyMs: Math.max(0, Date.now() - startedAtMs),
@@ -887,9 +892,11 @@ export function createPlanDebateOrchestrator(options: {
           status: "failed",
           completedAt: now(),
           error:
-            error instanceof Error ? error.message : "计划审查失败。",
+            error instanceof Error
+              ? redactCredentialString(error.message)
+              : "计划审查失败。",
           ...(error instanceof PlanRoundFailureError && error.failureExcerpt
-            ? { failureExcerpt: error.failureExcerpt }
+            ? { failureExcerpt: redactCredentialString(error.failureExcerpt) }
             : {}),
         };
         const saved = await options.planStore.save(
@@ -2234,7 +2241,7 @@ async function completePlanReview(
       buildRepairPrompt: (error) =>
         [
           "上一条响应未通过审查输出的结构化合同校验。",
-          `校验失败：${error instanceof Error ? error.message : "响应未通过审查合同校验。"}`,
+          `校验失败：${error instanceof Error ? redactCredentialString(error.message) : "响应未通过审查合同校验。"}`,
           "只返回一个 JSON 对象；不要输出解释、Markdown、XML、前后缀或代码围栏。",
           '必须是这个形状：{"approved": boolean, "issues": [{"code": string, "severity": "low|medium|high|critical", "message": string, "repairable": boolean, "repairInstruction": string}]}',
         ].join("\n"),
@@ -2285,7 +2292,9 @@ function buildStructuredRepairPrompt(
   schemaVersion: 1 | 2,
 ): string {
   const reason =
-    error instanceof Error ? error.message : "响应未通过结构化合同校验。";
+    error instanceof Error
+      ? redactCredentialString(error.message)
+      : "响应未通过结构化合同校验。";
   return [
     "上一条响应未通过结构化合同校验。把本次调用视为同一轮的格式修复，不是新的方案发言。",
     `校验失败：${reason}`,
@@ -2392,7 +2401,7 @@ export class PlanRoundFailureError extends Error {
 }
 
 export function buildFailureExcerpt(content: string): string | undefined {
-  const trimmed = content.trim();
+  const trimmed = redactCredentialString(content).trim();
   if (!trimmed) {
     return undefined;
   }
@@ -2415,7 +2424,9 @@ function structuredBoundaryFailure(
   response: StructuredBoundaryResponse,
 ): Error {
   const reason =
-    error instanceof Error ? error.message : "响应未通过结构化合同校验。";
+    error instanceof Error
+      ? redactCredentialString(error.message)
+      : "响应未通过结构化合同校验。";
   const content = response.content ?? "";
   const diagnostics = [
     `finishReason=${response.finishReason || "unknown"}`,
@@ -2425,28 +2436,10 @@ function structuredBoundaryFailure(
     `inputTokens=${response.usage?.inputTokens ?? "unknown"}`,
     `outputTokens=${response.usage?.outputTokens ?? "unknown"}`,
   ].join(", ");
-  dumpFullFailureContentForDebug(content);
   return new PlanRoundFailureError(
     `${label}连续两次未返回可用 JSON 对象。最后错误：${reason}（${diagnostics}）。`,
     buildFailureExcerpt(content),
   );
-}
-
-/**
- * Debug aid: when ZEROX_AGENT_FAILURE_DUMP_DIR is set, persist the FULL raw
- * failing response (the round record only keeps a bounded excerpt) so
- * contract-mismatch post-mortems can inspect the exact syntax error.
- */
-function dumpFullFailureContentForDebug(content: string): void {
-  const dir = process.env.ZEROX_AGENT_FAILURE_DUMP_DIR?.trim();
-  if (!dir || !content) {
-    return;
-  }
-  const file = path.join(
-    dir,
-    `round-failure-${Date.now()}-${randomUUID().slice(0, 8)}.txt`,
-  );
-  void writeFile(file, content, "utf8").catch(() => {});
 }
 
 function normalizeRoundOutput(

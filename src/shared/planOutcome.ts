@@ -1,4 +1,5 @@
 import type { PlanRecord, PlanningStageKind } from "./planMode";
+import { redactCredentialString } from "./credentialRedaction";
 
 export type PlanOutcomeKind =
   | "success"
@@ -47,7 +48,8 @@ export function getPlanFailurePresentation(
   const failedStage = [...(plan.planningStages ?? [])]
     .reverse()
     .find((stage) => stage.status === "failed");
-  const error = failedRound?.error ?? failedStage?.error;
+  const rawError = failedRound?.error ?? failedStage?.error;
+  const error = rawError ? redactCredentialString(rawError) : "";
   if (!error) return null;
 
   const title = plan.mode === "debate" ? "Debate 规划失败" : "规划失败";
@@ -76,7 +78,7 @@ export function getPlanFailurePresentation(
       error,
       failedStage.revisionAttempted ? "系统已尝试一次 PlanningBrief 合同修复。" : "",
       failedStage.failureExcerpt
-        ? `失败响应摘录：\n${failedStage.failureExcerpt}`
+        ? `失败响应摘录：\n${redactCredentialString(failedStage.failureExcerpt)}`
         : "",
     ].filter(Boolean).join("\n\n");
     return {

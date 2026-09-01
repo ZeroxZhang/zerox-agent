@@ -31,6 +31,7 @@ import {
 } from "./plannerKernel";
 import { estimateTextTokens } from "./contextManager";
 import { resolveAgentContextBudget } from "../shared/contextUsage";
+import { redactCredentialString } from "../shared/credentialRedaction";
 
 const MAX_EVIDENCE_SUMMARY_CHARS = 12_000;
 const MAX_EVIDENCE_PROMPT_CHARS = 48_000;
@@ -409,10 +410,12 @@ export function createPlanInvestigatorService(options: {
               ? { revisionAttempted: true }
               : {}),
             ...(boundaryError?.failureExcerpt
-              ? { failureExcerpt: boundaryError.failureExcerpt }
+              ? { failureExcerpt: redactCredentialString(boundaryError.failureExcerpt) }
               : {}),
             error:
-              error instanceof Error ? error.message : "规划调查失败。",
+              error instanceof Error
+                ? redactCredentialString(error.message)
+                : "规划调查失败。",
           };
           stages.push(failed);
           await input.onStageUpdate?.(failed, evidence);
@@ -505,14 +508,14 @@ async function parseInvestigationBriefWithRepair(input: {
             parseUniquePlanRoundObject(text, input.normalize),
           buildRepairPrompt: (error) => [
             "上一条调查摘要未通过 PlanningBrief 结构化合同校验。把本次调用视为同一调查阶段的合同修复，不是重新规划。",
-            `校验失败：${error instanceof Error ? error.message : "响应未通过 PlanningBrief 合同。"}`,
+            `校验失败：${error instanceof Error ? redactCredentialString(error.message) : "响应未通过 PlanningBrief 合同。"}`,
             "修复 JSON 语法以及被点名的字段类型/必填项；保持已经收集的事实、目标和证据引用不变。",
             "只返回一个完整 PlanningBrief JSON 对象。",
           ].join("\n"),
           buildFailure: (error, response, diagnostics) =>
             new PlanningBriefBoundaryError(
               error instanceof Error
-                ? error.message
+                ? redactCredentialString(error.message)
                 : "PlanningBrief 未通过结构化合同校验。",
               boundedBriefFailureExcerpt(response.content ?? input.summary),
               diagnostics.repairAttempted,
@@ -532,7 +535,9 @@ async function parseInvestigationBriefWithRepair(input: {
         throw error;
       }
       throw new PlanningBriefBoundaryError(
-        error instanceof Error ? error.message : String(error),
+        redactCredentialString(
+          error instanceof Error ? error.message : String(error),
+        ),
         boundedBriefFailureExcerpt(input.summary),
         suppliedInitialResponse,
       );
@@ -552,7 +557,7 @@ function isLikelyTruncatedBrief(summary: string, error: unknown): boolean {
 }
 
 function boundedBriefFailureExcerpt(content: string): string | undefined {
-  const trimmed = content.trim();
+  const trimmed = redactCredentialString(content).trim();
   if (!trimmed) return undefined;
   if (trimmed.length <= MAX_BRIEF_FAILURE_EXCERPT_CHARS) return trimmed;
   return `${trimmed.slice(0, 4_000)}\n...[excerpt truncated]...\n${trimmed.slice(-2_000)}`;

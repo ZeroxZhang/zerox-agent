@@ -874,7 +874,44 @@ static int move_between_directories(
       &moved_stats
     ) == 0
   ) {
-    result = fail_message("move postcondition failed; original layout restored");
+    int restoration_verified = verify_move_authority(
+      root_fd,
+      root_path,
+      root_identity,
+      category_fd,
+      category_path,
+      category_mode,
+      log_fd,
+      log_path,
+      log_mode,
+      journal_fd,
+      journal_name,
+      journal_identity
+    );
+    if (restoration_verified == 0) {
+      restoration_verified = verify_opened_regular_path(
+        source_fd,
+        source_directory_path,
+        source_name,
+        opened_source_fd,
+        expected,
+        0,
+        0
+      );
+    }
+    if (restoration_verified == 0) {
+      result = fail_message("move postcondition failed; original layout restored");
+      goto done;
+    }
+    if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
+      result = fail_message(
+        "move path was restored but authority is unresolved and reconciliation marker could not be persisted"
+      );
+      goto done;
+    }
+    result = fail_message(
+      "move path was restored but authority is unresolved; reconciliation marker persisted"
+    );
     goto done;
   }
   if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
