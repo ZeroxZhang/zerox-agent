@@ -6,6 +6,7 @@ import {
   chmodSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -31,13 +32,25 @@ const temporaryDirectory = path.join(
   `.build-${process.pid}`,
 );
 const temporaryPath = path.join(temporaryDirectory, "zerox-safe-fs");
+const configuredCompiler = process.env.CC?.trim()
+  || "/Library/Developer/CommandLineTools/usr/bin/clang";
+if (!path.isAbsolute(configuredCompiler)) {
+  throw new Error("CC must be an absolute compiler path");
+}
+const compilerPath = realpathSync(configuredCompiler);
+const configuredSdkRoot = process.env.SDKROOT?.trim()
+  || "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk";
+if (!path.isAbsolute(configuredSdkRoot)) {
+  throw new Error("SDKROOT must be an absolute SDK path");
+}
+const sdkRoot = realpathSync(configuredSdkRoot);
 mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
 mkdirSync(temporaryDirectory, { mode: 0o700 });
 
 try {
-  run("/usr/bin/xcrun", [
-    "clang",
+  run(compilerPath, [
     "-arch", architecture,
+    "-isysroot", sdkRoot,
     "-mmacosx-version-min=12.0",
     "-std=c17",
     "-Os",

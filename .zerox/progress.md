@@ -14392,3 +14392,28 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   staging prefixes; it still cannot access an unrelated sibling or the user
   temp directory as a subtree. This closes the complete atomic replacement
   lifecycle without granting a directory capability.
+- Candidate `8b1cb20b797c9ce21b25ba6c9e9ac9bc3269eea6` passed the code lane at
+  `0C/0M/0m` but was rejected by the security lane at `0C/1M/0m`. Exact-file
+  and filename-prefix writes still exposed shared host toolchain state to every
+  ordinary candidate subprocess, so a hostile command could persist payloads
+  outside the caller-private execution root even though it could not write the
+  parent directory as a subtree.
+- The ordinary command profile now has no read or write capability for host
+  `xcrun_db` state. The safe-fs build invokes the caller-resolved absolute
+  Clang path directly, uses an explicit SDK root, and the external runner pins
+  the resolved compiler bytes before any candidate command executes. A real
+  Seatbelt self-test exercises hostile cache writes in both successful and
+  failing child processes, then proves that cache entry/content digests and
+  external `xcrun` compiler resolution are unchanged. The runtime isolation
+  self-test passes with compiler digest
+  `sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d`;
+  focused package/helper validation passes `19/19`, both TypeScript projects
+  pass, and whitespace validation is clean.
+- Full `npm run verify` passes `4022` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2–Round12 compatibility
+  lane, production build, Agent eval `26/26`, and Memory eval `2/2`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`,
+  seven migrations, eight authority domains, renderer startup, and Node ABI
+  `137` restoration; the production dependency audit reports zero
+  vulnerabilities. Exact-byte dual review and the external package gate remain
+  required before merge and release.

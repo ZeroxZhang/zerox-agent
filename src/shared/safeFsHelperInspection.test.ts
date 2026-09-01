@@ -49,6 +49,14 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       path.join(process.cwd(), "native/macos/zerox-safe-fs.c"),
       "utf8",
     );
+    const buildSource = readFileSync(
+      path.join(process.cwd(), "scripts/build-safe-fs-helper.mjs"),
+      "utf8",
+    );
+    expect(buildSource).toContain("const configuredCompiler = process.env.CC?.trim()");
+    expect(buildSource).toContain("const compilerPath = realpathSync(configuredCompiler)");
+    expect(buildSource).toContain("const sdkRoot = realpathSync(configuredSdkRoot)");
+    expect(buildSource).not.toContain('run("/usr/bin/xcrun"');
     expect(source).toContain("renameatx_np(");
     expect(source).toContain("RENAME_EXCL");
     expect(source).toContain("restore_moved_entry(");

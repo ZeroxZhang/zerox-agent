@@ -71,6 +71,11 @@ const EXPECTED_TOOLCHAIN = Object.freeze({
 });
 const EXPECTED_NATIVE_NODE_ADDON_DIGEST =
   "sha256:259c51183118091e9b3b7591755ca89873e6d0145e9a0e80a7f68ef428ab6b95";
+const EXPECTED_MACOS_COMPILER = Object.freeze({
+  clang: "/Library/Developer/CommandLineTools/usr/bin/clang",
+  clangXX: "/Library/Developer/CommandLineTools/usr/bin/clang++",
+  digest: "sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+});
 const EXPECTED_NODE_HEADERS = Object.freeze({
   digest: "sha256:608964880bdb0f636deeb9486ecbd08478625a291ac17f10613f1189016ee9fb",
   entryCount: 3325,
@@ -218,6 +223,8 @@ const TRUSTED_SEATBELT_REQUIREMENTS = Object.freeze([
   "read-only-write-denied",
   "network-denied",
   "timeout-termination",
+  "host-xcrun-cache-success-isolation",
+  "host-xcrun-cache-failure-isolation",
   "cleanup",
 ]);
 const GENERATED_NATIVE_CACHE_PATH = path.join(
@@ -258,6 +265,13 @@ if (
   && process.argv[2] === "--self-test-publication-journal"
 ) {
   await runPublicationJournalSelfTest();
+  process.exit(0);
+}
+if (
+  process.argv.length === 3
+  && process.argv[2] === "--self-test-host-xcrun-isolation"
+) {
+  await runHostXcrunIsolationSelfTest();
   process.exit(0);
 }
 
@@ -302,6 +316,7 @@ const nodeCapture = await captureRegularFile(nodePath, "Node executable");
 if (nodeCapture.digest !== options.expectedNodeDigest) {
   fail("Node executable digest does not match the caller pin");
 }
+const macosCompiler = await resolvePinnedMacosCompiler();
 const npmCliPath = await realpath(options.npmCli);
 assertOutsideRepository(npmCliPath, repositoryRealpath, "npm CLI");
 const npmCliCapture = await captureRegularFile(npmCliPath, "npm CLI");
@@ -497,12 +512,6 @@ const darwinUserTempRoots = [...new Set([
   darwinUserTempAlias,
   darwinUserTempCanonical,
 ])];
-const xcrunEphemeralPrefixes = darwinUserTempRoots.map((root) =>
-  path.join(root, "xcrun_db-")
-);
-const xcrunCacheFiles = darwinUserTempRoots.map((root) =>
-  path.join(root, "xcrun_db")
-);
 const electronEphemeralPrefixes = darwinUserTempRoots.flatMap((root) => [
   path.join(root, "scoped_dir"),
   path.join(root, "xcrun_db-"),
@@ -514,12 +523,8 @@ await writePrivateFile(
   commandSandboxProfile,
   Buffer.from(buildAcceptanceSandboxProfile({
     readableRoots: sandboxReadableRoots,
-    readableFiles: xcrunCacheFiles,
-    readablePrefixes: xcrunEphemeralPrefixes,
     metadataRoots: ["/Users"],
     writableRoots: sandboxWritableRoots,
-    writableFiles: xcrunCacheFiles,
-    writablePrefixes: xcrunEphemeralPrefixes,
     network: false,
   })),
 );
@@ -630,8 +635,8 @@ const trustedEnvironment = {
   ].join(path.delimiter),
   SHELL: "/bin/sh",
   TMPDIR: execution.temp,
-  CC: "/Library/Developer/CommandLineTools/usr/bin/clang",
-  CXX: "/Library/Developer/CommandLineTools/usr/bin/clang++",
+  CC: macosCompiler.clang,
+  CXX: macosCompiler.clangXX,
   AR: "/Library/Developer/CommandLineTools/usr/bin/ar",
   RANLIB: "/Library/Developer/CommandLineTools/usr/bin/ranlib",
   LD: "/Library/Developer/CommandLineTools/usr/bin/ld",
@@ -651,6 +656,14 @@ const trustedEnvironment = {
   ZEROX_LOCAL_CANDIDATE_TOOLCHAIN_ENTRY_COUNT:
     String(EXPECTED_TOOLCHAIN.entryCount),
 };
+await verifyHostXcrunCacheIsolation({
+  profilePath: commandSandboxProfile,
+  nodePath,
+  cwd: executionRoot,
+  environment: trustedEnvironment,
+  cacheRoot: darwinUserTempCanonical,
+  compiler: macosCompiler,
+});
 await run(
   nodePath,
   [executionNpmCliPath, "run", "verify"],
@@ -1919,6 +1932,239 @@ async function verifyRepositoryCheckSandboxSelfTest(testRoot) {
   }
 }
 
+async function resolvePinnedMacosCompiler(cwd = process.cwd()) {
+  const clang = (await readCommandOutput(
+    "/usr/bin/xcrun",
+    ["--find", "clang"],
+    cwd,
+  )).trim();
+  const clangXX = (await readCommandOutput(
+    "/usr/bin/xcrun",
+    ["--find", "clang++"],
+    cwd,
+  )).trim();
+  const [canonicalClang, canonicalClangXX] = await Promise.all([
+    realpath(clang),
+    realpath(clangXX),
+  ]);
+  if (
+    clang !== EXPECTED_MACOS_COMPILER.clang
+    || clangXX !== EXPECTED_MACOS_COMPILER.clangXX
+    || canonicalClang !== canonicalClangXX
+  ) {
+    fail("xcrun compiler resolution differs from the caller-reviewed paths");
+  }
+  const capture = await captureRegularFile(
+    canonicalClang,
+    "caller-resolved macOS compiler",
+  );
+  if (capture.digest !== EXPECTED_MACOS_COMPILER.digest) {
+    fail("caller-resolved macOS compiler differs from the reviewed digest");
+  }
+  return Object.freeze({
+    clang,
+    clangXX,
+    canonicalPath: canonicalClang,
+    digest: capture.digest,
+    resolutionCwd: cwd,
+  });
+}
+
+async function runHostXcrunIsolationSelfTest() {
+  if (process.platform !== "darwin") {
+    console.log(JSON.stringify({ hostXcrunIsolationSelfTest: "skipped" }));
+    return;
+  }
+  const privateRoot = await realpath(await mkdtemp(
+    "/private/tmp/zerox-host-xcrun-isolation-",
+  ));
+  const profilePath = path.join(privateRoot, "command.sb");
+  try {
+    const trustedNodePath = await realpath(process.execPath);
+    const compiler = await resolvePinnedMacosCompiler(process.cwd());
+    const { stdout: darwinUserTempOutput } = await execFile(
+      "/usr/bin/getconf",
+      ["DARWIN_USER_TEMP_DIR"],
+      { encoding: "utf8" },
+    );
+    const cacheRoot = await realpath(darwinUserTempOutput.trim());
+    await writePrivateFile(
+      profilePath,
+      Buffer.from(buildAcceptanceSandboxProfile({
+        readableRoots: [
+          privateRoot,
+          path.dirname(path.dirname(trustedNodePath)),
+          ...SYSTEM_SANDBOX_READ_ROOTS,
+        ],
+        writableRoots: [privateRoot],
+        network: false,
+      })),
+    );
+    const environment = {
+      HOME: privateRoot,
+      LANG: "en_US.UTF-8",
+      PATH: "/usr/bin:/bin",
+      SHELL: "/bin/sh",
+      TMPDIR: privateRoot,
+    };
+    await verifyHostXcrunCacheIsolation({
+      profilePath,
+      nodePath: trustedNodePath,
+      cwd: privateRoot,
+      environment,
+      cacheRoot,
+      compiler,
+    });
+    console.log(JSON.stringify({
+      hostXcrunIsolationSelfTest: "passed",
+      compilerDigest: compiler.digest,
+    }));
+  } finally {
+    await rm(privateRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyHostXcrunCacheIsolation({
+  profilePath,
+  nodePath: trustedNodePath,
+  cwd,
+  environment,
+  cacheRoot,
+  compiler,
+}) {
+  await verifyExternalXcrunResolution(compiler);
+  const baseline = await captureHostXcrunCacheState(cacheRoot);
+  const hostilePrefixPath = path.join(
+    cacheRoot,
+    `xcrun_db-hostile-${process.pid}-${randomUUID()}`,
+  );
+  const exactCachePath = path.join(cacheRoot, "xcrun_db");
+  const hostileSource = [
+    "const fs=require('node:fs');",
+    "let denied=0;",
+    "for(const target of process.argv.slice(1)){",
+    "try{fs.writeFileSync(target,'zerox-hostile-xcrun-cache');}",
+    "catch(error){if(error.code==='EPERM'||error.code==='EACCES')denied+=1;else throw error;}",
+    "}",
+    "if(denied!==2)process.exit(9);",
+    "if(process.env.ZEROX_HOSTILE_FAILURE==='1')process.exit(17);",
+  ].join("");
+  const invokeHostileCandidate = (failure) => execFile(
+    "/usr/bin/sandbox-exec",
+    [
+      "-f",
+      profilePath,
+      trustedNodePath,
+      "-e",
+      hostileSource,
+      hostilePrefixPath,
+      exactCachePath,
+    ],
+    {
+      cwd,
+      env: {
+        ...environment,
+        ZEROX_HOSTILE_FAILURE: failure ? "1" : "0",
+      },
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout: 5_000,
+    },
+  );
+
+  await invokeHostileCandidate(false);
+  await assertHostXcrunStateUnchanged(cacheRoot, compiler, baseline, "success");
+  let failureObserved = false;
+  try {
+    await invokeHostileCandidate(true);
+  } catch (error) {
+    failureObserved = error?.code === 17;
+  }
+  if (!failureObserved) {
+    fail("hostile xcrun cache failure lane did not preserve its exit status");
+  }
+  await assertHostXcrunStateUnchanged(cacheRoot, compiler, baseline, "failure");
+}
+
+async function assertHostXcrunStateUnchanged(
+  cacheRoot,
+  compiler,
+  baseline,
+  lane,
+) {
+  await verifyExternalXcrunResolution(compiler);
+  const current = await captureHostXcrunCacheState(cacheRoot);
+  if (JSON.stringify(current) !== JSON.stringify(baseline)) {
+    fail(`host xcrun cache changed during hostile ${lane} lane`);
+  }
+}
+
+async function verifyExternalXcrunResolution(expected) {
+  const clang = (await readCommandOutput(
+    "/usr/bin/xcrun",
+    ["--find", "clang"],
+    expected.resolutionCwd,
+  )).trim();
+  const clangXX = (await readCommandOutput(
+    "/usr/bin/xcrun",
+    ["--find", "clang++"],
+    expected.resolutionCwd,
+  )).trim();
+  const [canonicalClang, canonicalClangXX] = await Promise.all([
+    realpath(clang),
+    realpath(clangXX),
+  ]);
+  if (
+    clang !== expected.clang
+    || clangXX !== expected.clangXX
+    || canonicalClang !== expected.canonicalPath
+    || canonicalClangXX !== expected.canonicalPath
+  ) {
+    fail("external xcrun compiler resolution changed");
+  }
+}
+
+async function captureHostXcrunCacheState(cacheRoot) {
+  const names = (await readdir(cacheRoot))
+    .filter((name) => name === "xcrun_db" || name.startsWith("xcrun_db-"))
+    .sort();
+  const entries = [];
+  for (const name of names) {
+    const absolutePath = path.join(cacheRoot, name);
+    const metadata = await lstat(absolutePath);
+    if (metadata.isSymbolicLink()) {
+      entries.push({
+        name,
+        kind: "symlink",
+        mode: metadata.mode & 0o777,
+        digest: sha256(Buffer.from(await readlink(absolutePath))),
+      });
+    } else if (metadata.isFile()) {
+      entries.push({
+        name,
+        kind: "file",
+        mode: metadata.mode & 0o777,
+        digest: sha256(await readFile(absolutePath)),
+      });
+    } else if (metadata.isDirectory()) {
+      const tree = await computeTreeManifest(absolutePath);
+      entries.push({
+        name,
+        kind: "directory",
+        mode: metadata.mode & 0o777,
+        digest: tree.digest,
+        entryCount: tree.entryCount,
+      });
+    } else {
+      fail(`unsupported host xcrun cache entry: ${name}`);
+    }
+  }
+  return {
+    digest: hashCanonical(entries),
+    entryCount: entries.length,
+  };
+}
+
 async function exercisePublicationRecoveryState({
   repositoryRoot,
   privateRoot,
@@ -2888,7 +3134,6 @@ function buildAcceptanceSandboxProfile({
   readablePrefixes = [],
   metadataRoots = [],
   writableRoots,
-  writableFiles = [],
   writablePrefixes = [],
   localSocketPrefixes = [],
   network,
@@ -2900,7 +3145,6 @@ function buildAcceptanceSandboxProfile({
     ...readableFiles,
     ...readablePrefixes,
     ...metadataRoots,
-    ...writableFiles,
     ...writablePrefixes,
     ...localSocketPrefixes,
   ]) {
@@ -2950,13 +3194,6 @@ function buildAcceptanceSandboxProfile({
   if (readableFiles.length > 0) {
     forms.push(
       `(allow file-read* file-test-existence ${readableFiles
-        .map((file) => `(literal ${JSON.stringify(path.resolve(file))})`)
-        .join(" ")})`,
-    );
-  }
-  if (writableFiles.length > 0) {
-    forms.push(
-      `(allow file-write* ${writableFiles
         .map((file) => `(literal ${JSON.stringify(path.resolve(file))})`)
         .join(" ")})`,
     );
@@ -3395,7 +3632,7 @@ function requiresElectronSandbox(command, args) {
 }
 
 async function runTrustedSeatbeltRegressionLane(privateRoot) {
-  if (TRUSTED_SEATBELT_REQUIREMENTS.length !== 11) {
+  if (TRUSTED_SEATBELT_REQUIREMENTS.length !== 13) {
     fail("trusted Seatbelt requirement roster changed");
   }
   const testRoot = await realpath(await mkdtemp(
