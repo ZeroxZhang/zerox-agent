@@ -538,6 +538,7 @@ describe("package scripts", () => {
       "anchor.packagedSafeFsHelperDigest !== safeFsCapture.digest",
     );
     expect(runner).toContain("--self-test-safe-fs-package-identity");
+    expect(runner).toContain("--self-test-safe-fs-toolchain-policy");
     expect(checker).toContain('"packagedSafeFsHelperDigest",');
     expect(runner).toContain("await verifyHostToolchainIsolation({");
     expect(runner).toContain('process.argv[2] === "--self-test-host-toolchain-isolation"');

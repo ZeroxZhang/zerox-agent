@@ -14718,3 +14718,27 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   dependency audit reports zero vulnerabilities and the dependency tree and
   whitespace checks pass. Fresh exact-byte dual review and the real isolated
   package-to-postflight acceptance remain mandatory before release.
+
+## 2026-09-02 - P113/CD09 toolchain policy producer-consumer closure
+
+- Frozen candidate `e6dd00c1ae8275c02e748606bbfb6814b2584057` was rejected
+  by the independent code lane at `0C/1M/0m`: the new anchor identity names had
+  also been applied to the caller-owned toolchain policy producer, while the
+  production loader correctly retained its strict version-one
+  `safeFsHelperDigest` schema. The runner would therefore have failed before
+  the first native build.
+- The policy schema remains stable and independent from the final anchor
+  schema: the policy keeps `safeFsHelperDigest` for the caller-reviewed
+  unsigned build output, while only the anchor exposes the explicit unsigned
+  and signed package identities. A new cross-module test executes the real
+  runner policy producer, writes its output at the real discovery boundary,
+  and loads it through `loadPinnedSafeFsToolchainPolicy`; shape and canonical
+  digest must both pass.
+- Focused after-sign, helper inspection, package identity, policy handoff, and
+  package control tests pass `32/32`. Fresh full `npm run verify` passes `4033`
+  current tests with declared skips, strict test type coverage `437/437`, every
+  Round2-Round12 compatibility lane, production build, Agent eval `26/26`, and
+  Memory eval `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`,
+  SQLite `3.53.2`, seven migrations, eight authority domains, renderer startup,
+  and Node ABI `137` restoration; dependency audit reports zero
+  vulnerabilities and dependency-tree and whitespace checks pass.

@@ -312,6 +312,34 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       .toThrowError("caller-owned safe-fs toolchain policy is invalid");
   });
 
+  it("loads the external runner's generated toolchain policy with the production parser", () => {
+    const directory = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-runner-policy-")),
+    );
+    temporaryDirectories.push(directory);
+    const executionRoot = path.join(directory, "execution");
+    mkdirSync(executionRoot, { recursive: true, mode: 0o700 });
+    const policy = execFileSync(
+      process.execPath,
+      [
+        "scripts/build-v392-acceptance-anchor.mjs",
+        "--self-test-safe-fs-toolchain-policy",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    writeFileSync(
+      path.join(directory, ".v392-pinned-safe-fs-toolchain.json"),
+      policy,
+      { mode: 0o600 },
+    );
+
+    expect(loadPinnedSafeFsToolchainPolicy(executionRoot)).toMatchObject({
+      schemaVersion: 1,
+      kind: "v3.9.2-pinned-safe-fs-toolchain",
+      safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
+    });
+  });
+
   it("requires hardened signing and an empty entitlement set", () => {
     const directory = realpathSync(
       mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-signature-")),

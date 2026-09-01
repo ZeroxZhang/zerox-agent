@@ -307,6 +307,20 @@ if (
   verifySafeFsPackageIdentitySelfTest();
   process.exit(0);
 }
+if (
+  process.argv.length === 3
+  && process.argv[2] === "--self-test-safe-fs-toolchain-policy"
+) {
+  console.log(JSON.stringify(createPinnedSafeFsToolchainPolicy({
+    clang: EXPECTED_MACOS_COMPILER.clang,
+    canonicalPath: EXPECTED_MACOS_COMPILER.clang,
+    digest: EXPECTED_MACOS_COMPILER.digest,
+    sdkAlias: EXPECTED_MACOS_SDK.alias,
+    sdkCanonicalPath: EXPECTED_MACOS_SDK.canonicalPath,
+    sdkSettingsDigest: EXPECTED_MACOS_SDK.settingsDigest,
+  })));
+  process.exit(0);
+}
 
 rejectPreloadEnvironment();
 const options = parseOptions(process.argv.slice(2));
@@ -2208,7 +2222,7 @@ function createPinnedSafeFsToolchainPolicy(toolchain) {
       canonicalPath: toolchain.sdkCanonicalPath,
       settingsDigest: toolchain.sdkSettingsDigest,
     },
-    unsignedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
+    safeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
   };
   return { ...digestInput, digest: hashCanonical(digestInput) };
 }
