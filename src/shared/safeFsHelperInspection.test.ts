@@ -39,18 +39,8 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       cwd: process.cwd(),
     });
     const second = inspectSafeFsHelper(helperPath);
-    execFileSync(process.execPath, ["scripts/build-safe-fs-helper.mjs"], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        CC: "clang",
-        SDKROOT: "macosx",
-      },
-    });
-    const portableOverride = inspectSafeFsHelper(helperPath);
 
     expect(second).toEqual(first);
-    expect(portableOverride).toEqual(first);
     expect(first).toMatchObject({
       mode: "0755",
       architecture: process.arch,
@@ -113,6 +103,45 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(organizerSource).toContain('child.stdin.on("error"');
     expect(organizerSource).toContain("MAX_TRANSACTION_LOG_BYTES");
     expect(organizerSource).toContain("readBoundedFileHandle(");
+  });
+
+  it("keeps relative tool overrides portable when no policy exists", () => {
+    const directory = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-portable-")),
+    );
+    temporaryDirectories.push(directory);
+    const executionRoot = path.join(directory, "execution");
+    const scriptsRoot = path.join(executionRoot, "scripts");
+    const nativeRoot = path.join(executionRoot, "native/macos");
+    mkdirSync(scriptsRoot, { recursive: true, mode: 0o700 });
+    mkdirSync(nativeRoot, { recursive: true, mode: 0o700 });
+    const copiedBuildScript = path.join(scriptsRoot, "build-safe-fs-helper.mjs");
+    copyFileSync(
+      path.join(process.cwd(), "scripts/build-safe-fs-helper.mjs"),
+      copiedBuildScript,
+    );
+    copyFileSync(
+      path.join(process.cwd(), "native/macos/zerox-safe-fs.c"),
+      path.join(nativeRoot, "zerox-safe-fs.c"),
+    );
+    execFileSync(process.execPath, [copiedBuildScript], {
+      cwd: executionRoot,
+      env: {
+        ...process.env,
+        CC: "clang",
+        SDKROOT: "macosx",
+      },
+    });
+    const helperPath = path.join(
+      executionRoot,
+      `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+    );
+    expect(inspectSafeFsHelper(helperPath)).toMatchObject({
+      mode: "0755",
+      architecture: process.arch,
+      minimumSystemVersion: expect.stringMatching(/^12\.0/),
+      linkedLibraries: ["/usr/lib/libSystem.B.dylib"],
+    });
   });
 
   it("rejects candidate-controlled compiler and SDK overrides", () => {

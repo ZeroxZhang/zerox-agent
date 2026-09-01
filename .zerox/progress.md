@@ -14468,3 +14468,25 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   reads and strictly validates `CC`/`SDKROOT`. A regression proves unpinned
   `CC=clang` plus symbolic `SDKROOT=macosx` produces the same helper, while the
   pinned override rejection tests remain intact.
+- Candidate `c6ed2f37efcc06c7d13707274a165793237743d2` passed the code lane at
+  `0C/0M/0m` but was rejected before receipts after the security lane found
+  `0C/1M/0m`: the unpinned portability regression executed from the repository
+  itself. In the real external layout that repository has the caller policy in
+  its immediate parent, so the test's `CC=clang`/`SDKROOT=macosx` values were
+  correctly treated as forbidden pinned-mode overrides and would fail the
+  external gate.
+- The portability regression now copies the reviewed build script and native C
+  source into a dedicated temporary execution tree whose immediate parent has
+  no policy, then performs a real build with relative overrides. The separate
+  policy-present fixture continues to prove those same override classes fail
+  before compilation. This removes the hidden checkout-parent assumption and
+  matches the external anchor's policy discovery semantics.
+- The replacement fixture passes focused package/helper validation `21/21`.
+  Fresh full `npm run verify` passes `4024` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2–Round12 compatibility lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration;
+  the production dependency audit reports zero vulnerabilities and whitespace
+  validation is clean. The candidate is ready to be frozen for exact-byte dual
+  review and external package acceptance.
