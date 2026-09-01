@@ -1308,6 +1308,7 @@ export async function runSafeFsHelper(
     let outputOverflow = false;
     let readySignaled = false;
     let settled = false;
+    let stdinError: Error | undefined;
     const rejectOnce = (error: unknown) => {
       if (settled) return;
       settled = true;
@@ -1351,9 +1352,7 @@ export async function runSafeFsHelper(
       rejectOnce(error);
     });
     child.stdin.on("error", (error) => {
-      rejectOnce(new Error(
-        `Local file organization helper input failed: ${error.message}`,
-      ));
+      stdinError = error;
     });
     child.on("close", (code, signal) => {
       if (outputOverflow) {
@@ -1364,6 +1363,12 @@ export async function runSafeFsHelper(
         rejectOnce(new Error(
           stderr.trim()
           || `Local file organization helper failed (${signal ?? code ?? "unknown"}).`,
+        ));
+        return;
+      }
+      if (stdinError) {
+        rejectOnce(new Error(
+          `Local file organization helper input failed: ${stdinError.message}`,
         ));
         return;
       }

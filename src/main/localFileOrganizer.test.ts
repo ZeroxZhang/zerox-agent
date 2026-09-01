@@ -628,6 +628,15 @@ describe("local file organizer", () => {
     await expect(winner).resolves.toMatchObject({ ok: true });
   });
 
+  it("preserves the helper terminal error when stdin closes early", async () => {
+    await expect(runSafeFsHelper(
+      "unknown-command",
+      [],
+      "x".repeat(4 * 1024 * 1024),
+      {},
+    )).rejects.toThrow(/unknown command/i);
+  });
+
   it("rejects FIFO leaves without waiting for a writer", async () => {
     const transactionId = "tx_fifo_leaf";
     const source = path.join(tempDir, "photo.jpg");

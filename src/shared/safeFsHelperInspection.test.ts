@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -16,6 +15,17 @@ import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error Local build inspection intentionally remains executable JavaScript.
 import { inspectSafeFsHelper } from "../../scripts/inspect-safe-fs-helper.mjs";
+// @ts-expect-error Local toolchain selection intentionally remains executable JavaScript.
+import * as safeFsToolchain from "../../scripts/safe-fs-toolchain-selection.mjs";
+
+const {
+  EXPECTED_SAFE_FS_COMPILER,
+  EXPECTED_SAFE_FS_HELPER_DIGEST,
+  EXPECTED_SAFE_FS_SDK,
+  hashCanonicalSafeFsToolchainPolicy,
+  loadPinnedSafeFsToolchainPolicy,
+  selectSafeFsToolchain,
+} = safeFsToolchain;
 
 describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () => {
   const temporaryDirectories: string[] = [];
@@ -55,9 +65,8 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       path.join(process.cwd(), "scripts/build-safe-fs-helper.mjs"),
       "utf8",
     );
-    expect(buildSource).toContain("const configuredCompiler = toolchainPolicy");
-    expect(buildSource).toContain("? process.env.CC?.trim() || toolchainPolicy.compiler.configuredPath");
-    expect(buildSource).toContain(': resolveXcrun(["--find", "clang"])');
+    expect(buildSource).toContain("loadPinnedSafeFsToolchainPolicy(root)");
+    expect(buildSource).toContain("selectSafeFsToolchain({");
     expect(buildSource).toContain("const compilerPath = realpathSync(configuredCompiler)");
     expect(buildSource).toContain("const sdkRoot = realpathSync(configuredSdkRoot)");
     expect(buildSource).toContain("const buildToolchainBefore = toolchainPolicy");
@@ -105,9 +114,32 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(organizerSource).toContain("readBoundedFileHandle(");
   });
 
-  it("keeps relative tool overrides portable when no policy exists", () => {
+  it("keeps unpinned tool selection portable without host side effects", () => {
+    const calls: string[][] = [];
+    const selected = selectSafeFsToolchain({
+      policy: null,
+      environment: { CC: "clang", SDKROOT: "macosx" },
+      resolveXcrun: (args: string[]) => {
+        calls.push(args);
+        return args[0] === "--find"
+          ? EXPECTED_SAFE_FS_COMPILER.configuredPath
+          : EXPECTED_SAFE_FS_SDK.configuredPath;
+      },
+    });
+
+    expect(calls).toEqual([
+      ["--find", "clang"],
+      ["--show-sdk-path"],
+    ]);
+    expect(selected).toEqual({
+      configuredCompiler: EXPECTED_SAFE_FS_COMPILER.configuredPath,
+      configuredSdkRoot: EXPECTED_SAFE_FS_SDK.configuredPath,
+    });
+  });
+
+  it("discovers and fail-closes the caller-owned toolchain policy", () => {
     const directory = realpathSync(
-      mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-portable-")),
+      mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-toolchain-")),
     );
     temporaryDirectories.push(directory);
     const executionRoot = path.join(directory, "execution");
@@ -121,76 +153,68 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       copiedBuildScript,
     );
     copyFileSync(
+      path.join(process.cwd(), "scripts/safe-fs-toolchain-selection.mjs"),
+      path.join(scriptsRoot, "safe-fs-toolchain-selection.mjs"),
+    );
+    copyFileSync(
       path.join(process.cwd(), "native/macos/zerox-safe-fs.c"),
       path.join(nativeRoot, "zerox-safe-fs.c"),
     );
-    execFileSync(process.execPath, [copiedBuildScript], {
-      cwd: executionRoot,
-      env: {
-        ...process.env,
-        CC: "clang",
-        SDKROOT: "macosx",
-      },
-    });
-    const helperPath = path.join(
-      executionRoot,
-      `dist-native/darwin-${process.arch}/zerox-safe-fs`,
-    );
-    expect(inspectSafeFsHelper(helperPath)).toMatchObject({
-      mode: "0755",
-      architecture: process.arch,
-      minimumSystemVersion: expect.stringMatching(/^12\.0/),
-      linkedLibraries: ["/usr/lib/libSystem.B.dylib"],
-    });
-  });
-
-  it("rejects candidate-controlled compiler and SDK overrides", () => {
-    const directory = realpathSync(
-      mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-toolchain-")),
-    );
-    temporaryDirectories.push(directory);
-    const executionRoot = path.join(directory, "execution");
-    const scriptsRoot = path.join(executionRoot, "scripts");
-    mkdirSync(scriptsRoot, { recursive: true, mode: 0o700 });
-    const copiedBuildScript = path.join(scriptsRoot, "build-safe-fs-helper.mjs");
-    copyFileSync(
-      path.join(process.cwd(), "scripts/build-safe-fs-helper.mjs"),
-      copiedBuildScript,
-    );
-    const fakeCompiler = path.join(executionRoot, "clang");
-    const fakeSdk = path.join(executionRoot, "MacOSX.sdk");
-    writeFileSync(fakeCompiler, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    mkdirSync(fakeSdk, { mode: 0o700 });
     const policyInput = {
       schemaVersion: 1,
       kind: "v3.9.2-pinned-safe-fs-toolchain",
-      compiler: {
-        configuredPath: "/Library/Developer/CommandLineTools/usr/bin/clang",
-        canonicalPath: "/Library/Developer/CommandLineTools/usr/bin/clang",
-        digest:
-          "sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
-      },
-      sdk: {
-        configuredPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
-        canonicalPath:
-          "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk",
-        settingsDigest:
-          "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
-      },
-      safeFsHelperDigest:
-        "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6",
+      compiler: EXPECTED_SAFE_FS_COMPILER,
+      sdk: EXPECTED_SAFE_FS_SDK,
+      safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
     };
     const policy = {
       ...policyInput,
-      digest: `sha256:${createHash("sha256")
-        .update(Buffer.from(canonicalJson(policyInput)))
-        .digest("hex")}`,
+      digest: hashCanonicalSafeFsToolchainPolicy(policyInput),
     };
+    const policyPath = path.join(
+      directory,
+      ".v392-pinned-safe-fs-toolchain.json",
+    );
     writeFileSync(
-      path.join(directory, ".v392-pinned-safe-fs-toolchain.json"),
+      policyPath,
       `${JSON.stringify(policy, null, 2)}\n`,
       { mode: 0o600 },
     );
+    const loaded = loadPinnedSafeFsToolchainPolicy(executionRoot);
+    const resolveXcrun = () => {
+      throw new Error("pinned selection must not invoke xcrun");
+    };
+
+    expect(selectSafeFsToolchain({
+      policy: loaded,
+      environment: {},
+      resolveXcrun,
+    })).toEqual({
+      configuredCompiler: EXPECTED_SAFE_FS_COMPILER.configuredPath,
+      configuredSdkRoot: EXPECTED_SAFE_FS_SDK.configuredPath,
+    });
+    expect(selectSafeFsToolchain({
+      policy: loaded,
+      environment: {
+        CC: EXPECTED_SAFE_FS_COMPILER.configuredPath,
+        SDKROOT: EXPECTED_SAFE_FS_SDK.configuredPath,
+      },
+      resolveXcrun,
+    })).toEqual({
+      configuredCompiler: EXPECTED_SAFE_FS_COMPILER.configuredPath,
+      configuredSdkRoot: EXPECTED_SAFE_FS_SDK.configuredPath,
+    });
+    expect(() => selectSafeFsToolchain({
+      policy: loaded,
+      environment: { CC: "clang" },
+      resolveXcrun,
+    })).toThrowError("CC differs from the caller-reviewed compiler path");
+    expect(() => selectSafeFsToolchain({
+      policy: loaded,
+      environment: { SDKROOT: "macosx" },
+      resolveXcrun,
+    })).toThrowError("SDKROOT differs from the caller-reviewed SDK path");
+
     const build = (environment: NodeJS.ProcessEnv) => execFileSync(
       process.execPath,
       [copiedBuildScript],
@@ -200,9 +224,49 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
         stdio: "pipe",
       },
     );
+    build({
+      CC: EXPECTED_SAFE_FS_COMPILER.configuredPath,
+      SDKROOT: EXPECTED_SAFE_FS_SDK.configuredPath,
+    });
+    expect(inspectSafeFsHelper(path.join(
+      executionRoot,
+      `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+    ))).toMatchObject({
+      mode: "0755",
+      architecture: process.arch,
+      minimumSystemVersion: expect.stringMatching(/^12\.0/),
+      linkedLibraries: ["/usr/lib/libSystem.B.dylib"],
+    });
+    expect(() => build({ CC: "clang" }))
+      .toThrowError(/CC differs from the caller-reviewed compiler path/);
+    expect(() => build({ SDKROOT: "macosx" }))
+      .toThrowError(/SDKROOT differs from the caller-reviewed SDK path/);
 
-    expect(() => build({ CC: fakeCompiler })).toThrow();
-    expect(() => build({ SDKROOT: fakeSdk })).toThrow();
+    writeFileSync(
+      policyPath,
+      `${JSON.stringify({ ...policy, digest: `sha256:${"0".repeat(64)}` })}\n`,
+      { mode: 0o600 },
+    );
+    expect(() => loadPinnedSafeFsToolchainPolicy(executionRoot))
+      .toThrowError("caller-owned safe-fs toolchain policy is invalid");
+
+    const tamperedPolicyInput = {
+      ...policyInput,
+      compiler: {
+        ...policyInput.compiler,
+        canonicalPath: "/tmp/unreviewed-clang",
+      },
+    };
+    writeFileSync(
+      policyPath,
+      `${JSON.stringify({
+        ...tamperedPolicyInput,
+        digest: hashCanonicalSafeFsToolchainPolicy(tamperedPolicyInput),
+      })}\n`,
+      { mode: 0o600 },
+    );
+    expect(() => loadPinnedSafeFsToolchainPolicy(executionRoot))
+      .toThrowError("caller-owned safe-fs toolchain policy is invalid");
   });
 
   it("requires hardened signing and an empty entitlement set", () => {
@@ -262,16 +326,3 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       .toThrow("empty entitlement set");
   });
 });
-
-function canonicalJson(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  }
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}

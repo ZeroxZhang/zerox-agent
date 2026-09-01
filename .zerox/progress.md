@@ -14490,3 +14490,36 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   the production dependency audit reports zero vulnerabilities and whitespace
   validation is clean. The candidate is ready to be frozen for exact-byte dual
   review and external package acceptance.
+- Candidate `53463e8cc23edca44e44f4e50f37551da0056952` was rejected before
+  receipts after both independent lanes reported `0C/1M/0m`. The security lane
+  proved that the unpinned integration fixture would still execute `xcrun`
+  inside the candidate Seatbelt profile and therefore require the shared host
+  cache write authority already removed. The code lane independently proved
+  that the policy-present negative fixture could pass for an unrelated missing
+  C source or output error because it asserted only that some error occurred.
+- Toolchain policy discovery and selection now form one imported, pure boundary
+  used by the production build script. Unpinned portability is verified with an
+  injected resolver and no host side effect. The pinned fixture discovers the
+  caller-owned policy from the actual parent layout, proves unset and exact
+  values succeed through a real helper build, requires exact errors for `CC`
+  and `SDKROOT` overrides, and rejects both digest and canonical-path policy
+  tampering. No candidate profile regains `xcrun` cache access. Focused
+  package/helper validation passes `21/21`, strict test type checking and
+  whitespace validation pass, and the real four-lane host-toolchain isolation
+  self-test passes with the reviewed compiler digest.
+- The first replacement full verification exposed an independent lifecycle
+  race in `runSafeFsHelper`: when the native helper rejected a move and closed
+  stdin, a concurrent `EPIPE` could settle the promise before the child's
+  authoritative stderr/exit result, replacing `target appeared after preview`
+  with a transport symptom. Stdin errors are now recorded and considered only
+  after child close; non-zero helper exit and bounded stderr retain precedence.
+  A deterministic early-close regression plus the original target-race case
+  pass together in `20/20` repeated runs, and the combined organizer/toolchain
+  focused suite passes `73/73`.
+- The corrected candidate's fresh full `npm run verify` passes `4025` current
+  tests with declared skips, strict test type coverage `437/437`, every
+  Round2–Round12 compatibility lane, production build, Agent eval `26/26`, and
+  Memory eval `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`,
+  SQLite `3.53.2`, seven migrations, eight authority domains, renderer startup,
+  and Node ABI `137` restoration; the production dependency audit reports zero
+  vulnerabilities and whitespace validation is clean.
