@@ -14142,3 +14142,37 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Caller-pinned Program/Harness checks and the zero-vulnerability production
   audit pass. Exact-byte dual review and external package acceptance remain
   required before merge and release.
+
+## 2026-09-02 - v3.9.2 capability-bound MCP temporary lifecycle
+
+- Candidate `aa7a468c56e91f0a40817c0dccfb7d35fe7ad2de` was rejected before review
+  completion after the security/data lane found one Major lifecycle boundary;
+  no PASS receipts were issued. Its new opaque MCP workspace still lived under
+  the persistent config directory, where parent symlink traversal, child
+  readdir/delete races, legacy non-directory entries, and missing disconnect or
+  crash reclamation could retain data or affect an unintended target.
+- Skill MCP no longer creates a separate persistent writable workspace. Stdio
+  servers receive read-only Skill roots while ProcessSandbox supplies the sole
+  writable `0700` private temp capability through `TMPDIR`, `TMP`, and `TEMP`.
+  The existing MCP process owner releases that capability after disconnect,
+  initialization failure, cancellation, and process settlement.
+- ProcessSandbox leases now bind PID plus random UUID under a canonical,
+  same-owner private temp root. A later process removes only leases whose owner
+  PID is confirmed dead, skips concurrent live instances, and removes each
+  whole lease without following symlink contents. The former persistent MCP
+  root is removed as one namespace operation, so a top-level symlink is unlinked
+  rather than traversed and nested legacy directories, files, or symlinks cannot
+  survive a child-selection race. Missing trusted Skill read roots fail closed.
+- Adversarial regressions cover a legacy parent symlink, mixed legacy entry
+  types, preserved external targets, disconnected/failure cleanup through the
+  MCP owner, crashed lease reclamation, live concurrent leases, and empty-root
+  denial. Focused Skill MCP, MCP lifecycle, ProcessSandbox, Electron sandbox,
+  container, and static-boundary validation passes `139/139`. Full
+  `npm run verify` passes strict test type coverage `435/435`, `326` current
+  files / `3972` current tests with declared skips, every Round2–Round12 lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration.
+  Caller-pinned Program/Harness checks and the zero-vulnerability production
+  audit pass. Exact-byte dual review and external package acceptance remain
+  required before merge and release.

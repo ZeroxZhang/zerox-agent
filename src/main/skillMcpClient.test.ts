@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   mkdir,
-  lstat,
   mkdtemp,
   readdir,
   rm,
+  symlink,
+  writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -50,22 +51,17 @@ describe("Skill MCP client activation", () => {
         transport: "stdio",
         command: "node",
         sandboxPolicy: {
-          mode: "workspace_write",
-          workspaceRoot: expect.stringContaining("mcp-process-sandbox"),
-          extraReadRoots: ["/trusted/skill", "/trusted/data"],
+          mode: "read_only",
+          workspaceRoot: "/trusted/skill",
+          extraReadRoots: ["/trusted/data"],
           network: "none",
         },
       }),
     );
-    const stateParent = path.join(configDir, "mcp-process-sandbox");
-    const stateRoots = await readdir(stateParent);
-    expect(stateRoots).toHaveLength(1);
-    expect(
-      (await lstat(path.join(stateParent, stateRoots[0]!))).mode & 0o777,
-    ).toBe(0o700);
+    expect(await readdir(configDir)).toEqual([]);
   });
 
-  it("uses opaque sandbox ids and removes legacy private-argument verifiers", async () => {
+  it("removes every legacy verifier type without retaining private arguments", async () => {
     const configDir = await tempDir();
     const stateParent = path.join(configDir, "mcp-process-sandbox");
     const secretCandidates = [
@@ -84,12 +80,11 @@ describe("Skill MCP client activation", () => {
         .slice(0, 24)
     );
     await mkdir(path.join(stateParent, legacyCandidateA), { recursive: true });
-    await mkdir(path.join(stateParent, legacyCandidateB), { recursive: true });
-    const observedRoots: string[] = [];
-    const createStdioClient = vi.fn((config: McpServerConfig) => {
-      observedRoots.push(config.sandboxPolicy?.workspaceRoot ?? "");
-      return client();
-    });
+    await writeFile(path.join(stateParent, legacyCandidateB), "legacy", "utf8");
+    const outside = await tempDir();
+    await writeFile(path.join(outside, "preserved.txt"), "preserved", "utf8");
+    await symlink(outside, path.join(stateParent, "abcdefabcdefabcdefabcdef"));
+    const createStdioClient = vi.fn((_config: McpServerConfig) => client());
 
     for (const secret of secretCandidates) {
       await createSkillMcpClient(
@@ -99,34 +94,71 @@ describe("Skill MCP client activation", () => {
           transport: "stdio",
           command: "node",
           args: ["server.js", `--token=${secret}`],
-          readRoots: [],
+          readRoots: ["/trusted/skill"],
           network: false,
         },
         { configDir, processSandbox: sandbox(), createStdioClient },
       );
     }
 
-    const stateRoots = (await readdir(stateParent)).sort();
-    expect(stateRoots).toHaveLength(2);
-    expect(stateRoots).not.toContain(legacyCandidateA);
-    expect(stateRoots).not.toContain(legacyCandidateB);
-    expect(stateRoots).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-        ),
-        expect.stringMatching(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-        ),
-      ]),
+    expect(await readdir(configDir)).toEqual([]);
+    expect(await readdir(outside)).toEqual(["preserved.txt"]);
+    expect(JSON.stringify(
+      createStdioClient.mock.calls.map(([observed]) => observed.sandboxPolicy),
+    )).not.toContain("skill-mcp-private-arg-candidate");
+  });
+
+  it("unlinks a legacy parent symlink without traversing its target", async () => {
+    const configDir = await tempDir();
+    const outside = await tempDir();
+    await mkdir(path.join(outside, "0123456789abcdef01234567"));
+    await writeFile(path.join(outside, "preserved.txt"), "preserved", "utf8");
+    await symlink(outside, path.join(configDir, "mcp-process-sandbox"));
+
+    await createSkillMcpClient(
+      {
+        sourceSkill: "research",
+        name: "local-index",
+        transport: "stdio",
+        command: "node",
+        args: ["server.js", "private-candidate"],
+        readRoots: ["/trusted/skill"],
+        network: false,
+      },
+      {
+        configDir,
+        processSandbox: sandbox(),
+        createStdioClient: () => client(),
+      },
     );
-    expect(new Set(stateRoots).size).toBe(2);
-    expect(observedRoots.map((root) => path.basename(root)).sort()).toEqual(
-      stateRoots,
-    );
-    expect(JSON.stringify({ stateRoots, observedRoots })).not.toContain(
-      "skill-mcp-private-arg-candidate",
-    );
+
+    expect(await readdir(configDir)).toEqual([]);
+    expect((await readdir(outside)).sort()).toEqual([
+      "0123456789abcdef01234567",
+      "preserved.txt",
+    ]);
+  });
+
+  it("fails closed when stdio activation has no trusted read root", async () => {
+    const configDir = await tempDir();
+    const createStdioClient = vi.fn((_config: McpServerConfig) => client());
+
+    await expect(
+      createSkillMcpClient(
+        {
+          sourceSkill: "research",
+          name: "local-index",
+          transport: "stdio",
+          command: "node",
+          args: ["server.js"],
+          readRoots: [],
+          network: false,
+        },
+        { configDir, processSandbox: sandbox(), createStdioClient },
+      ),
+    ).rejects.toThrow("requires a trusted read root");
+    expect(createStdioClient).not.toHaveBeenCalled();
+    expect(await readdir(configDir)).toEqual([]);
   });
 
   it("routes trusted HTTP manifests to the remote transport client", async () => {

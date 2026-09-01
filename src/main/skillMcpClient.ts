@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readdir, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import type { McpServerInitConfig } from "./skillRegistry";
 import {
@@ -34,16 +33,20 @@ export async function createSkillMcpClient(
   }
 
   if (config.transport === "stdio") {
-    const sandboxParent = path.join(options.configDir, "mcp-process-sandbox");
-    await mkdir(sandboxParent, { recursive: true, mode: 0o700 });
-    await chmod(sandboxParent, 0o700);
-    await scrubLegacySandboxVerifiers(sandboxParent);
-    // This identifier must remain independent of command/args/env. Those are
-    // private runtime configuration and cannot participate in an unkeyed,
-    // persistent value that can be used to test secret candidates offline.
-    const sandboxRoot = path.join(sandboxParent, randomUUID());
-    await mkdir(sandboxRoot, { mode: 0o700 });
-    await chmod(sandboxRoot, 0o700);
+    // Retire the former persistent workspace as one namespace operation. rm
+    // unlinks a top-level symlink instead of traversing it and recursively
+    // removes nested files/symlinks without following their targets. No
+    // readdir-to-child-delete window remains.
+    await rm(path.join(options.configDir, "mcp-process-sandbox"), {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 10,
+    });
+    const [workspaceRoot, ...extraReadRoots] = config.readRoots;
+    if (!workspaceRoot) {
+      throw new Error("Skill MCP stdio activation requires a trusted read root.");
+    }
     return (options.createStdioClient ?? createMcpClient)({
       name: config.name,
       transport: "stdio",
@@ -52,9 +55,12 @@ export async function createSkillMcpClient(
       env: config.env,
       processSandbox: options.processSandbox,
       sandboxPolicy: {
-        mode: "workspace_write",
-        workspaceRoot: sandboxRoot,
-        extraReadRoots: config.readRoots,
+        // The process sandbox owns an ephemeral 0700 private temp capability
+        // and exposes it through TMPDIR/TMP/TEMP. The Skill roots remain
+        // read-only, so MCP writes never need a persistent configDir workspace.
+        mode: "read_only",
+        workspaceRoot,
+        extraReadRoots,
         network: config.network ? "allow" : "none",
       },
     });
@@ -66,20 +72,4 @@ export async function createSkillMcpClient(
     url: config.url,
     headers: config.headers,
   });
-}
-
-async function scrubLegacySandboxVerifiers(sandboxParent: string) {
-  const entries = await readdir(sandboxParent, { withFileTypes: true });
-  await Promise.all(
-    entries
-      .filter(
-        (entry) => entry.isDirectory() && /^[0-9a-f]{24}$/.test(entry.name),
-      )
-      .map((entry) =>
-        rm(path.join(sandboxParent, entry.name), {
-          recursive: true,
-          force: true,
-        })
-      ),
-  );
 }

@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   realpathSync,
   rmSync,
 } from "node:fs";
@@ -93,6 +94,7 @@ const SYSTEM_PROCESS_READ_ROOTS = [
   "/private/etc",
   "/private/var/db",
 ] as const;
+const cleanedPrivateTempRoots = new Set<string>();
 
 export function buildMinimalProcessEnv(
   parentEnv: NodeJS.ProcessEnv,
@@ -377,10 +379,12 @@ function probeSeatbelt(sandboxExec: string, timeoutMs: number): boolean {
 
 function createPrivateTempDirectory(tempRoot: string): string {
   const canonicalTempRoot = canonicalExistingRoot(tempRoot);
+  assertPrivateTempRoot(canonicalTempRoot);
+  cleanupStalePrivateTempDirectories(canonicalTempRoot);
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const created = path.join(
       canonicalTempRoot,
-      `zerox-process-sandbox-${randomUUID()}`,
+      `zerox-process-sandbox-${process.pid}-${randomUUID()}`,
     );
     try {
       mkdirSync(created, { mode: 0o700 });
@@ -413,6 +417,59 @@ function createPrivateTempDirectory(tempRoot: string): string {
     }
   }
   throw new Error("private temporary directory name allocation was exhausted");
+}
+
+function assertPrivateTempRoot(canonicalTempRoot: string): void {
+  const metadata = lstatSync(canonicalTempRoot);
+  const currentUid = typeof process.getuid === "function"
+    ? process.getuid()
+    : null;
+  if (
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    (currentUid !== null && metadata.uid !== currentUid) ||
+    (metadata.mode & 0o077) !== 0
+  ) {
+    throw new Error("process sandbox temporary root is not private");
+  }
+}
+
+function cleanupStalePrivateTempDirectories(canonicalTempRoot: string): void {
+  if (cleanedPrivateTempRoots.has(canonicalTempRoot)) return;
+  const entries = readdirSync(canonicalTempRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    const match = /^zerox-process-sandbox-(\d+)-[0-9a-f-]{36}$/.exec(
+      entry.name,
+    );
+    if (!match) continue;
+    const ownerPid = Number(match[1]);
+    if (
+      !Number.isSafeInteger(ownerPid) ||
+      ownerPid <= 0 ||
+      ownerPid === process.pid ||
+      processIsAlive(ownerPid)
+    ) {
+      continue;
+    }
+    // rmSync unlinks symlinks instead of following them. Removing the entire
+    // random lease avoids a readdir-to-child-delete race for stale contents.
+    rmSync(path.join(canonicalTempRoot, entry.name), {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 10,
+    });
+  }
+  cleanedPrivateTempRoots.add(canonicalTempRoot);
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
 }
 
 function createPrivateTempCleanup(

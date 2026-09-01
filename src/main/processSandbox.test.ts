@@ -1,10 +1,12 @@
 import {
   access,
+  mkdir,
   lstat,
   mkdtemp,
   readdir,
   rm,
   symlink,
+  writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -158,6 +160,50 @@ describe("ProcessSandboxProvider", () => {
     await confined.cleanup();
   });
 
+  it("reclaims crashed leases without touching live or symlink targets", async () => {
+    const tempRoot = await tempDir("zerox-sandbox-lease-root-");
+    const workspace = await tempDir("zerox-sandbox-lease-workspace-");
+    const outside = await tempDir("zerox-sandbox-lease-outside-");
+    await writeFile(path.join(outside, "preserved.txt"), "preserved", "utf8");
+    const staleDirectory = path.join(
+      tempRoot,
+      "zerox-process-sandbox-2147483647-00000000-0000-4000-8000-000000000001",
+    );
+    const staleSymlink = path.join(
+      tempRoot,
+      "zerox-process-sandbox-2147483646-00000000-0000-4000-8000-000000000002",
+    );
+    const liveDirectory = path.join(
+      tempRoot,
+      `zerox-process-sandbox-${process.pid}-00000000-0000-4000-8000-000000000003`,
+    );
+    await mkdir(staleDirectory);
+    await writeFile(path.join(staleDirectory, "orphan.txt"), "orphan", "utf8");
+    await symlink(outside, staleSymlink);
+    await mkdir(liveDirectory);
+
+    const provider = createProcessSandboxProvider({
+      platform: "darwin",
+      probe: () => true,
+      tempRoot,
+    });
+    const confined = provider.confine(["/usr/bin/true"], {
+      mode: "read_only",
+      workspaceRoot: workspace,
+      network: "none",
+    });
+
+    const remaining = await readdir(tempRoot);
+    expect(remaining).not.toContain(path.basename(staleDirectory));
+    expect(remaining).not.toContain(path.basename(staleSymlink));
+    expect(remaining).toContain(path.basename(liveDirectory));
+    expect(path.basename(confined.privateTempDir)).toMatch(
+      new RegExp(`^zerox-process-sandbox-${process.pid}-`),
+    );
+    expect(await readdir(outside)).toEqual(["preserved.txt"]);
+    await confined.cleanup();
+  });
+
   it("does not derive process network access from web-tool policy", async () => {
     const workspace = await tempDir("zerox-sandbox-network-split-");
     const runContext = buildPrimaryRunContext({
@@ -270,7 +316,9 @@ describe("ProcessSandboxProvider", () => {
 
     expect(first.privateTempDir).not.toBe(second.privateTempDir);
     expect(path.basename(first.privateTempDir)).toMatch(
-      /^zerox-process-sandbox-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      new RegExp(
+        `^zerox-process-sandbox-${process.pid}-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`,
+      ),
     );
     expect(path.dirname(first.privateTempDir)).toBe(canonicalTempRoot);
     expect(path.dirname(second.privateTempDir)).toBe(canonicalTempRoot);

@@ -24,7 +24,15 @@ describe("production process sandbox boundary", () => {
       "processSandbox: options.processSandbox",
     );
     expect(skillMcpClient).toContain("sandboxPolicy:");
-    expect(skillMcpClient).toContain("extraReadRoots: config.readRoots");
+    expect(skillMcpClient).toContain(
+      "const [workspaceRoot, ...extraReadRoots] = config.readRoots",
+    );
+    expect(skillMcpClient).toContain(
+      "requires a trusted read root",
+    );
+    expect(skillMcpClient).toContain('mode: "read_only"');
+    expect(skillMcpClient).toContain("extraReadRoots,");
+    expect(skillMcpClient).not.toContain('mode: "workspace_write"');
   });
 
   it("confines every arbitrary model-reachable process before spawn", () => {
