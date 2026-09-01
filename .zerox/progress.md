@@ -14233,6 +14233,12 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 
 ## 2026-09-02 - v3.9.2 unified model response budgets
 
+- Candidate `4f79ea4ba0d7e63c952036ff9e4a5676084e7b13` was invalidated by the
+  parent audit before review completion. Response limits waited for underlying
+  Web-stream cancellation, so a cancellation hook that never settled could
+  turn the intended immediate hard failure into a permanent hang. All model
+  response-budget cancellation is now best-effort and non-blocking; private
+  reader cleanup cannot delay or replace the typed limit error.
 - Candidate `38b3e553bbdf137b5cbd2153b75e40af04879ea1` was rejected before review
   completion after the security/data lane found one Major Bedrock boundary;
   no PASS receipts were issued. AWS SDK responses were checked only after
@@ -14266,9 +14272,9 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Claude, Ollama discovery, and provider error decoding now enforce the shared
   limits. Regressions cover oversized successful bodies for every HTTP provider,
   oversized non-2xx bodies, streaming-limit fallback suppression, and retry
-  suppression. Focused transport validation passes `164/164`. Full
+  suppression. Focused transport validation passes `166/166`. Full
   `npm run verify` passes strict test type coverage `436/436`, `327` current
-  files / `3986` current tests with declared skips, every Round2–Round12 lane,
+  files / `3988` current tests with declared skips, every Round2–Round12 lane,
   production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
   passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
   eight authority domains, renderer startup, and Node ABI `137` restoration.

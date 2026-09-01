@@ -63,6 +63,35 @@ describe("Bedrock provider", () => {
     expect(sourceClosed).toBe(true);
   });
 
+  it("does not wait for a non-settling Web stream cancellation", async () => {
+    const response = {
+      headers: {},
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new Uint8Array(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+          );
+        },
+        cancel() {
+          return new Promise<void>(() => undefined);
+        },
+      }) as unknown,
+    };
+    enforceBedrockSdkResponseBudget(response);
+
+    const read = async () => {
+      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+      await reader.read();
+    };
+    await expect(Promise.race([
+      read(),
+      new Promise<never>((_resolve, reject) => setTimeout(
+        () => reject(new Error("Bedrock budget did not fail promptly")),
+        250,
+      )),
+    ])).rejects.toBeInstanceOf(ResponseBodyLimitError);
+  });
+
   it("rejects oversized Converse text, reasoning, and tool input", async () => {
     const oversized = "x".repeat(MODEL_RESPONSE_MAX_BODY_BYTES + 1);
     const responses = [

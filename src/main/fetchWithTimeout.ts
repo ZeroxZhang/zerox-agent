@@ -18,7 +18,10 @@ export async function readResponseTextWithLimit(
   const normalizedLimit = Math.max(1, Math.floor(maxBytes));
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > normalizedLimit) {
-    await response.body?.cancel(`${label} response exceeded ${normalizedLimit} bytes`);
+    cancelStreamWithoutWaiting(
+      response.body,
+      `${label} response exceeded ${normalizedLimit} bytes`,
+    );
     throw new ResponseBodyLimitError(label, normalizedLimit);
   }
   if (!response.body) {
@@ -33,20 +36,53 @@ export async function readResponseTextWithLimit(
   const decoder = new TextDecoder();
   let bytesRead = 0;
   let text = "";
+  let lockReleased = false;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       bytesRead += value.byteLength;
       if (bytesRead > normalizedLimit) {
-        await reader.cancel(`${label} response exceeded ${normalizedLimit} bytes`);
+        cancelReaderWithoutWaiting(
+          reader,
+          `${label} response exceeded ${normalizedLimit} bytes`,
+        );
+        lockReleased = true;
         throw new ResponseBodyLimitError(label, normalizedLimit);
       }
       text += decoder.decode(value, { stream: true });
     }
     return text + decoder.decode();
   } finally {
+    if (!lockReleased) reader.releaseLock();
+  }
+}
+
+function cancelStreamWithoutWaiting(
+  stream: ReadableStream<Uint8Array> | null,
+  reason: string,
+): void {
+  if (!stream) return;
+  try {
+    void stream.cancel(reason).catch(() => undefined);
+  } catch {
+    // Cleanup must never delay or replace the response-budget failure.
+  }
+}
+
+function cancelReaderWithoutWaiting(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reason: string,
+): void {
+  try {
+    void reader.cancel(reason).catch(() => undefined);
+  } catch {
+    // Cleanup must never delay or replace the response-budget failure.
+  }
+  try {
     reader.releaseLock();
+  } catch {
+    // The reader is private and no future reads are attempted after overflow.
   }
 }
 

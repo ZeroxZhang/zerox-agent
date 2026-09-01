@@ -206,12 +206,14 @@ function boundWebReadableStream(
       try {
         const result = await reader.read();
         if (result.done) {
+          releaseWebReader(reader);
           controller.close();
           return;
         }
         bytesRead += result.value.byteLength;
         if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
-          await reader.cancel(
+          cancelWebReaderWithoutWaiting(
+            reader,
             `${label} response exceeded ${MODEL_RESPONSE_MAX_BODY_BYTES} bytes`,
           );
           controller.error(
@@ -221,13 +223,36 @@ function boundWebReadableStream(
         }
         controller.enqueue(result.value);
       } catch (error) {
+        releaseWebReader(reader);
         controller.error(error);
       }
     },
     cancel(reason) {
-      return reader.cancel(reason);
+      cancelWebReaderWithoutWaiting(reader, reason);
     },
   });
+}
+
+function cancelWebReaderWithoutWaiting(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reason: unknown,
+): void {
+  try {
+    void reader.cancel(reason).catch(() => undefined);
+  } catch {
+    // Cleanup must never delay or replace the response-budget failure.
+  }
+  releaseWebReader(reader);
+}
+
+function releaseWebReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): void {
+  try {
+    reader.releaseLock();
+  } catch {
+    // The bounded stream never reads this private reader again after closure.
+  }
 }
 
 async function* boundAsyncIterable(
@@ -267,9 +292,17 @@ function cancelBedrockBody(body: unknown): void {
     destroy?: () => void;
     cancel?: (reason?: unknown) => unknown;
   };
-  candidate.destroy?.();
-  void Promise.resolve(candidate.cancel?.("Bedrock response budget exceeded"))
-    .catch(() => undefined);
+  try {
+    candidate.destroy?.();
+  } catch {
+    // Cleanup must never delay or replace the response-budget failure.
+  }
+  try {
+    void Promise.resolve(candidate.cancel?.("Bedrock response budget exceeded"))
+      .catch(() => undefined);
+  } catch {
+    // Cleanup must never delay or replace the response-budget failure.
+  }
 }
 
 function isNodeReadable(value: unknown): value is Readable {

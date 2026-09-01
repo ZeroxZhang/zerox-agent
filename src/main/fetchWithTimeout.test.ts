@@ -103,6 +103,31 @@ describe("fetchWithTimeout", () => {
     ).rejects.toThrow("fixture response exceeded 8 bytes");
   });
 
+  it("does not wait for a non-settling body cancellation after overflow", async () => {
+    const neverSettles = () => new Promise<void>(() => undefined);
+    const declared = new Response(
+      new ReadableStream({ cancel: neverSettles }),
+      { headers: { "content-length": "9" } },
+    );
+    const streamed = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("123456789"));
+        },
+        cancel: neverSettles,
+      }),
+    );
+
+    await expect(resolvesWithin(
+      readResponseTextWithLimit(declared, 8, "fixture")
+        .catch((error: unknown) => error),
+    )).resolves.toBeInstanceOf(ResponseBodyLimitError);
+    await expect(resolvesWithin(
+      readResponseTextWithLimit(streamed, 8, "fixture")
+        .catch((error: unknown) => error),
+    )).resolves.toBeInstanceOf(ResponseBodyLimitError);
+  });
+
   it("parses bounded JSON without bypassing the stream limit", async () => {
     await expect(
       readResponseJsonWithLimit<{ ok: boolean }>(
@@ -113,3 +138,20 @@ describe("fetchWithTimeout", () => {
     ).resolves.toEqual({ ok: true });
   });
 });
+
+async function resolvesWithin<T>(promise: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("response budget did not fail promptly")),
+          250,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
