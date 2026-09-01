@@ -920,8 +920,10 @@ describe("OpenAI-compatible chat client", () => {
       messages: [],
     }).catch((caught: unknown) => caught);
 
-    expect(error).toMatchObject({ status: 503, code: undefined });
-    expect((error as Error).message).toBe("HTTP 503");
+    expect(error).toBeInstanceOf(ResponseBodyLimitError);
+    expect((error as Error).message).toBe(
+      "Provider error response exceeded 65536 bytes.",
+    );
     expect(canceled).toBe(true);
   });
 

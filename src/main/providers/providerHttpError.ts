@@ -1,4 +1,7 @@
-import { readResponseTextWithLimit } from "../fetchWithTimeout";
+import {
+  readResponseTextWithLimit,
+  ResponseBodyLimitError,
+} from "../fetchWithTimeout";
 import { PROVIDER_ERROR_MAX_BODY_BYTES } from "../../shared/limits";
 
 const maximumRetryAfterMs = 30_000;
@@ -53,7 +56,11 @@ async function readSafeProviderCode(response: Response): Promise<string | undefi
       parsed.error?.code ?? parsed.error?.type ?? parsed.code ?? parsed.type;
     if (typeof value !== "string") return undefined;
     return value.trim().replace(/[^\w.\-:/]/g, "_").slice(0, 96) || undefined;
-  } catch {
+  } catch (error) {
+    // An oversized provider error body is itself a transport-budget failure.
+    // Preserve that typed boundary so stream fallback and retry cannot turn
+    // one rejected response into additional unbounded provider requests.
+    if (error instanceof ResponseBodyLimitError) throw error;
     return undefined;
   }
 }

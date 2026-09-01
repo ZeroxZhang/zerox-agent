@@ -14233,6 +14233,11 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 
 ## 2026-09-02 - v3.9.2 unified model response budgets
 
+- Candidate `31ac6fabdadf59c2f0c3e356e4ff2375d7b339f0` was invalidated by the
+  parent audit before either independent reviewer completed. Oversized provider
+  error bodies were bounded, but the decoder swallowed the typed limit signal
+  and returned a retryable HTTP status. The decoder now propagates the limit
+  unchanged, preserving the no-retry and no-fallback contract end to end.
 - Candidate `cf20bc5d3b4670438ba03a4c5e788dbefdf7ba62` was rejected before review
   completion after the security/data lane found one Major cross-transport
   resource-boundary defect; no PASS receipts were issued. The SSE path was
