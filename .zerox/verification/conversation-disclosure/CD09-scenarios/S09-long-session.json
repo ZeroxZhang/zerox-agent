@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S09-long-session",
   "scenarioDigest": "sha256:391645bd0c600e15825713b417f169204e755588942cde863dd80d527b095ae8",
-  "executionId": "4a3a75d4-3831-442c-8b07-70eee71683b4",
+  "executionId": "0782c50b-e6bc-4d7a-a128-40419c318bfe",
   "processEpochs": [
-    "main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
+    "main_f7e68c20-107d-453e-9c4b-f864eecb1345"
   ],
   "attemptNonces": [
-    "188c0af1-b59e-4e0a-8478-f733c1bb94f4"
+    "7bdfeb30-f66c-4239-8bb0-289abf8237c0"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "c65e8c4c-5ffc-4f74-b537-79ac2bccf58b",
+        "b07d9df0-4622-46a8-9308-7f39e52fc2d1",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
+        "process:main_f7e68c20-107d-453e-9c4b-f864eecb1345"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -55,10 +55,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "c65e8c4c-5ffc-4f74-b537-79ac2bccf58b",
+        "b07d9df0-4622-46a8-9308-7f39e52fc2d1",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
+        "process:main_f7e68c20-107d-453e-9c4b-f864eecb1345"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -79,10 +79,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "c65e8c4c-5ffc-4f74-b537-79ac2bccf58b",
+        "b07d9df0-4622-46a8-9308-7f39e52fc2d1",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_2bba5e3c-1d6b-451f-8574-a71acfa6cd9f"
+        "process:main_f7e68c20-107d-453e-9c4b-f864eecb1345"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -97,10 +97,10 @@
         "postUpdateTailCount": 50,
         "performanceBounded": true,
         "rendererMetricsAvailable": true,
-        "cpuTaskDurationMs": 29.681999999999995,
-        "heapBeforeBytes": 7453776,
-        "heapAfterBytes": 9452220,
-        "heapGrowthBytes": 1998444,
+        "cpuTaskDurationMs": 31.957,
+        "heapBeforeBytes": 7771968,
+        "heapAfterBytes": 8364224,
+        "heapGrowthBytes": 592256,
         "domNodeCount": 2744,
         "domNodeGrowth": 1094,
         "cpuHeapDomBounded": true
@@ -114,7 +114,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:fe56335ed0de87c1fc646078abbb93733c15e3890390807f04c1bcfe30ee958c",
-        "screenshot:sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
+        "screenshot:sha256:cd41666dc0b95705f2a68c452dba98f77c0307039789e54f149994b686bc3ca2"
       ]
     },
     {
@@ -123,7 +123,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:e17ae8f2e63c4ff2f3854b66ef6931efcdcddcdb115cc09c492f25865951803c",
-        "screenshot:sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
+        "screenshot:sha256:cd41666dc0b95705f2a68c452dba98f77c0307039789e54f149994b686bc3ca2"
       ]
     },
     {
@@ -131,8 +131,8 @@
       "requirement": "raw payloads are paged truncated or offloaded",
       "ok": true,
       "evidenceIds": [
-        "action:2:sha256:fe364255d86dae7b1ac3d1afc1303be6eca4bcfe08427f46ab45731909cfc4cb",
-        "screenshot:sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
+        "action:2:sha256:69f669ca35f18d6d410b56839617e3a7c0199b8c9a76eca2ba3ff5a2cbc72b7b",
+        "screenshot:sha256:cd41666dc0b95705f2a68c452dba98f77c0307039789e54f149994b686bc3ca2"
       ]
     }
   ],
@@ -354,42 +354,42 @@
     },
     {
       "ordinal": 44,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 45,
-      "channel": "agentRuns:list",
-      "ok": true
-    },
-    {
-      "ordinal": 46,
-      "channel": "agentRuns:getTrajectoryPage",
-      "ok": true
-    },
-    {
-      "ordinal": 47,
-      "channel": "scheduledTasks:list",
-      "ok": true
-    },
-    {
-      "ordinal": 48,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 49,
-      "channel": "plans:getLatestBySession",
-      "ok": true
-    },
-    {
-      "ordinal": 50,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
+      "ordinal": 46,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 47,
+      "channel": "agentRuns:getTrajectoryPage",
+      "ok": true
+    },
+    {
+      "ordinal": 48,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 49,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 50,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
       "ordinal": 51,
-      "channel": "skills:list",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
@@ -409,8 +409,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:550197be945e2760328f8075e9323a1108368c9b9e94d7ce8aaf2f7d0ef6ec8c"
+    "sha256:cd41666dc0b95705f2a68c452dba98f77c0307039789e54f149994b686bc3ca2"
   ],
   "status": "passed",
-  "digest": "sha256:947699e75b1cb30559f878f9b7e70f3d3491924b1e049327bdfc80707ae80a66"
+  "digest": "sha256:1437109a996690756f459cd1d79178f75965693c563e46a70b35c8694f9ecb78"
 }

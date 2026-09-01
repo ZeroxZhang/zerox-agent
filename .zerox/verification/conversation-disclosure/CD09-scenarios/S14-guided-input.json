@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S14-guided-input",
   "scenarioDigest": "sha256:3c9874af0ecbbb0423379639f72878eaf8861332e3c49791c79eb05abfc98dfd",
-  "executionId": "e5efd65a-f60b-4e9f-9c75-7c1288dfc53d",
+  "executionId": "f9ff7d58-f252-464b-8433-5f8532a148a1",
   "processEpochs": [
-    "main_60b360dc-e07d-4503-b380-3e4f1a384171"
+    "main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
   ],
   "attemptNonces": [
-    "7c59d3e4-c20a-46dd-9e62-8034708d6e31"
+    "4f44ab6e-7bce-4f84-b57f-b3014b361244"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "4ccb9383-48f2-4b9d-ac14-8b879494b2a4",
+        "6324e50c-2bf7-436e-9526-4fae24092f0b",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_60b360dc-e07d-4503-b380-3e4f1a384171"
+        "process:main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -40,11 +40,11 @@
         "runListed": true,
         "trajectoryLoaded": true,
         "guidedInputRequired": true,
-        "inputRequestId": "skill_input_a2329828-68df-4bec-8c88-455cd755e888",
+        "inputRequestId": "skill_input_f415b74d-c8d3-4118-b429-37d4ba83ba66",
         "waitingEventObserved": true,
         "workspaceBound": true,
         "reloadRecoveredPending": true,
-        "recoveredInputRequestId": "skill_input_a2329828-68df-4bec-8c88-455cd755e888"
+        "recoveredInputRequestId": "skill_input_f415b74d-c8d3-4118-b429-37d4ba83ba66"
       }
     },
     {
@@ -53,10 +53,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "4ccb9383-48f2-4b9d-ac14-8b879494b2a4",
+        "6324e50c-2bf7-436e-9526-4fae24092f0b",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_60b360dc-e07d-4503-b380-3e4f1a384171"
+        "process:main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,10 +75,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "4ccb9383-48f2-4b9d-ac14-8b879494b2a4",
+        "6324e50c-2bf7-436e-9526-4fae24092f0b",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_60b360dc-e07d-4503-b380-3e4f1a384171"
+        "process:main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,8 +96,8 @@
       "requirement": "the required prompt remains prominent after window reload",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:c3444280fe61190dc8d824708c208d090329b4e84b2d17ade56f02fbb81596f3",
-        "screenshot:sha256:a133c851b85118ed17e75e1707318b8132d0e8754e090aab9589ca2419b8b235"
+        "action:0:sha256:24f017ac1e4ccddf0ad717dff8b115da8cd2ce3ac7a931e214e5566adb44aeeb",
+        "screenshot:sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
       ]
     },
     {
@@ -106,7 +106,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:fe81b31a39c35e40f7975f73dd55d5a7c00cc3500460ba0eb962429928cc893c",
-        "screenshot:sha256:a133c851b85118ed17e75e1707318b8132d0e8754e090aab9589ca2419b8b235"
+        "screenshot:sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
       ]
     },
     {
@@ -115,7 +115,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:ec1abfa94913d38b7f1ce061b28c312886c483b8f645aa546eb36a5a9d2cd2d4",
-        "screenshot:sha256:a133c851b85118ed17e75e1707318b8132d0e8754e090aab9589ca2419b8b235"
+        "screenshot:sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
       ]
     }
   ],
@@ -482,8 +482,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:a133c851b85118ed17e75e1707318b8132d0e8754e090aab9589ca2419b8b235"
+    "sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
   ],
   "status": "passed",
-  "digest": "sha256:33cca9815d5dfbd945743267c08ebaeb527467312746c8932e606125c8b18ce3"
+  "digest": "sha256:eeb7145eb19b9f1153eacba41c6aa3a10565ea402a609451080bfcb2bbdf116a"
 }

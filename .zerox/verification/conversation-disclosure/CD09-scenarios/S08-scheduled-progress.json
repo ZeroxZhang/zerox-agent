@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S08-scheduled-progress",
   "scenarioDigest": "sha256:d6f3755be71fea9927b72ba5edef0f4a1a7b0e721accf24ac278843d53143bda",
-  "executionId": "8933c6c2-fe31-42b2-a0fd-e0393030e6fb",
+  "executionId": "a435917e-9c63-4d30-a8aa-1ebb80905e38",
   "processEpochs": [
-    "main_5bd99a4b-080f-42b3-ac57-0969c75f1c7d"
+    "main_14545861-9bae-4802-a2e7-ccc29ed8f998"
   ],
   "attemptNonces": [
-    "2b49febb-0838-49e9-8ddf-e39a26f0b5cd"
+    "516f3bf2-f260-4919-96e4-5463dba9dac2"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "5d63c2b1-bb4d-4907-8e42-ffe2f1cad2bd",
+        "696e6da4-de7b-4d8c-9d73-57981d33bcc2",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "ebb86917-339e-495e-ad2c-441d1514b130",
-        "process:main_5bd99a4b-080f-42b3-ac57-0969c75f1c7d"
+        "15e661cd-ff3a-437a-8414-bf7831e2bb72",
+        "process:main_14545861-9bae-4802-a2e7-ccc29ed8f998"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -42,7 +42,7 @@
         "trajectoryLoaded": true,
         "scheduledTaskFound": true,
         "streamEventCount": 5,
-        "actualRunId": "94d14714-dbb5-4dc3-9336-38a0d3fd8b63",
+        "actualRunId": "7f71d00f-835a-4c88-b53f-e1229c843fbf",
         "runError": "none",
         "fullSnapshotRefreshCount": 0,
         "streamRefreshBounded": true
@@ -54,11 +54,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "5d63c2b1-bb4d-4907-8e42-ffe2f1cad2bd",
+        "696e6da4-de7b-4d8c-9d73-57981d33bcc2",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "ebb86917-339e-495e-ad2c-441d1514b130",
-        "process:main_5bd99a4b-080f-42b3-ac57-0969c75f1c7d"
+        "15e661cd-ff3a-437a-8414-bf7831e2bb72",
+        "process:main_14545861-9bae-4802-a2e7-ccc29ed8f998"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -77,11 +77,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "5d63c2b1-bb4d-4907-8e42-ffe2f1cad2bd",
+        "696e6da4-de7b-4d8c-9d73-57981d33bcc2",
         "cd09-run-S08-scheduled-progress",
         "trajectory-S08-scheduled-progress",
-        "ebb86917-339e-495e-ad2c-441d1514b130",
-        "process:main_5bd99a4b-080f-42b3-ac57-0969c75f1c7d"
+        "15e661cd-ff3a-437a-8414-bf7831e2bb72",
+        "process:main_14545861-9bae-4802-a2e7-ccc29ed8f998"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -101,7 +101,7 @@
       "requirement": "progress arrives before the blocking result",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:3e133e77316de81596c4c0ff5e7f82f9cf7cff4fcf9013dc1821678908534edd",
+        "action:0:sha256:90512afa6a5c105182ae61173693da1ddba26017d3d77d565b7a650b07ed0786",
         "screenshot:sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
       ]
     },
@@ -119,7 +119,7 @@
       "requirement": "snapshot or delta updates remain bounded and do not trigger full refetch per event",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:3e133e77316de81596c4c0ff5e7f82f9cf7cff4fcf9013dc1821678908534edd",
+        "action:0:sha256:90512afa6a5c105182ae61173693da1ddba26017d3d77d565b7a650b07ed0786",
         "screenshot:sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
       ]
     }
@@ -385,5 +385,5 @@
     "sha256:c494ec3aa90649fdae5634782e446110a6a2f46046bd90106639bc33a010ce13"
   ],
   "status": "passed",
-  "digest": "sha256:2234947edc7e21593df62f7c9dd97d61f61474936b9c13e366e103134c3579c1"
+  "digest": "sha256:6538704fdd5410e6c20fa5c2ce9a84ada9924b113505c6c3015517f3f002bde2"
 }

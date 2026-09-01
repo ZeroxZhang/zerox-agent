@@ -14659,3 +14659,33 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `sha256:2054e4158c9cad3c3c00605462d395017619ec153bf788131c80fad6ef83e156`
   and
   `sha256:1380bd376500013daefbe2830093e1a4a65e0b7c4664967803400bbcc0fcd2d5`.
+
+## 2026-09-02 - P113/CD09 after-sign semantic output boundary
+
+- External acceptance attempt in `/private/tmp/zerox-v392-final6.XyksTa`
+  passed isolated full verification, the trusted Seatbelt regression, isolated
+  production smoke, dependency audit, and all `19/19` real-app scenarios, then
+  correctly stopped without issuing an anchor during local packaging.
+  `after-sign-mac.mjs` concatenated successful `otool` stdout with a non-fatal
+  sandbox cache diagnostic from stderr and parsed the diagnostic as an injected
+  library.
+- The after-sign command boundary now separates semantic output from failure
+  diagnostics. Successful `file` and `otool` inspection parses stdout only;
+  failed commands retain both streams, while codesign continues to consume its
+  normal metadata from stderr. A regression covers a zero-exit inspection with
+  valid stdout plus the exact cache-warning class on stderr.
+- Focused after-sign, safe-fs inspection, and package-script tests pass `30/30`.
+  A fresh real local-candidate package passes architecture, macOS `12.0`
+  deployment target, the sole `/usr/lib/libSystem.B.dylib` dependency, signature
+  verification, hardened runtime, and empty entitlements.
+- Fresh full `npm run verify` passes `4031` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2-Round12 compatibility lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration;
+  the production dependency audit reports zero vulnerabilities and the
+  dependency tree is valid.
+- The fresh full real-app acceptance passes all `19/19` governed scenarios and
+  regenerates their machine-readable receipts and screenshots for this
+  candidate. Exact-byte dual review and a fresh isolated external package
+  acceptance remain required before merge and release.

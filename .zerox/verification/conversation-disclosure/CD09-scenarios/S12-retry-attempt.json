@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S12-retry-attempt",
   "scenarioDigest": "sha256:49d4fb731a204d7b797ede14668b357e45234789b55325523987a21b05d43ef7",
-  "executionId": "75578ed8-2f10-4284-8fa8-f2137c25128f",
+  "executionId": "e66225b2-a117-4920-84b2-d2d83583eb6a",
   "processEpochs": [
-    "main_d1310e12-92c7-48aa-90a8-d23a05939788"
+    "main_a9377864-8240-4f60-9d2c-18dda699ee35"
   ],
   "attemptNonces": [
-    "6156558c-df6a-4a54-bed7-621c5e0e1bfb"
+    "a7a5adf6-6bf9-419d-bbbe-ec34f76e6f0c"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "f1aba1e5-1ff5-4444-8d19-97285c57869d",
+        "a2f67fae-b9ff-40ad-a0c9-0da258ea86df",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_d1310e12-92c7-48aa-90a8-d23a05939788"
+        "process:main_a9377864-8240-4f60-9d2c-18dda699ee35"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,10 +52,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "f1aba1e5-1ff5-4444-8d19-97285c57869d",
+        "a2f67fae-b9ff-40ad-a0c9-0da258ea86df",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_d1310e12-92c7-48aa-90a8-d23a05939788"
+        "process:main_a9377864-8240-4f60-9d2c-18dda699ee35"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,10 +72,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "f1aba1e5-1ff5-4444-8d19-97285c57869d",
+        "a2f67fae-b9ff-40ad-a0c9-0da258ea86df",
         "cd09-run-S12-retry-attempt",
         "trajectory-S12-retry-attempt",
-        "process:main_d1310e12-92c7-48aa-90a8-d23a05939788"
+        "process:main_a9377864-8240-4f60-9d2c-18dda699ee35"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -94,7 +94,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:5cb2bd5c1aa0719064d1cae7e4a5902391fa2ca29bd8d2830185406a3a978688",
-        "screenshot:sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
+        "screenshot:sha256:96ad1e3a38719d3cc9d38a3dae24978aa1f4cd06f2545b1019f2e135dfac7d1a"
       ]
     },
     {
@@ -103,7 +103,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:a1c37cf4b092f17dff3fb80b865cae4e5d8ec1f28d50929f794bfebeec36039a",
-        "screenshot:sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
+        "screenshot:sha256:96ad1e3a38719d3cc9d38a3dae24978aa1f4cd06f2545b1019f2e135dfac7d1a"
       ]
     },
     {
@@ -112,7 +112,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:b763fc738a8b416d406fce6fad85cb36c809408c30a557057cb8949d2423f6c6",
-        "screenshot:sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
+        "screenshot:sha256:96ad1e3a38719d3cc9d38a3dae24978aa1f4cd06f2545b1019f2e135dfac7d1a"
       ]
     }
   ],
@@ -259,12 +259,12 @@
     },
     {
       "ordinal": 29,
-      "channel": "chat:sendMessage",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 30,
-      "channel": "skills:list",
+      "channel": "chat:sendMessage",
       "ok": true
     },
     {
@@ -389,8 +389,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:b63cd2e35012c045964d3728ee60a733d77280534301a1f4961f7b72b0180d07"
+    "sha256:96ad1e3a38719d3cc9d38a3dae24978aa1f4cd06f2545b1019f2e135dfac7d1a"
   ],
   "status": "passed",
-  "digest": "sha256:9c5940a47e9c1b34a4d9f928f5134a5685ab5e9cbe6a7ba0cc26366863ec9c6c"
+  "digest": "sha256:71eecef9cdcf77c0988e84baa7c8e99b88a6a0b9b9facdbfd9b29fbc9c221150"
 }

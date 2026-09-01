@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S04-failure-attention",
   "scenarioDigest": "sha256:9c7eb05998e2d24ecc2a53e27d8dfce91df3d7d5f84d54085f0dea50bcd37d00",
-  "executionId": "dad5fe0e-4f7f-422d-82d6-5b71266ebdf3",
+  "executionId": "5970d5a3-b17c-4174-9c33-6ff524fbb7bf",
   "processEpochs": [
-    "main_403647a3-9589-4642-9aab-dd11e7f3e016"
+    "main_7a5672e1-365f-4a08-96e7-d6f25ac86b23"
   ],
   "attemptNonces": [
-    "ed22af3c-87b0-4a9b-8131-6b3cea3d0aef"
+    "474fccb2-b421-4906-8651-c4cf959b285e"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "dafc3a8d-3d94-4c3c-b914-fbe304270b9c",
+        "bbb9676c-6ca9-4063-a47a-93496f0f1c71",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_403647a3-9589-4642-9aab-dd11e7f3e016"
+        "process:main_7a5672e1-365f-4a08-96e7-d6f25ac86b23"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -50,10 +50,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "dafc3a8d-3d94-4c3c-b914-fbe304270b9c",
+        "bbb9676c-6ca9-4063-a47a-93496f0f1c71",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_403647a3-9589-4642-9aab-dd11e7f3e016"
+        "process:main_7a5672e1-365f-4a08-96e7-d6f25ac86b23"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -74,7 +74,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:e3d0f161932d10775f5dd9dbc9f0d8711f757ccbdc059e78585cf7aae3853010",
-        "screenshot:sha256:9c9adab49c998b5205ca85134c0a3e7095047f1ed1429d1c7db635a05970b366"
+        "screenshot:sha256:27aa924db6ae314685e28a3d7c3fbc67d3f2a75fff9624cf768290fa5782d728"
       ]
     },
     {
@@ -83,7 +83,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:878a5d69e7c032212bc7b4fd2eb60787f9bbc05d8e1e43630cd71e843cdc7fbb",
-        "screenshot:sha256:9c9adab49c998b5205ca85134c0a3e7095047f1ed1429d1c7db635a05970b366"
+        "screenshot:sha256:27aa924db6ae314685e28a3d7c3fbc67d3f2a75fff9624cf768290fa5782d728"
       ]
     },
     {
@@ -92,7 +92,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:878a5d69e7c032212bc7b4fd2eb60787f9bbc05d8e1e43630cd71e843cdc7fbb",
-        "screenshot:sha256:9c9adab49c998b5205ca85134c0a3e7095047f1ed1429d1c7db635a05970b366"
+        "screenshot:sha256:27aa924db6ae314685e28a3d7c3fbc67d3f2a75fff9624cf768290fa5782d728"
       ]
     }
   ],
@@ -234,27 +234,27 @@
     },
     {
       "ordinal": 28,
-      "channel": "agentWorkspaces:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 29,
-      "channel": "agentBootstrap:loadValidation",
+      "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
       "ordinal": 30,
-      "channel": "app:getMeta",
+      "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
       "ordinal": 31,
-      "channel": "app:getRuntimeInfo",
+      "channel": "app:getMeta",
       "ok": true
     },
     {
       "ordinal": 32,
-      "channel": "modelSettings:load",
+      "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
@@ -334,8 +334,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:9c9adab49c998b5205ca85134c0a3e7095047f1ed1429d1c7db635a05970b366"
+    "sha256:27aa924db6ae314685e28a3d7c3fbc67d3f2a75fff9624cf768290fa5782d728"
   ],
   "status": "passed",
-  "digest": "sha256:9f499168d6338986b8c79f6f17f2899a3bf34c3661d13364cadf28cd82f9e4b3"
+  "digest": "sha256:c002a512dd665a06eea1a673c7cd931896e77546f6275e7cdccfe7a63e28bfe1"
 }

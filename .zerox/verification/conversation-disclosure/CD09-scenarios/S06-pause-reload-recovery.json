@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S06-pause-reload-recovery",
   "scenarioDigest": "sha256:735d4a84adf2b87e2081d1a81638aaf9a96d79b5b6328f3c9cf6a6516d9a98ed",
-  "executionId": "de5c23cf-be15-46ed-b842-3023ef8bd5f8",
+  "executionId": "d9b62d11-40ae-40b5-a9ed-d526392753c5",
   "processEpochs": [
-    "main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
+    "main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
   ],
   "attemptNonces": [
-    "7f1f4282-5883-4d09-9b70-cac078bd8a87"
+    "331f4dd0-868c-46e1-bb30-96aac2886592"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "10e37a9a-afd9-4fbd-822d-e71e8e86a609",
+        "855d54ef-772b-477d-b92b-bda0bb179e20",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "d348796a-0fdf-40e5-8b91-c2f01c1df5cd",
-        "process:main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
+        "29dea494-c555-42bc-b931-2236b9a769fa",
+        "process:main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -51,11 +51,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "10e37a9a-afd9-4fbd-822d-e71e8e86a609",
+        "855d54ef-772b-477d-b92b-bda0bb179e20",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "d348796a-0fdf-40e5-8b91-c2f01c1df5cd",
-        "process:main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
+        "29dea494-c555-42bc-b931-2236b9a769fa",
+        "process:main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,11 +72,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "10e37a9a-afd9-4fbd-822d-e71e8e86a609",
+        "855d54ef-772b-477d-b92b-bda0bb179e20",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "d348796a-0fdf-40e5-8b91-c2f01c1df5cd",
-        "process:main_e4e31426-9427-451e-b2bb-a3ccda0420b2"
+        "29dea494-c555-42bc-b931-2236b9a769fa",
+        "process:main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,7 +96,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:dc8944961296d113ae68e87923d8a0b35963a3bee7b4219c75ece92d13cb46cd",
-        "screenshot:sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
+        "screenshot:sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
       ]
     },
     {
@@ -105,7 +105,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:a6ec076aaccb7730677ddad1c3661f70dc9060d81b40d9dc768b607bb2c1848f",
-        "screenshot:sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
+        "screenshot:sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
       ]
     },
     {
@@ -114,7 +114,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:11e70d7f8572dfea7ca1cc0d79c32579f00c7f4387ce496c457769e6be356ec4",
-        "screenshot:sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
+        "screenshot:sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
       ]
     }
   ],
@@ -206,17 +206,17 @@
     },
     {
       "ordinal": 18,
-      "channel": "modelSettings:load",
-      "ok": true
-    },
-    {
-      "ordinal": 19,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 20,
+      "ordinal": 19,
       "channel": "memory:list",
+      "ok": true
+    },
+    {
+      "ordinal": 20,
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
@@ -351,12 +351,12 @@
     },
     {
       "ordinal": 47,
-      "channel": "modelSettings:load",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 48,
-      "channel": "agentRuns:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
@@ -476,8 +476,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:8289a8b1123ad0e66fe6ec869c70c28f33622dcd248a4beb80339e39a0f67909"
+    "sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
   ],
   "status": "passed",
-  "digest": "sha256:b48ae27c2e99dedca48e047a8230df5d0380a746664d6e51a0eb708a12c80d79"
+  "digest": "sha256:fb4a9ce544bb633e0dbff0fdbe8dd43dbea63769bd053bc605ab0c8decd935ed"
 }

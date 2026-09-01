@@ -60,6 +60,41 @@ describe("legacy macOS after-sign hook", () => {
     );
   });
 
+  it("keeps successful command diagnostics out of helper metadata parsing", async () => {
+    const sandboxDiagnostic =
+      "otool: error: couldn't create cache file '/var/folders/x/xcrun_db': Operation not permitted";
+    const runCommand = vi.fn((command: string, args: string[]) => {
+      if (command === "/usr/bin/file") {
+        return success(`${args[0]}: Mach-O 64-bit executable arm64`, sandboxDiagnostic);
+      }
+      if (args[0] === "-l") {
+        return success("cmd LC_BUILD_VERSION\n  minos 12.0\n", sandboxDiagnostic);
+      }
+      return success(
+        `${args[1]}:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)`,
+        sandboxDiagnostic,
+      );
+    });
+    const runCodesign = vi.fn((args: string[]) => {
+      if (args[0] === "-dv") return success("", "flags=0x10000(runtime)");
+      if (args[0] === "-d") return success("", "<plist><dict></dict></plist>");
+      return success();
+    });
+
+    await expect(afterSignMac(context(), {
+      releaseMode: "developer-id",
+      existsSync: () => true,
+      lstatSync: () => ({
+        isFile: () => true,
+        isSymbolicLink: () => false,
+        mode: 0o100755,
+      }),
+      realpathSync: (value: string) => value,
+      runCommand,
+      runCodesign,
+    })).resolves.toBeUndefined();
+  });
+
   it("rejects helper entitlement and linked-library expansion", async () => {
     const dependencies = {
       releaseMode: "developer-id",

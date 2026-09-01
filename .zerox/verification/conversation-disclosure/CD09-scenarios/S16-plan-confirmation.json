@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S16-plan-confirmation",
   "scenarioDigest": "sha256:b629d2c39b858f620076e3b26976ba7261d6f4d04db51565df665f1ff1b3c432",
-  "executionId": "06299cb5-2af8-4918-8eee-542881562df4",
+  "executionId": "63905683-6899-4b4c-9da5-110c749bb9f7",
   "processEpochs": [
-    "main_cd9eb423-f58e-4f85-928a-689b77372642"
+    "main_ae77ad31-8297-4887-9832-c1b39fe6d799"
   ],
   "attemptNonces": [
-    "44f135bb-48f9-4356-b39c-5b99d9b568d7"
+    "afbc332c-2f43-4cbc-a5cb-28376f7cac82"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,12 +29,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "054b476d-b258-472f-a30f-d0aa4bf16c47",
+        "9a2b5b29-9424-40f8-bebf-88de125229be",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_cd9eb423-f58e-4f85-928a-689b77372642"
+        "process:main_ae77ad31-8297-4887-9832-c1b39fe6d799"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,12 +52,12 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "054b476d-b258-472f-a30f-d0aa4bf16c47",
+        "9a2b5b29-9424-40f8-bebf-88de125229be",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_cd9eb423-f58e-4f85-928a-689b77372642"
+        "process:main_ae77ad31-8297-4887-9832-c1b39fe6d799"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,12 +75,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "054b476d-b258-472f-a30f-d0aa4bf16c47",
+        "9a2b5b29-9424-40f8-bebf-88de125229be",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_cd9eb423-f58e-4f85-928a-689b77372642"
+        "process:main_ae77ad31-8297-4887-9832-c1b39fe6d799"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -100,7 +100,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:43e2d06eda831b91f4c049f4d65bb0410ad7d960c7a5cc0d0768d8be01ff0769",
-        "screenshot:sha256:383de6e499c610f0acc8bafa64bbe7fee17d42cbbac53c8dde72d3c0377b0264"
+        "screenshot:sha256:775d68893bde7fbec229cd9cc47414b53f3183d972a8022b46ccb118f9d38519"
       ]
     },
     {
@@ -109,7 +109,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:dd6342067e590b4cc3b680da6e67e0cdf09c28740c71871408663da8edea3aa1",
-        "screenshot:sha256:383de6e499c610f0acc8bafa64bbe7fee17d42cbbac53c8dde72d3c0377b0264"
+        "screenshot:sha256:775d68893bde7fbec229cd9cc47414b53f3183d972a8022b46ccb118f9d38519"
       ]
     },
     {
@@ -118,7 +118,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:cd49bae0bca16954d7b19b5a50e4f5bfecdf98e3579d85678ce0c8b2daf2aa17",
-        "screenshot:sha256:383de6e499c610f0acc8bafa64bbe7fee17d42cbbac53c8dde72d3c0377b0264"
+        "screenshot:sha256:775d68893bde7fbec229cd9cc47414b53f3183d972a8022b46ccb118f9d38519"
       ]
     }
   ],
@@ -215,47 +215,47 @@
     },
     {
       "ordinal": 19,
-      "channel": "modelSettings:load",
-      "ok": true
-    },
-    {
-      "ordinal": 20,
       "channel": "memory:list",
       "ok": true
     },
     {
-      "ordinal": 21,
+      "ordinal": 20,
       "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
-      "ordinal": 22,
+      "ordinal": 21,
       "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
-      "ordinal": 23,
+      "ordinal": 22,
       "channel": "app:getMeta",
       "ok": true
     },
     {
-      "ordinal": 24,
+      "ordinal": 23,
       "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
-      "ordinal": 25,
+      "ordinal": 24,
       "channel": "navigation:list",
       "ok": true
     },
     {
-      "ordinal": 26,
+      "ordinal": 25,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 27,
+      "ordinal": 26,
       "channel": "app:getUpdateState",
+      "ok": true
+    },
+    {
+      "ordinal": 27,
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
@@ -450,42 +450,42 @@
     },
     {
       "ordinal": 66,
-      "channel": "agentWorkspaces:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 67,
-      "channel": "agentBootstrap:loadValidation",
+      "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
       "ordinal": 68,
-      "channel": "app:getMeta",
+      "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
       "ordinal": 69,
-      "channel": "app:getRuntimeInfo",
+      "channel": "app:getMeta",
       "ok": true
     },
     {
       "ordinal": 70,
-      "channel": "navigation:list",
+      "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
       "ordinal": 71,
-      "channel": "chatSessions:list",
+      "channel": "navigation:list",
       "ok": true
     },
     {
       "ordinal": 72,
-      "channel": "app:getUpdateState",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 73,
-      "channel": "modelSettings:load",
+      "channel": "app:getUpdateState",
       "ok": true
     },
     {
@@ -690,8 +690,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:383de6e499c610f0acc8bafa64bbe7fee17d42cbbac53c8dde72d3c0377b0264"
+    "sha256:775d68893bde7fbec229cd9cc47414b53f3183d972a8022b46ccb118f9d38519"
   ],
   "status": "passed",
-  "digest": "sha256:7819cd3be1f31ebc8448b8c2a3b95869aba02b2cd08ecdf0e5955261b28ebddd"
+  "digest": "sha256:a23f199f4a61ecfe5b99239fe114880a0a7975163d56dc3be6955d7734d40025"
 }

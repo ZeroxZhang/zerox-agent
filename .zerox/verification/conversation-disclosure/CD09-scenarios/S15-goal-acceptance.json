@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S15-goal-acceptance",
   "scenarioDigest": "sha256:9fe6e0e486a9911753026a3e062c00e9ff43e114acd8c7860df6e184e16e5e72",
-  "executionId": "efafb4a3-617f-4a05-94d8-18d92ca5ff57",
+  "executionId": "357839a1-693d-4a3b-b243-0b2b263a6568",
   "processEpochs": [
-    "main_0d182ccf-c4a6-49a9-bcc8-a1efce91943a"
+    "main_b4f264f3-0e44-47e7-8e8d-a97641c5c66f"
   ],
   "attemptNonces": [
-    "7d3a4657-023b-4e88-b4c8-37d89d6e07b5"
+    "235d520a-d2fe-47f7-be0d-9984be50618c"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "bbbb71bc-403b-45d4-a0f8-d1dc111f6bf8",
+        "d5c150a4-832d-448a-988b-764432f61a70",
         "cd09-run-S15-goal-acceptance",
         "trajectory-S15-goal-acceptance",
         "cd09-goal-S15-goal-acceptance",
-        "process:main_0d182ccf-c4a6-49a9-bcc8-a1efce91943a"
+        "process:main_b4f264f3-0e44-47e7-8e8d-a97641c5c66f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,11 +52,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "bbbb71bc-403b-45d4-a0f8-d1dc111f6bf8",
+        "d5c150a4-832d-448a-988b-764432f61a70",
         "cd09-run-S15-goal-acceptance",
         "trajectory-S15-goal-acceptance",
         "cd09-goal-S15-goal-acceptance",
-        "process:main_0d182ccf-c4a6-49a9-bcc8-a1efce91943a"
+        "process:main_b4f264f3-0e44-47e7-8e8d-a97641c5c66f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,11 +75,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "bbbb71bc-403b-45d4-a0f8-d1dc111f6bf8",
+        "d5c150a4-832d-448a-988b-764432f61a70",
         "cd09-run-S15-goal-acceptance",
         "trajectory-S15-goal-acceptance",
         "cd09-goal-S15-goal-acceptance",
-        "process:main_0d182ccf-c4a6-49a9-bcc8-a1efce91943a"
+        "process:main_b4f264f3-0e44-47e7-8e8d-a97641c5c66f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -101,7 +101,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:16982675051ddd2309d5ec179469837d6a879bb76ed3abd3ce54da8e9fa4c5ef",
-        "screenshot:sha256:57af234b238f6923a27de8282554b85ffc7a8c27faba5b714b604a8c0e678d22"
+        "screenshot:sha256:b8dd92c4145420aaaeac2cce01f59c6c12e9a7e21f54398a09fc00bd821e3c8f"
       ]
     },
     {
@@ -110,7 +110,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:33b8852ba1340de9b73b174ea98c55a5a7ce2987428edf8919a5992ccc72132e",
-        "screenshot:sha256:57af234b238f6923a27de8282554b85ffc7a8c27faba5b714b604a8c0e678d22"
+        "screenshot:sha256:b8dd92c4145420aaaeac2cce01f59c6c12e9a7e21f54398a09fc00bd821e3c8f"
       ]
     },
     {
@@ -119,7 +119,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:e6e054140e3ac79c0a71aa0357e799e949bcb850989e298b7cfa6b71b1a1fd00",
-        "screenshot:sha256:57af234b238f6923a27de8282554b85ffc7a8c27faba5b714b604a8c0e678d22"
+        "screenshot:sha256:b8dd92c4145420aaaeac2cce01f59c6c12e9a7e21f54398a09fc00bd821e3c8f"
       ]
     }
   ],
@@ -416,17 +416,17 @@
     },
     {
       "ordinal": 59,
-      "channel": "goal:get",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 60,
-      "channel": "goal:continueAcceptance",
+      "channel": "goal:get",
       "ok": true
     },
     {
       "ordinal": 61,
-      "channel": "goal:get",
+      "channel": "goal:continueAcceptance",
       "ok": true
     },
     {
@@ -436,52 +436,52 @@
     },
     {
       "ordinal": 63,
-      "channel": "chatSessions:list",
+      "channel": "goal:get",
       "ok": true
     },
     {
       "ordinal": 64,
-      "channel": "chatSessions:getTranscriptPage",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 65,
-      "channel": "goal:get",
+      "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
       "ordinal": 66,
-      "channel": "chatSessions:list",
+      "channel": "goal:get",
       "ok": true
     },
     {
       "ordinal": 67,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 68,
-      "channel": "goal:get",
-      "ok": true
-    },
-    {
-      "ordinal": 69,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 70,
+      "ordinal": 68,
       "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
-      "ordinal": 71,
+      "ordinal": 69,
       "channel": "goal:get",
       "ok": true
     },
     {
+      "ordinal": 70,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 71,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
       "ordinal": 72,
-      "channel": "skills:list",
+      "channel": "goal:get",
       "ok": true
     },
     {
@@ -491,8 +491,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:57af234b238f6923a27de8282554b85ffc7a8c27faba5b714b604a8c0e678d22"
+    "sha256:b8dd92c4145420aaaeac2cce01f59c6c12e9a7e21f54398a09fc00bd821e3c8f"
   ],
   "status": "passed",
-  "digest": "sha256:01f1469ca7bf2898b1e6ac9edfbda72f4e5683dbe36d0e413f29694e6ae4ed82"
+  "digest": "sha256:b2b294bfb3d151ae1ab14ad3c2308eec864d2f2c946461120004beef90cd9196"
 }

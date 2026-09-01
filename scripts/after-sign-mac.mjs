@@ -20,30 +20,33 @@ function runCommand(command, args) {
   });
 }
 
-function commandOutput(result) {
+function commandDiagnostics(result) {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 }
 
 function assertCodesign(args, label, runner = runCodesign) {
   const result = runner(args);
   if (result.error || result.status !== 0) {
-    const output = commandOutput(result);
+    const output = commandDiagnostics(result);
     throw new Error(
       `${label} failed${output ? `: ${output}` : result.error ? `: ${result.error.message}` : ""}`,
     );
   }
-  return commandOutput(result);
+  return commandDiagnostics(result);
 }
 
 function assertCommand(command, args, label, runner = runCommand) {
   const result = runner(command, args);
   if (result.error || result.status !== 0) {
-    const output = commandOutput(result);
+    const output = commandDiagnostics(result);
     throw new Error(
       `${label} failed${output ? `: ${output}` : result.error ? `: ${result.error.message}` : ""}`,
     );
   }
-  return commandOutput(result);
+  // file(1) and otool(1) expose their machine-readable result on stdout.
+  // A successful command may still emit sandbox/cache diagnostics on stderr;
+  // those must never enter architecture, deployment-target, or library parsing.
+  return `${result.stdout ?? ""}`.trim();
 }
 
 function assertSafeFsHelper(appPath, dependencies = {}) {
