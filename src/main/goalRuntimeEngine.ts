@@ -13,6 +13,7 @@ import {
   type AgentRunContext,
 } from "../shared/agentWorkspace";
 import type { TaskPermissionPolicy } from "../shared/toolPermissions";
+import { createPublicSkillSnapshotSha256 } from "../shared/skills";
 import {
   runAgentLoop,
   type AgentLoopOptions,
@@ -1322,6 +1323,10 @@ function buildGoalMilestonePermissionPolicy(
               ...(selectedSkill.manifest.tools?.map((tool) => tool.name) ?? []),
             ]),
             allowedSkillNames: [selectedSkill.manifest.name],
+            allowedSkillSnapshotSha256ByName: {
+              [selectedSkill.manifest.name]:
+                createPublicSkillSnapshotSha256(selectedSkill),
+            },
             allowedSources: [
               ...(selectedSkill.manifest.tools?.length
                 ? [`skill:${selectedSkill.manifest.name}`]

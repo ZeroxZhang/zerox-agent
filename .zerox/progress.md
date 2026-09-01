@@ -14050,3 +14050,39 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   restoration. Caller-pinned Program/Harness, zero-vulnerability audit, and
   whitespace checks pass. Fresh exact-byte code and security PASS receipts
   remain mandatory before package acceptance and release.
+
+## 2026-09-02 - v3.9.2 terminal-stream and runtime-authority closure
+
+- Candidate `14aee8c6f584997b78a64e408dba389cd833e528` was rejected and no PASS
+  receipts were issued. The reviews exposed four shared contract gaps rather
+  than independent surface defects: model adapters could manufacture terminal
+  success at abrupt EOF, runtime Skill authority was not rebound as one public
+  immutable snapshot, exact tool arguments still crossed approval/audit
+  projections, and Plan/native recovery work could escape its serialized or
+  capability-bound commit boundary.
+- OpenAI-compatible, Gemini, custom-provider, and stream-processor adapters now
+  require a protocol terminal event and parse a final unterminated SSE frame.
+  Abrupt EOF is retryable; after bounded retries any meaningful partial output
+  is preserved as an output-limit continuation instead of being reported as a
+  completed answer or discarded.
+- Skill discovery binds canonical paths plus filesystem identities. Every
+  execution authority path force-refreshes and revalidates the current file,
+  public snapshot, and hidden runtime digest. Private MCP arguments,
+  environment values, URLs, and headers are excluded from model-visible,
+  persisted, and hash authority surfaces. Replanning from a selected Skill to
+  no Skill explicitly clears the Goal snapshot, input values, and permissions.
+- Approval IPC exposes only public request metadata. Durable exact-request
+  binding is now a per-install keyed HMAC that is stripped from public reads;
+  raw arguments remain sanitized on disk. Plan recovery reads and writes are
+  serialized per Plan, and the native helper scrubs a displaced pre-publish
+  transaction through the already-authorized descriptor without touching a
+  successfully swapped canonical file.
+- Focused regression suites pass `398/398`, the legacy compatibility corrections
+  pass `226/226`, and full `npm run verify` passes strict test type coverage
+  `435/435`, `326` current files / `3967` current tests with declared skips,
+  every restored Round2–Round12 lane, production build, Agent eval `26/26`, and
+  Memory eval `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`,
+  SQLite `3.53.2`, seven migrations, eight authority domains, renderer startup,
+  and Node ABI `137` restoration. Caller-pinned Program/Harness checks pass and
+  production audit reports zero vulnerabilities. Exact-byte dual review and
+  external package acceptance remain required before merge and release.

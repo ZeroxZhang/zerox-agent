@@ -912,6 +912,90 @@ describe("plan store parity", () => {
     ).resolves.toBe(true);
   });
 
+  it.each(["json", "sqlite"] as const)(
+    "serializes %s recovery writes with concurrent abandonment",
+    async (backend) => {
+      const configDir = path.join(tempDir, `projection-race-${backend}`);
+      const workspaceRoot = path.join(tempDir, `projection-race-workspace-${backend}`);
+      await mkdir(workspaceRoot, { recursive: true });
+      const storage = backend === "sqlite"
+        ? createStorageImpl({ dbPath: path.join(configDir, "zerox.db") })
+        : undefined;
+      if (storage) await storage.migrate();
+      try {
+        const initialStore = createPlanStore({ configDir, ...(storage ? { storage } : {}) });
+        const created = await initialStore.create({ ...createRecord(), workspaceRoot });
+        const artifact = createDiagnosticArtifact("safe");
+        const target = {
+          ...created,
+          status: "awaiting_input" as const,
+          actionGate: "needs_input" as const,
+          finalArtifact: artifact,
+        };
+        const description = await describePlanProjection(
+          { ...target, revision: created.revision + 1 },
+          artifact,
+        );
+        const pending = await initialStore.saveProjectionIntent(
+          target,
+          created.revision,
+          description,
+          "plan_synthesized",
+        );
+        let release!: () => void;
+        let started!: () => void;
+        const recoveryStarted = new Promise<void>((resolve) => { started = resolve; });
+        const recoveryRelease = new Promise<void>((resolve) => { release = resolve; });
+        const store = createPlanStore({
+          configDir,
+          ...(storage ? { storage } : {}),
+          projectionRecoveryWriter: {
+            async writePrepared(_plan, projection) {
+              started();
+              await recoveryRelease;
+              return {
+                path: projection.path,
+                sha256: projection.sha256,
+                writtenAt: "2026-09-02T00:00:00.000Z",
+              };
+            },
+            async write() { throw new Error("unused"); },
+            async verify() { return true; },
+          },
+        });
+        const read = store.get(pending.id);
+        await recoveryStarted;
+        let abandonmentSettled = false;
+        const abandonment = store.abandonProjectionIntent(
+          pending.id,
+          pending.revision,
+          "discarded",
+          "plan_projection_abandoned",
+        ).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        ).finally(() => { abandonmentSettled = true; });
+        await Promise.resolve();
+        expect(abandonmentSettled).toBe(false);
+        release();
+        const recovered = await read;
+        expect(recovered?.status).toBe("awaiting_input");
+        expect(recovered?.projectionIntent).toBeUndefined();
+        const abandonmentResult = await abandonment;
+        expect(abandonmentResult.ok).toBe(false);
+        expect(String(
+          abandonmentResult.ok ? "" : abandonmentResult.error,
+        )).toContain("不存在可放弃");
+        await expect(store.get(pending.id)).resolves.toMatchObject({
+          status: "awaiting_input",
+          revision: pending.revision,
+        });
+      } finally {
+        storage?.close();
+      }
+    },
+  );
+
   it("samples cancellation once at projection commit and returns the stored outcome", async () => {
     const configDir = path.join(tempDir, "projection-cancel-linearization");
     const workspaceRoot = path.join(tempDir, "projection-cancel-workspace");

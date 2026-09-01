@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import type { SkillRecord, SkillToolDefinition } from "../shared/skills";
+import { verifySkillRecordFilesystemAuthority } from "./skillRegistry";
 
 export type SkillExecutionContext = {
   taskInput: Record<string, unknown>;
@@ -83,6 +84,12 @@ export function createSkillExecutor(): SkillExecutor {
 
   return {
     async executeSkill(skill, context) {
+      if (
+        skill.rootIdentity &&
+        !(await verifySkillRecordFilesystemAuthority(skill))
+      ) {
+        return { ok: false, error: `Skill "${skill.manifest.name}" changed after authorization.` };
+      }
       if (skill.manifest.execution.mode !== "script") {
         return {
           ok: false,
@@ -134,6 +141,12 @@ export function createSkillExecutor(): SkillExecutor {
 
     async executeSkillTool(skill, tool, context) {
       try {
+        if (
+          skill.rootIdentity &&
+          !(await verifySkillRecordFilesystemAuthority(skill))
+        ) {
+          throw new Error("Skill changed after authorization.");
+        }
         const toolPath = await resolveEntrypoint(skill.rootDir, tool.entrypoint);
         const result = await runIsolatedSkillTool(toolPath, context);
 

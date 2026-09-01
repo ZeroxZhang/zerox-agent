@@ -14,6 +14,7 @@ import type {
   StreamingChatClient,
   StreamEvent as LowLevelStreamEvent,
 } from "../openAiCompatibleClient";
+import { IncompleteModelStreamError } from "../openAiCompatibleClient";
 import type { LLMProvider, CompleteRequest } from "./provider";
 import {
   modelServiceNoticeFromFinishReason,
@@ -79,7 +80,8 @@ export function createProviderChatClient(
         yield* completeResponseToStreamEvents(response);
         return;
       }
-      let finishReason = "stop";
+      let finishReason: string | undefined;
+      let terminalObserved = false;
       let modelServiceNotice: ModelServiceNotice | undefined;
       for await (const ev of provider.stream(req)) {
         if (ev.type === "text_delta") {
@@ -95,6 +97,7 @@ export function createProviderChatClient(
             arguments: ev.argumentsDelta ?? "",
           };
         } else if (ev.type === "done") {
+          terminalObserved = true;
           const candidateReason =
             ev.response?.finishReason ?? ev.finishReason ?? "stop";
           const candidateNotice =
@@ -111,13 +114,19 @@ export function createProviderChatClient(
           throw ev.error;
         }
       }
-      modelServiceNotice ??= modelServiceNoticeFromFinishReason(finishReason, {
+      if (!terminalObserved) {
+        throw new IncompleteModelStreamError(
+          `${provider.id} stream ended before a terminal event.`,
+        );
+      }
+      const terminalFinishReason = finishReason ?? "stop";
+      modelServiceNotice ??= modelServiceNoticeFromFinishReason(terminalFinishReason, {
         provider: provider.id,
         model: request.model,
       });
       yield {
         type: "done",
-        finishReason,
+        finishReason: terminalFinishReason,
         ...(modelServiceNotice ? { modelServiceNotice } : {}),
       };
     },

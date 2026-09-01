@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,7 +13,9 @@ describe("skill registry", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "building-agent-skills-"));
+    tempDir = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "building-agent-skills-")),
+    );
   });
 
   afterEach(async () => {

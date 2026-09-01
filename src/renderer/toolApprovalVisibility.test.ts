@@ -17,7 +17,7 @@ function createRequest(requiresConfirmation: boolean): ToolApprovalRequestPayloa
     id: "approval_1",
     taskId: "goal:1",
     taskName: "Goal",
-    request: { toolName: "shell_exec", args: { command: "npm publish" } },
+    request: { toolName: "shell_exec" },
     deniedReason: "confirmation required",
     argsSummary: { command: "npm publish" },
     risk: {

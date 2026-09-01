@@ -4501,6 +4501,26 @@ describe("app container goal drafts", () => {
         },
       ],
       status: "waiting_for_review",
+      selectedSkill: {
+        rootDir: "/skills/old-authority",
+        skillFile: "/skills/old-authority/SKILL.md",
+        body: "Old authority instructions.",
+        manifest: {
+          name: "old-authority",
+          displayName: "Old Authority",
+          description: "Must be removed by a no-Skill replan.",
+          version: "1.0.0",
+          execution: { mode: "agent", entrypoint: null },
+          inputs: [],
+          permissions: {
+            files: { read: ["/private/old"], write: ["/private/old"] },
+            shell: { commands: ["old-command"] },
+            web: { search: true, fetchDomains: ["old.example"] },
+            memory: { read: true, write: true },
+          },
+        },
+      },
+      selectedSkillInputValues: { oldSecretInput: "must-clear" },
       executionUsage: {
         iterations: 1,
         toolCalls: 1,
@@ -4574,6 +4594,11 @@ describe("app container goal drafts", () => {
       activePlanRef: { planId: candidate.id, mode: "direct" },
       executionUsage: { replans: 1 },
     });
+    expect(result.goal.selectedSkill).toBeUndefined();
+    expect(result.goal.selectedSkillInputValues).toBeUndefined();
+    const persistedAdoption = await container.agentGoalStore().get(goal.id);
+    expect(persistedAdoption?.selectedSkill).toBeUndefined();
+    expect(persistedAdoption?.selectedSkillInputValues).toBeUndefined();
     expect(result.goal.planHistory?.map((entry) => entry.outcome)).toEqual([
       "superseded",
       "active",

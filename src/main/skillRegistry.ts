@@ -1,13 +1,16 @@
-import { readdir, readFile, lstat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import {
   parseSkillMarkdown,
+  publicSkillSnapshotsEqual,
   type SkillDiscoveryError,
   type SkillDiscoveryResult,
   type SkillMcpRemoteServerConfig,
   type SkillMcpStdioServerConfig,
   type SkillRecord,
+  type SkillFilesystemIdentity,
+  type SkillSnapshotSource,
 } from "../shared/skills";
 
 export type SkillGraph = {
@@ -279,32 +282,28 @@ async function scanOneDirectory(
       continue;
     }
 
-    let rootDir = path.join(skillsDir, entry.name);
-
-    // Resolve symlinks to get the real directory
-    if (entry.isSymbolicLink()) {
-      try {
-        const linkStat = await lstat(rootDir);
-        if (linkStat.isSymbolicLink()) {
-          const realPath = await readFile(rootDir, "utf8").catch(() => "");
-          // Use readlink via lstat; for symlink dirs, construct the real path
-          rootDir = path.resolve(skillsDir, entry.name);
-        }
-      } catch {
-        // If we can't resolve, try the path as-is
-      }
-    }
-
-    const skillFile = path.join(rootDir, "SKILL.md");
+    const entryPath = path.join(skillsDir, entry.name);
 
     try {
+      const rootDir = await realpath(entryPath);
+      const rootStat = await stat(rootDir, { bigint: true });
+      if (!rootStat.isDirectory()) continue;
+      const skillFile = await realpath(path.join(rootDir, "SKILL.md"));
+      if (!isPathInside(rootDir, skillFile)) {
+        throw new Error("SKILL.md escapes the canonical Skill root.");
+      }
+      const skillFileStat = await stat(skillFile, { bigint: true });
+      if (!skillFileStat.isFile()) continue;
       const markdown = await readFile(skillFile, "utf8");
       const parsed = parseSkillMarkdown(markdown);
-      skills.push({
+      const skill: SkillRecord = {
         ...parsed,
         rootDir,
         skillFile,
-      });
+        rootIdentity: filesystemIdentity(rootStat),
+        skillFileIdentity: filesystemIdentity(skillFileStat),
+      };
+      skills.push(skill);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         continue;
@@ -319,4 +318,58 @@ async function scanOneDirectory(
   }
 
   return { skills, errors };
+}
+
+export async function verifySkillRecordFilesystemAuthority(
+  skill: SkillSnapshotSource,
+): Promise<boolean> {
+  if (!skill.rootIdentity || !skill.skillFileIdentity) return false;
+  try {
+    const canonicalRoot = await realpath(skill.rootDir);
+    const canonicalSkillFile = await realpath(skill.skillFile);
+    if (
+      canonicalRoot !== skill.rootDir ||
+      canonicalSkillFile !== skill.skillFile ||
+      !isPathInside(canonicalRoot, canonicalSkillFile)
+    ) {
+      return false;
+    }
+    const [rootStat, skillFileStat, markdown] = await Promise.all([
+      stat(canonicalRoot, { bigint: true }),
+      stat(canonicalSkillFile, { bigint: true }),
+      readFile(canonicalSkillFile, "utf8"),
+    ]);
+    const parsed = parseSkillMarkdown(markdown);
+    const current: SkillRecord = {
+      ...parsed,
+      rootDir: canonicalRoot,
+      skillFile: canonicalSkillFile,
+      rootIdentity: filesystemIdentity(rootStat),
+      skillFileIdentity: filesystemIdentity(skillFileStat),
+    };
+    return (
+      rootStat.isDirectory() &&
+      skillFileStat.isFile() &&
+      identitiesEqual(skill.rootIdentity, filesystemIdentity(rootStat)) &&
+      identitiesEqual(skill.skillFileIdentity, filesystemIdentity(skillFileStat)) &&
+      publicSkillSnapshotsEqual(current, skill)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function filesystemIdentity(value: { dev: bigint; ino: bigint }): SkillFilesystemIdentity {
+  return { dev: value.dev.toString(), ino: value.ino.toString() };
+}
+
+function identitiesEqual(
+  left: SkillFilesystemIdentity,
+  right: SkillFilesystemIdentity,
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function isPathInside(rootDir: string, candidate: string): boolean {
+  return candidate === rootDir || candidate.startsWith(`${rootDir}${path.sep}`);
 }

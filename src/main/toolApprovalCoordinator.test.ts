@@ -76,6 +76,41 @@ describe("tool approval coordinator", () => {
     });
   });
 
+  it("keeps exact tool arguments private to main across renderer IPC", async () => {
+    const sentinel = "TOOL_IPC_SECRET_74ab";
+    const sent: unknown[] = [];
+    const options = persistenceOptions();
+    const coordinator = createToolApprovalCoordinator({
+      ...options,
+      createId: () => "approval_private_args",
+      sendToRenderers(_channel, payload) {
+        sent.push(payload);
+      },
+    });
+    const approval = coordinator.requestUserApproval({
+      ...createRequest(),
+      request: {
+        toolName: "web_fetch",
+        args: {
+          url: "https://example.com/source",
+          headers: { authorization: sentinel },
+        },
+      },
+    });
+    await vi.waitFor(() => expect(coordinator.pendingSnapshot()).toHaveLength(1));
+    const durable = await options.store.getApprovalIntent("approval_private_args");
+    expect(JSON.stringify({
+      sent,
+      pending: coordinator.pendingSnapshot(),
+      durable,
+    })).not.toContain(sentinel);
+    expect(coordinator.pendingSnapshot()[0]?.request).toEqual({
+      toolName: "web_fetch",
+    });
+    await coordinator.resolveApproval({ id: "approval_private_args", approved: false });
+    await approval;
+  });
+
   it("persists the approval intent before publishing it to the renderer", async () => {
     const lifecycle: string[] = [];
     const coordinator = createToolApprovalCoordinator({
@@ -302,7 +337,7 @@ describe("tool approval coordinator", () => {
       .resolves.toMatchObject({
         taskName: expect.not.stringContaining("sk-sp-MUTATION-TASKNAME-SECRET"),
       });
-    expect(coordinator.pendingSnapshot()[0]?.taskName).toContain(
+    expect(coordinator.pendingSnapshot()[0]?.taskName).not.toContain(
       "sk-sp-MUTATION-TASKNAME-SECRET",
     );
     await coordinator.resolveApproval({ id: "approval_safe_task_name", approved: false });

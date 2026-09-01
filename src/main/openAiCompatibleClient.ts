@@ -116,6 +116,18 @@ export type StreamingChatClient = ChatClient & {
   ): AsyncIterable<StreamEvent>;
 };
 
+/**
+ * The transport ended before the provider supplied a protocol terminal event.
+ * Callers may retry the idempotent request and, after bounded retries, surface
+ * the already received deltas as an output-limit continuation.
+ */
+export class IncompleteModelStreamError extends Error {
+  constructor(message = "Model stream ended before a terminal event.") {
+    super(message);
+    this.name = "IncompleteModelStreamError";
+  }
+}
+
 export function createOpenAiCompatibleClient(options?: {
   fetch?: typeof fetch;
   timeoutMs?: number;
@@ -245,7 +257,8 @@ export function createOpenAiCompatibleClient(options?: {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let terminalFinishReason = "stop";
+      let terminalFinishReason: string | undefined;
+      let terminalObserved = false;
       let doneEmitted = false;
 
       // v3.6.0: SSE idle timeout per read (30 s). Prevents infinite hang when
@@ -253,7 +266,80 @@ export function createOpenAiCompatibleClient(options?: {
       const SSE_READ_IDLE_TIMEOUT_MS = 30_000;
 
       try {
-        let streamEnded = false;
+        const emitDataLine = async function* (
+          rawLine: string,
+        ): AsyncGenerator<StreamEvent, void, void> {
+          const trimmed = rawLine.trim();
+          if (!trimmed || !trimmed.startsWith("data:")) return;
+
+          const data = trimmed.slice(5).trimStart();
+          if (data === "[DONE]") {
+            terminalObserved = true;
+            terminalFinishReason ??= "stop";
+            return;
+          }
+
+          let chunk: {
+            choices?: Array<{
+              delta?: {
+                content?: string | null;
+                reasoning_content?: unknown;
+                reasoning?: unknown;
+                thinking?: unknown;
+                tool_calls?: Array<{
+                  index?: number;
+                  id?: string;
+                  type?: "function";
+                  function?: { name?: string; arguments?: string };
+                }>;
+              };
+              finish_reason?: string | null;
+            }>;
+          };
+          try {
+            chunk = JSON.parse(data) as typeof chunk;
+          } catch (error) {
+            throw new Error("LLM stream returned malformed JSON.", {
+              cause: error,
+            });
+          }
+
+          const delta = chunk.choices?.[0]?.delta;
+          const finishReason = chunk.choices?.[0]?.finish_reason;
+          const reasoningDelta = normalizeReasoningDelta(delta);
+          if (reasoningDelta) {
+            yield { type: "reasoning_delta", text: reasoningDelta };
+          }
+          if (delta?.content) {
+            yield { type: "content_delta", text: delta.content };
+          }
+          for (const tc of delta?.tool_calls ?? []) {
+            const index = normalizeStreamToolCallIndex(tc.index);
+            yield {
+              type: "tool_call_delta",
+              id: tc.id ?? "",
+              ...(index !== undefined ? { index } : {}),
+              name: tc.function?.name ?? "",
+              arguments: tc.function?.arguments ?? "",
+            };
+          }
+          if (finishReason) {
+            terminalObserved = true;
+            const currentNotice = terminalFinishReason
+              ? modelServiceNoticeFromFinishReason(terminalFinishReason, {
+                  model: request.model,
+                })
+              : undefined;
+            const candidateNotice = modelServiceNoticeFromFinishReason(
+              finishReason,
+              { model: request.model },
+            );
+            if (candidateNotice || !currentNotice) {
+              terminalFinishReason = finishReason;
+            }
+          }
+        };
+
         while (true) {
           // v3.6.0: Wrap reader.read() with an idle timeout that is
           // properly cleaned up after the race settles (CORE-02, NET-14).
@@ -271,7 +357,6 @@ export function createOpenAiCompatibleClient(options?: {
 
           const { done, value } = readResult;
           if (done) {
-            streamEnded = true;
             break;
           }
 
@@ -280,119 +365,37 @@ export function createOpenAiCompatibleClient(options?: {
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith("data:")) continue;
-
-            const data = trimmed.slice(5).trimStart();
-            if (data === "[DONE]") {
-              streamEnded = true;
-              // v3.6.0: Flush final UTF-8 bytes from TextDecoder before done
-              // (CORE-01). This ensures multi-byte CJK characters split across
-              // chunks are not truncated.
-              if (buffer.trim()) {
-                const final = decoder.decode();
-                if (final) buffer += final;
-              }
-              if (!doneEmitted) {
-                doneEmitted = true;
-                const modelServiceNotice =
-                  modelServiceNoticeFromFinishReason(terminalFinishReason, {
-                    model: request.model,
-                  });
-                yield {
-                  type: "done",
-                  finishReason: terminalFinishReason,
-                  ...(modelServiceNotice ? { modelServiceNotice } : {}),
-                };
-              }
-              return;
+            for await (const event of emitDataLine(line)) {
+              yield event;
             }
+          }
 
-            try {
-              const chunk = JSON.parse(data) as {
-                choices?: Array<{
-                  delta?: {
-                    content?: string | null;
-                    reasoning_content?: unknown;
-                    reasoning?: unknown;
-                    thinking?: unknown;
-                    tool_calls?: Array<{
-                      index?: number;
-                      id?: string;
-                      type?: "function";
-                      function?: { name?: string; arguments?: string };
-                    }>;
-                  };
-                  finish_reason?: string | null;
-                }>;
-              };
-              const delta = chunk.choices?.[0]?.delta;
-              const finishReason = chunk.choices?.[0]?.finish_reason;
-              const reasoningDelta = normalizeReasoningDelta(delta);
+          if (terminalObserved && trimmedContainsDone(lines)) break;
+        }
 
-              if (reasoningDelta) {
-                yield { type: "reasoning_delta", text: reasoningDelta };
-              }
-
-              if (delta?.content) {
-                yield { type: "content_delta", text: delta.content };
-              }
-
-              if (delta?.tool_calls?.length) {
-                for (const tc of delta.tool_calls) {
-                  const index = normalizeStreamToolCallIndex(tc.index);
-                  yield {
-                    type: "tool_call_delta",
-                    id: tc.id ?? "",
-                    ...(index !== undefined ? { index } : {}),
-                    name: tc.function?.name ?? "",
-                    arguments: tc.function?.arguments ?? "",
-                  };
-                }
-              }
-
-              // v3.6.0: handle finish_reason=length by emitting a special
-              // done reason so the caller can issue a continuation (CORE-03).
-              if (finishReason) {
-                streamEnded = true;
-                const currentNotice =
-                  modelServiceNoticeFromFinishReason(terminalFinishReason, {
-                    model: request.model,
-                  });
-                const candidateNotice =
-                  modelServiceNoticeFromFinishReason(finishReason, {
-                    model: request.model,
-                  });
-                if (candidateNotice || !currentNotice) {
-                  terminalFinishReason = finishReason;
-                }
-              }
-            } catch (error) {
-              throw new Error("LLM stream returned malformed JSON.", {
-                cause: error,
-              });
+        // Flush the decoder into the SSE buffer, then parse a final event even
+        // when the provider omitted the optional trailing newline.
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+          for (const line of buffer.split("\n")) {
+            for await (const event of emitDataLine(line)) {
+              yield event;
             }
           }
         }
-
-        // v3.6.0: Flush final UTF-8 bytes from TextDecoder after loop exit
-        // (CORE-01). If the stream ended without [DONE] and there were
-        // incomplete multi-byte characters buffered in the decoder, flush
-        // them now so they appear as a final content_delta.
-        if (streamEnded) {
-          const final = decoder.decode();
-          if (final.length > 0) {
-            yield { type: "content_delta", text: final };
-          }
+        if (!terminalObserved) {
+          throw new IncompleteModelStreamError();
         }
         if (!doneEmitted) {
+          const finishReason = terminalFinishReason ?? "stop";
           const modelServiceNotice = modelServiceNoticeFromFinishReason(
-            terminalFinishReason,
+            finishReason,
             { model: request.model },
           );
+          doneEmitted = true;
           yield {
             type: "done",
-            finishReason: terminalFinishReason,
+            finishReason,
             ...(modelServiceNotice ? { modelServiceNotice } : {}),
           };
         }
@@ -401,6 +404,10 @@ export function createOpenAiCompatibleClient(options?: {
       }
     },
   };
+}
+
+function trimmedContainsDone(lines: string[]): boolean {
+  return lines.some((line) => line.trim().replace(/^data:\s*/, "") === "[DONE]");
 }
 
 function normalizeReasoningContent(message: {

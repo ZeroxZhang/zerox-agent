@@ -381,7 +381,12 @@ export type GoalRuntimeCheckpoint = {
 
 export type GoalSelectedSkill = Pick<
   PublicSkillSnapshot,
-  "manifest" | "body" | "rootDir" | "skillFile"
+  | "manifest"
+  | "body"
+  | "rootDir"
+  | "skillFile"
+  | "rootIdentity"
+  | "skillFileIdentity"
 >;
 
 export type Goal = {

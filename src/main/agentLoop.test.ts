@@ -11,6 +11,7 @@ import type {
   ToolCall,
   ToolDefinition,
 } from "./openAiCompatibleClient";
+import { IncompleteModelStreamError } from "./openAiCompatibleClient";
 import type {
   ToolResultOffloadStore,
   ToolResultOffloadWriteInput,
@@ -3003,6 +3004,39 @@ describe("agent loop", () => {
     expect(completeCalls).toBe(1);
     expect(executions).toBe(0);
   });
+
+  it("retries abrupt EOF and preserves the final partial output as a continuation", async () => {
+    let streamCalls = 0;
+    let completeCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        throw new Error("partial streams must not fall back to non-streaming completion");
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        yield { type: "content_delta", text: `partial-${streamCalls}` };
+        throw new IncompleteModelStreamError();
+      },
+    };
+    const result = await runAgentLoop(
+      [{ role: "user", content: "write a long answer" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      },
+    );
+    expect(result).toMatchObject({
+      status: "paused",
+      summary: "partial-3",
+      continuation: { reason: "provider_output_limit" },
+      modelServiceNotice: { kind: "output_limit" },
+    });
+    expect(streamCalls).toBe(3);
+    expect(completeCalls).toBe(0);
+  }, 10_000);
 
   it("preserves partial streamed output and pauses on an output limit", async () => {
     const noticeCanary = "provider-notice-canary";

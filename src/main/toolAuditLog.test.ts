@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -49,7 +49,7 @@ describe("tool audit log", () => {
       },
       createdAt: "2026-06-05T08:00:00.000Z",
     });
-    expect(first.requestFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.requestFingerprint).toBeUndefined();
     await expect(auditLog.get("audit_1")).resolves.toEqual(first);
     await expect(auditLog.verifyAuthorizationReceipt({
       auditEventId: "audit_1",
@@ -139,7 +139,39 @@ describe("tool audit log", () => {
     expect(serialized).not.toMatch(
       /password@example|query-secret|nested-secret|cookie-secret|decision-secret/,
     );
+    expect(event.requestFingerprint).toBeUndefined();
+    const durable = await readFile(path.join(configDir, "tool-audit.jsonl"), "utf8");
+    expect(durable).not.toMatch(
+      /password@example|query-secret|nested-secret|cookie-secret|decision-secret/,
+    );
+    expect(durable).toMatch(/"requestFingerprint":"[0-9a-f]{64}"/);
     await expect(auditLog.list({ limit: 1 })).resolves.toEqual([event]);
+  });
+
+  it("does not expose a comparable verifier for different secret arguments", async () => {
+    let id = 0;
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => `audit_private_${++id}`,
+    });
+    const append = (secret: string) => auditLog.append({
+      taskId: "task_private",
+      request: {
+        toolName: "web_fetch",
+        args: { url: "https://example.test", headers: { authorization: secret } },
+      },
+      decision: { allowed: true, reason: "approved" },
+    });
+    const events = await Promise.all([
+      append("PRIVATE_TOOL_SECRET_ONE"),
+      append("PRIVATE_TOOL_SECRET_TWO"),
+    ]);
+    expect(events.every((event) => event.requestFingerprint === undefined)).toBe(true);
+    expect(JSON.stringify(await auditLog.list({ limit: 10 }))).not.toContain(
+      "PRIVATE_TOOL_SECRET",
+    );
+    const durable = await readFile(path.join(configDir, "tool-audit.jsonl"), "utf8");
+    expect(durable).not.toContain("PRIVATE_TOOL_SECRET");
   });
 
   describe.each(["sqlite", "dual"] as StorageBackend[])("backend=%s", (backend) => {

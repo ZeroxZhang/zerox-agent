@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   ToolAuditEvent,
@@ -48,13 +48,16 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
   const backend: StorageBackend = options.backend ?? "json";
   const auditPath = path.join(options.configDir, "tool-audit.jsonl");
   const receiptClaimsDir = path.join(options.configDir, "tool-audit-receipt-claims");
+  const receiptMacKeyPath = path.join(options.configDir, ".tool-audit-receipt.key");
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? (() => new Date());
 
   // v3.6.0: Maximum length for sensitive fields in audit log (SEC-18).
   const MAX_AUDIT_FIELD_LENGTH = 200;
 
-  function buildEvent(input: ToolAuditEventInput): ToolAuditEvent {
+  let receiptMacKeyPromise: Promise<Buffer> | null = null;
+
+  async function buildEvent(input: ToolAuditEventInput): Promise<ToolAuditEvent> {
     return {
       taskId: redactCredentialString(input.taskId),
       request: {
@@ -72,21 +75,24 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
       },
       id: createId(),
       createdAt: now().toISOString(),
-      requestFingerprint: fingerprintAuthorizationRequest(input.taskId, input.request),
+      requestFingerprint: await fingerprintAuthorizationRequest(
+        input.taskId,
+        input.request,
+      ),
     };
   }
 
   // --- legacy JSON implementation (unchanged) ---
   async function jsonAppend(input: ToolAuditEventInput): Promise<ToolAuditEvent> {
-    const event = buildEvent(input);
+    const event = await buildEvent(input);
     await writeJsonEvent(event);
-    return event;
+    return publicAuditEvent(event);
   }
   async function writeJsonEvent(event: ToolAuditEvent): Promise<void> {
     await mkdir(options.configDir, { recursive: true });
     await writeFile(auditPath, `${JSON.stringify(event)}\n`, { encoding: "utf8", flag: "a" });
   }
-  async function jsonList(listOptions?: { limit?: number }): Promise<ToolAuditEvent[]> {
+  async function jsonListRaw(listOptions?: { limit?: number }): Promise<ToolAuditEvent[]> {
     const limit = listOptions?.limit ?? 50;
     try {
       const raw = await readFile(auditPath, { encoding: "utf8" });
@@ -96,9 +102,16 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
       throw error;
     }
   }
-  async function jsonGet(id: string): Promise<ToolAuditEvent | null> {
-    return (await jsonList({ limit: Number.MAX_SAFE_INTEGER }))
+  async function jsonGetRaw(id: string): Promise<ToolAuditEvent | null> {
+    return (await jsonListRaw({ limit: Number.MAX_SAFE_INTEGER }))
       .find((event) => event.id === id) ?? null;
+  }
+  async function jsonList(listOptions?: { limit?: number }): Promise<ToolAuditEvent[]> {
+    return (await jsonListRaw(listOptions)).map(publicAuditEvent);
+  }
+  async function jsonGet(id: string): Promise<ToolAuditEvent | null> {
+    const event = await jsonGetRaw(id);
+    return event ? publicAuditEvent(event) : null;
   }
 
   async function verifyAuthorizationReceipt(input: {
@@ -113,27 +126,26 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
       && event.taskId === input.taskId
       && event.request.toolName === input.request.toolName
       && event.requestFingerprint
-        === fingerprintAuthorizationRequest(input.taskId, input.request),
+        ? safeFingerprintEqual(
+            event.requestFingerprint,
+            await fingerprintAuthorizationRequest(input.taskId, input.request),
+          )
+        : false,
     );
   }
 
-  function buildReceiptConsumptionEvent(input: {
+  async function buildReceiptConsumptionEvent(input: {
     auditEventId: string;
     taskId: string;
     request: ToolAuditEventInput["request"];
-  }): ToolAuditEvent {
-    const requestFingerprint = fingerprintAuthorizationRequest(
-      input.taskId,
-      input.request,
-    );
+  }): Promise<ToolAuditEvent> {
     return {
-      ...buildEvent({
+      ...await buildEvent({
         taskId: input.taskId,
         request: {
           toolName: "authorization_receipt_dispatch",
           args: {
             auditEventId: input.auditEventId,
-            requestFingerprint,
           },
         },
         decision: {
@@ -154,7 +166,7 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
     // A pre-marker dual build wrote the deterministic claim to its JSONL
     // shadow. Honor that durable evidence before creating the shared marker so
     // a backend downgrade cannot revive an already consumed receipt.
-    if (await jsonGet(claim.id)) return false;
+    if (await jsonGetRaw(claim.id)) return false;
     await mkdir(receiptClaimsDir, { recursive: true });
     try {
       await writeFile(
@@ -174,11 +186,11 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
       append: jsonAppend,
       get: jsonGet,
       verifyAuthorizationReceipt(input) {
-        return verifyAuthorizationReceipt(input, jsonGet);
+        return verifyAuthorizationReceipt(input, jsonGetRaw);
       },
       async consumeAuthorizationReceipt(input) {
-        if (!await verifyAuthorizationReceipt(input, jsonGet)) return false;
-        const claim = buildReceiptConsumptionEvent(input);
+        if (!await verifyAuthorizationReceipt(input, jsonGetRaw)) return false;
+        const claim = await buildReceiptConsumptionEvent(input);
         if (!await claimReceiptConsumption(claim)) return false;
         await writeJsonEvent(claim);
         return true;
@@ -196,15 +208,16 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
   return {
     async append(input) {
       shadowQueue.assertOpen();
-      const event = buildEvent(input);
+      const event = await buildEvent(input);
       repo.append(event); // sync, hot path
       if (backend === "dual") {
         void shadowQueue.enqueue(() => writeJsonEvent(event));
       }
-      return event;
+      return publicAuditEvent(event);
     },
     async get(id) {
-      return repo.get(id);
+      const event = repo.get(id);
+      return event ? publicAuditEvent(event) : null;
     },
     verifyAuthorizationReceipt(input) {
       return verifyAuthorizationReceipt(input, async (id) => repo.get(id));
@@ -213,7 +226,7 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
       if (!await verifyAuthorizationReceipt(input, async (id) => repo.get(id))) {
         return false;
       }
-      const claim = buildReceiptConsumptionEvent(input);
+      const claim = await buildReceiptConsumptionEvent(input);
       if (!await claimReceiptConsumption(claim)) return false;
       const consumed = repo.appendIfAbsent(claim);
       if (consumed && backend === "dual") {
@@ -223,7 +236,7 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
     },
     async list(listOptions) {
       const limit = listOptions?.limit ?? 50;
-      return repo.list({ limit });
+      return repo.list({ limit }).map(publicAuditEvent);
     },
     async flushShadowWrites(flushOptions) {
       await shadowQueue.drain(flushOptions);
@@ -243,15 +256,58 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
     );
   }
 
-  function fingerprintAuthorizationRequest(
+  async function fingerprintAuthorizationRequest(
     taskId: string,
     request: ToolAuditEventInput["request"],
-  ): string {
-    return createConversationRequestFingerprint({
+  ): Promise<string> {
+    const canonicalFingerprint = createConversationRequestFingerprint({
       schemaVersion: 1,
       taskId,
       request,
     });
+    return createHmac("sha256", await loadReceiptMacKey())
+      .update(canonicalFingerprint)
+      .digest("hex");
+  }
+
+  function loadReceiptMacKey(): Promise<Buffer> {
+    receiptMacKeyPromise ??= (async () => {
+      await mkdir(options.configDir, { recursive: true });
+      const generated = randomBytes(32);
+      try {
+        const handle = await open(receiptMacKeyPath, "wx", 0o600);
+        try {
+          await handle.writeFile(generated);
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        return generated;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const existing = await readFile(receiptMacKeyPath);
+        if (existing.length !== 32) {
+          throw new Error("Tool authorization receipt key is invalid.");
+        }
+        return existing;
+      }
+    })();
+    return receiptMacKeyPromise;
+  }
+
+  function publicAuditEvent(event: ToolAuditEvent): ToolAuditEvent {
+    const { requestFingerprint: _privateReceiptMac, ...publicEvent } = event;
+    return structuredClone(publicEvent);
+  }
+
+  function safeFingerprintEqual(left: string, right: string): boolean {
+    const leftBytes = Buffer.from(left, "hex");
+    const rightBytes = Buffer.from(right, "hex");
+    return (
+      leftBytes.length === rightBytes.length &&
+      leftBytes.length > 0 &&
+      timingSafeEqual(leftBytes, rightBytes)
+    );
   }
 
   function truncateAuditValue(value: unknown): unknown {

@@ -18,7 +18,7 @@ import { buildPrimaryRunContext } from "../shared/agentWorkspace";
 import { getArtifactProvenancePath } from "../shared/agentArtifactProvenance";
 import type { LocalFileOrganizationTransaction } from "./localFileOrganizer";
 import type { MemoryRecord } from "../shared/memory";
-import type { SkillDiscoveryResult } from "../shared/skills";
+import { discoverSkills } from "./skillRegistry";
 import {
   createProcessSandboxProvider,
   type ProcessSandboxPolicy,
@@ -518,30 +518,11 @@ describe("agent tool executor", () => {
       ].join("\n"),
       "utf8",
     );
-    const discovery: SkillDiscoveryResult = {
-      skills: [
-        {
-          manifest: {
-            name: "onepager",
-            displayName: "onepager",
-            description: "Build a one-page artifact.",
-            version: "0.1.0",
-            execution: { mode: "agent", entrypoint: null },
-            inputs: [],
-            permissions: {
-              files: { read: [], write: [] },
-              shell: { commands: [] },
-              web: { search: false, fetchDomains: [] },
-              memory: { read: true, write: false },
-            },
-          },
-          body: "Use the onepager steps.",
-          rootDir: skillRoot,
-          skillFile,
-        },
-      ],
-      errors: [],
-    };
+    const discovery = await discoverSkills({
+      skillsDir: path.join(tempDir, "skills"),
+      skipSystemDirs: true,
+      forceRefresh: true,
+    });
     const executor = createAgentToolExecutor({
       discoverSkills: async () => discovery,
     });

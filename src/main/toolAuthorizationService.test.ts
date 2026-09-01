@@ -76,7 +76,6 @@ describe("tool authorization service", () => {
           reason: "文件路径位于已授权目录内。",
         },
         createdAt: "2026-06-05T08:01:00.000Z",
-        requestFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
       },
     });
     await expect(auditLog.list()).resolves.toHaveLength(1);

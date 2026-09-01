@@ -116,7 +116,11 @@ import type { ExecutionContextMemoryScope } from "../shared/executionContextPack
 import type { MemoryRecord, MemorySearchResult } from "../shared/memory";
 import type { AgentContextUsage } from "../shared/contextUsage";
 import type { NativeToolDescriptor } from "../shared/nativeCapabilities";
-import type { SkillDiscoveryResult, SkillRecord } from "../shared/skills";
+import {
+  createPublicSkillSnapshotSha256,
+  type SkillDiscoveryResult,
+  type SkillRecord,
+} from "../shared/skills";
 import type {
   WorkspaceRunEventInput,
   WorkspaceRunEvent,
@@ -6396,6 +6400,12 @@ function createChatRuntimeTask(options: {
       allowedSkillNames: options.selectedSkill
         ? [options.selectedSkill.manifest.name]
         : [],
+      allowedSkillSnapshotSha256ByName: options.selectedSkill
+        ? {
+            [options.selectedSkill.manifest.name]:
+              createPublicSkillSnapshotSha256(options.selectedSkill),
+          }
+        : {},
       allowedSources: options.selectedSkill
         ? [
             ...(options.selectedSkill.manifest.tools?.length

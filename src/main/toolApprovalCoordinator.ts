@@ -406,15 +406,28 @@ export function createToolApprovalCoordinator(options: {
   }
 
   function createRequestPayload(request: ToolUserApprovalRequest): ToolApprovalRequestPayload {
+    const argsSummary = sanitizeToolApprovalIntentSummary(
+      summarizeToolApprovalArgs(request.request),
+    );
+    const risk = request.risk ?? classifyToolApprovalRisk(request);
     return {
       id: createId(),
       revision: 1,
       taskId: request.taskId,
-      taskName: request.taskName,
-      request: request.request,
-      deniedReason: request.deniedReason,
-      argsSummary: summarizeToolApprovalArgs(request.request),
-      risk: request.risk ?? classifyToolApprovalRisk(request),
+      taskName: sanitizeToolApprovalIntentLabel(request.taskName),
+      request: {
+        toolName: request.request.toolName,
+        ...(request.request.source ? { source: request.request.source } : {}),
+      },
+      deniedReason: sanitizeToolApprovalIntentLabel(request.deniedReason),
+      argsSummary,
+      risk: {
+        ...risk,
+        reason: sanitizeToolApprovalIntentLabel(risk.reason),
+        affectedTargets: risk.affectedTargets.map((target) =>
+          sanitizeToolApprovalIntentLabel(target)
+        ),
+      },
       createdAt: now(),
       ...(request.causalRef ? { causalRef: structuredClone(request.causalRef) } : {}),
     };
@@ -430,11 +443,11 @@ export function createToolApprovalCoordinator(options: {
       revision: 1,
       state: "pending",
       requestFingerprint: createConversationRequestFingerprint({
+        schemaVersion: 2,
+        approvalId: payload.id,
         taskId: payload.taskId,
         toolName: payload.request.toolName,
         source: payload.request.source,
-        args: payload.request.args,
-        deniedReason: payload.deniedReason,
       }),
       taskId: payload.taskId,
       taskName: sanitizeToolApprovalIntentLabel(payload.taskName),

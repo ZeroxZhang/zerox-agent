@@ -94,6 +94,13 @@ export type ParsedSkillMarkdown = {
 export type SkillRecord = ParsedSkillMarkdown & {
   rootDir: string;
   skillFile: string;
+  rootIdentity?: SkillFilesystemIdentity;
+  skillFileIdentity?: SkillFilesystemIdentity;
+};
+
+export type SkillFilesystemIdentity = {
+  dev: string;
+  ino: string;
 };
 
 export type PublicSkillMcpStdioServerConfig = Omit<
@@ -144,6 +151,12 @@ export function createPublicSkillSnapshot(
   return {
     rootDir: skill.rootDir,
     skillFile: skill.skillFile,
+    ...(skill.rootIdentity
+      ? { rootIdentity: { ...skill.rootIdentity } }
+      : {}),
+    ...(skill.skillFileIdentity
+      ? { skillFileIdentity: { ...skill.skillFileIdentity } }
+      : {}),
     body: skill.body,
     manifest: {
       name: manifest.name,
@@ -227,6 +240,16 @@ export function createPublicSkillSnapshotSha256(
   return sha256Hex(
     new TextEncoder().encode(
       JSON.stringify(createPublicSkillSnapshot(skill)),
+    ),
+  );
+}
+
+export function createPublicSkillManifestSha256(
+  skill: SkillSnapshotSource,
+): string {
+  return sha256Hex(
+    new TextEncoder().encode(
+      JSON.stringify(createPublicSkillSnapshot(skill).manifest),
     ),
   );
 }

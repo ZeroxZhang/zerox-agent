@@ -3,10 +3,11 @@ import {
   validatePathInsideRunContext,
   type AgentRunContext,
 } from "../shared/agentWorkspace";
-import type {
-  SkillInput,
-  SkillRecord,
-  SkillSnapshotSource,
+import {
+  createPublicSkillManifestSha256,
+  type SkillInput,
+  type SkillRecord,
+  type SkillSnapshotSource,
 } from "../shared/skills";
 import {
   transitionSkillExecution,
@@ -258,7 +259,7 @@ function createInitialSnapshot(
       skillFile: input.skill.skillFile,
       rootDir: input.skill.rootDir,
       bodyHash: hashValue(input.skill.body),
-      manifestHash: hashValue(JSON.stringify(input.skill.manifest)),
+      manifestHash: `sha256:${createPublicSkillManifestSha256(input.skill)}`,
     },
     executionPolicy: input.executionPolicy ?? {
       checkpointEveryTurns: Math.max(

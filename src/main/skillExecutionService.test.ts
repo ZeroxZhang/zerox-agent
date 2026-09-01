@@ -64,6 +64,38 @@ describe("SkillExecutionService", () => {
     });
   });
 
+  it("binds durable provenance only to the public Skill manifest", async () => {
+    const first = createSkillRecord();
+    const second = createSkillRecord();
+    first.manifest.mcpServers = [{
+      name: "private",
+      transport: "http",
+      url: "https://example.test/PRIVATE_SECRET_ONE",
+      headers: { authorization: "PRIVATE_SECRET_ONE" },
+    }];
+    second.manifest.mcpServers = [{
+      name: "private",
+      transport: "http",
+      url: "https://example.test/PRIVATE_SECRET_TWO",
+      headers: { authorization: "PRIVATE_SECRET_TWO" },
+    }];
+    const execute = (skill: SkillRecord, id: string) =>
+      createSkillExecutionService({ createId: () => id }).execute({
+        skill,
+        runAgentSkill: async () => ({ ok: true, result: {} }),
+      });
+    const [left, right] = await Promise.all([
+      execute(first, "public_hash_1"),
+      execute(second, "public_hash_2"),
+    ]);
+    expect(left.snapshot.skill.manifestHash).toBe(
+      right.snapshot.skill.manifestHash,
+    );
+    expect(JSON.stringify([left.snapshot, right.snapshot])).not.toContain(
+      "PRIVATE_SECRET",
+    );
+  });
+
   it("resolves required missing skill inputs deterministically", () => {
     const runContext = buildPrimaryRunContext({
       workspaceId: "workspace_1",

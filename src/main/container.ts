@@ -1211,7 +1211,7 @@ export function createAppContainer(options: {
         memoryStore: memoryStore(),
         chatSessionStore: chatSessionStore(),
         toolResultOffloadStore: toolResultOffloadStore(),
-        discoverSkills: () => discoverSkills({ skillsDir }),
+        discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
         historyIndexStore: historyIndexStore(),
         processSandbox: processSandboxProvider(),
       });
@@ -2715,9 +2715,9 @@ export function createAppContainer(options: {
         investigator: createPlanInvestigatorService({
           toolExecutor: createToolExecutor(),
           toolAuthorizationService: toolAuthorizationService(),
-          discoverSkills: () => discoverSkills({ skillsDir }),
+          discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
         }),
-        discoverSkills: () => discoverSkills({ skillsDir }),
+        discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
         availableToolNames: () =>
           createToolExecutor()
             .getRegistry()
@@ -3164,7 +3164,7 @@ export function createAppContainer(options: {
       createAgentBootstrapService({
         modelSettingsStore,
         taskStore: scheduledTaskStore(),
-        discoverSkills: () => discoverSkills({ skillsDir }),
+        discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
         testModelConnection: () => modelConnectionService().testConnection(),
         runScheduledTask: (taskId: string) =>
           runAgentTask(taskId, { writeChatTranscript: false }),
@@ -3180,7 +3180,7 @@ export function createAppContainer(options: {
         taskStore: scheduledTaskStore(),
         runStore: agentRunStore(),
         resolveSkill: async (skillName: string) => {
-          const result = await discoverSkills({ skillsDir });
+          const result = await discoverSkills({ skillsDir, forceRefresh: true });
           return (
             result.skills.find((skill) => skill.manifest.name === skillName) ?? null
           );
@@ -3289,7 +3289,9 @@ export function createAppContainer(options: {
           resolveSelectedSkill: async (goal) => {
             const skillAuthority = verifySelectedSkillAuthority({
               selectedSkill: goal.selectedSkill,
-              discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+              discoveredSkills: (
+                await discoverSkills({ skillsDir, forceRefresh: true })
+              ).skills,
             });
             if (!skillAuthority.ok) {
               throw new Error(
@@ -3535,7 +3537,7 @@ export function createAppContainer(options: {
             ...taskRunOptions,
             writeChatTranscript: false,
           }),
-        discoverSkills: () => discoverSkills({ skillsDir }),
+        discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
         workspaceService: agentWorkspaceService(),
         toolExecutor: createToolExecutor(),
         toolAuthorizationService: toolAuthorizationService(),
@@ -4502,7 +4504,9 @@ export function createAppContainer(options: {
             selectedSkill: plan.selectedSkill,
             snapshotSha256: plan.skillDecision.snapshotSha256,
             requireDigest: true,
-            discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+            discoveredSkills: (
+              await discoverSkills({ skillsDir, forceRefresh: true })
+            ).skills,
           });
           if (!skillAuthority.ok) {
             return {
@@ -4548,7 +4552,9 @@ export function createAppContainer(options: {
       if ((plan.schemaVersion ?? 1) < 2 && plan.selectedSkill) {
         const skillAuthority = verifySelectedSkillAuthority({
           selectedSkill: plan.selectedSkill,
-          discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+          discoveredSkills: (
+            await discoverSkills({ skillsDir, forceRefresh: true })
+          ).skills,
         });
         if (!skillAuthority.ok) {
           return {
@@ -5552,7 +5558,9 @@ export function createAppContainer(options: {
         selectedSkill: plan.selectedSkill,
         snapshotSha256: plan.skillDecision?.snapshotSha256,
         requireDigest: Boolean(plan.selectedSkill),
-        discoveredSkills: (await discoverSkills({ skillsDir })).skills,
+        discoveredSkills: (
+          await discoverSkills({ skillsDir, forceRefresh: true })
+        ).skills,
       });
       if (!adoptedSkillAuthority.ok) {
         return {
@@ -5758,14 +5766,12 @@ export function createAppContainer(options: {
           stopReason: undefined,
           runtimeCheckpoint: undefined,
           executionModelBinding: selectPlanExecutionModelBinding(plan),
-          ...(adoptedSkillAuthority.selectedSkill
-            ? {
-                selectedSkill: structuredClone(
-                  adoptedSkillAuthority.selectedSkill,
-                ),
-              }
-            : {}),
-          selectedSkillInputValues: plan.selectedSkillInputValues,
+          selectedSkill: adoptedSkillAuthority.selectedSkill
+            ? structuredClone(adoptedSkillAuthority.selectedSkill)
+            : undefined,
+          selectedSkillInputValues: adoptedSkillAuthority.selectedSkill
+            ? plan.selectedSkillInputValues
+            : undefined,
           executionUsage: {
             ...goal.executionUsage,
             replans: goal.executionUsage.replans + 1,
@@ -6231,7 +6237,7 @@ export function createAppContainer(options: {
         userDataPath: app.getPath("userData"),
         version: app.getVersion(),
       }),
-    discoverSkills: () => discoverSkills({ skillsDir }),
+    discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
     modelSettingsStore,
     modelConnectionService,
     modelRouter,

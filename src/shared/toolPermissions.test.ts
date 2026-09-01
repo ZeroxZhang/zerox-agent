@@ -646,6 +646,25 @@ describe("tool authorization", () => {
       reason: "skill_load 已绑定到本次运行授权技能 onepager。",
     });
 
+    const digest = "a".repeat(64);
+    const digestBoundPolicy = {
+      ...policy,
+      tools: {
+        allowedNames: ["skill_load"],
+        allowedSources: [],
+        allowedSkillNames: ["onepager"],
+        allowedSkillSnapshotSha256ByName: { onepager: digest },
+      },
+    };
+    expect(authorizeToolCall(digestBoundPolicy, {
+      toolName: "skill_load",
+      args: { skillName: "onepager", skillSnapshotSha256: "b".repeat(64) },
+    })).toMatchObject({ allowed: false });
+    expect(authorizeToolCall(digestBoundPolicy, {
+      toolName: "skill_load",
+      args: { skillName: "onepager", skillSnapshotSha256: digest },
+    })).toMatchObject({ allowed: true });
+
     expect(
       authorizeToolCall(
         {

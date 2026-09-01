@@ -66,6 +66,7 @@ export type TaskPermissionPolicy = {
     allowedNames: string[];
     allowedSources: string[];
     allowedSkillNames?: string[];
+    allowedSkillSnapshotSha256ByName?: Record<string, string>;
   };
 };
 
@@ -89,7 +90,7 @@ export type ToolAuditEventInput = {
 export type ToolAuditEvent = ToolAuditEventInput & {
   id: string;
   createdAt: string;
-  /** SHA-256 over the exact unsanitized task/request authorization input. */
+  /** Internal keyed receipt MAC; persistence adapters omit it from public projections. */
   requestFingerprint?: string;
 };
 
@@ -793,6 +794,15 @@ function authorizeSkillLazyLoadTool(
     return deny(`${toolName} 请求的技能 ${skillName} 不在本次运行授权技能内。`);
   }
 
+  const requiredSnapshot =
+    policy.tools.allowedSkillSnapshotSha256ByName?.[skillName];
+  if (
+    requiredSnapshot &&
+    String(args.skillSnapshotSha256 ?? "") !== requiredSnapshot
+  ) {
+    return deny(`${toolName} 请求的技能快照与本次运行授权不一致。`);
+  }
+
   return allow(`${toolName} 已绑定到本次运行授权技能 ${skillName}。`);
 }
 
@@ -914,6 +924,11 @@ function normalizeDynamicToolPolicy(
       .map((skillName) => skillName.trim())
       .filter(Boolean),
   );
+  const allowedSkillSnapshotSha256ByName = Object.fromEntries(
+    Object.entries(tools?.allowedSkillSnapshotSha256ByName ?? {})
+      .map(([name, digest]) => [name.trim(), String(digest).trim()] as const)
+      .filter(([name, digest]) => Boolean(name) && /^[a-f0-9]{64}$/.test(digest)),
+  );
 
   if (!allowedNames.length && !allowedSources.length && !allowedSkillNames.length) {
     return null;
@@ -923,6 +938,9 @@ function normalizeDynamicToolPolicy(
     allowedNames,
     allowedSources,
     ...(allowedSkillNames.length ? { allowedSkillNames } : {}),
+    ...(Object.keys(allowedSkillSnapshotSha256ByName).length
+      ? { allowedSkillSnapshotSha256ByName }
+      : {}),
   };
 }
 

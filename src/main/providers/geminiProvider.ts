@@ -10,6 +10,7 @@ import { estimateTextTokens } from "../contextManager";
 import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
+import { IncompleteModelStreamError } from "../openAiCompatibleClient";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -84,12 +85,63 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
       const acc = {
         text: "",
         thinking: "",
-        finish: "STOP",
+        finish: undefined as string | undefined,
         cacheRead: 0,
         inputTokens: 0,
         outputTokens: 0,
       };
       let nextToolCallIndex = 0;
+      let terminalObserved = false;
+      const emitGeminiLine = async function* (
+        line: string,
+      ): AsyncGenerator<StreamEvent, void, void> {
+        if (!line.startsWith("data:")) return;
+        const payload = line.slice(5).trim();
+        if (!payload) return;
+        let evt: Record<string, unknown>;
+        try {
+          evt = JSON.parse(payload) as Record<string, unknown>;
+        } catch {
+          throw new Error("Gemini stream returned malformed JSON.");
+        }
+        const candidates = evt.candidates as Array<Record<string, unknown>> | undefined;
+        const parts = ((candidates?.[0]?.content as { parts?: Array<Record<string, unknown>> } | undefined)?.parts) ?? [];
+        for (const p of parts) {
+          if (typeof p.text === "string" && p.thought === true) {
+            acc.thinking += p.text;
+            yield { type: "thinking_delta", text: p.text };
+          } else if (typeof p.text === "string") {
+            acc.text += p.text;
+            yield { type: "text_delta", text: p.text };
+          }
+          const fc = p.functionCall as
+            | { id?: string; name: string; args: unknown }
+            | undefined;
+          if (fc) {
+            const index = nextToolCallIndex++;
+            const toolCallId = fc.id?.trim() || `gemini_tool_call_${index + 1}`;
+            yield {
+              type: "tool_call_delta",
+              toolCallId,
+              index,
+              name: fc.name,
+              argumentsDelta: JSON.stringify(fc.args ?? {}),
+            };
+          }
+        }
+        if (candidates?.[0]?.finishReason) {
+          acc.finish = candidates[0].finishReason as string;
+          terminalObserved = true;
+        }
+        const um = evt.usageMetadata as {
+          cachedContentTokenCount?: number;
+          promptTokenCount?: number;
+          candidatesTokenCount?: number;
+        } | undefined;
+        if (um?.cachedContentTokenCount) acc.cacheRead = um.cachedContentTokenCount;
+        if (um?.promptTokenCount) acc.inputTokens = um.promptTokenCount;
+        if (um?.candidatesTokenCount) acc.outputTokens = um.candidatesTokenCount;
+      };
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -97,62 +149,26 @@ export function createGeminiProvider(options: GeminiProviderOptions = {}): LLMPr
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          let evt: Record<string, unknown>;
-          try {
-            evt = JSON.parse(payload) as Record<string, unknown>;
-          } catch {
-            yield {
-              type: "error",
-              error: new Error("Gemini stream returned malformed JSON."),
-            };
-            return;
-          }
-          const candidates = evt.candidates as Array<Record<string, unknown>> | undefined;
-          const parts = ((candidates?.[0]?.content as { parts?: Array<Record<string, unknown>> } | undefined)?.parts) ?? [];
-          for (const p of parts) {
-            if (typeof p.text === "string" && p.thought === true) {
-              acc.thinking += p.text;
-              yield { type: "thinking_delta", text: p.text };
-            } else if (typeof p.text === "string") {
-              acc.text += p.text;
-              yield { type: "text_delta", text: p.text };
-            }
-            const fc = p.functionCall as
-              | { id?: string; name: string; args: unknown }
-              | undefined;
-            if (fc) {
-              const index = nextToolCallIndex++;
-              const toolCallId =
-                fc.id?.trim() || `gemini_tool_call_${index + 1}`;
-              yield {
-                type: "tool_call_delta",
-                toolCallId,
-                index,
-                name: fc.name,
-                argumentsDelta: JSON.stringify(fc.args ?? {}),
-              };
-            }
-          }
-          if (candidates?.[0]?.finishReason) acc.finish = candidates[0].finishReason as string;
-          const um = evt.usageMetadata as {
-            cachedContentTokenCount?: number;
-            promptTokenCount?: number;
-            candidatesTokenCount?: number;
-          } | undefined;
-          if (um?.cachedContentTokenCount) acc.cacheRead = um.cachedContentTokenCount;
-          if (um?.promptTokenCount) acc.inputTokens = um.promptTokenCount;
-          if (um?.candidatesTokenCount) acc.outputTokens = um.candidatesTokenCount;
+          for await (const event of emitGeminiLine(line)) yield event;
         }
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        for (const line of buffer.split("\n")) {
+          for await (const event of emitGeminiLine(line)) yield event;
+        }
+      }
+      if (!terminalObserved) {
+        throw new IncompleteModelStreamError(
+          "Gemini stream ended before a finish reason.",
+        );
       }
       yield {
         type: "done",
         response: {
           content: acc.text || null,
           toolCalls: [],
-          finishReason: acc.finish,
+          finishReason: acc.finish ?? "STOP",
           ...(acc.thinking ? { reasoningContent: acc.thinking } : {}),
           cacheReadTokens: acc.cacheRead,
           cacheWriteTokens: 0,

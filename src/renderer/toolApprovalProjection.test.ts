@@ -53,7 +53,7 @@ function request(id: string): ToolApprovalRequestPayload {
     revision: 1,
     taskId: "task-1",
     taskName: "Safe task",
-    request: { toolName: "file_read", args: { path: "/tmp/a" } },
+    request: { toolName: "file_read" },
     deniedReason: "approval required",
     argsSummary: { path: "/tmp/a" },
     risk: {

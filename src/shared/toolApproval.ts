@@ -22,7 +22,7 @@ export type ToolApprovalRequestPayload = {
   revision?: number;
   taskId: string;
   taskName: string;
-  request: ToolCallRequest;
+  request: Pick<ToolCallRequest, "toolName" | "source">;
   deniedReason: string;
   argsSummary: Record<string, unknown>;
   risk: ToolApprovalRisk;

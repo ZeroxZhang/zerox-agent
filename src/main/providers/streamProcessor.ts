@@ -14,6 +14,7 @@ import type {
   StreamEvent,
   ToolCall,
 } from "./provider";
+import { IncompleteModelStreamError } from "../openAiCompatibleClient";
 
 export interface StreamProcessorResult {
   response: CompleteResponse;
@@ -37,6 +38,8 @@ export async function processStream(
   let toolCallDeltas = 0;
   let thinkingDeltas = 0;
   let doneResponse: CompleteResponse | null = null;
+  let doneFinishReason: string | undefined;
+  let terminalObserved = false;
 
   for await (const ev of provider.stream(req)) {
     switch (ev.type) {
@@ -60,11 +63,19 @@ export async function processStream(
         break;
       }
       case "done":
+        terminalObserved = true;
+        doneFinishReason = ev.finishReason ?? ev.response?.finishReason;
         if (ev.response) doneResponse = ev.response;
         break;
       case "error":
         throw ev.error;
     }
+  }
+
+  if (!terminalObserved) {
+    throw new IncompleteModelStreamError(
+      `${provider.id} stream ended before a terminal event.`,
+    );
   }
 
   // Prefer the provider's aggregated `done.response` when present; otherwise
@@ -84,7 +95,7 @@ export async function processStream(
   const response: CompleteResponse = {
     content: text || null,
     toolCalls,
-    finishReason: "stop",
+    finishReason: doneFinishReason ?? "stop",
     ...(thinking ? { reasoningContent: thinking } : {}),
     cacheReadTokens: 0,
     cacheWriteTokens: 0,

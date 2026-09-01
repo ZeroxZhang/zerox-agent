@@ -115,7 +115,8 @@ describe("plan artifact writer", () => {
       safeFsTestReadyStage: "projection-before-publish",
       safeFsTestOnReady: signalReady,
     });
-    const outcome = writer.write(createPlan(workspaceRoot), createArtifact()).then(
+    const plan = createPlan(workspaceRoot);
+    const outcome = writer.write(plan, createArtifact()).then(
       () => ({ ok: true as const }),
       (error: unknown) => ({ ok: false as const, error }),
     );
@@ -131,6 +132,10 @@ describe("plan artifact writer", () => {
     );
     await expect(access(path.join(outside, "plan-writer-test.md")))
       .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path.join(
+      displaced,
+      `.${plan.id}.projection.transaction`,
+    ), "utf8")).resolves.toBe("");
   });
 
   it("does not replace a projection whose recorded authority has drifted", async () => {

@@ -102,7 +102,7 @@ export function createToolRuntime(options: {
   return {
     async execute(input) {
       const diagnostics: string[] = [];
-      const canonicalRequest = canonicalizeRequest(
+      const unboundCanonicalRequest = canonicalizeRequest(
         input.request,
         resolveRegisteredSource(options.toolExecutor, input.request.toolName),
       );
@@ -113,6 +113,10 @@ export function createToolRuntime(options: {
       const canonicalRuntimeTask = input.authorizationOptions?.runtimeTask
         ? deepFreeze(structuredClone(input.authorizationOptions.runtimeTask))
         : undefined;
+      const canonicalRequest = bindSkillSnapshotAuthority(
+        unboundCanonicalRequest,
+        canonicalRuntimeTask,
+      );
       const executionOptions = input.executionOptions;
       let dispatchStarted = false;
       const context = Object.freeze({
@@ -335,6 +339,31 @@ function canonicalizeRequest(
     toolName: String(request.toolName),
     ...(source ? { source } : {}),
     args,
+  });
+}
+
+function bindSkillSnapshotAuthority(
+  request: ToolCallRequest,
+  runtimeTask: RuntimeToolAuthorizationTask | undefined,
+): ToolCallRequest {
+  if (
+    request.toolName !== "skill_load" &&
+    request.toolName !== "skill_resource_list"
+  ) {
+    return request;
+  }
+  const skillName = String(request.args.skillName ?? "").trim();
+  const digest =
+    runtimeTask?.permissions.tools?.allowedSkillSnapshotSha256ByName?.[
+      skillName
+    ];
+  if (!digest) return request;
+  return deepFreeze({
+    ...request,
+    args: {
+      ...structuredClone(request.args),
+      skillSnapshotSha256: digest,
+    },
   });
 }
 

@@ -10,9 +10,10 @@ import type {
   PlanningStageRecord,
 } from "../shared/planMode";
 import type { SkillInputValue } from "../shared/skillExecutionContract";
-import type {
-  SkillDiscoveryResult,
-  SkillSnapshotSource,
+import {
+  createPublicSkillSnapshotSha256,
+  type SkillDiscoveryResult,
+  type SkillSnapshotSource,
 } from "../shared/skills";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { TaskPermissionPolicy } from "../shared/toolPermissions";
@@ -606,7 +607,13 @@ function createPlanInvestigationPermissions(
       allowedNames: allowedToolNames,
       allowedSources: [],
       ...(explicitSkill
-        ? { allowedSkillNames: [explicitSkill.manifest.name] }
+        ? {
+            allowedSkillNames: [explicitSkill.manifest.name],
+            allowedSkillSnapshotSha256ByName: {
+              [explicitSkill.manifest.name]:
+                createPublicSkillSnapshotSha256(explicitSkill),
+            },
+          }
         : {}),
     },
   };

@@ -198,6 +198,8 @@ const goalContractSnapshotSchema = objectOf({
 const selectedSkillSchema = objectOf({
   rootDir: stringSchema,
   skillFile: stringSchema,
+  rootIdentity: objectOf({ dev: stringSchema, ino: stringSchema }, ["dev", "ino"]),
+  skillFileIdentity: objectOf({ dev: stringSchema, ino: stringSchema }, ["dev", "ino"]),
   body: stringSchema,
   manifest: objectOf({
     name: stringSchema,

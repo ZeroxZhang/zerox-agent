@@ -64,6 +64,45 @@ describe("ToolRuntime", () => {
     expect(observed.authorizedContext).toBe(runContext);
   });
 
+  it("binds Skill lazy-load calls to the runtime-authorized snapshot digest", async () => {
+    const digest = "a".repeat(64);
+    const observed: ToolCallRequest[] = [];
+    const runtime = createToolRuntime({
+      authorizationService: allowAuthorization((request) => observed.push(request)),
+      toolExecutor: executor(async (request) => {
+        observed.push(request);
+        return { ok: true, result: {} };
+      }),
+    });
+    await runtime.execute({
+      taskId: "task_skill",
+      request: {
+        toolName: "skill_load",
+        args: { skillName: "onepager", skillSnapshotSha256: "0".repeat(64) },
+      },
+      authorizationOptions: {
+        runtimeTask: {
+          name: "Skill runtime",
+          permissions: {
+            ...getDefaultTaskPermissionPolicy(),
+            tools: {
+              allowedNames: ["skill_load"],
+              allowedSources: [],
+              allowedSkillNames: ["onepager"],
+              allowedSkillSnapshotSha256ByName: { onepager: digest },
+            },
+          },
+        },
+      },
+    });
+    expect(observed).toHaveLength(2);
+    expect(observed[0]).toBe(observed[1]);
+    expect(observed[0]?.args).toEqual({
+      skillName: "onepager",
+      skillSnapshotSha256: digest,
+    });
+  });
+
   it("fails closed without authorization and never dispatches", async () => {
     const dispatch = vi.fn();
     const runtime = createToolRuntime({

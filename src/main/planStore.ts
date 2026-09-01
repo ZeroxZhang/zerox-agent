@@ -131,15 +131,15 @@ export function createPlanStore(options: {
   storage?: Storage;
   now?: () => string;
   createId?: () => string;
+  projectionRecoveryWriter?: PlanArtifactWriter;
 }): PlanStore {
   const plansDir = path.join(options.configDir, "plans");
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? (() => randomUUID());
   const queues = new Map<string, Promise<void>>();
   const activeRunIds = new Set<string>();
-  const projectionRecoveryWriter: PlanArtifactWriter = createPlanArtifactWriter({
-    now,
-  });
+  const projectionRecoveryWriter: PlanArtifactWriter =
+    options.projectionRecoveryWriter ?? createPlanArtifactWriter({ now });
   let sessionIndexQueue = Promise.resolve();
 
   function planPath(planId: string) {
@@ -484,7 +484,7 @@ export function createPlanStore(options: {
     },
 
     get(planId) {
-      return readPlan(planId);
+      return serialize(planId, () => readPlan(planId));
     },
 
     save(plan, expectedRevision, eventType, payload) {
@@ -707,7 +707,7 @@ export function createPlanStore(options: {
           )
           .all<SqlitePlanRow>(sessionId);
         return collectValidPlans(
-          rows.map((row) => readSqlitePlanPayload(row)),
+          rows.map((row) => serialize(row.id, () => readPlan(row.id))),
         );
       }
       try {
@@ -720,7 +720,10 @@ export function createPlanStore(options: {
                 name.endsWith(".json") &&
                 !name.endsWith(".events.json"),
             )
-            .map((name) => readPlan(name.slice(0, -".json".length))),
+            .map((name) => {
+              const planId = name.slice(0, -".json".length);
+              return serialize(planId, () => readPlan(planId));
+            }),
         );
         return plans
           .filter(
@@ -744,7 +747,7 @@ export function createPlanStore(options: {
           )
           .all<SqlitePlanRow>();
         return collectValidPlans(
-          rows.map((row) => readSqlitePlanPayload(row)),
+          rows.map((row) => serialize(row.id, () => readPlan(row.id))),
         );
       }
       try {
@@ -757,7 +760,10 @@ export function createPlanStore(options: {
                 name.endsWith(".json") &&
                 !name.endsWith(".events.json"),
             )
-            .map((name) => readPlan(name.slice(0, -".json".length))),
+            .map((name) => {
+              const planId = name.slice(0, -".json".length);
+              return serialize(planId, () => readPlan(planId));
+            }),
         );
         return plans
           .filter((plan): plan is PlanRecord => Boolean(plan))
@@ -778,14 +784,14 @@ export function createPlanStore(options: {
           )
           .all<SqlitePlanRow>(sessionId);
         return (await collectValidPlans(
-          rows.map((row) => readSqlitePlanPayload(row)),
+          rows.map((row) => serialize(row.id, () => readPlan(row.id))),
         ))[0] ?? null;
       }
       await sessionIndexQueue;
       const entry = (await readSessionIndex()).sessions[sessionId];
       if (entry) {
         try {
-          const indexed = await readPlan(entry.planId);
+          const indexed = await serialize(entry.planId, () => readPlan(entry.planId));
           if (indexed?.sessionId === sessionId) return indexed;
         } catch (error) {
           if (!isCorruptPlanRecordError(error)) throw error;

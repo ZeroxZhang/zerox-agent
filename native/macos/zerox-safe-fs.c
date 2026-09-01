@@ -2801,7 +2801,7 @@ done:
   if (swap_durable && existing_fd >= 0 && existing_identity.size > 0) {
     (void)scrub_projection_descriptor(existing_fd, &existing_identity);
   }
-  if (!published && plans_fd >= 0 && output_fd >= 0 && output_owned) {
+  if (!published && !swapped && output_fd >= 0 && output_owned) {
     struct stat cleanup_stats;
     file_identity cleanup_identity;
     if (
@@ -2813,23 +2813,15 @@ done:
         &cleanup_stats,
         &cleanup_identity
       ) == 0
-      && verify_opened_regular_path(
-        plans_fd,
-        plans_path,
-        temporary_name,
-        output_fd,
-        &cleanup_identity,
-        1,
-        1
-      ) == 0
     ) {
-      (void)scrub_projection_transaction(
-        plans_fd,
-        plans_path,
-        temporary_name,
-        output_fd,
-        &cleanup_identity
-      );
+      /*
+       * Before publication output_fd is the capability-bound transaction
+       * inode. Scrub it through that descriptor even if the plans directory
+       * pathname was displaced; pathname re-validation would fail precisely
+       * in the case where cleanup is most important. Never do this after a
+       * swap, because output_fd then names the newly published canonical Plan.
+       */
+      (void)scrub_projection_descriptor(output_fd, &cleanup_identity);
     }
   }
   if (output_fd >= 0) close(output_fd);

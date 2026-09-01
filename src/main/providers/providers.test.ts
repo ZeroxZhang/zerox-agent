@@ -4,7 +4,12 @@ import { buildCachePrefix, serializeCachePrefix } from "./cachePrefix";
 import { createProvider } from "./providerFactory";
 import { createProviderChatClient, createSettingsBackedChatClient } from "./providerChatClient";
 import { createOpenAICompatibleProvider } from "./openAiCompatibleProvider";
-import type { ChatMessage, ChatCompletionRequest } from "../openAiCompatibleClient";
+import {
+  IncompleteModelStreamError,
+  type ChatMessage,
+  type ChatCompletionRequest,
+} from "../openAiCompatibleClient";
+import { processStream } from "./streamProcessor";
 import type { CompleteRequest, LLMProvider, NormalizedMessage, StreamEvent } from "./provider";
 import type {
   ProviderKind,
@@ -681,6 +686,36 @@ describe("AnthropicProvider", () => {
 });
 
 describe("GeminiProvider", () => {
+  it("fails closed when SSE ends without a Gemini finish reason", async () => {
+    const encoder = new TextEncoder();
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-2.5-pro" },
+      {
+        fetch: (async () => new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: "partial" }] } }] })}\n\n`,
+              ));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        )) as typeof fetch,
+      },
+    );
+    const drain = async () => {
+      for await (const _event of provider.stream({
+        model: "gemini-2.5-pro",
+        apiKey: "k",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      })) { /* drain */ }
+    };
+    await expect(drain()).rejects.toBeInstanceOf(IncompleteModelStreamError);
+  });
+
   it("parses a native generateContent response", async () => {
     const provider = createProvider(
       { providerId: "gemini", apiKey: "k", chatModel: "gemini-1.5-pro" },
@@ -1048,6 +1083,34 @@ describe("GeminiProvider", () => {
 });
 
 describe("ProviderChatClient adapter", () => {
+  it("rejects a custom provider stream that never emits done", async () => {
+    const client = createProviderChatClient({
+      provider: scriptedProvider([{ type: "text_delta", text: "partial" }]),
+    });
+    const drain = async () => {
+      for await (const _event of client.streamComplete({
+        baseUrl: "",
+        apiKey: "k",
+        model: "m",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: "hi" }],
+      })) { /* drain */ }
+    };
+    await expect(drain()).rejects.toBeInstanceOf(IncompleteModelStreamError);
+  });
+
+  it("rejects shared stream aggregation without a provider terminal event", async () => {
+    const provider = scriptedProvider([{ type: "text_delta", text: "partial" }]);
+    await expect(processStream(provider, {
+      model: "m",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })).rejects.toBeInstanceOf(IncompleteModelStreamError);
+  });
+
   it("routes complete through the provider and maps the response back", async () => {
     const provider = createProvider(
       { providerId: "anthropic", apiKey: "k", chatModel: "claude-3" },

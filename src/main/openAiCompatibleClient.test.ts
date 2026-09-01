@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createOpenAiCompatibleClient,
   createOpenAiCompatibleEmbeddingClient,
+  IncompleteModelStreamError,
 } from "./openAiCompatibleClient";
 
 describe("OpenAI-compatible chat client", () => {
@@ -468,6 +469,71 @@ describe("OpenAI-compatible chat client", () => {
         // Drain.
       }
     }).rejects.toThrow("LLM stream returned malformed JSON.");
+  });
+
+  it("fails closed on abrupt EOF after preserving received deltas", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`,
+              ));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+    const events = [];
+    let thrown: unknown;
+    try {
+      for await (const event of client.streamComplete({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "secret-key",
+        model: "agent-model",
+        temperature: 0,
+        maxTokens: 10,
+        messages: [{ role: "user", content: "Run" }],
+      })) events.push(event);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(events).toEqual([{ type: "content_delta", text: "partial" }]);
+    expect(thrown).toBeInstanceOf(IncompleteModelStreamError);
+  });
+
+  it("parses an unterminated final SSE event when it carries finish_reason", async () => {
+    const encoder = new TextEncoder();
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: "complete" }, finish_reason: "stop" }] })}`,
+              ));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    });
+    const events = [];
+    for await (const event of client.streamComplete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "Run" }],
+    })) events.push(event);
+    expect(events).toEqual([
+      { type: "content_delta", text: "complete" },
+      { type: "done", finishReason: "stop" },
+    ]);
   });
 
   it("preserves a streamed length finish reason when a later [DONE] arrives", async () => {

@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { DynamicToolRegistry } from "./dynamicToolRegistry";
-import type { SkillDiscoveryResult, SkillRecord } from "../shared/skills";
+import {
+  createPublicSkillManifestSha256,
+  createPublicSkillSnapshot,
+  createPublicSkillSnapshotSha256,
+  type SkillDiscoveryResult,
+  type SkillRecord,
+} from "../shared/skills";
+import { verifySkillRecordFilesystemAuthority } from "./skillRegistry";
 
 export type SkillLoadResourceKind = "skill" | "reference" | "asset" | "script";
 
@@ -72,6 +79,9 @@ async function listSkillResources(
   }
 
   const resources = await collectSkillResources(skill.skill, { includeHashes: false });
+  if (!(await verifySkillRecordFilesystemAuthority(skill.skill))) {
+    return { ok: false as const, error: "Skill changed while resources were being listed." };
+  }
   return {
     ok: true as const,
     result: {
@@ -94,6 +104,10 @@ async function loadSkill(
   }
 
   const resources = await collectSkillResources(skill.skill, { includeHashes: true });
+  if (!(await verifySkillRecordFilesystemAuthority(skill.skill))) {
+    return { ok: false as const, error: "Skill changed while it was being loaded." };
+  }
+  const publicSkill = createPublicSkillSnapshot(skill.skill);
   return {
     ok: true as const,
     result: {
@@ -103,8 +117,8 @@ async function loadSkill(
       version: skill.skill.manifest.version,
       rootDir: skill.skill.rootDir,
       skillFile: skill.skill.skillFile,
-      manifest: skill.skill.manifest,
-      manifestHash: `sha256:${hashString(JSON.stringify(skill.skill.manifest))}`,
+      manifest: publicSkill.manifest,
+      manifestHash: `sha256:${createPublicSkillManifestSha256(skill.skill)}`,
       instruction: skill.skill.body,
       resources,
     },
@@ -137,6 +151,23 @@ async function resolveSkill(
     };
   }
 
+  if (!(await verifySkillRecordFilesystemAuthority(skill))) {
+    return {
+      ok: false,
+      error: `Skill "${skillName}" changed after discovery. Refresh and select it again.`,
+    };
+  }
+  const expectedSnapshot = String(args.skillSnapshotSha256 ?? "").trim();
+  if (
+    expectedSnapshot &&
+    createPublicSkillSnapshotSha256(skill) !== expectedSnapshot
+  ) {
+    return {
+      ok: false,
+      error: `Skill "${skillName}" no longer matches the authorized snapshot.`,
+    };
+  }
+
   return { ok: true, skill };
 }
 
@@ -146,7 +177,21 @@ async function collectSkillResources(
 ): Promise<SkillLoadResource[]> {
   const resources: SkillLoadResource[] = [];
   await walkSkillRoot(skill.rootDir, resources, options);
-  return resources.sort((left, right) => left.path.localeCompare(right.path));
+  if (options.includeHashes) {
+    const skillResource = resources.find((resource) => resource.kind === "skill");
+    if (skillResource) {
+      const publicSkill = createPublicSkillSnapshot(skill);
+      skillResource.sha256 = `sha256:${hashString(JSON.stringify({
+        manifest: publicSkill.manifest,
+        instruction: publicSkill.body,
+      }))}`;
+    }
+  }
+  return resources.sort((left, right) => {
+    if (left.kind === "skill" && right.kind !== "skill") return -1;
+    if (right.kind === "skill" && left.kind !== "skill") return 1;
+    return left.path.localeCompare(right.path);
+  });
 }
 
 async function walkSkillRoot(
@@ -160,6 +205,13 @@ async function walkSkillRoot(
       continue;
     }
     const entryPath = path.join(directory, entry.name);
+    const canonicalEntry = await realpath(entryPath);
+    if (
+      canonicalEntry !== entryPath ||
+      !canonicalEntry.startsWith(`${path.resolve(directory)}${path.sep}`)
+    ) {
+      throw new Error("Skill resources may not contain symbolic links.");
+    }
     if (entry.isDirectory()) {
       await walkSkillRoot(entryPath, resources, options);
       continue;
@@ -174,7 +226,7 @@ async function walkSkillRoot(
       path: entryPath,
       sizeBytes: fileStat.size,
     };
-    if (options.includeHashes) {
+    if (options.includeHashes && resource.kind !== "skill") {
       resource.sha256 = `sha256:${hashString(await readFile(entryPath, "utf8"))}`;
     }
     resources.push(resource);

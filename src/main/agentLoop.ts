@@ -20,6 +20,7 @@ import type {
   StreamingChatClient,
   ToolCall,
 } from "./openAiCompatibleClient";
+import { IncompleteModelStreamError } from "./openAiCompatibleClient";
 import {
   completeWithModelRetry,
   type ModelRetryEvent,
@@ -1007,6 +1008,12 @@ export async function runAgentLoop(
             error instanceof StreamingCompletionError
             && error.hasMeaningfulStreamEvent
           ) {
+            if (
+              error.cause instanceof IncompleteModelStreamError
+              && error.partialResponse
+            ) {
+              return error.partialResponse;
+            }
             await onModelAttempt?.({
               operation: "reset",
               attempt: answerAttempt,
@@ -1028,6 +1035,9 @@ export async function runAgentLoop(
   }
 
   function isRetryableStreamError(error: unknown): boolean {
+    if (error instanceof IncompleteModelStreamError) {
+      return true;
+    }
     const message =
       error instanceof Error ? error.message : String(error ?? "");
     return /idle timeout|timed out|timeout|ECONNRESET|EPIPE|network|fetch failed|socket|terminated|overloaded/i.test(
@@ -1909,13 +1919,19 @@ function throwIfCanceled(signal: AbortSignal | undefined) {
 
 class StreamingCompletionError extends Error {
   readonly hasMeaningfulStreamEvent: boolean;
+  readonly partialResponse?: ChatCompletionResponse;
   override readonly cause: unknown;
 
-  constructor(error: unknown, hasMeaningfulStreamEvent: boolean) {
+  constructor(
+    error: unknown,
+    hasMeaningfulStreamEvent: boolean,
+    partialResponse?: ChatCompletionResponse,
+  ) {
     super(error instanceof Error ? error.message : String(error ?? "Model stream failed."));
     this.name = "StreamingCompletionError";
     this.cause = error;
     this.hasMeaningfulStreamEvent = hasMeaningfulStreamEvent;
+    this.partialResponse = partialResponse;
   }
 }
 
@@ -1927,6 +1943,7 @@ async function aggregateStreamingCompletion(
   let content = "";
   let reasoningContent = "";
   let finishReason = "stop";
+  let terminalObserved = false;
   let streamModelServiceNotice: ModelServiceNotice | undefined;
   let activeToolCallKey: string | null = null;
   let hasMeaningfulStreamEvent = false;
@@ -1985,19 +2002,73 @@ async function aggregateStreamingCompletion(
         continue;
       }
 
+      terminalObserved = true;
       finishReason = event.finishReason || finishReason;
       streamModelServiceNotice =
         event.modelServiceNotice ?? streamModelServiceNotice;
     }
   } catch (error) {
-    throw new StreamingCompletionError(error, hasMeaningfulStreamEvent);
+    const partialResponse = hasMeaningfulStreamEvent
+      ? buildAggregatedStreamingResponse({
+          content,
+          reasoningContent,
+          toolCalls,
+          finishReason: "length",
+          modelServiceNotice: modelServiceNoticeFromFinishReason("length", {
+            model: request.model,
+          }),
+        })
+      : undefined;
+    throw new StreamingCompletionError(
+      error,
+      hasMeaningfulStreamEvent,
+      partialResponse,
+    );
   }
 
   throwIfCanceled(request.signal);
 
+  if (!terminalObserved) {
+    throw new StreamingCompletionError(
+      new IncompleteModelStreamError(),
+      hasMeaningfulStreamEvent,
+      hasMeaningfulStreamEvent
+        ? buildAggregatedStreamingResponse({
+            content,
+            reasoningContent,
+            toolCalls,
+            finishReason: "length",
+            modelServiceNotice: modelServiceNoticeFromFinishReason("length", {
+              model: request.model,
+            }),
+          })
+        : undefined,
+    );
+  }
+
+  return buildAggregatedStreamingResponse({
+    content,
+    reasoningContent,
+    toolCalls,
+    finishReason,
+    modelServiceNotice:
+      streamModelServiceNotice ??
+      modelServiceNoticeFromFinishReason(finishReason, {
+        model: request.model,
+      }),
+  });
+}
+
+function buildAggregatedStreamingResponse(input: {
+  content: string;
+  reasoningContent: string;
+  toolCalls: Map<string, { id: string; name: string; arguments: string }>;
+  finishReason: string;
+  modelServiceNotice?: ModelServiceNotice;
+}): ChatCompletionResponse {
   return {
-    content: content || null,
-    toolCalls: [...toolCalls.values()].map((toolCall) => ({
+    content: input.content || null,
+    toolCalls: [...input.toolCalls.values()].map((toolCall) => ({
       id: toolCall.id,
       type: "function" as const,
       function: {
@@ -2005,21 +2076,17 @@ async function aggregateStreamingCompletion(
         arguments: toolCall.arguments,
       },
     })),
-    finishReason,
-    ...(streamModelServiceNotice ??
-    modelServiceNoticeFromFinishReason(finishReason, {
-      model: request.model,
-    })
+    finishReason: input.finishReason,
+    ...(input.modelServiceNotice
       ? {
           modelServiceNotice: sanitizeModelServiceNotice(
-            streamModelServiceNotice ??
-            modelServiceNoticeFromFinishReason(finishReason, {
-              model: request.model,
-            })!,
+            input.modelServiceNotice,
           ),
         }
       : {}),
-    ...(reasoningContent ? { reasoningContent } : {}),
+    ...(input.reasoningContent
+      ? { reasoningContent: input.reasoningContent }
+      : {}),
   };
 }
 

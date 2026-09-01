@@ -5485,7 +5485,12 @@ describe("chat service", () => {
         loopOptions.runtimeTask.permissions,
         {
           toolName: "skill_load",
-          args: { skillName: "onepager" },
+          args: {
+            skillName: "onepager",
+            skillSnapshotSha256:
+              loopOptions.runtimeTask.permissions.tools
+                ?.allowedSkillSnapshotSha256ByName?.onepager,
+          },
         },
         loopOptions.runContext,
       ),
