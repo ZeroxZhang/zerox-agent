@@ -630,10 +630,12 @@ static int record_reconciliation_marker(
   const char *transaction_id
 ) {
   char marker_name[NAME_MAX + 1];
+  char temporary_name[NAME_MAX + 1];
   const char *body = RECONCILIATION_BODY;
   size_t body_length = strlen(body);
   size_t offset = 0U;
-  int marker_fd;
+  unsigned int attempt;
+  int marker_fd = -1;
   int written = snprintf(
     marker_name,
     sizeof(marker_name),
@@ -644,17 +646,13 @@ static int record_reconciliation_marker(
   if (written < 0 || (size_t)written >= sizeof(marker_name)) {
     return fail_message("reconciliation marker name is too long");
   }
+
   marker_fd = openat(
     log_fd,
     marker_name,
-    O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_CREAT | O_EXCL,
-    0600
+    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
   );
-  if (marker_fd < 0 && errno == EEXIST) {
-    marker_fd = openat(log_fd, marker_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (marker_fd < 0) {
-      return fail_errno("cannot open existing reconciliation marker");
-    }
+  if (marker_fd >= 0) {
     if (validate_reconciliation_marker(log_fd, marker_name, marker_fd) != 0) {
       close(marker_fd);
       return fail_message("existing reconciliation marker is invalid");
@@ -666,26 +664,103 @@ static int record_reconciliation_marker(
       ? 0
       : fail_errno("cannot synchronize reconciliation directory");
   }
-  if (marker_fd < 0) return fail_errno("cannot create reconciliation marker");
+  if (errno != ENOENT) {
+    return fail_errno("cannot inspect existing reconciliation marker");
+  }
+
+  for (attempt = 0U; attempt < 16U; attempt += 1U) {
+    written = snprintf(
+      temporary_name,
+      sizeof(temporary_name),
+      ".zerox-reconciliation-%ld-%08x.tmp",
+      (long)getpid(),
+      arc4random()
+    );
+    if (written < 0 || (size_t)written >= sizeof(temporary_name)) {
+      return fail_message("reconciliation marker temporary name is too long");
+    }
+    marker_fd = openat(
+      log_fd,
+      temporary_name,
+      O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_CREAT | O_EXCL,
+      0600
+    );
+    if (marker_fd >= 0) break;
+    if (errno != EEXIST) {
+      return fail_errno("cannot create reconciliation marker temporary file");
+    }
+  }
+  if (marker_fd < 0) {
+    return fail_message("cannot allocate reconciliation marker temporary file");
+  }
+  maybe_test_checkpoint("reconciliation-marker-temp-created");
   while (offset < body_length) {
     ssize_t count = write(marker_fd, body + offset, body_length - offset);
     if (count < 0) {
       if (errno == EINTR) continue;
+      int write_error = errno;
       close(marker_fd);
+      unlinkat(log_fd, temporary_name, 0);
+      errno = write_error;
       return fail_errno("cannot write reconciliation marker");
     }
     offset += (size_t)count;
   }
+  maybe_test_checkpoint("reconciliation-marker-temp-written");
   if (fsync(marker_fd) != 0) {
+    int sync_error = errno;
     close(marker_fd);
+    unlinkat(log_fd, temporary_name, 0);
+    errno = sync_error;
     return fail_errno("cannot synchronize reconciliation marker");
   }
-  if (validate_reconciliation_marker(log_fd, marker_name, marker_fd) != 0) {
+  maybe_test_checkpoint("reconciliation-marker-temp-synced");
+  if (
+    validate_reconciliation_marker(log_fd, temporary_name, marker_fd) != 0
+  ) {
     close(marker_fd);
+    unlinkat(log_fd, temporary_name, 0);
     return fail_message("new reconciliation marker failed self-validation");
   }
   if (close(marker_fd) != 0) {
+    int close_error = errno;
+    unlinkat(log_fd, temporary_name, 0);
+    errno = close_error;
     return fail_errno("cannot close reconciliation marker");
+  }
+  marker_fd = -1;
+
+  if (
+    renameatx_np(
+      log_fd,
+      temporary_name,
+      log_fd,
+      marker_name,
+      RENAME_EXCL
+    ) != 0
+  ) {
+    int publication_error = errno;
+    unlinkat(log_fd, temporary_name, 0);
+    if (publication_error != EEXIST) {
+      errno = publication_error;
+      return fail_errno("cannot publish reconciliation marker");
+    }
+  }
+  maybe_test_checkpoint("reconciliation-marker-published");
+  marker_fd = openat(
+    log_fd,
+    marker_name,
+    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+  );
+  if (marker_fd < 0) {
+    return fail_errno("cannot open published reconciliation marker");
+  }
+  if (validate_reconciliation_marker(log_fd, marker_name, marker_fd) != 0) {
+    close(marker_fd);
+    return fail_message("published reconciliation marker is invalid");
+  }
+  if (close(marker_fd) != 0) {
+    return fail_errno("cannot close published reconciliation marker");
   }
   return fsync(log_fd) == 0
     ? 0

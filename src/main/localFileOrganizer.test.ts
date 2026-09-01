@@ -406,6 +406,46 @@ describe("local file organizer", () => {
     );
   });
 
+  it.each([
+    ["missing", async (journal: string) => rm(journal)],
+    ["unsafe mode", async (journal: string) => chmod(journal, 0o644)],
+    [
+      "extra hard link",
+      async (journal: string) => link(journal, `${journal}.second-link`),
+    ],
+  ])("projects an independent marker when the journal is %s", async (
+    _label,
+    makeJournalUnavailable,
+  ) => {
+    const transactionId = `tx_marker_${_label.replaceAll(" ", "_")}`;
+    const transactionDir = path.join(tempDir, ".zerox-organize-transactions");
+    const journal = path.join(transactionDir, `${transactionId}.json`);
+    const marker = path.join(
+      transactionDir,
+      `${transactionId}.reconciliation`,
+    );
+    await mkdir(transactionDir, { recursive: true });
+    await writeFile(journal, "{}\n", { encoding: "utf8", mode: 0o600 });
+    await writeFile(
+      marker,
+      '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n',
+      { encoding: "utf8", mode: 0o600 },
+    );
+    await makeJournalUnavailable(journal);
+
+    await expect(readLocalFileOrganizationTransaction(journal)).resolves
+      .toMatchObject({
+        id: transactionId,
+        status: "reconciliation_required",
+        moves: [],
+        reconciliation: {
+          required: true,
+          kind: "marker",
+          reason: "journal_unreadable_requires_manual_reconciliation",
+        },
+      });
+  });
+
   it("persists reconciliation state when a moved source is concurrently repopulated", async () => {
     const source = path.join(tempDir, "photo.jpg");
     const target = path.join(tempDir, "Images", "photo.jpg");
@@ -689,7 +729,6 @@ describe("local file organizer", () => {
     expect(String(result.ok ? "" : result.error)).toMatch(/mode|permission|identity/i);
     await expectPath(source, false);
     await expect(readFile(target, "utf8")).resolves.toBe("original");
-    await chmod(journal, 0o600);
     await expect(readLocalFileOrganizationTransaction(journal)).resolves.toMatchObject({
       status: "reconciliation_required",
       reconciliation: { required: true },

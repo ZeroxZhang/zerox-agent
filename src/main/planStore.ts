@@ -20,6 +20,7 @@ import {
 } from "./goalPlanContractService";
 import { createPublicSkillSnapshot } from "../shared/skills";
 import { sanitizePlanRecordDiagnostics } from "../shared/planDiagnostics";
+import { rewriteSanitizedPlanProjection } from "./planArtifactWriter";
 
 export type PlanStoreEvent = {
   id: string;
@@ -88,16 +89,22 @@ export function createPlanStore(options: {
     return path.join(plansDir, SESSION_INDEX_FILENAME);
   }
 
-  function readSqlitePlanPayload(payload: string): PlanRecord {
+  async function readSqlitePlanPayload(payload: string): Promise<PlanRecord> {
     const parsed = JSON.parse(payload) as PlanRecord;
-    const validated = validatePlanRecord(parsed);
+    const diagnosticSafe = sanitizePlanRecordDiagnostics(parsed);
+    const diagnosticsChanged =
+      JSON.stringify(parsed) !== JSON.stringify(diagnosticSafe);
+    const validated = validatePlanRecord(diagnosticSafe);
+    const migrated = diagnosticsChanged
+      ? await rewriteSanitizedPlanProjection(validated, now)
+      : validated;
     if (
       options.storage &&
-      JSON.stringify(parsed) !== JSON.stringify(validated)
+      JSON.stringify(parsed) !== JSON.stringify(migrated)
     ) {
-      writeSqlitePlan(options.storage, validated);
+      writeSqlitePlan(options.storage, migrated);
     }
-    return recoverInterruptedPlanRecord(validated, activeRunIds);
+    return recoverInterruptedPlanRecord(migrated, activeRunIds);
   }
 
   async function readPlan(planId: string): Promise<PlanRecord | null> {
@@ -113,13 +120,19 @@ export function createPlanStore(options: {
       const parsed = JSON.parse(
         await readFile(planPath(planId), "utf8"),
       ) as PlanRecord;
-      const validated = validatePlanRecord(parsed);
+      const diagnosticSafe = sanitizePlanRecordDiagnostics(parsed);
+      const diagnosticsChanged =
+        JSON.stringify(parsed) !== JSON.stringify(diagnosticSafe);
+      const validated = validatePlanRecord(diagnosticSafe);
+      const migrated = diagnosticsChanged
+        ? await rewriteSanitizedPlanProjection(validated, now)
+        : validated;
       if (
-        JSON.stringify(parsed) !== JSON.stringify(validated)
+        JSON.stringify(parsed) !== JSON.stringify(migrated)
       ) {
-        await writePlan(validated);
+        await writePlan(migrated);
       }
-      return recoverInterruptedPlanRecord(validated, activeRunIds);
+      return recoverInterruptedPlanRecord(migrated, activeRunIds);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -230,10 +243,15 @@ export function createPlanStore(options: {
         if (existing) {
           throw new Error(`计划 ${plan.id} 已存在。`);
         }
-        const created = validatePlanRecord({
+        const candidate = {
           ...structuredClone(plan),
           revision: Math.max(1, plan.revision),
-        });
+        };
+        const diagnosticSafe = sanitizePlanRecordDiagnostics(candidate);
+        const validated = validatePlanRecord(diagnosticSafe);
+        const created = JSON.stringify(candidate) !== JSON.stringify(diagnosticSafe)
+          ? await rewriteSanitizedPlanProjection(validated, now)
+          : validated;
         const event: PlanStoreEvent = {
           id: `plan_event_${createId()}`,
           planId: created.id,
@@ -270,11 +288,16 @@ export function createPlanStore(options: {
             existing.revision,
           );
         }
-        const updated = validatePlanRecord({
+        const candidate = {
           ...structuredClone(plan),
           revision: expectedRevision + 1,
           updatedAt: now(),
-        });
+        };
+        const diagnosticSafe = sanitizePlanRecordDiagnostics(candidate);
+        const validated = validatePlanRecord(diagnosticSafe);
+        const updated = JSON.stringify(candidate) !== JSON.stringify(diagnosticSafe)
+          ? await rewriteSanitizedPlanProjection(validated, now)
+          : validated;
         const event: PlanStoreEvent = {
           id: `plan_event_${createId()}`,
           planId: updated.id,
@@ -297,12 +320,14 @@ export function createPlanStore(options: {
 
     async listBySession(sessionId) {
       if (options.storage) {
-        return options.storage.db
+        const rows = options.storage.db
           .prepare(
             "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
           )
-          .all<{ payload: string }>(sessionId)
-          .map((row) => readSqlitePlanPayload(row.payload));
+          .all<{ payload: string }>(sessionId);
+        return Promise.all(
+          rows.map((row) => readSqlitePlanPayload(row.payload)),
+        );
       }
       try {
         const names = await readdir(plansDir);
@@ -332,10 +357,12 @@ export function createPlanStore(options: {
 
     async listAll() {
       if (options.storage) {
-        return options.storage.db
+        const rows = options.storage.db
           .prepare("SELECT payload FROM plan_records ORDER BY updated_at DESC")
-          .all<{ payload: string }>()
-          .map((row) => readSqlitePlanPayload(row.payload));
+          .all<{ payload: string }>();
+        return Promise.all(
+          rows.map((row) => readSqlitePlanPayload(row.payload)),
+        );
       }
       try {
         const names = await readdir(plansDir);
@@ -367,7 +394,7 @@ export function createPlanStore(options: {
             "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1",
           )
           .get<{ payload: string }>(sessionId);
-        return row ? readSqlitePlanPayload(row.payload) : null;
+        return row ? await readSqlitePlanPayload(row.payload) : null;
       }
       await sessionIndexQueue;
       const entry = (await readSessionIndex()).sessions[sessionId];

@@ -13,7 +13,7 @@ import type {
   PlanProjection,
   PlanRecord,
 } from "../shared/planMode";
-import { assertSafePlanId } from "./planStore";
+import { sanitizePlanRecordDiagnostics } from "../shared/planDiagnostics";
 
 export type PlanArtifactWriter = {
   write(plan: PlanRecord, artifact: PlanArtifact): Promise<PlanProjection>;
@@ -27,22 +27,26 @@ export function createPlanArtifactWriter(options?: {
 
   return {
     async write(plan, artifact) {
-      if (!plan.workspaceRoot) {
+      const safeInput = sanitizeArtifactProjection(plan, artifact);
+      if (!safeInput.plan.workspaceRoot) {
         throw new Error("计划没有绑定工作区，无法生成 Markdown 投影。");
       }
-      assertSafePlanId(plan.id);
-      const root = await realpath(plan.workspaceRoot);
+      assertArtifactPlanId(safeInput.plan.id);
+      const root = await realpath(safeInput.plan.workspaceRoot);
       const zeroxDir = path.join(root, ".zerox");
       const plansDir = path.join(zeroxDir, "plans");
       await assertNotSymlinkIfPresent(zeroxDir);
       await mkdir(plansDir, { recursive: true });
       await assertNotSymlinkIfPresent(zeroxDir);
       await assertNotSymlinkIfPresent(plansDir);
-      const destination = path.join(plansDir, `${plan.id}.md`);
+      const destination = path.join(plansDir, `${safeInput.plan.id}.md`);
       assertInside(root, destination);
-      const markdown = renderPlanMarkdown(plan, artifact);
+      const markdown = renderPlanMarkdown(safeInput.plan, safeInput.artifact);
       const sha256 = hash(markdown);
-      const temp = path.join(plansDir, `.${plan.id}.${randomUUID()}.tmp`);
+      const temp = path.join(
+        plansDir,
+        `.${safeInput.plan.id}.${randomUUID()}.tmp`,
+      );
       await writeFile(temp, markdown, { encoding: "utf8", mode: 0o600 });
       await rename(temp, destination);
       const persisted = await readFile(destination, "utf8");
@@ -61,25 +65,100 @@ export function createPlanArtifactWriter(options?: {
         return false;
       }
       try {
-        const root = await realpath(plan.workspaceRoot);
-        assertInside(root, plan.projection.path);
-        await assertNoSymlinkChain(root, plan.projection.path);
-        const content = await readFile(plan.projection.path, "utf8");
+        const safeInput = sanitizeArtifactProjection(plan, plan.finalArtifact);
+        const root = await realpath(safeInput.plan.workspaceRoot!);
+        assertInside(root, safeInput.plan.projection!.path);
+        await assertNoSymlinkChain(root, safeInput.plan.projection!.path);
+        const content = await readFile(safeInput.plan.projection!.path, "utf8");
         const currentProjection = renderPlanMarkdown(
-          plan.confirmedRevision
-            ? { ...plan, revision: plan.confirmedRevision }
-            : plan,
-          plan.finalArtifact,
+          safeInput.plan.confirmedRevision
+            ? {
+                ...safeInput.plan,
+                revision: safeInput.plan.confirmedRevision,
+              }
+            : safeInput.plan,
+          safeInput.artifact,
         );
         return (
-          hash(content) === plan.projection.sha256 &&
-          hash(currentProjection) === plan.projection.sha256
+          hash(content) === safeInput.plan.projection!.sha256 &&
+          hash(currentProjection) === safeInput.plan.projection!.sha256
         );
       } catch {
         return false;
       }
     },
   };
+}
+
+export async function rewriteSanitizedPlanProjection(
+  plan: PlanRecord,
+  now = () => new Date().toISOString(),
+): Promise<PlanRecord> {
+  if (!plan.projection || !plan.workspaceRoot || !plan.finalArtifact) {
+    return sanitizePlanRecordDiagnostics(plan);
+  }
+  const safeInput = sanitizeArtifactProjection(plan, plan.finalArtifact);
+  assertArtifactPlanId(safeInput.plan.id);
+  const root = await realpath(safeInput.plan.workspaceRoot!);
+  const zeroxDir = path.join(root, ".zerox");
+  const plansDir = path.join(zeroxDir, "plans");
+  const destination = path.join(plansDir, `${safeInput.plan.id}.md`);
+  if (safeInput.plan.projection!.path !== destination) {
+    throw new Error("计划投影路径不是当前计划的规范路径。");
+  }
+  assertInside(root, destination);
+  await assertNotSymlinkIfPresent(zeroxDir);
+  await mkdir(plansDir, { recursive: true });
+  await assertNotSymlinkIfPresent(zeroxDir);
+  await assertNotSymlinkIfPresent(plansDir);
+  await assertNoSymlinkChain(root, destination);
+  const markdown = renderPlanMarkdown(safeInput.plan, safeInput.artifact);
+  const sha256 = hash(markdown);
+  let current = "";
+  try {
+    current = await readFile(destination, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (hash(current) !== sha256) {
+    const temp = path.join(
+      plansDir,
+      `.${safeInput.plan.id}.${randomUUID()}.migration.tmp`,
+    );
+    await writeFile(temp, markdown, { encoding: "utf8", mode: 0o600 });
+    await rename(temp, destination);
+  }
+  return {
+    ...safeInput.plan,
+    projection: {
+      path: destination,
+      sha256,
+      writtenAt:
+        safeInput.plan.projection!.sha256 === sha256
+          ? safeInput.plan.projection!.writtenAt
+          : now(),
+    },
+  };
+}
+
+function sanitizeArtifactProjection(
+  plan: PlanRecord,
+  artifact: PlanArtifact,
+): { plan: PlanRecord; artifact: PlanArtifact } {
+  const sanitized = sanitizePlanRecordDiagnostics({
+    ...plan,
+    finalArtifact: artifact,
+  });
+  if (!sanitized.finalArtifact) {
+    throw new Error("计划投影缺少可公开的结构化终版。");
+  }
+  return { plan: sanitized, artifact: sanitized.finalArtifact };
+}
+
+function assertArtifactPlanId(planId: string): void {
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(planId)) {
+    throw new Error("计划 ID 非法。");
+  }
 }
 
 export function renderPlanMarkdown(

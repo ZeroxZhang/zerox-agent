@@ -75,6 +75,7 @@ import { createConversationDisclosureScriptedClient } from "./conversationDisclo
 import { assertSafeStoreEntityId } from "./storeEntityId";
 import { assertSafePlanId } from "./planStore";
 import { stringifyRedactedCredentials } from "../shared/credentialRedaction";
+import { classifyPlanReplayReadFailure } from "../shared/planDiagnostics";
 
 app.setName("Zerox Agent");
 applyUserDataDirOverride({
@@ -884,7 +885,7 @@ function startPlanReplayDriver() {
       };
     } catch (error) {
       log("无法读取计划文件", {
-        error: error instanceof Error ? error.message : String(error),
+        category: classifyPlanReplayReadFailure(error),
       });
       return null;
     }

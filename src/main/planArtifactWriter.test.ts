@@ -1,6 +1,7 @@
 import {
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   symlink,
@@ -75,6 +76,72 @@ describe("plan artifact writer", () => {
         createArtifact(),
       ),
     ).rejects.toThrow(/符号链接/);
+  });
+
+  it("sanitizes diagnostic DTO fields before writing a workspace projection", async () => {
+    const secret = "local-canary-plan-projection-0123456789abcdef";
+    const writer = createPlanArtifactWriter();
+    const plan: PlanRecord = {
+      ...createPlan(workspaceRoot),
+      planningStages: [
+        {
+          id: "review",
+          kind: "review",
+          runId: "review-run",
+          status: "completed",
+          evidenceRefs: [],
+          reviewApproved: false,
+          reviewIssues: [
+            {
+              code: `review-${secret}`,
+              severity: "high",
+              message: `review message ${secret}`,
+              repairable: false,
+              repairInstruction: `repair ${secret}`,
+            },
+          ],
+        },
+      ],
+      qualityReport: {
+        status: "blocked",
+        blockingIssues: [
+          {
+            code: "MISSING_EVIDENCE",
+            severity: "blocking",
+            message: `missing ${secret}`,
+            milestoneId: `milestone-${secret}`,
+            checkId: `check-${secret}`,
+            evidenceRefs: [`evidence-${secret}`],
+          },
+        ],
+        warnings: [],
+        evidenceCoverage: {
+          referenced: 0,
+          total: 1,
+          missingRefs: [`missing-${secret}`],
+        },
+        acceptanceCoverage: {
+          deterministicChecks: 0,
+          modelReviewChecks: 0,
+          totalChecks: 0,
+          milestonesCovered: 0,
+          milestonesTotal: 0,
+        },
+        generatedAt: "2026-09-01T00:00:00.000Z",
+      },
+    };
+    const artifact: PlanArtifact = {
+      ...createArtifact(),
+      minorityOpinion: [`review ${secret}`],
+      actionGate: "blocked",
+      gateReason: `quality ${secret}`,
+      markdown: `# raw ${secret}`,
+    };
+
+    const projection = await writer.write(plan, artifact);
+    const markdown = await readFile(projection.path, "utf8");
+    expect(markdown).not.toContain(secret);
+    expect(markdown).toContain("原始诊断内容未保存");
   });
 });
 

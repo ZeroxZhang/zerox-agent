@@ -73,7 +73,10 @@ import {
   goalContractMatchesRef,
 } from "./goalPlanContractService";
 import { redactCredentialString } from "../shared/credentialRedaction";
-import { sanitizePlanReviewIssue } from "../shared/planDiagnostics";
+import {
+  sanitizePlanRecordDiagnostics,
+  sanitizePlanReviewIssue,
+} from "../shared/planDiagnostics";
 
 const MAX_PLAN_SOURCE_CHARS = 32_000;
 const MAX_CLARIFICATION_CHARS = 4_000;
@@ -1042,12 +1045,19 @@ export function createPlanDebateOrchestrator(options: {
             gateRepairAttempted,
           )
         : artifact;
+    const projectionInput = sanitizePlanProjection(
+      projectedPlan,
+      presentedArtifact,
+    );
     const canonicalArtifact = {
-      ...presentedArtifact,
-      markdown: renderPlanMarkdown(projectedPlan, presentedArtifact),
+      ...projectionInput.artifact,
+      markdown: renderPlanMarkdown(
+        projectionInput.plan,
+        projectionInput.artifact,
+      ),
     };
     const projection = await options.artifactWriter.write(
-      projectedPlan,
+      projectionInput.plan,
       canonicalArtifact,
     );
     await persistCancellationIfAborted(record, signal, {
@@ -1062,7 +1072,9 @@ export function createPlanDebateOrchestrator(options: {
         ),
         finalArtifact: canonicalArtifact,
         projection,
-        ...(qualityReport ? { qualityReport } : {}),
+        ...(projectionInput.plan.qualityReport
+          ? { qualityReport: projectionInput.plan.qualityReport }
+          : {}),
         planningStages: [
           ...(record.planningStages ?? []),
           ...(qualityStage ? [qualityStage] : []),
@@ -1447,12 +1459,19 @@ export function createPlanDebateOrchestrator(options: {
       qualityReport,
       gateRepair.attempted,
     );
+    const projectionInput = sanitizePlanProjection(
+      projectedPlan,
+      presentedArtifact,
+    );
     const canonicalArtifact = {
-      ...presentedArtifact,
-      markdown: renderPlanMarkdown(projectedPlan, presentedArtifact),
+      ...projectionInput.artifact,
+      markdown: renderPlanMarkdown(
+        projectionInput.plan,
+        projectionInput.artifact,
+      ),
     };
     const projection = await options.artifactWriter.write(
-      projectedPlan,
+      projectionInput.plan,
       canonicalArtifact,
     );
     const saved = await options.planStore.save(
@@ -1464,7 +1483,7 @@ export function createPlanDebateOrchestrator(options: {
         ),
         finalArtifact: canonicalArtifact,
         projection,
-        qualityReport,
+        qualityReport: projectionInput.plan.qualityReport,
         planningStages: [
           ...(record.planningStages ?? []).map((stage) =>
             stage.kind === "quality"
@@ -2349,6 +2368,26 @@ function buildGateRepairPrompt(
         ...(issue.checkId ? { checkId: issue.checkId } : {}),
       })),
     }),
+  };
+}
+
+function sanitizePlanProjection(
+  plan: PlanRecord,
+  artifact: PlanArtifact,
+): { plan: PlanRecord; artifact: PlanArtifact } {
+  const sanitized = sanitizePlanRecordDiagnostics({
+    ...plan,
+    finalArtifact: {
+      ...artifact,
+      markdown: "",
+    },
+  });
+  if (!sanitized.finalArtifact) {
+    throw new Error("计划投影缺少可公开的结构化终版。");
+  }
+  return {
+    plan: sanitized,
+    artifact: sanitized.finalArtifact,
   };
 }
 

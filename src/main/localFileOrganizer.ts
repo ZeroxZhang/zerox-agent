@@ -500,10 +500,27 @@ export async function readLocalFileOrganizationTransaction(
 ): Promise<LocalFileOrganizationTransaction> {
   const resolvedLogPath = resolveUserPath(logPath);
   const reconciliationContext = deriveReconciliationContext(resolvedLogPath);
-  const handle = await open(
-    resolvedLogPath,
-    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  let markerStats = await readReconciliationMarker(
+    reconciliationContext.markerPath,
   );
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(
+      resolvedLogPath,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+    );
+  } catch (error) {
+    markerStats ??= await readReconciliationMarker(
+      reconciliationContext.markerPath,
+    );
+    if (markerStats) {
+      return createUnreadableJournalReconciliation(
+        reconciliationContext,
+        markerStats,
+      );
+    }
+    throw error;
+  }
   try {
     const before = await handle.stat({ bigint: true });
     if (!before.isFile() || before.nlink !== 1n) {
@@ -547,30 +564,11 @@ export async function readLocalFileOrganizationTransaction(
     ) {
       throw new Error("Local file organization journal identity changed while reading.");
     }
-    const markerPath = reconciliationContext.markerPath;
-    const reconciliationRequired = await readReconciliationMarker(markerPath);
     if (oversized) {
-      if (reconciliationRequired) {
-        return createUnreadableJournalReconciliation(
-          reconciliationContext,
-          after,
-        );
-      }
       throw new Error("Local file organization journal exceeds the safe size limit.");
     }
     const body = bytes!.toString("utf8");
-    let parsed: ReturnType<typeof parseTransactionJournal>;
-    try {
-      parsed = parseTransactionJournal(body);
-    } catch (error) {
-      if (reconciliationRequired) {
-        return createUnreadableJournalReconciliation(
-          reconciliationContext,
-          after,
-        );
-      }
-      throw error;
-    }
+    const parsed = parseTransactionJournal(body);
     const transaction = parsed.transaction;
     if (parsed.format === "current") {
       if (
@@ -606,13 +604,13 @@ export async function readLocalFileOrganizationTransaction(
     }
     return {
       ...transaction,
-      ...(reconciliationRequired
+      ...(markerStats
         ? {
             status: "reconciliation_required" as const,
             reconciliation: {
               required: true as const,
               kind: "marker" as const,
-              markerPath,
+              markerPath: reconciliationContext.markerPath,
             },
           }
         : parsed.format === "legacy_v3.9.1"
@@ -637,6 +635,17 @@ export async function readLocalFileOrganizationTransaction(
           }
         : { logIdentity: undefined }),
     };
+  } catch (error) {
+    markerStats ??= await readReconciliationMarker(
+      reconciliationContext.markerPath,
+    );
+    if (markerStats) {
+      return createUnreadableJournalReconciliation(
+        reconciliationContext,
+        markerStats,
+      );
+    }
+    throw error;
   } finally {
     await handle.close();
   }
@@ -670,13 +679,13 @@ function deriveReconciliationContext(logPath: string): {
 
 function createUnreadableJournalReconciliation(
   context: ReturnType<typeof deriveReconciliationContext>,
-  journalStats: BigIntStats,
+  authorityStats: BigIntStats,
 ): LocalFileOrganizationTransaction {
   return {
     id: context.id,
     root: context.root,
     status: "reconciliation_required",
-    createdAt: new Date(Number(journalStats.mtimeMs)).toISOString(),
+    createdAt: new Date(Number(authorityStats.mtimeMs)).toISOString(),
     logPath: context.logPath,
     moves: [],
     movesApplied: 0,
@@ -870,7 +879,9 @@ async function readBoundedFileHandle(
   return bytes;
 }
 
-async function readReconciliationMarker(markerPath: string): Promise<boolean> {
+async function readReconciliationMarker(
+  markerPath: string,
+): Promise<BigIntStats | null> {
   let handle;
   try {
     handle = await open(
@@ -878,7 +889,7 @@ async function readReconciliationMarker(markerPath: string): Promise<boolean> {
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
   try {
@@ -928,7 +939,7 @@ async function readReconciliationMarker(markerPath: string): Promise<boolean> {
         "Local file organization reconciliation marker is invalid or changed while reading.",
       );
     }
-    return true;
+    return after;
   } finally {
     await handle.close();
   }

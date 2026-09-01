@@ -138,7 +138,7 @@ describe("plan debate orchestrator", () => {
     const markdown = await readFile(plan.projection!.path, "utf8");
     expect(markdown).toContain("# C Final");
     expect(markdown).toContain("## 里程碑");
-    expect(plan.finalArtifact?.markdown).toBe(markdown);
+    expect(plan.finalArtifact?.markdown).toBe("");
   });
 
   it.each(["direct", "debate"] as const)(
@@ -779,6 +779,10 @@ describe("plan debate orchestrator", () => {
     await expect(readFile(path.join(configDir, "plans", `${plan.id}.json`), "utf8"))
       .resolves.not.toContain(secret);
     await expect(readFile(path.join(configDir, "plans", `${plan.id}.json`), "utf8"))
+      .resolves.not.toContain(secretCode);
+    await expect(readFile(plan.projection!.path, "utf8"))
+      .resolves.not.toContain(secret);
+    await expect(readFile(plan.projection!.path, "utf8"))
       .resolves.not.toContain(secretCode);
   });
 

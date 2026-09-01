@@ -27,13 +27,26 @@ const planQualityIssueCodes = new Set<PlanQualityIssue["code"]>([
   "ILLEGAL_CAPABILITY",
 ]);
 
+export function classifyPlanReplayReadFailure(
+  error: unknown,
+): "invalid_json" | "plan_file_unavailable" {
+  return error instanceof SyntaxError
+    ? "invalid_json"
+    : "plan_file_unavailable";
+}
+
 export function sanitizePlanReviewIssue(
   issue: PlanReviewIssue,
 ): PlanReviewIssue {
   const code = "MODEL_REVIEW_ISSUE";
+  const severity = ["low", "medium", "high", "critical"].includes(
+    issue.severity,
+  )
+    ? issue.severity
+    : "high";
   return {
     code,
-    severity: issue.severity,
+    severity,
     message: `模型审查报告了 ${code}；原始说明未保存。`,
     repairable: issue.repairable === true,
     repairInstruction: issue.repairable
@@ -43,31 +56,26 @@ export function sanitizePlanReviewIssue(
 }
 
 export function sanitizePlanRecordDiagnostics(plan: PlanRecord): PlanRecord {
-  const rawReviewText = new Set(
-    (plan.planningStages ?? []).flatMap((stage) =>
-      (stage.reviewIssues ?? []).flatMap((issue) => [
-        issue.message,
-        issue.repairInstruction,
-      ]),
-    ),
+  const hasReviewDiagnostics = (plan.planningStages ?? []).some(
+    (stage) => (stage.reviewIssues?.length ?? 0) > 0,
   );
-  const rawQualityText = [
-    ...(plan.qualityReport?.blockingIssues ?? []),
-    ...(plan.qualityReport?.warnings ?? []),
-  ].map((issue) => issue.message);
   const finalArtifact = plan.finalArtifact
     ? {
         ...plan.finalArtifact,
-        ...((plan.finalArtifact.minorityOpinion ?? []).some((entry) =>
-          rawReviewText.has(entry)
-        )
-          ? { minorityOpinion: ["模型审查意见的原始内容未保存。"] }
+        // Markdown is a derived workspace projection. Persisting the model's
+        // raw markdown field duplicates an unbounded diagnostic channel in
+        // JSON/SQLite and plans IPC, so the Plan record stores no copy.
+        markdown: "",
+        ...(hasReviewDiagnostics
+          ? {
+              minorityOpinion: ["模型审查意见的原始内容未保存。"],
+            }
           : {}),
-        ...(plan.finalArtifact.gateReason
-          && rawQualityText.some((message) =>
-            plan.finalArtifact?.gateReason?.includes(message)
-          )
-          ? { gateReason: "计划质量门禁未通过；原始诊断内容未保存。" }
+        ...(plan.qualityReport && plan.qualityReport.status !== "ready"
+          ? {
+              gateReason:
+                "计划质量门禁未通过；原始诊断内容未保存。请提供修订方向后重新规划。",
+            }
           : {}),
       }
     : undefined;
@@ -115,6 +123,10 @@ export function sanitizePlanRecordDiagnostics(plan: PlanRecord): PlanRecord {
               sanitizeQualityIssue,
             ),
             warnings: plan.qualityReport.warnings.map(sanitizeQualityIssue),
+            evidenceCoverage: {
+              ...plan.qualityReport.evidenceCoverage,
+              missingRefs: [],
+            },
           },
         }
       : {}),
@@ -138,7 +150,6 @@ function sanitizeQualityIssue(issue: PlanQualityIssue): PlanQualityIssue {
     ? issue.code
     : "INVALID_SCHEMA";
   return {
-    ...issue,
     code,
     severity: issue.severity === "warning" ? "warning" : "blocking",
     message: `计划质量检查 ${code} 未通过；原始诊断内容未保存。`,

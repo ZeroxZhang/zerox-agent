@@ -13749,3 +13749,40 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   restoration. Production audit reports zero vulnerabilities; dependency,
   caller-pinned Program/Harness, and whitespace checks pass. A fresh seventh
   exact-byte code/security review is the next mandatory gate.
+
+## 2026-09-01 - v3.9.2 atomic reconciliation and Plan projection authority repair
+
+- The seventh frozen candidate was rejected by code review with two Majors and
+  one Minor, and by security review with one Major and one Minor. No review
+  receipts were issued. The remaining root causes were that reconciliation
+  state still depended on opening the journal first, native marker publication
+  exposed a partially written final filename, and sanitized Plan records could
+  still project legacy or model-supplied diagnostic prose through Markdown,
+  persistence, IPC, or replay logging.
+- Reconciliation markers are now validated independently before journal access.
+  Missing, unsafe-mode, hard-linked, oversized, or invalid journals therefore
+  retain an explicit read-only manual-reconciliation state whenever a valid
+  marker exists. Native publication writes and validates a private same-directory
+  temporary marker, fsyncs it, publishes it with exclusive atomic rename, then
+  reopens the final marker and fsyncs the directory. Failure cleanup can unlink
+  only the temporary name.
+- Plan diagnostics now cross one closed allowlist boundary before rendering,
+  writing, JSON/SQLite persistence, IPC, and replay logging. Free-form review
+  messages, repair text, milestone/check/evidence references, missing-reference
+  values, gate reasons, minority opinions, and duplicated final Markdown are
+  removed or replaced with fixed local text. Legacy JSON and SQLite records
+  migrate both the stored record and the canonical workspace projection, while
+  unrelated user edits still fail the projection-integrity check rather than
+  being auto-healed.
+- Focused validation passes the local-file, safe-fs, Plan store/writer,
+  orchestrator, replay, and container canaries. Full `npm run verify` passes
+  strict test type coverage `433/433`, `324` current files / `3898` current
+  tests with declared skips, all Round2-Round12 historical lanes, production
+  build, Agent eval `26/26`, and Memory eval `2/2`. The native helper is
+  `52816` bytes with digest
+  `sha256:8887b7b452adb1dec229b0b6f07a347178cb67aa9a0357201247ed62a6937ea4`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration. Production audit reports zero vulnerabilities; dependency,
+  caller-pinned Program/Harness, and whitespace checks pass. A fresh eighth
+  exact-byte code/security review is the next mandatory gate.

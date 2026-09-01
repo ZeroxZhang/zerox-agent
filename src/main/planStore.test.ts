@@ -1,8 +1,19 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { PlanQualityIssueCode, PlanRecord } from "../shared/planMode";
+import type {
+  PlanArtifact,
+  PlanQualityIssueCode,
+  PlanRecord,
+} from "../shared/planMode";
 import {
   assertSafePlanId,
   createPlanStore,
@@ -10,6 +21,7 @@ import {
 } from "./planStore";
 import { createStorageImpl } from "./storage/storageDb";
 import { ensurePlanGoalContract } from "./goalPlanContractService";
+import { classifyPlanReplayReadFailure } from "../shared/planDiagnostics";
 
 describe("plan store parity", () => {
   let tempDir: string;
@@ -25,6 +37,16 @@ describe("plan store parity", () => {
   it("rejects unsafe plan ids used by stores and replay drivers", () => {
     expect(() => assertSafePlanId("plan-safe_1")).not.toThrow();
     expect(() => assertSafePlanId("../outside")).toThrow("计划 ID 非法");
+  });
+
+  it("classifies replay read failures without retaining arbitrary parser input", () => {
+    const secret = "local-canary-replay-json-0123456789abcdef";
+    expect(classifyPlanReplayReadFailure(new SyntaxError(secret))).toBe(
+      "invalid_json",
+    );
+    expect(classifyPlanReplayReadFailure(new Error(secret))).toBe(
+      "plan_file_unavailable",
+    );
   });
 
   it("keeps JSON and SQLite backends behaviorally equivalent", async () => {
@@ -94,6 +116,17 @@ describe("plan store parity", () => {
   it("sanitizes and migrates Plan diagnostics at every storage boundary", async () => {
     const secret = "local-canary-plan-store-0123456789abcdef";
     const configDir = path.join(tempDir, "diagnostic-json");
+    const workspaceInput = path.join(tempDir, "diagnostic-workspace");
+    await mkdir(workspaceInput, { recursive: true });
+    const workspaceRoot = await realpath(workspaceInput);
+    const projectionPath = path.join(
+      workspaceRoot,
+      ".zerox",
+      "plans",
+      "plan-store-test.md",
+    );
+    await mkdir(path.dirname(projectionPath), { recursive: true });
+    await writeFile(projectionPath, `# raw projection ${secret}\n`, "utf8");
     const storage = createStorageImpl({
       dbPath: path.join(tempDir, "diagnostic.sqlite"),
       skipFts5Check: true,
@@ -105,6 +138,7 @@ describe("plan store parity", () => {
     });
     const raw: PlanRecord = {
       ...createRecord(),
+      workspaceRoot,
       rounds: [
         {
           id: "round-secret",
@@ -147,10 +181,17 @@ describe("plan store parity", () => {
             code: `SECRET_QUALITY_${secret}` as PlanQualityIssueCode,
             severity: "blocking",
             message: `quality message ${secret}`,
+            milestoneId: `milestone-${secret}`,
+            checkId: `check-${secret}`,
+            evidenceRefs: [`evidence-${secret}`],
           },
         ],
         warnings: [],
-        evidenceCoverage: { referenced: 0, total: 0, missingRefs: [] },
+        evidenceCoverage: {
+          referenced: 0,
+          total: 1,
+          missingRefs: [`missing-${secret}`],
+        },
         acceptanceCoverage: {
           deterministicChecks: 0,
           modelReviewChecks: 0,
@@ -158,6 +199,12 @@ describe("plan store parity", () => {
           milestonesCovered: 0,
           milestonesTotal: 0,
         },
+      },
+      finalArtifact: createDiagnosticArtifact(secret),
+      projection: {
+        path: projectionPath,
+        sha256: `raw-${secret}`,
+        writtenAt: "2026-09-01T00:00:00.000Z",
       },
     };
 
@@ -169,6 +216,15 @@ describe("plan store parity", () => {
       expect(JSON.stringify(jsonCreated)).not.toContain("SECRET_REVIEW");
       expect(jsonCreated.qualityReport?.blockingIssues[0]?.code).toBe(
         "INVALID_SCHEMA",
+      );
+      expect(jsonCreated.qualityReport?.blockingIssues[0]?.milestoneId)
+        .toBeUndefined();
+      expect(jsonCreated.qualityReport?.evidenceCoverage.missingRefs).toEqual(
+        [],
+      );
+      expect(jsonCreated.finalArtifact?.markdown).toBe("");
+      await expect(readFile(projectionPath, "utf8")).resolves.not.toContain(
+        secret,
       );
       expect(jsonCreated.rounds[0]?.failureExcerpt).toBeUndefined();
       expect(jsonCreated.planningStages?.[0]?.reviewIssues?.[0]?.message)
@@ -182,10 +238,14 @@ describe("plan store parity", () => {
       await writeFile(planFile, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
       storage.db.prepare("UPDATE plan_records SET payload = ? WHERE id = ?")
         .run(JSON.stringify(raw), raw.id);
+      await writeFile(projectionPath, `# legacy projection ${secret}\n`, "utf8");
 
       await expect(json.get(raw.id)).resolves.toMatchObject({ id: raw.id });
       await expect(sqlite.get(raw.id)).resolves.toMatchObject({ id: raw.id });
       await expect(readFile(planFile, "utf8")).resolves.not.toContain(secret);
+      await expect(readFile(projectionPath, "utf8")).resolves.not.toContain(
+        secret,
+      );
       expect(storage.db.prepare("SELECT payload FROM plan_records WHERE id = ?")
         .get<{ payload: string }>(raw.id)?.payload).not.toContain(secret);
     } finally {
@@ -528,6 +588,26 @@ function createRecord(): PlanRecord {
     rounds: [],
     createdAt: "2026-07-30T00:00:00.000Z",
     updatedAt: "2026-07-30T00:00:00.000Z",
+  };
+}
+
+function createDiagnosticArtifact(secret: string): PlanArtifact {
+  return {
+    title: "Diagnostic migration",
+    summary: "summary",
+    objective: "objective",
+    scope: { in: [], out: [] },
+    assumptions: [],
+    milestones: [],
+    dependencies: [],
+    risks: [],
+    acceptanceCriteria: [],
+    claimLedger: [],
+    unresolvedQuestions: [],
+    minorityOpinion: [`review ${secret}`],
+    actionGate: "blocked",
+    gateReason: `quality gate ${secret}`,
+    markdown: `# raw markdown ${secret}`,
   };
 }
 

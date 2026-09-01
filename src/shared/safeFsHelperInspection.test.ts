@@ -65,8 +65,13 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(source).toContain("st_ctimespec.tv_nsec");
     expect(source).toContain("safe_directory_mode(");
     expect(source).toContain("RECONCILIATION_SUFFIX");
-    expect(source).not.toContain("linkat(");
-    expect(source).not.toContain("unlinkat(");
+    expect(source).toContain("reconciliation-marker-temp-synced");
+    expect(source).toContain("reconciliation-marker-published");
+    expect(source).toContain(".zerox-reconciliation-%ld-%08x.tmp");
+    expect(source).toMatch(/renameatx_np\(\s*log_fd,\s*temporary_name,\s*log_fd,\s*marker_name,\s*RENAME_EXCL/);
+    expect(source).toContain("unlinkat(log_fd, temporary_name, 0)");
+    expect(source).not.toContain("unlinkat(log_fd, marker_name, 0)");
+    expect(source).not.toMatch(/\blinkat\(/);
     expect(source).not.toContain("remove-category-duplicate");
     const organizerSource = readFileSync(
       path.join(process.cwd(), "src/main/localFileOrganizer.ts"),
