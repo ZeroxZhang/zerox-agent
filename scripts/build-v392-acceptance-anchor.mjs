@@ -84,7 +84,7 @@ const EXPECTED_MACOS_SDK = Object.freeze({
   settingsDigest:
     "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
 });
-const EXPECTED_SAFE_FS_HELPER_DIGEST =
+const EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST =
   "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6";
 const PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME =
   ".v392-pinned-safe-fs-toolchain.json";
@@ -114,7 +114,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "package-lock.json":
     "sha256:c5cd81cff944c33d2a1bcd785cba49fd3a34f0c7279a701989e6fa9e3c448beb",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:14755b3e236f84bc0cedc9e59ee8d9f7c2d7333dbe60f2cddd9821e9545a4c06",
+    "sha256:cd70260a32a245bf2c08d658fbeed795248740aad45be1d4878069d618f6b9e2",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
@@ -298,6 +298,13 @@ if (
   && process.argv[2] === "--self-test-generated-build-boundary"
 ) {
   verifyGeneratedBuildBoundarySelfTest();
+  process.exit(0);
+}
+if (
+  process.argv.length === 3
+  && process.argv[2] === "--self-test-safe-fs-package-identity"
+) {
+  verifySafeFsPackageIdentitySelfTest();
   process.exit(0);
 }
 
@@ -805,6 +812,19 @@ try {
       await captureRepositoryFile(repositoryRealpath, relativePath)
     ).digest;
   }
+  const packageReceipt = JSON.parse((
+    await captureRepositoryFile(
+      repositoryRealpath,
+      ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+    )
+  ).bytes.toString("utf8"));
+  const packagedSafeFsHelperDigest = packageReceipt.safeFsHelper?.sha256;
+  if (
+    !/^sha256:[0-9a-f]{64}$/.test(packagedSafeFsHelperDigest ?? "")
+    || packagedSafeFsHelperDigest === EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+  ) {
+    fail("packaged safe-fs helper identity does not bind signed bytes");
+  }
   const anchor = {
     schemaVersion: 1,
     kind: "v3.9.2-local-acceptance-external-anchor",
@@ -843,6 +863,8 @@ try {
     },
     sourceDigest: options.expectedSourceDigest,
     sourceFileCount: options.expectedSourceFileCount,
+    unsignedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
+    packagedSafeFsHelperDigest,
     controlDigests: CONTROL_DIGESTS,
     verification: {
       fullVerify: "split-equivalent-passed",
@@ -1167,11 +1189,36 @@ async function verifyCompletedOutputs(
     targetRepositoryRoot,
     safeFsRelativePath,
   );
+  assertPackagedSafeFsIdentity({
+    anchor,
+    packageReceipt,
+    safeFsCapture,
+    safeFsRelativePath,
+  });
+  const anchorCapture = await captureRegularFile(
+    outputPath,
+    "post-commit acceptance anchor",
+  );
+  if (anchorCapture.digest !== sha256(completedAnchorBytes(anchor))) {
+    fail("post-commit acceptance anchor drifted");
+  }
+}
+
+function assertPackagedSafeFsIdentity({
+  anchor,
+  packageReceipt,
+  safeFsCapture,
+  safeFsRelativePath,
+}) {
   if (
-    packageReceipt.safeFsHelper?.path !== safeFsRelativePath
+    anchor.unsignedSafeFsHelperDigest
+      !== EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || anchor.packagedSafeFsHelperDigest !== safeFsCapture.digest
+    || anchor.packagedSafeFsHelperDigest
+      === EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || packageReceipt.safeFsHelper?.path !== safeFsRelativePath
     || packageReceipt.safeFsHelper?.bytes !== safeFsCapture.bytes.length
     || packageReceipt.safeFsHelper?.sha256 !== safeFsCapture.digest
-    || safeFsCapture.digest !== EXPECTED_SAFE_FS_HELPER_DIGEST
     || packageReceipt.safeFsHelper?.mode !== "0755"
     || (safeFsCapture.metadata.mode & 0o777) !== 0o755
     || packageReceipt.safeFsHelper?.signatureVerified !== true
@@ -1180,13 +1227,77 @@ async function verifyCompletedOutputs(
   ) {
     fail("post-commit safe-fs helper receipt drifted");
   }
-  const anchorCapture = await captureRegularFile(
-    outputPath,
-    "post-commit acceptance anchor",
-  );
-  if (anchorCapture.digest !== sha256(completedAnchorBytes(anchor))) {
-    fail("post-commit acceptance anchor drifted");
+}
+
+function verifySafeFsPackageIdentitySelfTest() {
+  const safeFsRelativePath =
+    "release-local/mac-arm64/Zerox Agent.app/Contents/Resources/safe-fs/zerox-safe-fs";
+  const bytes = Buffer.from("signed-safe-fs-helper");
+  const signedDigest = sha256(bytes);
+  const anchor = {
+    unsignedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
+    packagedSafeFsHelperDigest: signedDigest,
+  };
+  const packageReceipt = {
+    safeFsHelper: {
+      path: safeFsRelativePath,
+      bytes: bytes.length,
+      sha256: signedDigest,
+      mode: "0755",
+      signatureVerified: true,
+      hardenedRuntime: true,
+      entitlements: "empty",
+    },
+  };
+  const safeFsCapture = {
+    bytes,
+    digest: signedDigest,
+    metadata: { mode: 0o100755 },
+  };
+  assertPackagedSafeFsIdentity({
+    anchor,
+    packageReceipt,
+    safeFsCapture,
+    safeFsRelativePath,
+  });
+
+  let unsignedReuseRejected = false;
+  try {
+    assertPackagedSafeFsIdentity({
+      anchor: {
+        ...anchor,
+        packagedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
+      },
+      packageReceipt,
+      safeFsCapture,
+      safeFsRelativePath,
+    });
+  } catch (error) {
+    unsignedReuseRejected =
+      error?.message === "post-commit safe-fs helper receipt drifted";
   }
+  let receiptDriftRejected = false;
+  try {
+    assertPackagedSafeFsIdentity({
+      anchor,
+      packageReceipt: {
+        safeFsHelper: { ...packageReceipt.safeFsHelper, sha256: sha256(Buffer.from("drift")) },
+      },
+      safeFsCapture,
+      safeFsRelativePath,
+    });
+  } catch (error) {
+    receiptDriftRejected =
+      error?.message === "post-commit safe-fs helper receipt drifted";
+  }
+  if (!unsignedReuseRejected || !receiptDriftRejected) {
+    fail("safe-fs package identity self-test did not fail closed");
+  }
+  console.log(JSON.stringify({
+    safeFsPackageIdentitySelfTest: "passed",
+    unsignedReuseRejected,
+    receiptDriftRejected,
+  }));
 }
 
 async function validateRecoveredCommittedAcceptance({
@@ -1250,6 +1361,13 @@ async function validateRecoveredCommittedAcceptance({
     || anchor.electronHeadersEntryCount !== EXPECTED_ELECTRON_HEADERS.entryCount
     || anchor.sourceDigest !== expected.expectedSourceDigest
     || anchor.sourceFileCount !== expected.expectedSourceFileCount
+    || anchor.unsignedSafeFsHelperDigest
+      !== EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
+    || !/^sha256:[0-9a-f]{64}$/.test(
+      anchor.packagedSafeFsHelperDigest ?? "",
+    )
+    || anchor.packagedSafeFsHelperDigest
+      === EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST
     || anchor.gitHead !== expected.expectedGitHead
     || anchor.gitTree !== expected.expectedGitTree
     || JSON.stringify(anchor.reviewPins) !== JSON.stringify(reviewPins)
@@ -2090,7 +2208,7 @@ function createPinnedSafeFsToolchainPolicy(toolchain) {
       canonicalPath: toolchain.sdkCanonicalPath,
       settingsDigest: toolchain.sdkSettingsDigest,
     },
-    safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
+    unsignedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST,
   };
   return { ...digestInput, digest: hashCanonical(digestInput) };
 }

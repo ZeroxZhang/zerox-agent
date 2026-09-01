@@ -72,6 +72,27 @@ describe("package scripts", () => {
     });
   });
 
+  it("separates the unsigned helper pin from signed package identity", () => {
+    const result = JSON.parse(execFileSync(
+      process.execPath,
+      [
+        "scripts/build-v392-acceptance-anchor.mjs",
+        "--self-test-safe-fs-package-identity",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    )) as {
+      safeFsPackageIdentitySelfTest?: string;
+      unsignedReuseRejected?: boolean;
+      receiptDriftRejected?: boolean;
+    };
+
+    expect(result).toEqual({
+      safeFsPackageIdentitySelfTest: "passed",
+      unsignedReuseRejected: true,
+      receiptDriftRejected: true,
+    });
+  });
+
   it("binds macOS release artifacts to one clean Git commit", () => {
     const source = readFileSync(
       path.join(process.cwd(), "scripts", "package-mac.mjs"),
@@ -510,7 +531,14 @@ describe("package scripts", () => {
     expect(runner).toContain("const macosCompiler = await resolvePinnedMacosCompiler()");
     expect(runner).toContain("const EXPECTED_MACOS_SDK = Object.freeze({");
     expect(runner).toContain("await verifyPinnedMacosSdkManifest(macosCompiler)");
-    expect(runner).toContain("safeFsCapture.digest !== EXPECTED_SAFE_FS_HELPER_DIGEST");
+    expect(runner).toContain(
+      "unsignedSafeFsHelperDigest: EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST",
+    );
+    expect(runner).toContain(
+      "anchor.packagedSafeFsHelperDigest !== safeFsCapture.digest",
+    );
+    expect(runner).toContain("--self-test-safe-fs-package-identity");
+    expect(checker).toContain('"packagedSafeFsHelperDigest",');
     expect(runner).toContain("await verifyHostToolchainIsolation({");
     expect(runner).toContain('process.argv[2] === "--self-test-host-toolchain-isolation"');
     expect(runner).toContain('"host-toolchain-command-success-isolation"');

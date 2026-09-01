@@ -14689,3 +14689,32 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   regenerates their machine-readable receipts and screenshots for this
   candidate. Exact-byte dual review and a fresh isolated external package
   acceptance remain required before merge and release.
+
+## 2026-09-02 - P113/CD09 unsigned and signed helper identity separation
+
+- Frozen candidate `3be24333d1c6e99b042f2d1415f6dbc792920d73` passed the
+  independent security lane at `0C/0M/0m` but was rejected by the code lane at
+  `0C/1M/0m`. The external runner pinned the unsigned `dist-native` helper
+  digest and incorrectly required the signed helper inside the packaged App to
+  retain the same raw Mach-O bytes. A real hardened-runtime signature appends a
+  code-signature load command and necessarily changes the byte digest, so the
+  post-publication check could never accept a valid package.
+- The acceptance identity now carries separate
+  `unsignedSafeFsHelperDigest` and `packagedSafeFsHelperDigest` fields. The
+  unsigned digest remains bound to the caller-reviewed compiler/SDK policy;
+  the signed digest is captured from the generated package receipt and must
+  match the published App bytes, package receipt, App-tree manifest, and final
+  external anchor. Reusing the unsigned digest or drifting the receipt fails
+  closed.
+- The successor checker independently reads the signed helper and package
+  receipt and verifies their bytes, mode, and anchor binding. The runner's
+  executable self-test covers both negative identity cases; focused after-sign,
+  helper inspection, and package controls pass `31/31`.
+- Fresh full `npm run verify` passes `4032` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2-Round12 compatibility lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration;
+  dependency audit reports zero vulnerabilities and the dependency tree and
+  whitespace checks pass. Fresh exact-byte dual review and the real isolated
+  package-to-postflight acceptance remain mandatory before release.

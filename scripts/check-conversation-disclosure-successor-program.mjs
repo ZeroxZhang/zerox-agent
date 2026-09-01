@@ -214,6 +214,8 @@ const expectedFinalAnchorKeys = [
   "reviewPins",
   "sourceDigest",
   "sourceFileCount",
+  "unsignedSafeFsHelperDigest",
+  "packagedSafeFsHelperDigest",
   "controlDigests",
   "verification",
   "fileDigests",
@@ -237,6 +239,8 @@ const releaseAttestationPath =
   ".zerox/verification/conversation-disclosure/CD09-release-attestation.json";
 const expectedAcceptedCd04AnchorDigest =
   "sha256:99b8b7af27e24d2c44e2bb3b2433ada877fd68aeac2d1de80427931de15c01ef";
+const expectedUnsignedSafeFsHelperDigest =
+  "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6";
 const expectedReleaseAttestationKeys = [
   "schemaVersion",
   "kind",
@@ -892,6 +896,13 @@ async function validateFinalAcceptanceAnchor(options, canonicalRoot, errors) {
       !== sha256BytesV13(nativeNodeAddon.bytes)
     || anchor?.sourceDigest !== sourceManifest.digest
     || anchor?.sourceFileCount !== sourceManifest.fileCount
+    || anchor?.unsignedSafeFsHelperDigest
+      !== expectedUnsignedSafeFsHelperDigest
+    || !/^sha256:[0-9a-f]{64}$/.test(
+      anchor?.packagedSafeFsHelperDigest ?? "",
+    )
+    || anchor?.packagedSafeFsHelperDigest
+      === expectedUnsignedSafeFsHelperDigest
     || JSON.stringify(anchor?.verification)
       !== JSON.stringify(expectedFinalVerification)
     || anchor?.fileDigests?.["scripts/build-v392-acceptance-anchor.mjs"]
@@ -922,6 +933,36 @@ async function validateFinalAcceptanceAnchor(options, canonicalRoot, errors) {
     ) {
       errors.push(`v3.9.2 acceptance anchor drift: ${relativePath}`);
     }
+  }
+  const [packageReceipt, packagedSafeFsHelper] = await Promise.all([
+    readCanonicalJson(
+      path.join(
+        root,
+        ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+      ),
+      errors,
+    ),
+    readBoundRegularFile(
+      path.join(
+        root,
+        "release-local/mac-arm64/Zerox Agent.app/Contents/Resources/safe-fs/zerox-safe-fs",
+      ),
+      errors,
+      "packaged safe-fs helper",
+    ),
+  ]);
+  if (
+    !packageReceipt
+    || !packagedSafeFsHelper
+    || packageReceipt.value.safeFsHelper?.sha256
+      !== anchor.packagedSafeFsHelperDigest
+    || packageReceipt.value.safeFsHelper?.bytes
+      !== packagedSafeFsHelper.bytes.length
+    || anchor.packagedSafeFsHelperDigest
+      !== sha256BytesV13(packagedSafeFsHelper.bytes)
+    || (packagedSafeFsHelper.metadata.mode & 0o777) !== 0o755
+  ) {
+    errors.push("v3.9.2 packaged safe-fs helper identity is invalid");
   }
   for (const relativePath of expectedExternalControlFiles) {
     const controlCapture = await readBoundRegularFile(
