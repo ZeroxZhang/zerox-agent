@@ -14233,6 +14233,16 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 
 ## 2026-09-02 - v3.9.2 unified model response budgets
 
+- Candidate `65726a22e61ca14ca7ca39a562ff97dbf93cfa5e` was rejected before review
+  completion after the code lane found one Major async-iterator shutdown
+  boundary; no PASS receipts were issued. JavaScript `for await` performs an
+  implicit awaited `AsyncIteratorClose`, so an iterator whose `return()` never
+  settled could still suppress the immediate limit failure.
+- Generic Bedrock async bodies now use an explicit bounded iterator state
+  machine. Overflow triggers the underlying `return()` only as background
+  cleanup, while the wrapper's own `return()` resolves immediately and the
+  typed limit failure reaches Smithy without waiting. A 33-chunk regression
+  proves the limit fails promptly even when the source `return()` never settles.
 - Candidate `4f79ea4ba0d7e63c952036ff9e4a5676084e7b13` was invalidated by the
   parent audit before review completion. Response limits waited for underlying
   Web-stream cancellation, so a cancellation hook that never settled could
@@ -14272,9 +14282,9 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Claude, Ollama discovery, and provider error decoding now enforce the shared
   limits. Regressions cover oversized successful bodies for every HTTP provider,
   oversized non-2xx bodies, streaming-limit fallback suppression, and retry
-  suppression. Focused transport validation passes `166/166`. Full
+  suppression. Focused transport validation passes `167/167`. Full
   `npm run verify` passes strict test type coverage `436/436`, `327` current
-  files / `3988` current tests with declared skips, every Round2–Round12 lane,
+  files / `3989` current tests with declared skips, every Round2–Round12 lane,
   production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
   passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
   eight authority domains, renderer startup, and Node ABI `137` restoration.

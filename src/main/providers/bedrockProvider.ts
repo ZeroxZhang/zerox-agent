@@ -165,7 +165,7 @@ function boundedBedrockBody(body: unknown, label: string): unknown {
     return boundNodeReadable(body, label);
   }
   if (isAsyncIterable(body)) {
-    return Readable.from(boundAsyncIterable(body, label));
+    return Readable.from(createBoundedAsyncIterable(body, label));
   }
   throw new Error("Bedrock SDK response body used an unsupported transport type.");
 }
@@ -255,24 +255,60 @@ function releaseWebReader(
   }
 }
 
-async function* boundAsyncIterable(
+function createBoundedAsyncIterable(
   body: AsyncIterable<unknown>,
   label: string,
-): AsyncGenerator<unknown> {
+): AsyncIterable<unknown> {
+  const iterator = body[Symbol.asyncIterator]();
   let bytesRead = 0;
-  for await (const chunk of body) {
-    const byteLength = typeof chunk === "string"
-      ? Buffer.byteLength(chunk)
-      : chunk instanceof Uint8Array
-        ? chunk.byteLength
-        : 0;
-    bytesRead += byteLength;
-    if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
-      cancelBedrockBody(body);
-      throw new ResponseBodyLimitError(label, MODEL_RESPONSE_MAX_BODY_BYTES);
+  let closed = false;
+  const closeWithoutWaiting = () => {
+    if (closed) return;
+    closed = true;
+    try {
+      void Promise.resolve(iterator.return?.()).catch(() => undefined);
+    } catch {
+      // Cleanup must never delay or replace the response-budget failure.
     }
-    yield chunk;
-  }
+    cancelBedrockBody(body);
+  };
+  return {
+    [Symbol.asyncIterator]() {
+      return {
+        async next() {
+          if (closed) return { done: true, value: undefined };
+          const result = await iterator.next();
+          if (result.done) {
+            closed = true;
+            return result;
+          }
+          const chunk = result.value;
+          const byteLength = typeof chunk === "string"
+            ? Buffer.byteLength(chunk)
+            : chunk instanceof Uint8Array
+              ? chunk.byteLength
+              : 0;
+          bytesRead += byteLength;
+          if (bytesRead > MODEL_RESPONSE_MAX_BODY_BYTES) {
+            closeWithoutWaiting();
+            throw new ResponseBodyLimitError(
+              label,
+              MODEL_RESPONSE_MAX_BODY_BYTES,
+            );
+          }
+          return { done: false, value: chunk };
+        },
+        async return() {
+          closeWithoutWaiting();
+          return { done: true, value: undefined };
+        },
+        async throw(error?: unknown) {
+          closeWithoutWaiting();
+          throw error;
+        },
+      };
+    },
+  };
 }
 
 function readContentLength(

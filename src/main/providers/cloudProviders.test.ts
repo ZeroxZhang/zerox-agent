@@ -92,6 +92,43 @@ describe("Bedrock provider", () => {
     ])).rejects.toBeInstanceOf(ResponseBodyLimitError);
   });
 
+  it("does not await a non-settling async iterator return after overflow", async () => {
+    let reads = 0;
+    let returnCalled = false;
+    const chunk = Buffer.alloc(1024 * 1024, 0x61);
+    const asyncBody = {
+      [Symbol.asyncIterator]() {
+        return {
+          async next() {
+            reads += 1;
+            return { done: false as const, value: chunk };
+          },
+          return() {
+            returnCalled = true;
+            return new Promise<IteratorResult<Buffer>>(() => undefined);
+          },
+        };
+      },
+    };
+    const response = { headers: {}, body: asyncBody as unknown };
+    enforceBedrockSdkResponseBudget(response);
+    const consume = async () => {
+      for await (const _chunk of response.body as Readable) {
+        // The 33rd MiB must reject without awaiting iterator.return().
+      }
+    };
+
+    await expect(Promise.race([
+      consume(),
+      new Promise<never>((_resolve, reject) => setTimeout(
+        () => reject(new Error("async iterator budget did not fail promptly")),
+        250,
+      )),
+    ])).rejects.toBeInstanceOf(ResponseBodyLimitError);
+    expect(reads).toBe(33);
+    expect(returnCalled).toBe(true);
+  });
+
   it("rejects oversized Converse text, reasoning, and tool input", async () => {
     const oversized = "x".repeat(MODEL_RESPONSE_MAX_BODY_BYTES + 1);
     const responses = [
