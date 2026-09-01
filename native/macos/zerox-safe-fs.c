@@ -279,6 +279,29 @@ static int sha256_fd(int fd, char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U]) {
   return sha256_fd_with_checkpoint(fd, output, NULL);
 }
 
+static int sha256_bytes(
+  const char *bytes,
+  size_t length,
+  char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U]
+) {
+  CC_SHA256_CTX context;
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  size_t index;
+  if (length > UINT32_MAX) return fail_message("projection body is too large");
+  if (
+    CC_SHA256_Init(&context) != 1
+    || CC_SHA256_Update(&context, bytes, (CC_LONG)length) != 1
+    || CC_SHA256_Final(digest, &context) != 1
+  ) {
+    return fail_message("cannot calculate projection body digest");
+  }
+  for (index = 0U; index < CC_SHA256_DIGEST_LENGTH; index += 1U) {
+    (void)snprintf(output + index * 2U, 3U, "%02x", digest[index]);
+  }
+  output[CC_SHA256_DIGEST_LENGTH * 2U] = '\0';
+  return 0;
+}
+
 static int digest_matches_with_checkpoint(
   int fd,
   const file_identity *identity,
@@ -1945,22 +1968,22 @@ static int open_expected_projection(
   const char *plans_path,
   const char *final_name,
   const char *expected_value,
+  const char *next_digest,
   uid_t expected_uid,
   int *existing_fd,
   file_identity *existing_identity,
-  int *expect_absent
+  int *expect_absent,
+  int *already_published
 ) {
   struct stat stats;
+  char actual_digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
+  char expected_digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
   *expect_absent = strcmp(expected_value, "absent") == 0;
-  if (*expect_absent) {
-    if (fstatat(plans_fd, final_name, &stats, AT_SYMLINK_NOFOLLOW) == 0) {
-      return fail_message("plan projection appeared without prior authority");
-    }
-    return errno == ENOENT
-      ? 0
-      : fail_errno("cannot inspect plan projection absence");
-  }
-  if (!parse_sha256_value(expected_value, existing_identity->sha256)) {
+  *already_published = 0;
+  if (
+    !*expect_absent
+    && !parse_sha256_value(expected_value, expected_digest)
+  ) {
     return fail_message("invalid expected plan projection digest");
   }
   *existing_fd = openat(
@@ -1969,6 +1992,7 @@ static int open_expected_projection(
     O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW
   );
   if (*existing_fd < 0) {
+    if (errno == ENOENT && *expect_absent) return 0;
     return fail_errno("cannot open expected plan projection capability");
   }
   if (fstat(*existing_fd, &stats) != 0) {
@@ -1986,9 +2010,17 @@ static int open_expected_projection(
   existing_identity->ino = stats.st_ino;
   existing_identity->size = stats.st_size;
   existing_identity->uid = stats.st_uid;
-  if (!digest_matches_with_checkpoint(*existing_fd, existing_identity, NULL)) {
+  if (sha256_fd(*existing_fd, actual_digest) != 0) {
+    return fail_message("cannot read expected plan projection digest");
+  }
+  if (strcmp(actual_digest, next_digest) == 0) {
+    *already_published = 1;
+  } else if (*expect_absent) {
+    return fail_message("plan projection appeared without prior authority");
+  } else if (strcmp(actual_digest, expected_digest) != 0) {
     return fail_message("expected plan projection content authority changed");
   }
+  memcpy(existing_identity->sha256, actual_digest, sizeof(existing_identity->sha256));
   return verify_opened_regular_path(
     plans_fd,
     plans_path,
@@ -2109,28 +2141,36 @@ static int run_projection_write(int argc, char **argv) {
   directory_identity root_identity;
   directory_identity zerox_identity;
   file_identity existing_identity;
+  file_identity lock_identity;
   file_identity output_identity;
+  struct stat lock_stats;
   struct stat output_stats;
   int root_fd = -1;
   int zerox_fd = -1;
   int plans_fd = -1;
   int existing_fd = -1;
+  int lock_fd = -1;
   int output_fd = -1;
+  int output_bound = 0;
   int result = 0;
   int expect_absent = 0;
+  int already_published = 0;
   int published = 0;
   int swapped = 0;
   char zerox_path[MAXPATHLEN];
   char plans_path[MAXPATHLEN];
   char final_name[NAME_MAX + 1];
+  char lock_name[NAME_MAX + 1];
   char temporary_name[NAME_MAX + 1];
+  char body_digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
+  char next_digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
   char *body = NULL;
   size_t body_length = 0U;
   mode_t zerox_mode = 0;
   mode_t plans_mode = 0;
   unsigned int attempt;
   int written;
-  if (argc != 9) return fail_message("invalid projection write arguments");
+  if (argc != 10) return fail_message("invalid projection write arguments");
   if (!is_single_component(argv[7])) return fail_message("invalid plan id");
   if (!parse_directory_identity(argv[3], argv[4], argv[5], argv[6], &root_identity)) {
     return fail_message("invalid projection root identity");
@@ -2139,8 +2179,21 @@ static int run_projection_write(int argc, char **argv) {
   if (written < 0 || (size_t)written >= sizeof(final_name)) {
     return fail_message("plan projection name is too long");
   }
+  written = snprintf(lock_name, sizeof(lock_name), ".%s.projection.lock", argv[7]);
+  if (written < 0 || (size_t)written >= sizeof(lock_name)) {
+    return fail_message("plan projection lock name is too long");
+  }
+  if (!parse_sha256_value(argv[9], next_digest)) {
+    return fail_message("invalid next plan projection digest");
+  }
   result = read_stdin_body(&body, &body_length);
   if (result != 0) goto done;
+  result = sha256_bytes(body, body_length, body_digest);
+  if (result != 0) goto done;
+  if (strcmp(body_digest, next_digest) != 0) {
+    result = fail_message("plan projection body does not match next digest");
+    goto done;
+  }
   result = open_root(argv[2], &root_identity, &root_fd);
   if (result != 0) goto done;
   result = open_plan_directories(
@@ -2155,6 +2208,39 @@ static int run_projection_write(int argc, char **argv) {
     &plans_fd,
     plans_path,
     &plans_mode
+  );
+  if (result != 0) goto done;
+  lock_fd = openat(
+    plans_fd,
+    lock_name,
+    O_RDWR | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW | O_CREAT,
+    0600
+  );
+  if (lock_fd < 0) {
+    result = fail_errno("cannot open plan projection lock");
+    goto done;
+  }
+  if (
+    fstat(lock_fd, &lock_stats) != 0
+    || !S_ISREG(lock_stats.st_mode)
+    || lock_stats.st_nlink != 1
+    || (lock_stats.st_mode & 0777) != 0600
+    || lock_stats.st_uid != root_identity.uid
+    || capture_file_identity(lock_fd, &lock_stats, &lock_identity) != 0
+  ) {
+    result = fail_message("plan projection lock authority is unsafe");
+    goto done;
+  }
+  result = lock_transaction_file(lock_fd);
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    lock_name,
+    lock_fd,
+    &lock_identity,
+    1,
+    1
   );
   if (result != 0) goto done;
   maybe_test_checkpoint("projection-directories-opened");
@@ -2176,12 +2262,48 @@ static int run_projection_write(int argc, char **argv) {
     plans_path,
     final_name,
     argv[8],
+    next_digest,
     root_identity.uid,
     &existing_fd,
     &existing_identity,
-    &expect_absent
+    &expect_absent,
+    &already_published
   );
   if (result != 0) goto done;
+  if (already_published) {
+    if (
+      fsync(plans_fd) != 0
+      || fsync(zerox_fd) != 0
+      || fsync(root_fd) != 0
+    ) {
+      result = fail_errno("cannot synchronize idempotent plan projection");
+      goto done;
+    }
+    result = verify_plan_directories(
+      root_fd,
+      argv[2],
+      &root_identity,
+      zerox_fd,
+      zerox_path,
+      &zerox_identity,
+      zerox_mode,
+      plans_fd,
+      plans_path,
+      plans_mode
+    );
+    if (result != 0) goto done;
+    result = verify_opened_regular_path(
+      plans_fd,
+      plans_path,
+      final_name,
+      existing_fd,
+      &existing_identity,
+      1,
+      1
+    );
+    if (result == 0) print_identity(&existing_identity);
+    goto done;
+  }
   for (attempt = 0U; attempt < 16U; attempt += 1U) {
     written = snprintf(
       temporary_name,
@@ -2229,6 +2351,7 @@ static int run_projection_write(int argc, char **argv) {
     result = fail_message("plan projection temporary authority is unsafe");
     goto done;
   }
+  output_bound = 1;
   maybe_test_checkpoint("projection-before-publish");
   result = verify_plan_directories(
     root_fd,
@@ -2241,6 +2364,16 @@ static int run_projection_write(int argc, char **argv) {
     plans_fd,
     plans_path,
     plans_mode
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
+    lock_name,
+    lock_fd,
+    &lock_identity,
+    1,
+    1
   );
   if (result != 0) goto done;
   if (expect_absent) {
@@ -2304,6 +2437,16 @@ static int run_projection_write(int argc, char **argv) {
   result = verify_opened_regular_path(
     plans_fd,
     plans_path,
+    lock_name,
+    lock_fd,
+    &lock_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
     final_name,
     output_fd,
     &output_identity,
@@ -2348,6 +2491,16 @@ static int run_projection_write(int argc, char **argv) {
   result = verify_opened_regular_path(
     plans_fd,
     plans_path,
+    lock_name,
+    lock_fd,
+    &lock_identity,
+    1,
+    1
+  );
+  if (result != 0) goto done;
+  result = verify_opened_regular_path(
+    plans_fd,
+    plans_path,
     final_name,
     output_fd,
     &output_identity,
@@ -2355,46 +2508,39 @@ static int run_projection_write(int argc, char **argv) {
     1
   );
   if (result != 0) goto done;
-  if (swapped && unlinkat(plans_fd, temporary_name, 0) != 0) {
-    result = fail_errno("cannot retire replaced plan projection");
-    goto done;
-  }
-  if (swapped && fsync(plans_fd) != 0) {
-    result = fail_errno("cannot synchronize replaced plan projection retirement");
-    goto done;
+  if (
+    swapped
+    && verify_opened_regular_path(
+      plans_fd,
+      plans_path,
+      temporary_name,
+      existing_fd,
+      &existing_identity,
+      1,
+      1
+    ) == 0
+    && unlinkat(plans_fd, temporary_name, 0) == 0
+  ) {
+    (void)fsync(plans_fd);
   }
   print_identity(&output_identity);
 done:
-  if (result != 0 && swapped) {
-    if (renameatx_np(
-      plans_fd,
-      temporary_name,
-      plans_fd,
-      final_name,
-      RENAME_SWAP
-    ) == 0) {
-      published = 0;
-    }
-  }
-  if (result != 0 && published && expect_absent) {
+  if (!published && plans_fd >= 0 && output_fd >= 0 && output_bound) {
     if (verify_opened_regular_path(
       plans_fd,
       plans_path,
-      final_name,
+      temporary_name,
       output_fd,
       &output_identity,
       1,
       1
     ) == 0) {
-      (void)unlinkat(plans_fd, final_name, 0);
-      published = 0;
+      (void)unlinkat(plans_fd, temporary_name, 0);
     }
-  }
-  if (!published && plans_fd >= 0 && output_fd >= 0) {
-    (void)unlinkat(plans_fd, temporary_name, 0);
   }
   if (output_fd >= 0) close(output_fd);
   if (existing_fd >= 0) close(existing_fd);
+  if (lock_fd >= 0) close(lock_fd);
   if (plans_fd >= 0) close(plans_fd);
   if (zerox_fd >= 0) close(zerox_fd);
   if (root_fd >= 0) close(root_fd);

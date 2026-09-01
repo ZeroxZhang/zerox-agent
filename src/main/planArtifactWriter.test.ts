@@ -1,8 +1,10 @@
 import {
   access,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rename,
   rm,
@@ -167,6 +169,137 @@ describe("plan artifact writer", () => {
     ).resolves.toBe(true);
     await expect(readFile(second.path, "utf8")).resolves.toContain(
       "revised summary",
+    );
+  });
+
+  it("recovers idempotently when the canonical projection already has the next digest", async () => {
+    const writer = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await writer.write(plan, createArtifact());
+    const revisedArtifact = { ...createArtifact(), summary: "idempotent next" };
+    const second = await writer.write(
+      { ...plan, projection: first },
+      revisedArtifact,
+    );
+
+    const recovered = await writer.write(
+      { ...plan, projection: first },
+      revisedArtifact,
+    );
+
+    expect(recovered).toMatchObject({
+      path: second.path,
+      sha256: second.sha256,
+    });
+    await expect(readFile(second.path, "utf8")).resolves.toContain(
+      "idempotent next",
+    );
+  });
+
+  it("never swaps an attacker replacement from the retired leaf back into the canonical path", async () => {
+    const baseWriter = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await baseWriter.write(plan, createArtifact());
+    const outside = path.join(tempDir, "attacker-target");
+    await writeFile(outside, "attacker data", { mode: 0o600 });
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const writer = createPlanArtifactWriter({
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "projection-published",
+      safeFsTestOnReady: signalReady,
+    });
+    const revised = { ...createArtifact(), summary: "safe published next" };
+    const outcome = writer.write({ ...plan, projection: first }, revised).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready;
+    const plansDir = path.dirname(first.path);
+    const retiredLeaf = (await readdir(plansDir)).find((name) =>
+      name.endsWith(".tmp")
+    );
+    expect(retiredLeaf).toBeDefined();
+    await rm(path.join(plansDir, retiredLeaf!));
+    await symlink(outside, path.join(plansDir, retiredLeaf!));
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect((await lstat(first.path)).isSymbolicLink()).toBe(false);
+    await expect(readFile(first.path, "utf8")).resolves.toContain(
+      "safe published next",
+    );
+    await expect(readFile(outside, "utf8")).resolves.toBe("attacker data");
+  });
+
+  it("preserves a concurrent canonical replacement after publication without destructive rollback", async () => {
+    const baseWriter = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await baseWriter.write(plan, createArtifact());
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const writer = createPlanArtifactWriter({
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "projection-published",
+      safeFsTestOnReady: signalReady,
+    });
+    const revised = { ...createArtifact(), summary: "displaced safe next" };
+    const outcome = writer.write({ ...plan, projection: first }, revised).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready;
+    const displaced = path.join(tempDir, "published-next.md");
+    await rename(first.path, displaced);
+    await writeFile(first.path, "# concurrent user replacement\n", {
+      mode: 0o600,
+    });
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    await expect(readFile(first.path, "utf8")).resolves.toBe(
+      "# concurrent user replacement\n",
+    );
+    await expect(readFile(displaced, "utf8")).resolves.toContain(
+      "displaced safe next",
+    );
+  });
+
+  it("serializes cooperating writers with a stable per-Plan lock", async () => {
+    const baseWriter = createPlanArtifactWriter();
+    const plan = createPlan(workspaceRoot);
+    const first = await baseWriter.write(plan, createArtifact());
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      signalReady = resolve;
+    });
+    const holdingWriter = createPlanArtifactWriter({
+      safeFsTestDelayMs: 500,
+      safeFsTestReadyStage: "projection-before-publish",
+      safeFsTestOnReady: signalReady,
+    });
+    const firstOutcome = holdingWriter.write(
+      { ...plan, projection: first },
+      { ...createArtifact(), summary: "serialized winner" },
+    );
+
+    await ready;
+    await expect(
+      baseWriter.write(
+        { ...plan, projection: first },
+        { ...createArtifact(), summary: "concurrent loser" },
+      ),
+    ).rejects.toThrow(/already active/i);
+    const winner = await firstOutcome;
+
+    await expect(readFile(winner.path, "utf8")).resolves.toContain(
+      "serialized winner",
     );
   });
 

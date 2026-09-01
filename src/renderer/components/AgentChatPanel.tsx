@@ -4721,7 +4721,7 @@ function PlanConfirmationCard(props: {
     props.plan.status === "awaiting_confirmation" &&
     props.plan.actionGate === "ready" &&
     !props.confirmBlockedReason &&
-    Boolean(artifact && props.plan.projection);
+    Boolean(artifact && props.plan.projection && !props.plan.projectionIntent);
   const canDiscard =
     ![
       "confirmed_pending_execution",
@@ -5261,7 +5261,7 @@ function PlanTechnicalDetails(props: { plan: PlanRecord }) {
           </section>
         ) : null}
 
-        {artifact && props.plan.projection ? (
+        {artifact && props.plan.projection && !props.plan.projectionIntent ? (
           <p className="plan-projection-ref">
             Markdown 投影：{props.plan.projection.path} ·{" "}
             {props.plan.projection.sha256.slice(0, 12)}

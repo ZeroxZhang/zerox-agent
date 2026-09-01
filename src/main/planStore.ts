@@ -8,7 +8,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import type { PlanRecord } from "../shared/planMode";
+import type {
+  PlanProjection,
+  PlanRecord,
+} from "../shared/planMode";
 import type { Storage } from "../shared/storageContract";
 import {
   isGoalContractRef,
@@ -20,7 +23,15 @@ import {
 } from "./goalPlanContractService";
 import { createPublicSkillSnapshot } from "../shared/skills";
 import { sanitizePlanRecordDiagnostics } from "../shared/planDiagnostics";
-import { rewriteSanitizedPlanProjection } from "./planArtifactWriter";
+import {
+  createPlanArtifactWriter,
+  describePlanProjection,
+  describePlanTombstoneProjection,
+  rewriteSanitizedPlanProjection,
+  type PlanArtifactWriter,
+  type PreparedPlanProjection,
+} from "./planArtifactWriter";
+import { decodePersistedPlanRecord } from "./planRecordDecoder";
 
 export type PlanStoreEvent = {
   id: string;
@@ -37,6 +48,20 @@ export type PlanStore = {
   save(
     plan: PlanRecord,
     expectedRevision: number,
+    eventType: string,
+    payload?: Record<string, unknown>,
+  ): Promise<PlanRecord>;
+  saveProjectionIntent(
+    plan: PlanRecord,
+    expectedRevision: number,
+    projection: PreparedPlanProjection,
+    eventType: string,
+    payload?: Record<string, unknown>,
+  ): Promise<PlanRecord>;
+  finalizeProjectionIntent(
+    planId: string,
+    expectedRevision: number,
+    projection: PlanProjection,
     eventType: string,
     payload?: Record<string, unknown>,
   ): Promise<PlanRecord>;
@@ -75,6 +100,9 @@ export function createPlanStore(options: {
   const createId = options.createId ?? (() => randomUUID());
   const queues = new Map<string, Promise<void>>();
   const activeRunIds = new Set<string>();
+  const projectionRecoveryWriter: PlanArtifactWriter = createPlanArtifactWriter({
+    now,
+  });
   let sessionIndexQueue = Promise.resolve();
 
   function planPath(planId: string) {
@@ -101,7 +129,25 @@ export function createPlanStore(options: {
     const detached = detachProjection(plan);
     if (!plan.workspaceRoot) return detached;
     try {
-      return await rewriteSanitizedPlanProjection(plan, now);
+      const next = plan.finalArtifact
+        ? await describePlanProjection(plan, plan.finalArtifact)
+        : await describePlanTombstoneProjection(plan);
+      const durableIntent = validatePlanRecord({
+        ...plan,
+        status: "drafting",
+        actionGate: "blocked",
+        projectionIntent: {
+          kind: plan.finalArtifact ? "artifact" : "tombstone",
+          expectedSha256: plan.projection.sha256,
+          nextPath: next.path,
+          nextSha256: next.sha256,
+          targetStatus: plan.status,
+          targetActionGate: plan.actionGate,
+          preparedAt: now(),
+        },
+      });
+      await writePlan(durableIntent);
+      return await recoverProjectionIntent(durableIntent);
     } catch {
       // The persistent record must remain readable and content-free when an
       // old workspace is offline, removed, read-only, or no longer canonical.
@@ -111,9 +157,12 @@ export function createPlanStore(options: {
     }
   }
 
-  async function readSqlitePlanPayload(payload: string): Promise<PlanRecord> {
-    const parsed = JSON.parse(payload) as PlanRecord;
-    const diagnosticSafe = sanitizePlanRecordDiagnostics(parsed);
+  async function readSqlitePlanPayload(
+    payload: string,
+    recoverProjection = true,
+  ): Promise<PlanRecord> {
+    const parsed: unknown = JSON.parse(payload);
+    const diagnosticSafe = decodePersistedPlanRecord(parsed);
     const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
     const validated = validatePlanRecord(diagnosticSafe);
     let migrated = validated;
@@ -127,23 +176,29 @@ export function createPlanStore(options: {
     } else if (options.storage && !recordsEqual(parsed, validated)) {
       writeSqlitePlan(options.storage, validated);
     }
-    return recoverInterruptedPlanRecord(migrated, activeRunIds);
+    const recovered = recoverProjection
+      ? await recoverProjectionIntent(migrated)
+      : migrated;
+    return recoverInterruptedPlanRecord(recovered, activeRunIds);
   }
 
-  async function readPlan(planId: string): Promise<PlanRecord | null> {
+  async function readPlan(
+    planId: string,
+    recoverProjection = true,
+  ): Promise<PlanRecord | null> {
     safePlanId(planId);
     if (options.storage) {
       const row = options.storage.db
         .prepare("SELECT payload FROM plan_records WHERE id = ?")
         .get<{ payload: string }>(planId);
       if (!row) return null;
-      return readSqlitePlanPayload(row.payload);
+      return readSqlitePlanPayload(row.payload, recoverProjection);
     }
     try {
-      const parsed = JSON.parse(
+      const parsed: unknown = JSON.parse(
         await readFile(planPath(planId), "utf8"),
-      ) as PlanRecord;
-      const diagnosticSafe = sanitizePlanRecordDiagnostics(parsed);
+      );
+      const diagnosticSafe = decodePersistedPlanRecord(parsed);
       const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
       const validated = validatePlanRecord(diagnosticSafe);
       let migrated = validated;
@@ -157,7 +212,10 @@ export function createPlanStore(options: {
       } else if (!recordsEqual(parsed, validated)) {
         await writePlan(validated);
       }
-      return recoverInterruptedPlanRecord(migrated, activeRunIds);
+      const recovered = recoverProjection
+        ? await recoverProjectionIntent(migrated)
+        : migrated;
+      return recoverInterruptedPlanRecord(recovered, activeRunIds);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
@@ -191,6 +249,58 @@ export function createPlanStore(options: {
       encoding: "utf8",
       mode: 0o600,
     });
+  }
+
+  async function persistPlanAndEvent(
+    plan: PlanRecord,
+    event: PlanStoreEvent,
+  ): Promise<void> {
+    if (options.storage) {
+      writeSqlitePlanAndEvent(options.storage, plan, event);
+      return;
+    }
+    await writePlan(plan);
+    await appendEvent(event);
+    await updateSessionIndex(plan);
+  }
+
+  async function recoverProjectionIntent(plan: PlanRecord): Promise<PlanRecord> {
+    const intent = plan.projectionIntent;
+    if (!intent) return plan;
+    try {
+      const published = intent.kind === "artifact"
+        ? plan.finalArtifact
+          ? await projectionRecoveryWriter.write(plan, plan.finalArtifact)
+          : undefined
+        : (await rewriteSanitizedPlanProjection(plan, now)).projection;
+      if (!published) return plan;
+      if (
+        published.path !== intent.nextPath
+        || published.sha256 !== intent.nextSha256
+      ) {
+        return plan;
+      }
+      const recovered = validatePlanRecord({
+        ...plan,
+        status: intent.targetStatus,
+        actionGate: intent.targetActionGate,
+        projection: published,
+        projectionIntent: undefined,
+      });
+      const event: PlanStoreEvent = {
+        id: `plan_event_${createId()}`,
+        planId: recovered.id,
+        type: "plan_projection_recovered",
+        revision: recovered.revision,
+        createdAt: now(),
+      };
+      await persistPlanAndEvent(recovered, event);
+      return recovered;
+    } catch {
+      // A pending intent is a valid, non-confirmable recovery state. Workspace
+      // drift/offline errors must not make the Plan store unreadable.
+      return plan;
+    }
   }
 
   async function readSessionIndex(): Promise<SessionPlanIndex> {
@@ -306,6 +416,9 @@ export function createPlanStore(options: {
         if (!existing) {
           throw new Error(`计划 ${plan.id} 不存在。`);
         }
+        if (existing.projectionIntent) {
+          throw new Error("计划投影仍在等待恢复，不能推进 Plan revision。");
+        }
         if (existing.revision !== expectedRevision) {
           throw new PlanVersionConflictError(
             plan.id,
@@ -343,6 +456,114 @@ export function createPlanStore(options: {
       });
     },
 
+    saveProjectionIntent(
+      plan,
+      expectedRevision,
+      projection,
+      eventType,
+      payload,
+    ) {
+      return serialize(plan.id, async () => {
+        const existing = await readPlan(plan.id);
+        if (!existing) throw new Error(`计划 ${plan.id} 不存在。`);
+        if (existing.projectionIntent) {
+          throw new Error("计划投影仍在等待恢复，不能覆盖其持久化 intent。");
+        }
+        if (existing.revision !== expectedRevision) {
+          throw new PlanVersionConflictError(
+            plan.id,
+            expectedRevision,
+            existing.revision,
+          );
+        }
+        const candidate = validatePlanRecord(
+          sanitizePlanRecordDiagnostics({
+            ...structuredClone(plan),
+            revision: expectedRevision + 1,
+            updatedAt: now(),
+            status: "drafting",
+            actionGate: "blocked",
+            projection: existing.projection,
+            projectionIntent: {
+              kind: "artifact",
+              expectedSha256: existing.projection?.sha256 ?? null,
+              nextPath: projection.path,
+              nextSha256: projection.sha256,
+              targetStatus: plan.status,
+              targetActionGate: plan.actionGate,
+              preparedAt: now(),
+            },
+          }),
+        );
+        const event: PlanStoreEvent = {
+          id: `plan_event_${createId()}`,
+          planId: candidate.id,
+          type: `${eventType}_projection_prepared`,
+          revision: candidate.revision,
+          ...(payload ? { payload: structuredClone(payload) } : {}),
+          createdAt: now(),
+        };
+        trackActiveRunIds(candidate, activeRunIds);
+        await persistPlanAndEvent(candidate, event);
+        return structuredClone(candidate);
+      });
+    },
+
+    finalizeProjectionIntent(
+      planId,
+      expectedRevision,
+      projection,
+      eventType,
+      payload,
+    ) {
+      return serialize(planId, async () => {
+        const existing = await readPlan(planId, false);
+        if (!existing) throw new Error(`计划 ${planId} 不存在。`);
+        if (!existing.projectionIntent) {
+          if (
+            existing.revision === expectedRevision
+            && existing.projection?.path === projection.path
+            && existing.projection.sha256 === projection.sha256
+          ) {
+            return structuredClone(existing);
+          }
+          throw new Error("计划不存在可提交的投影 intent。");
+        }
+        if (existing.revision !== expectedRevision) {
+          throw new PlanVersionConflictError(
+            planId,
+            expectedRevision,
+            existing.revision,
+          );
+        }
+        const intent = existing.projectionIntent;
+        if (
+          projection.path !== intent.nextPath
+          || projection.sha256 !== intent.nextSha256
+        ) {
+          throw new Error("计划投影提交结果与持久化 intent 不一致。");
+        }
+        const finalized = validatePlanRecord({
+          ...existing,
+          status: intent.targetStatus,
+          actionGate: intent.targetActionGate,
+          projection,
+          projectionIntent: undefined,
+        });
+        const event: PlanStoreEvent = {
+          id: `plan_event_${createId()}`,
+          planId,
+          type: eventType,
+          revision: finalized.revision,
+          ...(payload ? { payload: structuredClone(payload) } : {}),
+          createdAt: now(),
+        };
+        trackActiveRunIds(finalized, activeRunIds);
+        await persistPlanAndEvent(finalized, event);
+        return structuredClone(finalized);
+      });
+    },
+
     async listBySession(sessionId) {
       if (options.storage) {
         const rows = options.storage.db
@@ -350,13 +571,13 @@ export function createPlanStore(options: {
             "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
           )
           .all<{ payload: string }>(sessionId);
-        return Promise.all(
+        return collectValidPlans(
           rows.map((row) => readSqlitePlanPayload(row.payload)),
         );
       }
       try {
         const names = await readdir(plansDir);
-        const plans = await Promise.all(
+        const plans = await collectValidPlans(
           names
             .filter(
               (name) =>
@@ -385,13 +606,13 @@ export function createPlanStore(options: {
         const rows = options.storage.db
           .prepare("SELECT payload FROM plan_records ORDER BY updated_at DESC")
           .all<{ payload: string }>();
-        return Promise.all(
+        return collectValidPlans(
           rows.map((row) => readSqlitePlanPayload(row.payload)),
         );
       }
       try {
         const names = await readdir(plansDir);
-        const plans = await Promise.all(
+        const plans = await collectValidPlans(
           names
             .filter(
               (name) =>
@@ -414,19 +635,24 @@ export function createPlanStore(options: {
 
     async getLatestBySession(sessionId) {
       if (options.storage) {
-        const row = options.storage.db
+        const rows = options.storage.db
           .prepare(
-            "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1",
+            "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
           )
-          .get<{ payload: string }>(sessionId);
-        return row ? await readSqlitePlanPayload(row.payload) : null;
+          .all<{ payload: string }>(sessionId);
+        return (await collectValidPlans(
+          rows.map((row) => readSqlitePlanPayload(row.payload)),
+        ))[0] ?? null;
       }
       await sessionIndexQueue;
       const entry = (await readSessionIndex()).sessions[sessionId];
       if (entry) {
-        const indexed = await readPlan(entry.planId);
-        if (indexed?.sessionId === sessionId) {
-          return indexed;
+        try {
+          const indexed = await readPlan(entry.planId);
+          if (indexed?.sessionId === sessionId) return indexed;
+        } catch {
+          // The authoritative record scan below isolates a corrupt/stale index
+          // target instead of turning one entry into a session-wide outage.
         }
       }
       const latest = (await this.listBySession(sessionId))[0] ?? null;
@@ -436,6 +662,15 @@ export function createPlanStore(options: {
       return latest;
     },
   };
+}
+
+async function collectValidPlans(
+  reads: Array<Promise<PlanRecord | null>>,
+): Promise<PlanRecord[]> {
+  const settled = await Promise.allSettled(reads);
+  return settled.flatMap((result) =>
+    result.status === "fulfilled" && result.value ? [result.value] : []
+  );
 }
 
 function writeSqlitePlan(storage: Storage, plan: PlanRecord): void {
@@ -542,6 +777,46 @@ function validatePlanRecord(plan: PlanRecord): PlanRecord {
   }
   if (plan.mode !== "direct" && plan.mode !== "debate") {
     throw new Error("计划模式非法。");
+  }
+  const validStatuses = new Set<PlanRecord["status"]>([
+    "drafting",
+    "paused",
+    "awaiting_input",
+    "awaiting_confirmation",
+    "confirmed_pending_execution",
+    "executing",
+    "steps_completed",
+    "completed",
+    "superseded",
+    "discarded",
+    "canceled",
+    "failed",
+  ]);
+  const validActionGates = new Set<PlanRecord["actionGate"]>([
+    "ready",
+    "needs_input",
+    "blocked",
+  ]);
+  if (!validStatuses.has(plan.status) || !validActionGates.has(plan.actionGate)) {
+    throw new Error("计划状态或执行门禁非法。");
+  }
+  if (plan.projectionIntent) {
+    const intent = plan.projectionIntent;
+    if (
+      plan.status !== "drafting"
+      || plan.actionGate !== "blocked"
+      || (intent.kind !== "artifact" && intent.kind !== "tombstone")
+      || (intent.kind === "artifact" && !plan.finalArtifact)
+      || !plan.workspaceRoot
+      || !validStatuses.has(intent.targetStatus)
+      || !validActionGates.has(intent.targetActionGate)
+      || !/^[a-f0-9]{64}$/.test(intent.nextSha256)
+      || (intent.expectedSha256 !== null
+        && !/^[a-f0-9]{64}$/.test(intent.expectedSha256))
+      || intent.expectedSha256 !== (plan.projection?.sha256 ?? null)
+    ) {
+      throw new Error("计划投影 intent 非法。");
+    }
   }
   if (
     plan.autonomyMode !== undefined &&

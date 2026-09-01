@@ -226,6 +226,19 @@ export function sanitizePlanRecordDiagnostics(plan: PlanRecord): PlanRecord {
           },
         }
       : {}),
+    ...(plan.projectionIntent !== undefined
+      ? {
+          projectionIntent: {
+            kind: plan.projectionIntent.kind,
+            expectedSha256: plan.projectionIntent.expectedSha256,
+            nextPath: plan.projectionIntent.nextPath,
+            nextSha256: plan.projectionIntent.nextSha256,
+            targetStatus: plan.projectionIntent.targetStatus,
+            targetActionGate: plan.projectionIntent.targetActionGate,
+            preparedAt: plan.projectionIntent.preparedAt,
+          },
+        }
+      : {}),
     ...(plan.executionGoalId !== undefined
       ? { executionGoalId: plan.executionGoalId }
       : {}),

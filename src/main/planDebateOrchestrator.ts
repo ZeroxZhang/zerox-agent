@@ -39,7 +39,10 @@ import {
 import type { ChatMessage } from "./openAiCompatibleClient";
 import type { BoundModelClient, ModelRouter } from "./providers/modelRouter";
 import type { PlanArtifactWriter } from "./planArtifactWriter";
-import { renderPlanMarkdown } from "./planArtifactWriter";
+import {
+  describePlanProjection,
+  renderPlanMarkdown,
+} from "./planArtifactWriter";
 import type { PlanStore } from "./planStore";
 import {
   createPublicSkillSnapshot,
@@ -1056,45 +1059,54 @@ export function createPlanDebateOrchestrator(options: {
         projectionInput.artifact,
       ),
     };
-    const projection = await options.artifactWriter.write(
+    const targetPlan: PlanRecord = {
+      ...record,
+      criterionBindings: deriveRecordCriterionBindings(
+        record,
+        canonicalArtifact,
+      ),
+      finalArtifact: canonicalArtifact,
+      ...(projectionInput.plan.qualityReport
+        ? { qualityReport: projectionInput.plan.qualityReport }
+        : {}),
+      planningStages: [
+        ...(record.planningStages ?? []),
+        ...(qualityStage ? [qualityStage] : []),
+      ],
+      // A terminal gate block is a question for the user, not a dead
+      // end: keep actionGate honest (confirmation stays impossible) but
+      // park the plan in awaiting_input so the revise-by-reply path is
+      // offered instead of a stranded "Blocked" card.
+      status:
+        canonicalArtifact.actionGate === "ready"
+          ? "awaiting_confirmation"
+          : "awaiting_input",
+      actionGate: canonicalArtifact.actionGate,
+    };
+    const preparedProjection = await describePlanProjection(
       projectionInput.plan,
       canonicalArtifact,
     );
-    await persistCancellationIfAborted(record, signal, {
-      afterProjection: true,
-    });
-    const synthesized = await options.planStore.save(
-      {
-        ...record,
-        criterionBindings: deriveRecordCriterionBindings(
-          record,
-          canonicalArtifact,
-        ),
-        finalArtifact: canonicalArtifact,
-        projection,
-        ...(projectionInput.plan.qualityReport
-          ? { qualityReport: projectionInput.plan.qualityReport }
-          : {}),
-        planningStages: [
-          ...(record.planningStages ?? []),
-          ...(qualityStage ? [qualityStage] : []),
-        ],
-        // A terminal gate block is a question for the user, not a dead
-        // end: keep actionGate honest (confirmation stays impossible) but
-        // park the plan in awaiting_input so the revise-by-reply path is
-        // offered instead of a stranded "Blocked" card.
-        status:
-          canonicalArtifact.actionGate === "ready"
-            ? "awaiting_confirmation"
-            : "awaiting_input",
-        actionGate: canonicalArtifact.actionGate,
-      },
+    const preparedRecord = await options.planStore.saveProjectionIntent(
+      targetPlan,
       record.revision,
+      preparedProjection,
+      "plan_synthesized",
+      { actionGate: canonicalArtifact.actionGate },
+    );
+    const projection = await options.artifactWriter.write(
+      preparedRecord,
+      canonicalArtifact,
+    );
+    const synthesized = await options.planStore.finalizeProjectionIntent(
+      preparedRecord.id,
+      preparedRecord.revision,
+      projection,
       "plan_synthesized",
       { actionGate: canonicalArtifact.actionGate },
     );
     await persistCancellationIfAborted(synthesized, signal, {
-      afterSynthesis: true,
+      afterProjection: true,
     });
     return synthesized;
   }
@@ -1470,35 +1482,50 @@ export function createPlanDebateOrchestrator(options: {
         projectionInput.artifact,
       ),
     };
-    const projection = await options.artifactWriter.write(
+    const targetPlan: PlanRecord = {
+      ...record,
+      criterionBindings: deriveRecordCriterionBindings(
+        record,
+        canonicalArtifact,
+      ),
+      finalArtifact: canonicalArtifact,
+      qualityReport: projectionInput.plan.qualityReport,
+      planningStages: [
+        ...(record.planningStages ?? []).map((stage) =>
+          stage.kind === "quality"
+            ? { ...stage, status: "invalidated" as const }
+            : stage,
+        ),
+        qualityStage,
+      ],
+      status:
+        canonicalArtifact.actionGate === "ready"
+          ? "awaiting_confirmation"
+          : "awaiting_input",
+      actionGate: canonicalArtifact.actionGate,
+    };
+    const preparedProjection = await describePlanProjection(
       projectionInput.plan,
       canonicalArtifact,
     );
-    const saved = await options.planStore.save(
-      {
-        ...record,
-        criterionBindings: deriveRecordCriterionBindings(
-          record,
-          canonicalArtifact,
-        ),
-        finalArtifact: canonicalArtifact,
-        projection,
-        qualityReport: projectionInput.plan.qualityReport,
-        planningStages: [
-          ...(record.planningStages ?? []).map((stage) =>
-            stage.kind === "quality"
-              ? { ...stage, status: "invalidated" as const }
-              : stage,
-          ),
-          qualityStage,
-        ],
-        status:
-          canonicalArtifact.actionGate === "ready"
-            ? "awaiting_confirmation"
-            : "awaiting_input",
-        actionGate: canonicalArtifact.actionGate,
-      },
+    const preparedRecord = await options.planStore.saveProjectionIntent(
+      targetPlan,
       record.revision,
+      preparedProjection,
+      "plan_quality_rechecked",
+      {
+        compatibilityNormalized,
+        ...(gateRepair.attempted ? { gateRepairAttempted: true } : {}),
+      },
+    );
+    const projection = await options.artifactWriter.write(
+      preparedRecord,
+      canonicalArtifact,
+    );
+    const saved = await options.planStore.finalizeProjectionIntent(
+      preparedRecord.id,
+      preparedRecord.revision,
+      projection,
       "plan_quality_rechecked",
       {
         compatibilityNormalized,

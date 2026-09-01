@@ -356,6 +356,22 @@ export type PlanProjection = {
   writtenAt: string;
 };
 
+/**
+ * Durable half of the Plan projection transaction. While this intent exists,
+ * the Plan is deliberately non-confirmable. The workspace projection may
+ * still contain either expectedSha256 (before publish) or nextSha256 (after a
+ * publish/process crash); both states can be reconciled idempotently.
+ */
+export type PlanProjectionIntent = {
+  kind: "artifact" | "tombstone";
+  expectedSha256: string | null;
+  nextPath: string;
+  nextSha256: string;
+  targetStatus: PlanStatus;
+  targetActionGate: PlanActionGate;
+  preparedAt: string;
+};
+
 export type PlanRecord = {
   schemaVersion?: PlanSchemaVersion;
   id: string;
@@ -396,6 +412,7 @@ export type PlanRecord = {
   rounds: DebateRound[];
   finalArtifact?: PlanArtifact;
   projection?: PlanProjection;
+  projectionIntent?: PlanProjectionIntent;
   executionGoalId?: string;
   executionRunId?: string;
   confirmedRevision?: number;

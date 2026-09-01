@@ -1953,8 +1953,12 @@ describe("plan debate orchestrator", () => {
       status: "canceled",
       actionGate: "blocked",
     });
-    expect(canceled?.finalArtifact).toBeUndefined();
-    expect(canceled?.projection).toBeUndefined();
+    expect(canceled?.finalArtifact).toBeDefined();
+    expect(canceled?.projection).toBeDefined();
+    expect(canceled?.projectionIntent).toBeUndefined();
+    await expect(readFile(canceled!.projection!.path, "utf8")).resolves.toContain(
+      "Projection cancellation",
+    );
     expect(canceled?.rounds).toEqual([
       expect.objectContaining({
         kind: "direct",

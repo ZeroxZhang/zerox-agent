@@ -13866,3 +13866,42 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   restoration. Production audit reports zero vulnerabilities; the full
   dependency tree, caller-pinned Program/Harness, and whitespace checks pass.
   A fresh tenth exact-byte code/security review is the next mandatory gate.
+
+## 2026-09-01 - v3.9.2 durable Plan projection transaction and corrupt-record isolation
+
+- The tenth frozen candidate was rejected by code and security review with no
+  Critical findings and two Major findings in each review. No review receipts
+  were issued. The shared root causes were a post-publication native rollback
+  that could act on a concurrent replacement, projection publication preceding
+  its authoritative Plan-store commit, and unchecked persisted nested Plan
+  shapes allowing one corrupt record to reject an entire list query.
+- Plan projection now uses a durable two-phase intent at one Plan revision:
+  first persist the target payload in a blocked, non-confirmable state with the
+  exact old and next digests; then publish through the native helper; finally
+  clear the intent and expose the target status and action gate. Reads recover
+  interrupted intents idempotently, while ordinary saves cannot advance or
+  overwrite unresolved recovery authority.
+- The native `projection-write` boundary takes a stable per-Plan exclusive
+  lock, validates the supplied body against the exact next digest, accepts an
+  already-published next digest as an idempotent retry, and never swaps back or
+  removes an unverified pathname after publication. Retired/temp cleanup is
+  descriptor-, identity-, and digest-bound; post-publication cleanup is
+  best-effort after the canonical file is durably committed.
+- Persisted JSON and SQLite Plans now cross a full unknown-value structural
+  decoder before diagnostic sanitation. Batch reads isolate malformed rows,
+  latest-by-session skips corrupt newer rows, and a broken JSON session index
+  falls back to an authoritative record scan. Error diagnostics contain only
+  field paths, never persisted values.
+- Adversarial regressions cover crash recovery, cancellation after publication,
+  next-digest idempotence, symlinked retired leaves, concurrent canonical
+  replacement, writer lock contention, malformed nested arrays/objects and
+  selected-Skill shapes, corrupt newest SQLite rows, and tombstone migration
+  recovery. Focused validation passes `68/68` tests. Full `npm run verify`
+  passes strict test type coverage `434/434`, `325` current files / `3925`
+  current tests with declared skips, every Round2–Round12 lane, production
+  build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke passes
+  Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations, eight
+  authority domains, renderer startup, and Node ABI `137` restoration.
+  Production audit reports zero vulnerabilities; dependency, caller-pinned
+  Program/Harness, and whitespace checks pass. A fresh exact-byte code and
+  security review remains mandatory before package acceptance and release.

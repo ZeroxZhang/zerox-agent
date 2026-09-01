@@ -17,6 +17,11 @@ export type PlanArtifactWriter = {
   verify(plan: PlanRecord): Promise<boolean>;
 };
 
+export type PreparedPlanProjection = {
+  path: string;
+  sha256: string;
+};
+
 export function createPlanArtifactWriter(options?: SafeFsHelperRuntimeOptions & {
   now?: () => string;
 }): PlanArtifactWriter {
@@ -24,34 +29,21 @@ export function createPlanArtifactWriter(options?: SafeFsHelperRuntimeOptions & 
 
   return {
     async write(plan, artifact) {
-      const safeInput = sanitizeArtifactProjection(plan, artifact);
-      if (!safeInput.plan.workspaceRoot) {
-        throw new Error("计划没有绑定工作区，无法生成 Markdown 投影。");
-      }
-      assertArtifactPlanId(safeInput.plan.id);
-      const root = await realpath(safeInput.plan.workspaceRoot);
-      const destination = canonicalProjectionPath(root, safeInput.plan.id);
-      if (
-        safeInput.plan.projection
-        && safeInput.plan.projection.path !== destination
-      ) {
-        throw new Error("计划投影路径不是当前计划的规范路径。");
-      }
-      const markdown = renderPlanMarkdown(safeInput.plan, safeInput.artifact);
-      const sha256 = hash(markdown);
+      const prepared = await preparePlanProjection(plan, artifact);
+      const safeInput = prepared.safeInput;
       await runSafeFsHelper(
         "projection-write",
         await projectionHelperArgs(
-          root,
+          prepared.root,
           safeInput.plan.id,
           safeInput.plan.projection?.sha256,
+          prepared.projection.sha256,
         ),
-        markdown,
+        prepared.markdown,
         options ?? {},
       );
       return {
-        path: destination,
-        sha256,
+        ...prepared.projection,
         writtenAt: now(),
       };
     },
@@ -116,7 +108,7 @@ export async function rewriteSanitizedPlanProjection(
   }
   const markdown = sanitized.finalArtifact
     ? renderPlanMarkdown(sanitized, sanitized.finalArtifact)
-    : "# Plan projection unavailable\n\nLegacy diagnostic projection removed.\n";
+    : tombstoneProjectionMarkdown();
   const sha256 = hash(markdown);
   await runSafeFsHelper(
     "projection-write",
@@ -124,11 +116,11 @@ export async function rewriteSanitizedPlanProjection(
       root,
       sanitized.id,
       sanitized.projection.sha256,
+      sha256,
     ),
     markdown,
     {},
   );
-  if (!sanitized.finalArtifact) return detached;
   return {
     ...sanitized,
     projection: {
@@ -139,6 +131,63 @@ export async function rewriteSanitizedPlanProjection(
           ? sanitized.projection.writtenAt
           : now(),
     },
+  };
+}
+
+export async function describePlanProjection(
+  plan: PlanRecord,
+  artifact: PlanArtifact,
+): Promise<PreparedPlanProjection> {
+  return (await preparePlanProjection(plan, artifact)).projection;
+}
+
+export async function describePlanTombstoneProjection(
+  plan: PlanRecord,
+): Promise<PreparedPlanProjection> {
+  const sanitized = sanitizePlanRecordDiagnostics(plan);
+  if (!sanitized.workspaceRoot) {
+    throw new Error("计划没有绑定工作区，无法生成 Markdown 投影。");
+  }
+  assertArtifactPlanId(sanitized.id);
+  const root = await realpath(sanitized.workspaceRoot);
+  const destination = canonicalProjectionPath(root, sanitized.id);
+  if (sanitized.projection?.path !== destination) {
+    throw new Error("计划投影路径不是当前计划的规范路径。");
+  }
+  return {
+    path: destination,
+    sha256: hash(tombstoneProjectionMarkdown()),
+  };
+}
+
+async function preparePlanProjection(
+  plan: PlanRecord,
+  artifact: PlanArtifact,
+): Promise<{
+  safeInput: { plan: PlanRecord; artifact: PlanArtifact };
+  root: string;
+  markdown: string;
+  projection: PreparedPlanProjection;
+}> {
+  const safeInput = sanitizeArtifactProjection(plan, artifact);
+  if (!safeInput.plan.workspaceRoot) {
+    throw new Error("计划没有绑定工作区，无法生成 Markdown 投影。");
+  }
+  assertArtifactPlanId(safeInput.plan.id);
+  const root = await realpath(safeInput.plan.workspaceRoot);
+  const destination = canonicalProjectionPath(root, safeInput.plan.id);
+  if (
+    safeInput.plan.projection
+    && safeInput.plan.projection.path !== destination
+  ) {
+    throw new Error("计划投影路径不是当前计划的规范路径。");
+  }
+  const markdown = renderPlanMarkdown(safeInput.plan, safeInput.artifact);
+  return {
+    safeInput,
+    root,
+    markdown,
+    projection: { path: destination, sha256: hash(markdown) },
   };
 }
 
@@ -154,6 +203,10 @@ function sanitizeArtifactProjection(
     throw new Error("计划投影缺少可公开的结构化终版。");
   }
   return { plan: sanitized, artifact: sanitized.finalArtifact };
+}
+
+function tombstoneProjectionMarkdown(): string {
+  return "# Plan projection unavailable\n\nLegacy diagnostic projection removed.\n";
 }
 
 function assertArtifactPlanId(planId: string): void {
@@ -352,6 +405,7 @@ async function projectionHelperArgs(
   root: string,
   planId: string,
   expectedSha256: string | undefined,
+  nextSha256?: string,
 ): Promise<string[]> {
   const stats = await lstat(root, { bigint: true });
   if (!stats.isDirectory() || stats.isSymbolicLink()) {
@@ -365,6 +419,7 @@ async function projectionHelperArgs(
     (stats.mode & 0o777n).toString(),
     planId,
     expectedSha256 ? `sha256:${expectedSha256}` : "absent",
+    ...(nextSha256 ? [`sha256:${nextSha256}`] : []),
   ];
 }
 

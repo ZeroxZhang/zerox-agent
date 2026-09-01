@@ -20,6 +20,11 @@ import {
   createPlanStore,
   PlanVersionConflictError,
 } from "./planStore";
+import {
+  createPlanArtifactWriter,
+  describePlanProjection,
+} from "./planArtifactWriter";
+import { InvalidPersistedPlanRecordError } from "./planRecordDecoder";
 import { createStorageImpl } from "./storage/storageDb";
 import { ensurePlanGoalContract } from "./goalPlanContractService";
 import { classifyPlanReplayReadFailure } from "../shared/planDiagnostics";
@@ -469,13 +474,14 @@ describe("plan store parity", () => {
     Object.assign(raw, { rawDiagnostic: secret });
 
     const created = await store.create(raw);
-    expect(created.projection).toBeUndefined();
-    await expect(readFile(projectionPath, "utf8")).resolves.not.toContain(
-      secret,
+    expect(created.projection).toBeDefined();
+    expect(created.projectionIntent).toBeUndefined();
+    await expect(readFile(projectionPath, "utf8")).resolves.toBe(
+      "# Plan projection unavailable\n\nLegacy diagnostic projection removed.\n",
     );
   });
 
-  it("detaches sanitized records without overwriting a drifted legacy projection", async () => {
+  it("keeps a non-confirmable recovery intent without overwriting a drifted legacy projection", async () => {
     const secret = "local-canary-drifted-plan-0123456789abcdef";
     const workspaceInput = path.join(tempDir, "drifted-diagnostic-workspace");
     await mkdir(workspaceInput, { recursive: true });
@@ -520,7 +526,15 @@ describe("plan store parity", () => {
 
         const created = await store.create(raw);
 
-        expect(created.projection).toBeUndefined();
+        expect(created).toMatchObject({
+          status: "drafting",
+          actionGate: "blocked",
+          projection: { sha256: sha256(trustedProjection) },
+          projectionIntent: {
+            kind: "artifact",
+            expectedSha256: sha256(trustedProjection),
+          },
+        });
         await expect(readFile(projectionPath, "utf8")).resolves.toBe(
           userModifiedProjection,
         );
@@ -781,6 +795,149 @@ describe("plan store parity", () => {
     await expect(
       store.getLatestBySession(created.sessionId),
     ).resolves.toEqual(created);
+  });
+
+  it("recovers a durable projection intent before exposing a confirmable Plan", async () => {
+    const configDir = path.join(tempDir, "projection-intent");
+    const workspaceRoot = path.join(tempDir, "projection-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const firstRuntime = createPlanStore({ configDir });
+    const artifact: PlanArtifact = {
+      ...createDiagnosticArtifact("safe"),
+      actionGate: "ready",
+      gateReason: "ready",
+    };
+    const created = await firstRuntime.create({
+      ...createRecord(),
+      workspaceRoot,
+    });
+    const target: PlanRecord = {
+      ...created,
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      finalArtifact: artifact,
+    };
+    const description = await describePlanProjection(
+      { ...target, revision: created.revision + 1 },
+      artifact,
+    );
+    const prepared = await firstRuntime.saveProjectionIntent(
+      target,
+      created.revision,
+      description,
+      "plan_synthesized",
+    );
+
+    expect(prepared).toMatchObject({
+      revision: created.revision + 1,
+      status: "drafting",
+      actionGate: "blocked",
+      projectionIntent: {
+        nextPath: description.path,
+        nextSha256: description.sha256,
+        targetStatus: "awaiting_confirmation",
+        targetActionGate: "ready",
+      },
+    });
+
+    const recovered = await createPlanStore({ configDir }).get(created.id);
+
+    expect(recovered).toMatchObject({
+      revision: prepared.revision,
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      projection: {
+        path: description.path,
+        sha256: description.sha256,
+      },
+    });
+    expect(recovered?.projectionIntent).toBeUndefined();
+    await expect(
+      createPlanArtifactWriter().verify(recovered!),
+    ).resolves.toBe(true);
+  });
+
+  it("quarantines malformed JSON Plans without blocking valid list queries", async () => {
+    const configDir = path.join(tempDir, "malformed-json");
+    const store = createPlanStore({ configDir });
+    const valid = await store.create(createRecord());
+    const malformedRecords = [
+      {
+        ...createRecord(),
+        id: "plan-malformed-issue",
+        goalContractIssues: [null],
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-contract",
+        goalContractSnapshot: {},
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-skill",
+        selectedSkill: { manifest: { inputs: [], permissions: {} } },
+      },
+    ];
+    for (const malformed of malformedRecords) {
+      await writeFile(
+        path.join(configDir, "plans", `${malformed.id}.json`),
+        JSON.stringify(malformed),
+        "utf8",
+      );
+      await expect(store.get(malformed.id)).rejects.toBeInstanceOf(
+        InvalidPersistedPlanRecordError,
+      );
+    }
+    await expect(store.listAll()).resolves.toEqual([valid]);
+    await expect(store.listBySession(valid.sessionId)).resolves.toEqual([valid]);
+  });
+
+  it("quarantines malformed SQLite Plans and skips a corrupt newest session record", async () => {
+    const storage = createStorageImpl({
+      dbPath: path.join(tempDir, "malformed.sqlite"),
+      skipFts5Check: true,
+    });
+    const store = createPlanStore({
+      configDir: path.join(tempDir, "sqlite-unused"),
+      storage,
+    });
+    try {
+      const valid = await store.create(createRecord());
+      const malformed = {
+        ...createRecord(),
+        id: "plan-malformed-sqlite",
+        selectedSkill: { manifest: { inputs: [], permissions: {} } },
+        updatedAt: "2026-07-30T01:00:00.000Z",
+      };
+      storage.db.prepare(
+        `INSERT INTO plan_records
+          (id, session_id, mode, status, action_gate, revision, payload, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        malformed.id,
+        malformed.sessionId,
+        malformed.mode,
+        malformed.status,
+        malformed.actionGate,
+        malformed.revision,
+        JSON.stringify(malformed),
+        malformed.createdAt,
+        malformed.updatedAt,
+      );
+
+      await expect(store.get(malformed.id)).rejects.toBeInstanceOf(
+        InvalidPersistedPlanRecordError,
+      );
+      await expect(store.listAll()).resolves.toEqual([valid]);
+      await expect(store.listBySession(valid.sessionId)).resolves.toEqual([
+        valid,
+      ]);
+      await expect(store.getLatestBySession(valid.sessionId)).resolves.toEqual(
+        valid,
+      );
+    } finally {
+      storage.close();
+    }
   });
 
   it("recovers an interrupted v2 planning stage as a retryable failure in a new runtime", async () => {
