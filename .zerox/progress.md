@@ -14230,3 +14230,31 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
   zero-vulnerability production audit pass. Exact-byte dual review and external
   package acceptance remain required before merge and release.
+
+## 2026-09-02 - v3.9.2 unified model response budgets
+
+- Candidate `cf20bc5d3b4670438ba03a4c5e788dbefdf7ba62` was rejected before review
+  completion after the security/data lane found one Major cross-transport
+  resource-boundary defect; no PASS receipts were issued. The SSE path was
+  bounded, but a stream failure without meaningful output could fall back to
+  non-streaming provider paths that still materialized successful JSON and
+  error bodies without a byte limit.
+- Streaming and non-streaming model responses now share a 32 MiB raw response
+  budget, with a 4 MiB physical SSE-line limit. Provider error inspection is
+  capped at 64 KiB and model-catalog metadata at 8 MiB. Limit violations use a
+  typed hard-failure signal, cancel the body, and are excluded from both model
+  retry and stream-to-nonstream fallback, so the same oversized response cannot
+  cross into another unbounded transport path.
+- OpenAI-compatible chat and embeddings, Gemini, Anthropic, Vertex, Bedrock
+  Claude, Ollama discovery, and provider error decoding now enforce the shared
+  limits. Regressions cover oversized successful bodies for every HTTP provider,
+  oversized non-2xx bodies, streaming-limit fallback suppression, and retry
+  suppression. Focused transport validation passes `162/162`. Full
+  `npm run verify` passes strict test type coverage `436/436`, `327` current
+  files / `3984` current tests with declared skips, every Round2–Round12 lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration.
+  Caller-pinned Harness checks and the zero-vulnerability production audit
+  pass. Exact-byte dual review and external package acceptance remain required
+  before merge and release.

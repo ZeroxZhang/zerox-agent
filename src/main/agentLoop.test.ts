@@ -12,6 +12,7 @@ import type {
   ToolDefinition,
 } from "./openAiCompatibleClient";
 import { IncompleteModelStreamError } from "./openAiCompatibleClient";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 import type {
   ToolResultOffloadStore,
   ToolResultOffloadWriteInput,
@@ -3003,6 +3004,39 @@ describe("agent loop", () => {
     expect(streamCalls).toBe(1);
     expect(completeCalls).toBe(1);
     expect(executions).toBe(0);
+  });
+
+  it("does not fall back when a stream exceeds the shared response budget", async () => {
+    let completeCalls = 0;
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        completeCalls += 1;
+        return {
+          content: "unexpected oversized fallback",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+      async *streamComplete() {
+        streamCalls += 1;
+        throw new ResponseBodyLimitError("Model SSE stream", 32 * 1024 * 1024);
+      },
+    };
+
+    const result = await runAgentLoop(
+      [{ role: "user", content: "reject oversized model data" }],
+      modelProfile,
+      {
+        chatClient,
+        toolExecutor: createToolExecutor(),
+        tools: testTools,
+      },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(streamCalls).toBe(1);
+    expect(completeCalls).toBe(0);
   });
 
   it("retries abrupt EOF and preserves the final partial output as a continuation", async () => {

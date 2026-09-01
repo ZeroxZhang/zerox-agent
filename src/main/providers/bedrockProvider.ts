@@ -19,6 +19,8 @@ import type {
   ToolDefinition,
 } from "./provider";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
+import { ResponseBodyLimitError } from "../fetchWithTimeout";
+import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../../shared/limits";
 import { defaultRequestTimeoutMs } from "../fetchWithTimeout";
 
 const capabilities: ProviderCapabilities = {
@@ -155,6 +157,12 @@ async function completeClaude(
     req.signal,
     timeoutMs,
   );
+  if (output.body.byteLength > MODEL_RESPONSE_MAX_BODY_BYTES) {
+    throw new ResponseBodyLimitError(
+      "Bedrock Claude",
+      MODEL_RESPONSE_MAX_BODY_BYTES,
+    );
+  }
   const json = JSON.parse(
     new TextDecoder().decode(output.body),
   ) as Record<string, unknown>;

@@ -29,7 +29,7 @@ describe("readSseLinesUntilTerminal", () => {
     };
 
     await expect(drain()).rejects.toThrow(
-      "SSE stream line exceeded the maximum byte limit.",
+      "Model SSE line response exceeded 31 bytes.",
     );
     expect(pulls).toBeLessThanOrEqual(5);
     expect(canceled).toBe(true);
@@ -57,7 +57,7 @@ describe("readSseLinesUntilTerminal", () => {
     };
 
     await expect(drain()).rejects.toThrow(
-      "SSE stream exceeded the maximum total byte limit.",
+      "Model SSE stream response exceeded 31 bytes.",
     );
     expect(canceled).toBe(true);
     expect(SSE_MAX_LINE_BYTES).toBe(4 * 1024 * 1024);

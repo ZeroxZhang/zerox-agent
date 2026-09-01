@@ -1,3 +1,6 @@
+import { readResponseTextWithLimit } from "../fetchWithTimeout";
+import { PROVIDER_ERROR_MAX_BODY_BYTES } from "../../shared/limits";
+
 const maximumRetryAfterMs = 30_000;
 
 export class ProviderHttpError extends Error {
@@ -36,7 +39,11 @@ export async function providerHttpError(
 
 async function readSafeProviderCode(response: Response): Promise<string | undefined> {
   try {
-    const body = (await response.clone().text()).slice(0, 8_192);
+    const body = await readResponseTextWithLimit(
+      response,
+      PROVIDER_ERROR_MAX_BODY_BYTES,
+      "Provider error",
+    );
     const parsed = JSON.parse(body) as {
       code?: unknown;
       type?: unknown;

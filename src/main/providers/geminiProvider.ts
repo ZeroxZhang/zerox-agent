@@ -7,11 +7,16 @@
 
 import { buildCachePrefix } from "./cachePrefix";
 import { estimateTextTokens } from "../contextManager";
-import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
+import {
+  defaultRequestTimeoutMs,
+  fetchWithTimeout,
+  readResponseJsonWithLimit,
+} from "../fetchWithTimeout";
 import { providerHttpError } from "./providerHttpError";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
 import { IncompleteModelStreamError } from "../openAiCompatibleClient";
 import { readSseLinesUntilTerminal } from "./sseLineReader";
+import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../../shared/limits";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -269,9 +274,12 @@ async function geminiFetch(
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const res = await geminiFetchRaw(fetchImpl, baseUrl, path, apiKey, body, timeoutMs, signal);
-  const text = await res.text();
   if (!res.ok) throw await providerHttpError(res);
-  return JSON.parse(text) as Record<string, unknown>;
+  return readResponseJsonWithLimit<Record<string, unknown>>(
+    res,
+    MODEL_RESPONSE_MAX_BODY_BYTES,
+    "Gemini",
+  );
 }
 
 async function geminiFetchRaw(

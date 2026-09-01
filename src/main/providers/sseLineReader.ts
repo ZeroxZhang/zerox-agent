@@ -1,3 +1,9 @@
+import { ResponseBodyLimitError } from "../fetchWithTimeout";
+import {
+  MODEL_RESPONSE_MAX_BODY_BYTES,
+  MODEL_STREAM_MAX_LINE_BYTES,
+} from "../../shared/limits";
+
 export interface SseLineReaderOptions {
   isTerminal: () => boolean;
   idleTimeoutMs?: number;
@@ -6,11 +12,8 @@ export interface SseLineReaderOptions {
   maxStreamBytes?: number;
 }
 
-export const SSE_MAX_LINE_BYTES = 4 * 1024 * 1024;
-export const SSE_MAX_STREAM_BYTES = 32 * 1024 * 1024;
-
-const SSE_LINE_LIMIT_ERROR = "SSE stream line exceeded the maximum byte limit.";
-const SSE_STREAM_LIMIT_ERROR = "SSE stream exceeded the maximum total byte limit.";
+export const SSE_MAX_LINE_BYTES = MODEL_STREAM_MAX_LINE_BYTES;
+export const SSE_MAX_STREAM_BYTES = MODEL_RESPONSE_MAX_BODY_BYTES;
 
 /**
  * Decode an SSE response one line at a time and stop at the protocol terminal
@@ -46,7 +49,7 @@ export async function* readSseLinesUntilTerminal(
 
       totalBytes += value.byteLength;
       if (totalBytes > maxStreamBytes) {
-        throw new Error(SSE_STREAM_LIMIT_ERROR);
+        throw new ResponseBodyLimitError("Model SSE stream", maxStreamBytes);
       }
       currentLineBytes = countTrailingLineBytes(
         value,
@@ -113,7 +116,7 @@ function countTrailingLineBytes(
     const segmentEnd = newlineIndex === -1 ? chunk.byteLength : newlineIndex;
     lineBytes += segmentEnd - segmentStart;
     if (lineBytes > maxLineBytes) {
-      throw new Error(SSE_LINE_LIMIT_ERROR);
+      throw new ResponseBodyLimitError("Model SSE line", maxLineBytes);
     }
     if (newlineIndex === -1) break;
     lineBytes = 0;

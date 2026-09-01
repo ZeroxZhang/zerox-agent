@@ -13,7 +13,10 @@ import {
   defaultModelCapabilities,
   providerConnectionTargetIdentity,
 } from "../shared/modelSettings";
-import { fetchWithTimeout } from "./fetchWithTimeout";
+import {
+  fetchWithTimeout,
+  readResponseJsonWithLimit,
+} from "./fetchWithTimeout";
 import type { ModelSettingsStore, ResolvedModelProfile } from "./modelSettingsStore";
 import type { ChatClient, StreamingChatClient } from "./openAiCompatibleClient";
 import {
@@ -30,6 +33,7 @@ import {
   validateProviderFields,
 } from "./providers/providerRegistry";
 import { throwForModelServiceNotice } from "../shared/modelServiceNotice";
+import { MODEL_METADATA_MAX_BODY_BYTES } from "../shared/limits";
 
 export type ModelConnectionService = {
   testConnection(): Promise<TestModelConnectionResult>;
@@ -79,9 +83,9 @@ export function createModelConnectionService(options: {
       if (!response.ok) {
         throw new Error(`Ollama 返回 HTTP ${response.status}。`);
       }
-      const json = (await response.json()) as {
+      const json = await readResponseJsonWithLimit<{
         models?: Array<{ name?: string; model?: string }>;
-      };
+      }>(response, MODEL_METADATA_MAX_BODY_BYTES, "Ollama model catalog");
       const models = [
         ...new Set(
           (json.models ?? []).map((model) => model.name ?? model.model ?? "").filter(Boolean),
@@ -898,7 +902,11 @@ async function discoverPublishedModels(input: {
     "模型目录",
   );
   if (!response.ok) return [];
-  const payload = await response.json();
+  const payload = await readResponseJsonWithLimit<unknown>(
+    response,
+    MODEL_METADATA_MAX_BODY_BYTES,
+    "Model catalog",
+  );
   const label = `${requireProviderDescriptor(input.providerKind).title} /models`;
   const requested = new Set(input.modelIds);
   return parsePublishedModelMetadata(payload, label, input.checkedAt).filter(
@@ -929,9 +937,9 @@ async function discoverOllamaPublishedModels(input: {
         "Ollama 模型信息",
       );
       if (!response.ok) return null;
-      const payload = (await response.json()) as {
+      const payload = await readResponseJsonWithLimit<{
         model_info?: Record<string, unknown>;
-      };
+      }>(response, MODEL_METADATA_MAX_BODY_BYTES, "Ollama model metadata");
       const contextWindow = firstPositiveInteger(
         ...Object.entries(payload.model_info ?? {})
           .filter(([key]) => key.endsWith(".context_length"))

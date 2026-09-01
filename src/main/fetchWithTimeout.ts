@@ -1,5 +1,15 @@
 export const defaultRequestTimeoutMs = 300_000;
 
+export class ResponseBodyLimitError extends Error {
+  readonly maxBytes: number;
+
+  constructor(label: string, maxBytes: number) {
+    super(`${label} response exceeded ${maxBytes} bytes.`);
+    this.name = "ResponseBodyLimitError";
+    this.maxBytes = maxBytes;
+  }
+}
+
 export async function readResponseTextWithLimit(
   response: Response,
   maxBytes: number,
@@ -9,12 +19,12 @@ export async function readResponseTextWithLimit(
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > normalizedLimit) {
     await response.body?.cancel(`${label} response exceeded ${normalizedLimit} bytes`);
-    throw new Error(`${label} response exceeded ${normalizedLimit} bytes.`);
+    throw new ResponseBodyLimitError(label, normalizedLimit);
   }
   if (!response.body) {
     const text = await response.text();
     if (new TextEncoder().encode(text).byteLength > normalizedLimit) {
-      throw new Error(`${label} response exceeded ${normalizedLimit} bytes.`);
+      throw new ResponseBodyLimitError(label, normalizedLimit);
     }
     return text;
   }
@@ -30,7 +40,7 @@ export async function readResponseTextWithLimit(
       bytesRead += value.byteLength;
       if (bytesRead > normalizedLimit) {
         await reader.cancel(`${label} response exceeded ${normalizedLimit} bytes`);
-        throw new Error(`${label} response exceeded ${normalizedLimit} bytes.`);
+        throw new ResponseBodyLimitError(label, normalizedLimit);
       }
       text += decoder.decode(value, { stream: true });
     }

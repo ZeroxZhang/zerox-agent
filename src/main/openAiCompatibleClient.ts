@@ -1,10 +1,15 @@
-import { defaultRequestTimeoutMs, fetchWithTimeout } from "./fetchWithTimeout";
+import {
+  defaultRequestTimeoutMs,
+  fetchWithTimeout,
+  readResponseJsonWithLimit,
+} from "./fetchWithTimeout";
 import { providerHttpError } from "./providers/providerHttpError";
 import { readSseLinesUntilTerminal } from "./providers/sseLineReader";
 import {
   modelServiceNoticeFromFinishReason,
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
+import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../shared/limits";
 
 export type ChatImageContent = {
   mediaType: string;
@@ -154,7 +159,7 @@ export function createOpenAiCompatibleClient(options?: {
         throw await providerHttpError(response);
       }
 
-      const payload = (await response.json()) as {
+      const payload = await readResponseJsonWithLimit<{
         choices?: Array<{
           message?: {
             content?: string | null;
@@ -176,7 +181,7 @@ export function createOpenAiCompatibleClient(options?: {
           prompt_tokens_details?: { cached_tokens?: number };
         };
         error?: { message?: string };
-      };
+      }>(response, MODEL_RESPONSE_MAX_BODY_BYTES, "LLM");
 
       const choice = payload.choices?.[0];
       const message = choice?.message;
@@ -481,10 +486,10 @@ export function createOpenAiCompatibleEmbeddingClient(options?: {
         throw await providerHttpError(response);
       }
 
-      const payload = (await response.json()) as {
+      const payload = await readResponseJsonWithLimit<{
         data?: Array<{ embedding?: number[] }>;
         error?: { message?: string };
-      };
+      }>(response, MODEL_RESPONSE_MAX_BODY_BYTES, "Embedding");
 
       const embedding = payload.data?.[0]?.embedding;
       if (!embedding?.length) {

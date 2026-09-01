@@ -4,6 +4,8 @@ import type { CompleteRequest } from "./provider";
 import { createBedrockProvider } from "./bedrockProvider";
 import { createProvider } from "./providerFactory";
 import { createVertexProvider } from "./vertexProvider";
+import { ResponseBodyLimitError } from "../fetchWithTimeout";
+import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../../shared/limits";
 
 const request: CompleteRequest = {
   baseUrl: "",
@@ -173,6 +175,26 @@ describe("Bedrock provider", () => {
 });
 
 describe("Vertex provider", () => {
+  it("rejects an oversized successful HTTP body before JSON parsing", async () => {
+    const provider = createVertexProvider({
+      project: "project",
+      location: "global",
+      authMethod: "api_key",
+      apiKey: "k",
+      fetch: (async () => new Response("{}", {
+        status: 200,
+        headers: {
+          "content-length": String(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+        },
+      })) as typeof fetch,
+    });
+
+    await expect(provider.complete({
+      ...request,
+      model: "gemini/gemini-3.6-flash",
+    })).rejects.toBeInstanceOf(ResponseBodyLimitError);
+  });
+
   it("times out access-token acquisition before starting the HTTP request", async () => {
     const fetchMock = vi.fn();
     const provider = createVertexProvider({

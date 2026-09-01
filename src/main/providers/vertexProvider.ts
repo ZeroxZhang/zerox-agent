@@ -1,10 +1,15 @@
 import { GoogleAuth } from "google-auth-library";
 import { estimateTextTokens } from "../contextManager";
-import { defaultRequestTimeoutMs, fetchWithTimeout } from "../fetchWithTimeout";
+import {
+  defaultRequestTimeoutMs,
+  fetchWithTimeout,
+  readResponseJsonWithLimit,
+} from "../fetchWithTimeout";
 import { buildCachePrefix } from "./cachePrefix";
 import { geminiGenerationConfig } from "./geminiProvider";
 import { providerHttpError } from "./providerHttpError";
 import { withModelServiceNotice } from "../../shared/modelServiceNotice";
+import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../../shared/limits";
 import type {
   CompleteRequest,
   CompleteResponse,
@@ -371,11 +376,14 @@ async function vertexFetch(
     "Vertex AI",
     signal,
   );
-  const text = await response.text();
   if (!response.ok) {
     throw await providerHttpError(response);
   }
-  return JSON.parse(text) as Record<string, unknown>;
+  return readResponseJsonWithLimit<Record<string, unknown>>(
+    response,
+    MODEL_RESPONSE_MAX_BODY_BYTES,
+    "Vertex AI",
+  );
 }
 
 function vertexUrl(

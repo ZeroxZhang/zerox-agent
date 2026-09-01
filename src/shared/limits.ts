@@ -24,6 +24,19 @@ export const MIN_TOOL_TIMEOUT_MS = 25;
  *  stream is considered dead and the loop exits (CORE-02, NET-14). */
 export const SSE_READ_IDLE_TIMEOUT_MS = 30_000;
 
+/** Maximum raw bytes accepted from one model response across streaming and
+ *  non-streaming transports. Exceeding it is a hard failure, never truncation. */
+export const MODEL_RESPONSE_MAX_BODY_BYTES = 32 * 1024 * 1024;
+
+/** Maximum raw bytes in one physical SSE line before a newline delimiter. */
+export const MODEL_STREAM_MAX_LINE_BYTES = 4 * 1024 * 1024;
+
+/** Maximum provider error body inspected for a machine-readable error code. */
+export const PROVIDER_ERROR_MAX_BODY_BYTES = 64 * 1024;
+
+/** Maximum provider model-catalog or local metadata response body. */
+export const MODEL_METADATA_MAX_BODY_BYTES = 8 * 1024 * 1024;
+
 /** Maximum transparent follow-up requests after provider output truncation. */
 export const AUTO_OUTPUT_LIMIT_MAX_CONTINUATIONS = 8;
 

@@ -4,6 +4,7 @@ import type {
   ChatCompletionResponse,
 } from "./openAiCompatibleClient";
 import { modelServiceNoticeFromError } from "../shared/modelServiceNotice";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 
 export type ModelRetryOptions = {
   maxRetries?: number;
@@ -77,6 +78,9 @@ export async function retryModelOperation<T>(
 }
 
 function isRetryableModelError(error: unknown): boolean {
+  if (error instanceof ResponseBodyLimitError) {
+    return false;
+  }
   if (modelServiceNoticeFromError(error)) {
     return false;
   }

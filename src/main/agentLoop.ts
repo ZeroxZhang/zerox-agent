@@ -21,6 +21,7 @@ import type {
   ToolCall,
 } from "./openAiCompatibleClient";
 import { IncompleteModelStreamError } from "./openAiCompatibleClient";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
 import {
   completeWithModelRetry,
   type ModelRetryEvent,
@@ -947,6 +948,12 @@ export async function runAgentLoop(
             onModelStreamEvent?.(event, turn);
           });
         } catch (error) {
+          if (
+            error instanceof StreamingCompletionError &&
+            error.cause instanceof ResponseBodyLimitError
+          ) {
+            throw error.cause;
+          }
           if (
             error instanceof StreamingCompletionError &&
             !error.hasMeaningfulStreamEvent &&

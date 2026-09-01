@@ -15,6 +15,8 @@ import type {
   ProviderKind,
   PublicModelSettings,
 } from "../../shared/modelSettings";
+import { ResponseBodyLimitError } from "../fetchWithTimeout";
+import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../../shared/limits";
 
 describe("normalize round-trip", () => {
   it("preserves user image content across provider normalization", () => {
@@ -379,6 +381,28 @@ async function resolvesBefore<T>(promise: Promise<T>, timeoutMs = 250): Promise<
 }
 
 describe("AnthropicProvider", () => {
+  it("rejects an oversized successful non-streaming body", async () => {
+    const provider = createProvider(
+      { providerId: "anthropic", apiKey: "k", chatModel: "claude-3-5-sonnet" },
+      {
+        fetch: (async () => new Response("{}", {
+          status: 200,
+          headers: {
+            "content-length": String(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+          },
+        })) as typeof fetch,
+      },
+    );
+
+    await expect(provider.complete({
+      model: "claude-3-5-sonnet",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })).rejects.toBeInstanceOf(ResponseBodyLimitError);
+  });
+
   it("parses a native Messages response into CompleteResponse", async () => {
     const provider = createProvider(
       { providerId: "anthropic", apiKey: "k", chatModel: "claude-3-5-sonnet" },
@@ -768,6 +792,28 @@ describe("AnthropicProvider", () => {
 });
 
 describe("GeminiProvider", () => {
+  it("rejects an oversized successful non-streaming body", async () => {
+    const provider = createProvider(
+      { providerId: "gemini", apiKey: "k", chatModel: "gemini-2.5-pro" },
+      {
+        fetch: (async () => new Response("{}", {
+          status: 200,
+          headers: {
+            "content-length": String(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+          },
+        })) as typeof fetch,
+      },
+    );
+
+    await expect(provider.complete({
+      model: "gemini-2.5-pro",
+      apiKey: "k",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    })).rejects.toBeInstanceOf(ResponseBodyLimitError);
+  });
+
   it("fails closed when SSE ends without a Gemini finish reason", async () => {
     const encoder = new TextEncoder();
     const provider = createProvider(

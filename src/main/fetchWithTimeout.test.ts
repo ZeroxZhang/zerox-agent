@@ -3,6 +3,7 @@ import {
   fetchWithTimeout,
   readResponseJsonWithLimit,
   readResponseTextWithLimit,
+  ResponseBodyLimitError,
 } from "./fetchWithTimeout";
 
 describe("fetchWithTimeout", () => {
@@ -77,13 +78,15 @@ describe("fetchWithTimeout", () => {
   });
 
   it("rejects declared and streamed bodies above the byte limit", async () => {
-    await expect(
-      readResponseTextWithLimit(
+    const declaredError = await readResponseTextWithLimit(
         new Response("small", { headers: { "content-length": "100" } }),
         8,
         "fixture",
-      ),
-    ).rejects.toThrow("fixture response exceeded 8 bytes");
+      ).catch((error: unknown) => error);
+    expect(declaredError).toBeInstanceOf(ResponseBodyLimitError);
+    expect((declaredError as Error).message).toBe(
+      "fixture response exceeded 8 bytes.",
+    );
     await expect(
       readResponseTextWithLimit(new Response("123456789"), 8, "fixture"),
     ).rejects.toThrow("fixture response exceeded 8 bytes");

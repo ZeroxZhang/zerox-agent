@@ -4,6 +4,8 @@ import {
   createOpenAiCompatibleEmbeddingClient,
   IncompleteModelStreamError,
 } from "./openAiCompatibleClient";
+import { ResponseBodyLimitError } from "./fetchWithTimeout";
+import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../shared/limits";
 
 async function resolvesBefore<T>(promise: Promise<T>, timeoutMs = 250): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -383,6 +385,36 @@ describe("OpenAI-compatible chat client", () => {
         rawReason: "length",
       },
     });
+  });
+
+  it("rejects oversized successful chat and embedding bodies before JSON parsing", async () => {
+    const oversized = () =>
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(MODEL_RESPONSE_MAX_BODY_BYTES + 1),
+        },
+      });
+    const chatClient = createOpenAiCompatibleClient({ fetch: async () => oversized() });
+    const embeddingClient = createOpenAiCompatibleEmbeddingClient({
+      fetch: async () => oversized(),
+    });
+
+    await expect(chatClient.complete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [{ role: "user", content: "Run" }],
+    })).rejects.toBeInstanceOf(ResponseBodyLimitError);
+    await expect(embeddingClient.embed({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "embedding-model",
+      input: "embed",
+    })).rejects.toBeInstanceOf(ResponseBodyLimitError);
   });
 
   it("streams provider reasoning deltas from SSE chunks", async () => {
@@ -857,6 +889,40 @@ describe("OpenAI-compatible chat client", () => {
 
     expect((error as Error).message).toBe("HTTP 401");
     expect(JSON.stringify(error)).not.toContain(sentinel);
+  });
+
+  it("bounds and cancels an oversized provider error body before code parsing", async () => {
+    let canceled = false;
+    const client = createOpenAiCompatibleClient({
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"error":{"code":"secret"}}'));
+            },
+            cancel() {
+              canceled = true;
+            },
+          }),
+          {
+            status: 503,
+            headers: { "content-length": String(64 * 1024 + 1) },
+          },
+        ),
+    });
+
+    const error = await client.complete({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "secret-key",
+      model: "agent-model",
+      temperature: 0,
+      maxTokens: 10,
+      messages: [],
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ status: 503, code: undefined });
+    expect((error as Error).message).toBe("HTTP 503");
+    expect(canceled).toBe(true);
   });
 
   it("aborts a chat completion request when it exceeds the configured timeout", async () => {
