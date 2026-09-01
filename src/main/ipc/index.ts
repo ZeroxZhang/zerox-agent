@@ -858,11 +858,8 @@ function formatPlanRetryMessage(plan: PlanRecord): string {
       "仍有必要信息需要补充。";
     return `规划辩论已完成，仍需补充信息：${reason}`;
   }
-  const failedRound = [...plan.rounds]
-    .reverse()
-    .find((round) => round.status === "failed");
   if (plan.status === "paused" || plan.status === "failed") {
-    return `计划重试后仍暂停：${failedRound?.error ?? "请检查失败轮次后再次重试。"}`;
+    return "计划重试后仍暂停；原始诊断内容未写入聊天记录，请检查失败轮次后再次重试。";
   }
   return `已从失败轮次继续规划：${title}。`;
 }

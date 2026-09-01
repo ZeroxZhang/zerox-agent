@@ -19,6 +19,7 @@ import {
   goalContractMatchesRef,
 } from "./goalPlanContractService";
 import { createPublicSkillSnapshot } from "../shared/skills";
+import { sanitizePlanRecordDiagnostics } from "../shared/planDiagnostics";
 
 export type PlanStoreEvent = {
   id: string;
@@ -92,9 +93,7 @@ export function createPlanStore(options: {
     const validated = validatePlanRecord(parsed);
     if (
       options.storage &&
-      parsed.selectedSkill &&
-      JSON.stringify(parsed.selectedSkill) !==
-        JSON.stringify(validated.selectedSkill)
+      JSON.stringify(parsed) !== JSON.stringify(validated)
     ) {
       writeSqlitePlan(options.storage, validated);
     }
@@ -116,9 +115,7 @@ export function createPlanStore(options: {
       ) as PlanRecord;
       const validated = validatePlanRecord(parsed);
       if (
-        parsed.selectedSkill &&
-        JSON.stringify(parsed.selectedSkill) !==
-          JSON.stringify(validated.selectedSkill)
+        JSON.stringify(parsed) !== JSON.stringify(validated)
       ) {
         await writePlan(validated);
       }
@@ -463,6 +460,7 @@ function safePlanId(planId: string): string {
 }
 
 function validatePlanRecord(plan: PlanRecord): PlanRecord {
+  plan = sanitizePlanRecordDiagnostics(plan);
   plan = plan.selectedSkill
     ? {
         ...plan,

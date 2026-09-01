@@ -1,5 +1,6 @@
 import type { PlanRecord, PlanningStageKind } from "./planMode";
 import { redactCredentialString } from "./credentialRedaction";
+import { sanitizePlanRecordDiagnostics } from "./planDiagnostics";
 
 export type PlanOutcomeKind =
   | "success"
@@ -42,6 +43,7 @@ const planningStageGuidance: Record<PlanningStageKind, string> = {
 export function getPlanFailurePresentation(
   plan: PlanRecord,
 ): PlanFailurePresentation | null {
+  plan = sanitizePlanRecordDiagnostics(plan);
   const failedRound = [...plan.rounds]
     .reverse()
     .find((round) => round.status === "failed");

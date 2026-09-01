@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { PlanRecord } from "../shared/planMode";
+import type { PlanQualityIssueCode, PlanRecord } from "../shared/planMode";
 import {
   assertSafePlanId,
   createPlanStore,
@@ -86,6 +86,108 @@ describe("plan store parity", () => {
         { type: "plan_created", revision: 1 },
         { type: "plan_ready", revision: 2 },
       ]);
+    } finally {
+      storage.close();
+    }
+  });
+
+  it("sanitizes and migrates Plan diagnostics at every storage boundary", async () => {
+    const secret = "local-canary-plan-store-0123456789abcdef";
+    const configDir = path.join(tempDir, "diagnostic-json");
+    const storage = createStorageImpl({
+      dbPath: path.join(tempDir, "diagnostic.sqlite"),
+      skipFts5Check: true,
+    });
+    const json = createPlanStore({ configDir });
+    const sqlite = createPlanStore({
+      configDir: path.join(tempDir, "diagnostic-sqlite-unused"),
+      storage,
+    });
+    const raw: PlanRecord = {
+      ...createRecord(),
+      rounds: [
+        {
+          id: "round-secret",
+          kind: "direct",
+          role: "direct",
+          ordinal: 1,
+          runId: "run-secret",
+          modelBinding: {} as PlanRecord["rounds"][number]["modelBinding"],
+          status: "failed",
+          publicInputRefs: [],
+          error: `provider failed with ${secret}`,
+          failureExcerpt: `raw response ${secret}`,
+        },
+      ],
+      planningStages: [
+        {
+          id: "stage-secret",
+          kind: "review",
+          runId: "review-secret",
+          status: "failed",
+          evidenceRefs: [],
+          error: `review failed with ${secret}`,
+          failureExcerpt: `review raw ${secret}`,
+          reviewIssues: [
+            {
+              code: "SECRET_REVIEW",
+              severity: "high",
+              message: `review message ${secret}`,
+              repairable: true,
+              repairInstruction: `repair using ${secret}`,
+            },
+          ],
+        },
+      ],
+      qualityReport: {
+        status: "blocked",
+        generatedAt: "2026-09-01T00:00:00.000Z",
+        blockingIssues: [
+          {
+            code: `SECRET_QUALITY_${secret}` as PlanQualityIssueCode,
+            severity: "blocking",
+            message: `quality message ${secret}`,
+          },
+        ],
+        warnings: [],
+        evidenceCoverage: { referenced: 0, total: 0, missingRefs: [] },
+        acceptanceCoverage: {
+          deterministicChecks: 0,
+          modelReviewChecks: 0,
+          totalChecks: 0,
+          milestonesCovered: 0,
+          milestonesTotal: 0,
+        },
+      },
+    };
+
+    try {
+      const jsonCreated = await json.create(raw);
+      const sqliteCreated = await sqlite.create(raw);
+      expect(JSON.stringify(jsonCreated)).not.toContain(secret);
+      expect(JSON.stringify(sqliteCreated)).not.toContain(secret);
+      expect(JSON.stringify(jsonCreated)).not.toContain("SECRET_REVIEW");
+      expect(jsonCreated.qualityReport?.blockingIssues[0]?.code).toBe(
+        "INVALID_SCHEMA",
+      );
+      expect(jsonCreated.rounds[0]?.failureExcerpt).toBeUndefined();
+      expect(jsonCreated.planningStages?.[0]?.reviewIssues?.[0]?.message)
+        .toContain("原始说明未保存");
+
+      const planFile = path.join(configDir, "plans", `${raw.id}.json`);
+      await expect(readFile(planFile, "utf8")).resolves.not.toContain(secret);
+      expect(storage.db.prepare("SELECT payload FROM plan_records WHERE id = ?")
+        .get<{ payload: string }>(raw.id)?.payload).not.toContain(secret);
+
+      await writeFile(planFile, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+      storage.db.prepare("UPDATE plan_records SET payload = ? WHERE id = ?")
+        .run(JSON.stringify(raw), raw.id);
+
+      await expect(json.get(raw.id)).resolves.toMatchObject({ id: raw.id });
+      await expect(sqlite.get(raw.id)).resolves.toMatchObject({ id: raw.id });
+      await expect(readFile(planFile, "utf8")).resolves.not.toContain(secret);
+      expect(storage.db.prepare("SELECT payload FROM plan_records WHERE id = ?")
+        .get<{ payload: string }>(raw.id)?.payload).not.toContain(secret);
     } finally {
       storage.close();
     }

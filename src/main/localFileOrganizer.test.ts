@@ -6,6 +6,7 @@ import {
   link,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   realpath,
   rename,
@@ -268,6 +269,50 @@ describe("local file organizer", () => {
     });
   });
 
+  it("detects an in-place rewrite after the first target digest block was read", async () => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    await writeFile(source, Buffer.alloc(8 * 1024 * 1024, 0x61));
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => "tx_target_mid_digest_rewrite",
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "post-move-target-digest-read",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    const handle = await open(target, "r+");
+    try {
+      await handle.write(Buffer.alloc(64 * 1024, 0x62), 0, 64 * 1024, 0);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(
+      /changed during digest|authority is unresolved/i,
+    );
+    const restored = await readFile(source);
+    expect(restored.subarray(0, 64 * 1024)).toEqual(Buffer.alloc(64 * 1024, 0x62));
+    await expectPath(target, false);
+    await expect(readLocalFileOrganizationTransaction(path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      "tx_target_mid_digest_rewrite.json",
+    ))).resolves.toMatchObject({
+      status: "reconciliation_required",
+      reconciliation: { required: true, kind: "marker" },
+    });
+  });
+
   it("marks reconciliation when the journal is rewritten after the move", async () => {
     const source = path.join(tempDir, "photo.jpg");
     const target = path.join(tempDir, "Images", "photo.jpg");
@@ -309,6 +354,56 @@ describe("local file organizer", () => {
       status: "reconciliation_required",
       reconciliation: { required: true, kind: "marker" },
     });
+  });
+
+  it.each([
+    ["equal-length invalid JSON", (body: string) => `[${body.slice(1)}`],
+    ["truncated JSON", (body: string) => body.slice(0, -8)],
+  ])("projects a marker even when the journal has %s", async (_label, corrupt) => {
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const logPath = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+      `tx_unreadable_journal_${_label.startsWith("equal") ? "equal" : "short"}.json`,
+    );
+    const transactionId = path.basename(logPath, ".json");
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => transactionId,
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "move-applied",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    const journal = await readFile(logPath, "utf8");
+    await writeFile(logPath, corrupt(journal), "utf8");
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expectPath(target, false);
+    const transaction = await readLocalFileOrganizationTransaction(logPath);
+    expect(transaction).toMatchObject({
+      id: transactionId,
+      status: "reconciliation_required",
+      moves: [],
+      reconciliation: {
+        required: true,
+        kind: "marker",
+        reason: "journal_unreadable_requires_manual_reconciliation",
+      },
+    });
+    await expect(rollbackLocalFileOrganization(transaction)).rejects.toThrow(
+      /manual reconciliation/i,
+    );
   });
 
   it("persists reconciliation state when a moved source is concurrently repopulated", async () => {
@@ -993,6 +1088,19 @@ describe("local file organizer", () => {
 
     await expect(readLocalFileOrganizationTransaction(logPath)).rejects.toThrow(
       /permissions are unsafe/i,
+    );
+  });
+
+  it("rejects an oversized journal before reading it into memory", async () => {
+    const logDirectory = path.join(tempDir, ".zerox-organize-transactions");
+    const logPath = path.join(logDirectory, "tx_oversized_journal.json");
+    await mkdir(logDirectory, { mode: 0o700 });
+    await writeFile(logPath, Buffer.alloc(4 * 1024 * 1024 + 1, 0x20), {
+      mode: 0o600,
+    });
+
+    await expect(readLocalFileOrganizationTransaction(logPath)).rejects.toThrow(
+      /exceeds the safe size limit/i,
     );
   });
 

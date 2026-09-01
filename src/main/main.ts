@@ -897,18 +897,15 @@ function startPlanReplayDriver() {
       log("轮次状态", {
         kind: round.kind,
         status: round.status,
-        error: round.error?.slice(0, 300),
+        diagnosticOmitted: Boolean(round.error || round.failureExcerpt),
       });
-      if (round.failureExcerpt) {
-        log("失败摘录", {
-          kind: round.kind,
-          excerpt: round.failureExcerpt.slice(0, 6_000),
-        });
-      }
     }
     for (const stage of plan.planningStages ?? []) {
       if (stage.status === "failed") {
-        log("阶段失败", { kind: stage.kind, error: stage.error?.slice(0, 300) });
+        log("阶段失败", {
+          kind: stage.kind,
+          diagnosticOmitted: Boolean(stage.error),
+        });
       }
     }
   };

@@ -38,8 +38,6 @@ const MAX_EVIDENCE_PROMPT_CHARS = 48_000;
 const MAX_PERSISTED_EVIDENCE_ITEMS = 200;
 const MAX_PERSISTED_EVIDENCE_CHARS = 1024 * 1024;
 const MAX_PROMPT_SKILL_CANDIDATES = 80;
-const MAX_BRIEF_FAILURE_EXCERPT_CHARS = 6_000;
-
 type PlanningBriefBoundaryResult = {
   brief: PlanningBrief;
   repairAttempted: boolean;
@@ -130,7 +128,7 @@ export function createPlanInvestigatorService(options: {
           completedAt: now(),
           error:
             error instanceof Error
-              ? `Skill 清单调查失败：${error.message}`
+              ? "Skill 清单调查失败；原始诊断内容未保存。"
               : "Skill 清单调查失败。",
         };
         await input.onStageUpdate?.(failed, input.baseEvidence);
@@ -413,9 +411,7 @@ export function createPlanInvestigatorService(options: {
               ? { failureExcerpt: redactCredentialString(boundaryError.failureExcerpt) }
               : {}),
             error:
-              error instanceof Error
-                ? redactCredentialString(error.message)
-                : "规划调查失败。",
+              "规划调查失败；原始诊断内容未保存。",
           };
           stages.push(failed);
           await input.onStageUpdate?.(failed, evidence);
@@ -557,10 +553,13 @@ function isLikelyTruncatedBrief(summary: string, error: unknown): boolean {
 }
 
 function boundedBriefFailureExcerpt(content: string): string | undefined {
-  const trimmed = redactCredentialString(content).trim();
+  const trimmed = content.trim();
   if (!trimmed) return undefined;
-  if (trimmed.length <= MAX_BRIEF_FAILURE_EXCERPT_CHARS) return trimmed;
-  return `${trimmed.slice(0, 4_000)}\n...[excerpt truncated]...\n${trimmed.slice(-2_000)}`;
+  return [
+    "response omitted",
+    `contentLength=${content.length}`,
+    `contentSha256=${createHash("sha256").update(content).digest("hex").slice(0, 16)}`,
+  ].join("; ");
 }
 
 function createReadOnlyPlanContext(input: {  runId: string;

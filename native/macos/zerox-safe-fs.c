@@ -38,6 +38,8 @@ typedef struct {
   mode_t mode;
 } directory_identity;
 
+static void maybe_test_checkpoint(const char *stage);
+
 static int fail_message(const char *message) {
   fprintf(stderr, "zerox-safe-fs: %s\n", message);
   return 1;
@@ -168,17 +170,47 @@ static int stat_matches(const struct stat *stats, const file_identity *identity)
     stats->st_uid == identity->uid;
 }
 
+static int stat_snapshot_matches(
+  const struct stat *before,
+  const struct stat *after
+) {
+  return
+    before->st_dev == after->st_dev
+    && before->st_ino == after->st_ino
+    && before->st_size == after->st_size
+    && before->st_uid == after->st_uid
+    && before->st_mode == after->st_mode
+    && before->st_nlink == after->st_nlink
+    && before->st_mtimespec.tv_sec == after->st_mtimespec.tv_sec
+    && before->st_mtimespec.tv_nsec == after->st_mtimespec.tv_nsec
+    && before->st_ctimespec.tv_sec == after->st_ctimespec.tv_sec
+    && before->st_ctimespec.tv_nsec == after->st_ctimespec.tv_nsec;
+}
+
 static int safe_directory_mode(mode_t mode) {
   return (mode & 0022) == 0;
 }
 
-static int sha256_fd(int fd, char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U]) {
+static int sha256_fd_with_checkpoint(
+  int fd,
+  char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U],
+  const char *checkpoint
+) {
   CC_SHA256_CTX context;
   unsigned char digest[CC_SHA256_DIGEST_LENGTH];
   unsigned char buffer[64U * 1024U];
+  struct stat before;
+  struct stat after;
   off_t offset = 0;
   ssize_t count;
   size_t index;
+  int checkpoint_emitted = 0;
+  if (fstat(fd, &before) != 0) {
+    return fail_errno("cannot inspect regular file before digest");
+  }
+  if (!S_ISREG(before.st_mode)) {
+    return fail_message("digest source is not a regular file");
+  }
   if (CC_SHA256_Init(&context) != 1) {
     return fail_message("cannot initialize regular-file digest");
   }
@@ -193,6 +225,10 @@ static int sha256_fd(int fd, char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U]) {
       return fail_message("cannot update regular-file digest");
     }
     offset += count;
+    if (!checkpoint_emitted && checkpoint != NULL) {
+      checkpoint_emitted = 1;
+      maybe_test_checkpoint(checkpoint);
+    }
   }
   if (CC_SHA256_Final(digest, &context) != 1) {
     return fail_message("cannot finalize regular-file digest");
@@ -201,12 +237,26 @@ static int sha256_fd(int fd, char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U]) {
     (void)snprintf(output + index * 2U, 3U, "%02x", digest[index]);
   }
   output[CC_SHA256_DIGEST_LENGTH * 2U] = '\0';
+  if (fstat(fd, &after) != 0) {
+    return fail_errno("cannot inspect regular file after digest");
+  }
+  if (!stat_snapshot_matches(&before, &after)) {
+    return fail_message("regular-file identity changed during digest");
+  }
   return 0;
 }
 
-static int digest_matches(int fd, const file_identity *identity) {
+static int sha256_fd(int fd, char output[CC_SHA256_DIGEST_LENGTH * 2U + 1U]) {
+  return sha256_fd_with_checkpoint(fd, output, NULL);
+}
+
+static int digest_matches_with_checkpoint(
+  int fd,
+  const file_identity *identity,
+  const char *checkpoint
+) {
   char digest[CC_SHA256_DIGEST_LENGTH * 2U + 1U];
-  if (sha256_fd(fd, digest) != 0) return 0;
+  if (sha256_fd_with_checkpoint(fd, digest, checkpoint) != 0) return 0;
   if (strcmp(digest, identity->sha256) != 0) {
     (void)fail_message("regular-file content digest changed");
     return 0;
@@ -376,14 +426,15 @@ static int verify_directories(
   return 0;
 }
 
-static int verify_opened_regular_path(
+static int verify_opened_regular_path_with_checkpoint(
   int directory_fd,
   const char *directory_path,
   const char *name,
   int file_fd,
   const file_identity *expected,
   int require_single_link,
-  int require_private_mode
+  int require_private_mode,
+  const char *digest_checkpoint
 ) {
   char expected_path[MAXPATHLEN];
   struct stat directory_stats;
@@ -412,21 +463,39 @@ static int verify_opened_regular_path(
     || (require_private_mode && (opened_stats.st_mode & 0777) != 0600)
     || opened_stats.st_uid != directory_stats.st_uid
     || !stat_matches(&opened_stats, expected)
-    || !digest_matches(file_fd, expected)
+    || !digest_matches_with_checkpoint(file_fd, expected, digest_checkpoint)
   ) {
     return fail_message("opened regular-file identity changed");
   }
   if (read_regular_at(directory_fd, name, expected, &path_stats) != 0) return 1;
   if (
     (require_single_link && path_stats.st_nlink != 1)
-    || path_stats.st_dev != opened_stats.st_dev
-    || path_stats.st_ino != opened_stats.st_ino
-    || path_stats.st_size != opened_stats.st_size
-    || path_stats.st_uid != opened_stats.st_uid
+    || !stat_snapshot_matches(&opened_stats, &path_stats)
   ) {
     return fail_message("regular-file path no longer names the opened file");
   }
   return verify_fd_path(file_fd, expected_path);
+}
+
+static int verify_opened_regular_path(
+  int directory_fd,
+  const char *directory_path,
+  const char *name,
+  int file_fd,
+  const file_identity *expected,
+  int require_single_link,
+  int require_private_mode
+) {
+  return verify_opened_regular_path_with_checkpoint(
+    directory_fd,
+    directory_path,
+    name,
+    file_fd,
+    expected,
+    require_single_link,
+    require_private_mode,
+    NULL
+  );
 }
 
 static int verify_move_authority(
@@ -797,14 +866,15 @@ static int move_between_directories(
   }
   if (
     result == 0
-    && verify_opened_regular_path(
+    && verify_opened_regular_path_with_checkpoint(
       target_fd,
       target_directory_path,
       target_name,
       opened_source_fd,
       expected,
       0,
-      0
+      0,
+      "post-move-target-digest-read"
     ) != 0
   ) {
     result = fail_message("cannot verify atomically moved target capability");
@@ -1225,8 +1295,15 @@ static int read_stdin_body(char **body, size_t *length) {
     if (used == capacity) {
       char *resized;
       if (capacity >= MAX_LOG_BYTES) {
+        unsigned char extra;
+        do {
+          count = read(STDIN_FILENO, &extra, 1U);
+        } while (count < 0 && errno == EINTR);
+        if (count == 0) break;
         free(buffer);
-        return fail_message("transaction log exceeds the safe size limit");
+        return count < 0
+          ? fail_errno("cannot read transaction log input")
+          : fail_message("transaction log exceeds the safe size limit");
       }
       capacity *= 2U;
       if (capacity > MAX_LOG_BYTES) capacity = MAX_LOG_BYTES;
@@ -1269,11 +1346,19 @@ static int capture_file_identity(
   const struct stat *stats,
   file_identity *identity
 ) {
-  identity->dev = stats->st_dev;
-  identity->ino = stats->st_ino;
-  identity->size = stats->st_size;
-  identity->uid = stats->st_uid;
-  return sha256_fd(fd, identity->sha256);
+  struct stat after;
+  if (sha256_fd(fd, identity->sha256) != 0) return 1;
+  if (fstat(fd, &after) != 0) {
+    return fail_errno("cannot inspect captured regular file identity");
+  }
+  if (!stat_snapshot_matches(stats, &after)) {
+    return fail_message("regular-file identity changed while capturing authority");
+  }
+  identity->dev = after.st_dev;
+  identity->ino = after.st_ino;
+  identity->size = after.st_size;
+  identity->uid = after.st_uid;
+  return 0;
 }
 
 static void print_identity(const file_identity *identity) {
@@ -1364,6 +1449,14 @@ static int run_log(int argc, char **argv, int append) {
   if (!append) mutation_started = 1;
   if (fstat(output_fd, &opened_stats) != 0) {
     result = fail_errno("cannot inspect opened transaction log");
+    goto done;
+  }
+  if (
+    opened_stats.st_size < 0
+    || (uint64_t)opened_stats.st_size > (uint64_t)MAX_LOG_BYTES
+    || body_length > MAX_LOG_BYTES - (size_t)opened_stats.st_size
+  ) {
+    result = fail_message("transaction log exceeds the safe size limit");
     goto done;
   }
   if (

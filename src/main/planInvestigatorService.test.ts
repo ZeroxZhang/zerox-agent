@@ -10,6 +10,35 @@ import {
 import { createPlanTaskProfile } from "./plannerKernel";
 
 describe("plan investigator service", () => {
+  it("omits Skill discovery exception content before stage persistence", async () => {
+    const secret = "local-canary-skill-discovery-0123456789abcdef";
+    let failedStageError = "";
+    const service = createPlanInvestigatorService({
+      toolExecutor: {} as AgentToolExecutor,
+      toolAuthorizationService: {} as ToolAuthorizationService,
+      discoverSkills: async () => {
+        throw new Error(`skill loader failed with ${secret}`);
+      },
+    });
+
+    const investigation = service.investigate({
+      planId: "plan-skill-discovery-secret",
+      sessionId: "session-skill-discovery-secret",
+      workspaceRoot: "/workspace",
+      sourceMessage: "分析工作区",
+      profile: createPlanTaskProfile("分析工作区"),
+      baseEvidence: [],
+      model: model(),
+      async onStageUpdate(stage) {
+        failedStageError = stage.error ?? "";
+      },
+    });
+
+    await expect(investigation).rejects.toBeInstanceOf(PlanInvestigationError);
+    expect(failedStageError).toContain("原始诊断内容未保存");
+    expect(failedStageError).not.toContain(secret);
+  });
+
   it("runs an isolated read-only plan loop and persists model-visible evidence refs", async () => {
     let observedSystemPrompt = "";
     let observedRunMode = "";
@@ -728,8 +757,8 @@ describe("plan investigator service", () => {
     );
     expect(repairAttempts).toBe(1);
     expect(stageStatuses).toEqual(["running", "failed"]);
-    expect(failedExcerpt).toContain("still not json at all");
-    expect(failedExcerpt).toContain("[redacted]");
+    expect(failedExcerpt).toContain("response omitted");
+    expect(failedExcerpt).toMatch(/contentSha256=[a-f0-9]{16}/);
     expect(failedExcerpt).not.toContain(secret);
     expect(failedRepairAttempted).toBe(true);
     const failure = (await investigation.catch((error) => error)) as
@@ -744,7 +773,7 @@ describe("plan investigator service", () => {
     });
   });
 
-  it("surfaces the provider notice instead of an internal continuation reason", async () => {
+  it("does not persist a raw provider notice", async () => {
     const providerMessage = "模型服务商正在限流，请稍后由你手动重试。";
     const stageErrors: string[] = [];
     const registry = {
@@ -805,9 +834,11 @@ describe("plan investigator service", () => {
     });
 
     await expect(investigation).rejects.toMatchObject({
-      message: providerMessage,
+      message: expect.stringContaining("原始诊断内容未保存"),
     });
-    expect(stageErrors).toEqual([providerMessage]);
+    expect(stageErrors).toHaveLength(1);
+    expect(stageErrors[0]).toContain("原始诊断内容未保存");
+    expect(stageErrors[0]).not.toContain(providerMessage);
   });
 });
 

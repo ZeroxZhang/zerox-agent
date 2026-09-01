@@ -6896,12 +6896,7 @@ function formatPlanContinuationReply(plan: PlanRecord): string {
       "仍有必要信息需要补充。";
     return `已将补充信息纳入规划，但仍需确认：${reason}`;
   }
-  const failedRound = [...plan.rounds]
-    .reverse()
-    .find((round) => round.status === "failed");
-  return `已将补充信息纳入规划，但计划尚未通过门禁：${
-    failedRound?.error ?? plan.finalArtifact?.gateReason ?? "请检查计划详情。"
-  }`;
+  return "已将补充信息纳入规划，但计划尚未通过门禁；原始诊断内容未写入聊天记录，请检查计划详情。";
 }
 
 function formatLockedPlanReply(plan: PlanRecord): string {

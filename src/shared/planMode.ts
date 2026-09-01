@@ -191,10 +191,7 @@ export type PlanningStageRecord = {
     estimated?: boolean;
   };
   error?: string;
-  /**
-   * Bounded excerpt of the raw model response that failed the stage (same
-   * observability contract as DebateRound.failureExcerpt).
-   */
+  /** Content-free length/hash metadata for a failed model response. */
   failureExcerpt?: string;
 };
 
@@ -341,11 +338,7 @@ export type DebateRound = {
   publicInputRefs: string[];
   output?: PlanProposal | RevisedPlanProposal | DebateCritique | PlanArtifact;
   error?: string;
-  /**
-   * Bounded excerpt of the raw model response that failed the round
-   * contract, persisted for post-mortem diagnosis. Local-only; never
-   * rendered into prompts.
-   */
+  /** Content-free length/hash metadata for a failed model response. */
   failureExcerpt?: string;
   startedAt?: string;
   completedAt?: string;

@@ -439,7 +439,7 @@ describe("plan debate orchestrator", () => {
       plan.planningStages?.find((stage) => stage.kind === "quality"),
     ).toMatchObject({ status: "failed", gateRepairAttempted: true });
     expect(plan.qualityReport?.blockingIssues.length).toBeGreaterThan(0);
-    expect(plan.finalArtifact?.gateReason).toContain("输入处理意见");
+    expect(plan.finalArtifact?.gateReason).toContain("原始诊断内容未保存");
   });
 
   it("keeps the original blocked artifact when the gate repair call itself fails", async () => {
@@ -697,6 +697,9 @@ describe("plan debate orchestrator", () => {
   it("repairs once, cold-reviews the revision, and blocks unresolved high-severity findings", async () => {
     const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
       [];
+    const secret = "local-canary-review-0123456789abcdef";
+    const secretCode = "LOCAL_CANARY_REVIEW_0123456789ABCDEF";
+    const configDir = path.join(tempDir, "config-direct-review-block");
     const router = createQueuedRouter(
       {
         profileDirect: [
@@ -718,11 +721,11 @@ describe("plan debate orchestrator", () => {
             approved: false,
             issues: [
               {
-                code: "UNSUPPORTED_SCOPE",
+                code: secretCode,
                 severity: "critical",
-                message: "修订后仍包含无证据支撑的范围。",
+                message: `修订后仍包含无证据支撑的范围：${secret}`,
                 repairable: false,
-                repairInstruction: "",
+                repairInstruction: `不要持久化 ${secret}`,
               },
             ],
           },
@@ -732,7 +735,7 @@ describe("plan debate orchestrator", () => {
     );
     const orchestrator = createPlanDebateOrchestrator({
       planStore: createPlanStore({
-        configDir: path.join(tempDir, "config-direct-review-block"),
+        configDir,
       }),
       artifactWriter: createPlanArtifactWriter(),
       modelRouter: router,
@@ -765,9 +768,18 @@ describe("plan debate orchestrator", () => {
       reviewApproved: false,
       revisionAttempted: true,
       reviewIssues: [
-        expect.objectContaining({ code: "UNSUPPORTED_SCOPE" }),
+        expect.objectContaining({
+          code: "MODEL_REVIEW_ISSUE",
+          message: expect.stringContaining("原始说明未保存"),
+        }),
       ],
     });
+    expect(JSON.stringify(plan)).not.toContain(secret);
+    expect(JSON.stringify(plan)).not.toContain(secretCode);
+    await expect(readFile(path.join(configDir, "plans", `${plan.id}.json`), "utf8"))
+      .resolves.not.toContain(secret);
+    await expect(readFile(path.join(configDir, "plans", `${plan.id}.json`), "utf8"))
+      .resolves.not.toContain(secretCode);
   });
 
   it("repairs a malformed cold-review response once instead of pausing the plan", async () => {
@@ -1401,7 +1413,7 @@ describe("plan debate orchestrator", () => {
       paused.rounds.find((round) => round.kind === "b1"),
     ).toMatchObject({
       status: "failed",
-      error: "B provider unavailable",
+      error: expect.stringContaining("原始诊断内容未保存"),
     });
 
     const result = await orchestrator.retryFailedRound(
@@ -2226,12 +2238,13 @@ describe("plan debate orchestrator", () => {
     expect(calls).toHaveLength(2);
     const failedRound = plan.rounds.find((round) => round.status === "failed");
     const error = failedRound?.error ?? "";
-    expect(error).toContain("连续两次未返回可用 JSON 对象");
-    expect(error).toContain("finishReason=stop");
-    expect(error).toContain(`contentLength=${failingResponse.length}`);
-    expect(error).toMatch(/contentSha256=[a-f0-9]{16}/);
+    expect(error).toContain("原始诊断内容未保存");
     expect(error).not.toContain(secret);
-    expect(failedRound?.failureExcerpt).toContain("[redacted]");
+    expect(failedRound?.failureExcerpt).toContain("response omitted");
+    expect(failedRound?.failureExcerpt).toContain(
+      `contentLength=${failingResponse.length}`,
+    );
+    expect(failedRound?.failureExcerpt).toMatch(/contentSha256=[a-f0-9]{16}/);
     expect(failedRound?.failureExcerpt).not.toContain(secret);
   });
 
@@ -2289,7 +2302,7 @@ describe("plan debate orchestrator", () => {
     expect(plan.status).toBe("paused");
     const error =
       plan.rounds.find((round) => round.status === "failed")?.error ?? "";
-    expect(error).toContain("模型输出达到限制");
+    expect(error).toContain("原始诊断内容未保存");
     expect(JSON.stringify(plan)).not.toContain(
       "private reasoning must not be persisted",
     );

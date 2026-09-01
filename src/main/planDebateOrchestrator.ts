@@ -73,6 +73,7 @@ import {
   goalContractMatchesRef,
 } from "./goalPlanContractService";
 import { redactCredentialString } from "../shared/credentialRedaction";
+import { sanitizePlanReviewIssue } from "../shared/planDiagnostics";
 
 const MAX_PLAN_SOURCE_CHARS = 32_000;
 const MAX_CLARIFICATION_CHARS = 4_000;
@@ -850,14 +851,15 @@ export function createPlanDebateOrchestrator(options: {
           );
           reviewUsage = mergeUsage(reviewUsage, repair.usage, review.usage);
         }
-        reviewIssues = review.issues;
+        const persistedReviewIssues = review.issues.map(sanitizePlanReviewIssue);
+        reviewIssues = persistedReviewIssues;
         reviewApproved = review.approved;
         if (!review.approved) {
           artifact = {
             ...artifact,
             minorityOpinion: uniqueStrings([
               ...artifact.minorityOpinion,
-              ...review.issues.map((issue) => issue.message),
+              ...persistedReviewIssues.map((issue) => issue.message),
             ]),
           };
         }
@@ -866,7 +868,7 @@ export function createPlanDebateOrchestrator(options: {
           status: "completed",
           completedAt: now(),
           reviewApproved: review.approved,
-          reviewIssues: review.issues,
+          reviewIssues: persistedReviewIssues,
           revisionAttempted,
           usage: reviewUsage,
         };
@@ -2381,14 +2383,10 @@ function presentBlockedGateAsInputRequest(
   };
 }
 
-const FAILURE_EXCERPT_HEAD_CHARS = 4_000;
-const FAILURE_EXCERPT_TAIL_CHARS = 2_000;
-
 /**
- * Error raised when a structured round exhausts its recovery ladder. Carries
- * a bounded excerpt of the last failing raw response so the paused plan
- * record stays self-diagnosing (the 2026-08-02 "title 必须是非空字符串"
- * incident was undebuggable precisely because only a SHA-256 survived).
+ * Error raised when a structured round exhausts its recovery ladder. The
+ * optional diagnostic contains only response length and a short digest; raw
+ * model output never crosses the persistence boundary.
  */
 export class PlanRoundFailureError extends Error {
   constructor(
@@ -2401,14 +2399,15 @@ export class PlanRoundFailureError extends Error {
 }
 
 export function buildFailureExcerpt(content: string): string | undefined {
-  const trimmed = redactCredentialString(content).trim();
+  const trimmed = content.trim();
   if (!trimmed) {
     return undefined;
   }
-  if (trimmed.length <= FAILURE_EXCERPT_HEAD_CHARS + FAILURE_EXCERPT_TAIL_CHARS) {
-    return trimmed;
-  }
-  return `${trimmed.slice(0, FAILURE_EXCERPT_HEAD_CHARS)}\n…[中间省略，共 ${trimmed.length} 字符]…\n${trimmed.slice(-FAILURE_EXCERPT_TAIL_CHARS)}`;
+  return [
+    "response omitted",
+    `contentLength=${content.length}`,
+    `contentSha256=${createHash("sha256").update(content).digest("hex").slice(0, 16)}`,
+  ].join("; ");
 }
 
 function structuredRoundFailure(

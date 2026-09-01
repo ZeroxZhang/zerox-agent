@@ -59,7 +59,10 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(source).toContain("journal-bound");
     expect(source).toContain("pread(");
     expect(source).toContain("CC_SHA256_Init(");
-    expect(source).toContain("digest_matches(");
+    expect(source).toContain("digest_matches_with_checkpoint(");
+    expect(source).toContain("stat_snapshot_matches(");
+    expect(source).toContain("st_mtimespec.tv_nsec");
+    expect(source).toContain("st_ctimespec.tv_nsec");
     expect(source).toContain("safe_directory_mode(");
     expect(source).toContain("RECONCILIATION_SUFFIX");
     expect(source).not.toContain("linkat(");
@@ -71,6 +74,9 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     );
     expect(organizerSource).not.toContain('child.kill("SIGKILL")');
     expect(organizerSource).not.toMatch(/setTimeout\([^]*10_000/);
+    expect(organizerSource).toContain('child.stdin.on("error"');
+    expect(organizerSource).toContain("MAX_TRANSACTION_LOG_BYTES");
+    expect(organizerSource).toContain("readBoundedFileHandle(");
   });
 
   it("requires hardened signing and an empty entitlement set", () => {

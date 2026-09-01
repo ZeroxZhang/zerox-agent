@@ -30,7 +30,7 @@ describe("plan failure presentation", () => {
       detail: "系统没有完成这次规划，但已完成的内容已经保留。",
       nextAction: "请重新检查计划；如果仍然失败，可补充验收要求后再规划。",
       actionLabel: "重新尝试",
-      technicalDetail: "验收路径越界。",
+      technicalDetail: "规划阶段 quality 未完成；原始诊断内容未保存。",
     });
   });
 
@@ -86,7 +86,7 @@ describe("plan failure presentation", () => {
     });
     expect(presentation?.nextAction).toContain("只从失败的调查深度恢复");
     expect(presentation?.technicalDetail).toContain("合同修复");
-    expect(presentation?.technicalDetail).toContain("失败响应摘录");
+    expect(presentation?.technicalDetail).not.toContain("skillCandidates");
   });
 
   it("projects a recovered plan over stale persisted failure activity", () => {
@@ -181,7 +181,7 @@ describe("plan failure presentation", () => {
     });
   });
 
-  it("keeps a raw failed-round error only in opt-in technical detail", () => {
+  it("omits a raw failed-round error even from technical detail", () => {
     const presentation = getPlanFailurePresentation(
       planWithFailure({
         rounds: [
@@ -197,10 +197,10 @@ describe("plan failure presentation", () => {
     expect(presentation).toMatchObject({
       title: "Debate 规划失败",
       actionLabel: "更换模型并重试",
-      technicalDetail: "provider stack trace and raw payload",
+      technicalDetail: expect.stringContaining("原始诊断内容未保存"),
     });
-    expect(presentation?.detail).not.toContain("stack trace");
-    expect(presentation?.nextAction).not.toContain("raw payload");
+    expect(JSON.stringify(presentation)).not.toContain("stack trace");
+    expect(JSON.stringify(presentation)).not.toContain("raw payload");
   });
 
   it("redacts credentials from legacy persisted planning diagnostics", () => {
@@ -224,7 +224,7 @@ describe("plan failure presentation", () => {
       }),
     );
 
-    expect(presentation?.technicalDetail).toContain("[redacted]");
+    expect(presentation?.technicalDetail).toContain("原始诊断内容未保存");
     expect(presentation?.technicalDetail).not.toContain(secret);
   });
 });

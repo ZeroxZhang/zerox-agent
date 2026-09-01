@@ -5,7 +5,7 @@ import {
   readdir,
   realpath,
 } from "node:fs/promises";
-import { constants } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +15,11 @@ import { assertSafeStoreEntityId } from "./storeEntityId";
 
 const RECONCILIATION_MARKER_BODY =
   '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n';
+const MAX_TRANSACTION_LOG_BYTES = 4 * 1024 * 1024;
+const MAX_RECONCILIATION_MARKER_BYTES = Buffer.byteLength(
+  RECONCILIATION_MARKER_BODY,
+  "utf8",
+);
 
 export type LocalFileCategory =
   | "Images"
@@ -88,7 +93,9 @@ export type LocalFileOrganizationTransaction = {
     required: true;
     kind: "marker" | "legacy_journal";
     markerPath?: string;
-    reason?: "v3.9.1_transaction_requires_manual_reconciliation";
+    reason?:
+      | "v3.9.1_transaction_requires_manual_reconciliation"
+      | "journal_unreadable_requires_manual_reconciliation";
   };
   history: Array<{ status: "pending" | "applied" | "rolled_back"; at: string }>;
 };
@@ -112,6 +119,7 @@ export type LocalFileOrganizerRuntimeOptions = {
     | "journal-bound"
     | "source-verified"
     | "move-applied"
+    | "post-move-target-digest-read"
     | "log-before-mutation"
     | "log-opened"
     | "log-mutated";
@@ -491,6 +499,7 @@ export async function readLocalFileOrganizationTransaction(
   logPath: string,
 ): Promise<LocalFileOrganizationTransaction> {
   const resolvedLogPath = resolveUserPath(logPath);
+  const reconciliationContext = deriveReconciliationContext(resolvedLogPath);
   const handle = await open(
     resolvedLogPath,
     constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
@@ -500,8 +509,17 @@ export async function readLocalFileOrganizationTransaction(
     if (!before.isFile() || before.nlink !== 1n) {
       throw new Error("Local file organization journal is not a single-link regular file.");
     }
-    const bytes = await handle.readFile();
-    const body = bytes.toString("utf8");
+    if ((before.mode & 0o022n) !== 0n) {
+      throw new Error("Legacy local file organization journal permissions are unsafe.");
+    }
+    const oversized = before.size > BigInt(MAX_TRANSACTION_LOG_BYTES);
+    const bytes = oversized
+      ? undefined
+      : await readBoundedFileHandle(
+          handle,
+          Number(before.size),
+          "Local file organization journal",
+        );
     const [after, leaf, directory, canonicalPath] = await Promise.all([
       handle.stat({ bigint: true }),
       lstat(resolvedLogPath, { bigint: true }),
@@ -529,7 +547,30 @@ export async function readLocalFileOrganizationTransaction(
     ) {
       throw new Error("Local file organization journal identity changed while reading.");
     }
-    const parsed = parseTransactionJournal(body);
+    const markerPath = reconciliationContext.markerPath;
+    const reconciliationRequired = await readReconciliationMarker(markerPath);
+    if (oversized) {
+      if (reconciliationRequired) {
+        return createUnreadableJournalReconciliation(
+          reconciliationContext,
+          after,
+        );
+      }
+      throw new Error("Local file organization journal exceeds the safe size limit.");
+    }
+    const body = bytes!.toString("utf8");
+    let parsed: ReturnType<typeof parseTransactionJournal>;
+    try {
+      parsed = parseTransactionJournal(body);
+    } catch (error) {
+      if (reconciliationRequired) {
+        return createUnreadableJournalReconciliation(
+          reconciliationContext,
+          after,
+        );
+      }
+      throw error;
+    }
     const transaction = parsed.transaction;
     if (parsed.format === "current") {
       if (
@@ -557,11 +598,12 @@ export async function readLocalFileOrganizationTransaction(
     ) {
       throw new Error("Local file organization journal path does not match its transaction.");
     }
-    const markerPath = reconciliationMarkerPath(
-      transaction.root,
-      transaction.id,
-    );
-    const reconciliationRequired = await readReconciliationMarker(markerPath);
+    if (
+      transaction.id !== reconciliationContext.id
+      || resolveUserPath(transaction.root) !== reconciliationContext.root
+    ) {
+      throw new Error("Local file organization journal path does not match its transaction.");
+    }
     return {
       ...transaction,
       ...(reconciliationRequired
@@ -590,7 +632,7 @@ export async function readLocalFileOrganizationTransaction(
               ino: after.ino.toString(),
               size: after.size.toString(),
               uid: after.uid.toString(),
-              sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+              sha256: `sha256:${createHash("sha256").update(bytes!).digest("hex")}`,
             },
           }
         : { logIdentity: undefined }),
@@ -598,6 +640,54 @@ export async function readLocalFileOrganizationTransaction(
   } finally {
     await handle.close();
   }
+}
+
+function deriveReconciliationContext(logPath: string): {
+  id: string;
+  root: string;
+  logPath: string;
+  markerPath: string;
+} {
+  const directory = path.dirname(logPath);
+  const leaf = path.basename(logPath);
+  if (path.basename(directory) !== ".zerox-organize-transactions") {
+    throw new Error("Local file organization journal is outside its transaction directory.");
+  }
+  const match = /^([A-Za-z0-9][A-Za-z0-9._:-]{0,249})\.json$/.exec(leaf);
+  if (!match) {
+    throw new Error("Local file organization journal name is invalid.");
+  }
+  const id = match[1];
+  assertSafeStoreEntityId(id, "Local file organization transaction id");
+  const root = resolveUserPath(path.dirname(directory));
+  return {
+    id,
+    root,
+    logPath,
+    markerPath: reconciliationMarkerPath(root, id),
+  };
+}
+
+function createUnreadableJournalReconciliation(
+  context: ReturnType<typeof deriveReconciliationContext>,
+  journalStats: BigIntStats,
+): LocalFileOrganizationTransaction {
+  return {
+    id: context.id,
+    root: context.root,
+    status: "reconciliation_required",
+    createdAt: new Date(Number(journalStats.mtimeMs)).toISOString(),
+    logPath: context.logPath,
+    moves: [],
+    movesApplied: 0,
+    reconciliation: {
+      required: true,
+      kind: "marker",
+      markerPath: context.markerPath,
+      reason: "journal_unreadable_requires_manual_reconciliation",
+    },
+    history: [],
+  };
 }
 
 async function loadAuthoritativeTransaction(
@@ -754,6 +844,32 @@ function reconciliationMarkerPath(root: string, id: string): string {
   );
 }
 
+async function readBoundedFileHandle(
+  handle: Awaited<ReturnType<typeof open>>,
+  expectedBytes: number,
+  label: string,
+): Promise<Buffer> {
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0) {
+    throw new Error(`${label} has an invalid size.`);
+  }
+  const bytes = Buffer.alloc(expectedBytes);
+  let offset = 0;
+  while (offset < expectedBytes) {
+    const result = await handle.read(
+      bytes,
+      offset,
+      expectedBytes - offset,
+      offset,
+    );
+    if (result.bytesRead === 0) break;
+    offset += result.bytesRead;
+  }
+  if (offset !== expectedBytes) {
+    throw new Error(`${label} identity changed while reading.`);
+  }
+  return bytes;
+}
+
 async function readReconciliationMarker(markerPath: string): Promise<boolean> {
   let handle;
   try {
@@ -767,7 +883,18 @@ async function readReconciliationMarker(markerPath: string): Promise<boolean> {
   }
   try {
     const before = await handle.stat({ bigint: true });
-    const body = await handle.readFile("utf8");
+    if (before.size !== BigInt(MAX_RECONCILIATION_MARKER_BYTES)) {
+      throw new Error(
+        "Local file organization reconciliation marker is invalid: unexpected size.",
+      );
+    }
+    const body = (
+      await readBoundedFileHandle(
+        handle,
+        MAX_RECONCILIATION_MARKER_BYTES,
+        "Local file organization reconciliation marker",
+      )
+    ).toString("utf8");
     const [after, leaf, directory, canonicalPath] = await Promise.all([
       handle.stat({ bigint: true }),
       lstat(markerPath, { bigint: true }),
@@ -1065,6 +1192,17 @@ async function runLogWithSafeFs(
   options: LocalFileOrganizerRuntimeOptions,
 ): Promise<LocalFileIdentity> {
   const rootIdentity = transaction.rootIdentity!;
+  const bodyBytes = Buffer.byteLength(body, "utf8");
+  const existingBytes = command === "log-append"
+    ? Number(transaction.logIdentity!.size)
+    : 0;
+  if (
+    !Number.isSafeInteger(existingBytes)
+    || existingBytes < 0
+    || bodyBytes > MAX_TRANSACTION_LOG_BYTES - existingBytes
+  ) {
+    throw new Error("Local file organization transaction log exceeds its safe size limit.");
+  }
   const args = [
     transaction.root,
     rootIdentity.dev,
@@ -1102,6 +1240,10 @@ async function runSafeFsHelper(
   options: LocalFileOrganizerRuntimeOptions,
 ): Promise<{ ok: true; identity?: LocalFileIdentity }> {
   const helperPath = await resolveSafeFsHelper(options.safeFsHelperPath);
+  const inputBody = input ?? "";
+  if (Buffer.byteLength(inputBody, "utf8") > MAX_TRANSACTION_LOG_BYTES) {
+    throw new Error("Local file organization helper input exceeds its safe size limit.");
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(helperPath, [command, ...args], {
       cwd: "/",
@@ -1122,6 +1264,17 @@ async function runSafeFsHelper(
     let stderr = "";
     let outputOverflow = false;
     let readySignaled = false;
+    let settled = false;
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const resolveOnce = (value: { ok: true; identity?: LocalFileIdentity }) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -1149,18 +1302,23 @@ async function runSafeFsHelper(
     });
     child.on("error", (error) => {
       if (outputOverflow) {
-        reject(new Error("Local file organization helper output exceeded its limit."));
+        rejectOnce(new Error("Local file organization helper output exceeded its limit."));
         return;
       }
-      reject(error);
+      rejectOnce(error);
+    });
+    child.stdin.on("error", (error) => {
+      rejectOnce(new Error(
+        `Local file organization helper input failed: ${error.message}`,
+      ));
     });
     child.on("close", (code, signal) => {
       if (outputOverflow) {
-        reject(new Error("Local file organization helper output exceeded its limit."));
+        rejectOnce(new Error("Local file organization helper output exceeded its limit."));
         return;
       }
       if (code !== 0) {
-        reject(new Error(
+        rejectOnce(new Error(
           stderr.trim()
           || `Local file organization helper failed (${signal ?? code ?? "unknown"}).`,
         ));
@@ -1174,12 +1332,12 @@ async function runSafeFsHelper(
         if (parsed.ok !== true) {
           throw new Error("Local file organization helper did not confirm success.");
         }
-        resolve(parsed as { ok: true; identity?: LocalFileIdentity });
+        resolveOnce(parsed as { ok: true; identity?: LocalFileIdentity });
       } catch (error) {
-        reject(error);
+        rejectOnce(error);
       }
     });
-    child.stdin.end(input ?? "");
+    child.stdin.end(inputBody);
   });
 }
 

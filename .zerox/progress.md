@@ -13709,3 +13709,43 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   restoration. Production audit reports zero vulnerabilities; dependency,
   caller-pinned Program/Harness, and whitespace checks pass. A fresh sixth
   exact-byte code/security review is the next mandatory gate.
+
+## 2026-09-01 - v3.9.2 stable-hash, bounded-journal, and Plan diagnostic boundary repair
+
+- The sixth frozen candidate was rejected by code review with two Majors and
+  by security review with three Majors. No review receipts were issued. The
+  shared gaps were incomplete stability proof during content hashing, an
+  unbounded/multi-settle journal subprocess boundary, reconciliation marker
+  visibility depending on a parseable journal, and diagnostic cleaning spread
+  across consumers rather than enforced by the Plan storage contract.
+- Native SHA-256 authority now captures and compares pre/post descriptor
+  snapshots including device, inode, size, owner, mode, link count, mtime, and
+  ctime. The moved-target regression pauses after the first digest block and
+  rewrites that already-read block in place, proving that a digest assembled
+  from stale bytes cannot be accepted and that unresolved restoration receives
+  a durable marker.
+- TypeScript and native journal boundaries now share a strict 4 MiB byte cap.
+  Journal and marker reads allocate only a validated descriptor size, append
+  checks include the existing journal bytes, child stdin errors are consumed,
+  and promise settlement is single-shot. The native exact-limit reader probes
+  one additional byte so its contract matches the caller without a false
+  `EPIPE` at exactly 4 MiB.
+- Reconciliation identity is derived from the canonical transaction leaf and
+  its marker is validated independently of JSON parsing. Equal-length invalid
+  JSON, truncated journals, and oversized journals therefore remain bounded
+  and either project explicit read-only manual reconciliation or fail closed.
+- Planning failures persist only content-free response length/hash metadata.
+  Valid review issues are converted to code-based safe diagnostics before
+  quality projection, persisted quality issue codes are restricted to the
+  closed shared enum, and `PlanStore` sanitizes both writes and reads for JSON
+  and SQLite, migrating legacy raw round/stage/review diagnostics. Chat, IPC,
+  UI, and replay logging no longer re-emit raw diagnostic content.
+- Focused validation passes `9/9` files and `321/321` tests. Full
+  `npm run verify` passes strict test type coverage `433/433`, `324` current
+  files / `3893` current tests with declared skips, every historical lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and final Node ABI `137`
+  restoration. Production audit reports zero vulnerabilities; dependency,
+  caller-pinned Program/Harness, and whitespace checks pass. A fresh seventh
+  exact-byte code/security review is the next mandatory gate.
