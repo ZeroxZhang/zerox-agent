@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -56,6 +58,10 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(buildSource).toContain("const configuredCompiler = process.env.CC?.trim()");
     expect(buildSource).toContain("const compilerPath = realpathSync(configuredCompiler)");
     expect(buildSource).toContain("const sdkRoot = realpathSync(configuredSdkRoot)");
+    expect(buildSource).toContain("const buildToolchainBefore = toolchainPolicy");
+    expect(buildSource).toContain("await capturePinnedBuildToolchain(toolchainPolicy)");
+    expect(buildSource).toContain("const buildToolchainAfter = await capturePinnedBuildToolchain(toolchainPolicy)");
+    expect(buildSource).toContain("caller-reviewed compiler or SDK changed during safe-fs build");
     expect(buildSource).not.toContain('run("/usr/bin/xcrun"');
     expect(source).toContain("renameatx_np(");
     expect(source).toContain("RENAME_EXCL");
@@ -95,6 +101,67 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(organizerSource).toContain('child.stdin.on("error"');
     expect(organizerSource).toContain("MAX_TRANSACTION_LOG_BYTES");
     expect(organizerSource).toContain("readBoundedFileHandle(");
+  });
+
+  it("rejects candidate-controlled compiler and SDK overrides", () => {
+    const directory = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), "zerox-safe-fs-toolchain-")),
+    );
+    temporaryDirectories.push(directory);
+    const executionRoot = path.join(directory, "execution");
+    const scriptsRoot = path.join(executionRoot, "scripts");
+    mkdirSync(scriptsRoot, { recursive: true, mode: 0o700 });
+    const copiedBuildScript = path.join(scriptsRoot, "build-safe-fs-helper.mjs");
+    copyFileSync(
+      path.join(process.cwd(), "scripts/build-safe-fs-helper.mjs"),
+      copiedBuildScript,
+    );
+    const fakeCompiler = path.join(executionRoot, "clang");
+    const fakeSdk = path.join(executionRoot, "MacOSX.sdk");
+    writeFileSync(fakeCompiler, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    mkdirSync(fakeSdk, { mode: 0o700 });
+    const policyInput = {
+      schemaVersion: 1,
+      kind: "v3.9.2-pinned-safe-fs-toolchain",
+      compiler: {
+        configuredPath: "/Library/Developer/CommandLineTools/usr/bin/clang",
+        canonicalPath: "/Library/Developer/CommandLineTools/usr/bin/clang",
+        digest:
+          "sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+      },
+      sdk: {
+        configuredPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        canonicalPath:
+          "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk",
+        settingsDigest:
+          "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
+      },
+      safeFsHelperDigest:
+        "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6",
+    };
+    const policy = {
+      ...policyInput,
+      digest: `sha256:${createHash("sha256")
+        .update(Buffer.from(canonicalJson(policyInput)))
+        .digest("hex")}`,
+    };
+    writeFileSync(
+      path.join(directory, ".v392-pinned-safe-fs-toolchain.json"),
+      `${JSON.stringify(policy, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    const build = (environment: NodeJS.ProcessEnv) => execFileSync(
+      process.execPath,
+      [copiedBuildScript],
+      {
+        cwd: executionRoot,
+        env: { ...process.env, ...environment },
+        stdio: "pipe",
+      },
+    );
+
+    expect(() => build({ CC: fakeCompiler })).toThrow();
+    expect(() => build({ SDKROOT: fakeSdk })).toThrow();
   });
 
   it("requires hardened signing and an empty entitlement set", () => {
@@ -154,3 +221,16 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       .toThrow("empty entitlement set");
   });
 });
+
+function canonicalJson(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}

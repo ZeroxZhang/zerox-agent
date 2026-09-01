@@ -76,6 +76,18 @@ const EXPECTED_MACOS_COMPILER = Object.freeze({
   clangXX: "/Library/Developer/CommandLineTools/usr/bin/clang++",
   digest: "sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
 });
+const EXPECTED_MACOS_SDK = Object.freeze({
+  alias: "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+  canonicalPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk",
+  digest: "sha256:3f7ce329454a71cfa9ca9a481b530a5fc8dbb1d4c0fea2fc0f50a6cecec6cfb1",
+  entryCount: 49730,
+  settingsDigest:
+    "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
+});
+const EXPECTED_SAFE_FS_HELPER_DIGEST =
+  "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6";
+const PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME =
+  ".v392-pinned-safe-fs-toolchain.json";
 const EXPECTED_NODE_HEADERS = Object.freeze({
   digest: "sha256:608964880bdb0f636deeb9486ecbd08478625a291ac17f10613f1189016ee9fb",
   entryCount: 3325,
@@ -223,8 +235,10 @@ const TRUSTED_SEATBELT_REQUIREMENTS = Object.freeze([
   "read-only-write-denied",
   "network-denied",
   "timeout-termination",
-  "host-xcrun-cache-success-isolation",
-  "host-xcrun-cache-failure-isolation",
+  "host-toolchain-command-success-isolation",
+  "host-toolchain-command-failure-isolation",
+  "host-toolchain-electron-success-isolation",
+  "host-toolchain-electron-failure-isolation",
   "cleanup",
 ]);
 const GENERATED_NATIVE_CACHE_PATH = path.join(
@@ -269,9 +283,9 @@ if (
 }
 if (
   process.argv.length === 3
-  && process.argv[2] === "--self-test-host-xcrun-isolation"
+  && process.argv[2] === "--self-test-host-toolchain-isolation"
 ) {
-  await runHostXcrunIsolationSelfTest();
+  await runHostToolchainIsolationSelfTest();
   process.exit(0);
 }
 
@@ -385,6 +399,18 @@ if (
 ) {
   fail("acceptance anchor parent must be canonical");
 }
+const pinnedToolchainPolicyPath = path.join(
+  outputParent,
+  PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME,
+);
+await writePrivateFile(
+  pinnedToolchainPolicyPath,
+  Buffer.from(`${JSON.stringify(
+    createPinnedSafeFsToolchainPolicy(macosCompiler),
+    null,
+    2,
+  )}\n`),
+);
 const publicationJournalPath = `${options.output}.publication-transaction.json`;
 const nodePrefix = path.dirname(path.dirname(nodePath));
 if (
@@ -514,7 +540,6 @@ const darwinUserTempRoots = [...new Set([
 ])];
 const electronEphemeralPrefixes = darwinUserTempRoots.flatMap((root) => [
   path.join(root, "scoped_dir"),
-  path.join(root, "xcrun_db-"),
 ]);
 const electronSocketPrefixes = darwinUserTempRoots.map((root) =>
   path.join(root, "scoped_dir")
@@ -523,6 +548,7 @@ await writePrivateFile(
   commandSandboxProfile,
   Buffer.from(buildAcceptanceSandboxProfile({
     readableRoots: sandboxReadableRoots,
+    readableFiles: [pinnedToolchainPolicyPath],
     metadataRoots: ["/Users"],
     writableRoots: sandboxWritableRoots,
     network: false,
@@ -541,6 +567,7 @@ await writePrivateFile(
   electronSandboxProfile,
   Buffer.from(buildAcceptanceSandboxProfile({
     readableRoots: sandboxReadableRoots,
+    readableFiles: [pinnedToolchainPolicyPath],
     readablePrefixes: electronEphemeralPrefixes,
     metadataRoots: ["/Users"],
     writableRoots: sandboxWritableRoots,
@@ -642,7 +669,7 @@ const trustedEnvironment = {
   LD: "/Library/Developer/CommandLineTools/usr/bin/ld",
   LIBTOOL: "/Library/Developer/CommandLineTools/usr/bin/libtool",
   STRIP: "/Library/Developer/CommandLineTools/usr/bin/strip",
-  SDKROOT: "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+  SDKROOT: macosCompiler.sdkAlias,
   npm_config_nodedir: execution.electronHeaders,
   ZEROX_V392_OUTER_SANDBOX: "1",
   ZEROX_ACCEPTANCE_SECRET_CANARY:
@@ -656,13 +683,17 @@ const trustedEnvironment = {
   ZEROX_LOCAL_CANDIDATE_TOOLCHAIN_ENTRY_COUNT:
     String(EXPECTED_TOOLCHAIN.entryCount),
 };
-await verifyHostXcrunCacheIsolation({
-  profilePath: commandSandboxProfile,
+await verifyHostToolchainIsolation({
+  profiles: [
+    { label: "command", path: commandSandboxProfile },
+    { label: "electron", path: electronSandboxProfile },
+  ],
   nodePath,
   cwd: executionRoot,
   environment: trustedEnvironment,
   cacheRoot: darwinUserTempCanonical,
   compiler: macosCompiler,
+  policyPath: pinnedToolchainPolicyPath,
 });
 await run(
   nodePath,
@@ -718,6 +749,7 @@ await scanPathsForEnvironmentSecrets([
   appPath,
   ...FINAL_FILES.map((relativePath) => path.join(executionRoot, relativePath)),
 ], trustedEnvironment);
+await verifyPinnedMacosSdkManifest(macosCompiler);
 await assertExecutionQuiescent("before publication");
 let publication;
 let completedAnchor;
@@ -973,6 +1005,7 @@ await Promise.all([
   rm(auditSandboxProfile, { force: true }),
   rm(electronSandboxProfile, { force: true }),
   rm(repositoryCheckSandboxProfile, { force: true }),
+  rm(pinnedToolchainPolicyPath, { force: true }),
 ]);
 await settleMutationWatchers();
 await verifyCanonicalRepositoryPostflight();
@@ -1126,6 +1159,7 @@ async function verifyCompletedOutputs(
     packageReceipt.safeFsHelper?.path !== safeFsRelativePath
     || packageReceipt.safeFsHelper?.bytes !== safeFsCapture.bytes.length
     || packageReceipt.safeFsHelper?.sha256 !== safeFsCapture.digest
+    || safeFsCapture.digest !== EXPECTED_SAFE_FS_HELPER_DIGEST
     || packageReceipt.safeFsHelper?.mode !== "0755"
     || (safeFsCapture.metadata.mode & 0o777) !== 0o755
     || packageReceipt.safeFsHelper?.signatureVerified !== true
@@ -1961,18 +1995,97 @@ async function resolvePinnedMacosCompiler(cwd = process.cwd()) {
   if (capture.digest !== EXPECTED_MACOS_COMPILER.digest) {
     fail("caller-resolved macOS compiler differs from the reviewed digest");
   }
+  const sdkCanonicalPath = await realpath(EXPECTED_MACOS_SDK.alias);
+  if (sdkCanonicalPath !== EXPECTED_MACOS_SDK.canonicalPath) {
+    fail("macOS SDK canonical path differs from the caller-reviewed path");
+  }
+  const [sdkManifest, sdkSettings] = await Promise.all([
+    computeTreeManifest(sdkCanonicalPath),
+    captureRegularFile(
+      path.join(sdkCanonicalPath, "SDKSettings.json"),
+      "caller-resolved macOS SDK settings",
+    ),
+  ]);
+  if (
+    sdkManifest.digest !== EXPECTED_MACOS_SDK.digest
+    || sdkManifest.entryCount !== EXPECTED_MACOS_SDK.entryCount
+    || sdkSettings.digest !== EXPECTED_MACOS_SDK.settingsDigest
+  ) {
+    fail("caller-resolved macOS SDK differs from the reviewed manifest");
+  }
   return Object.freeze({
     clang,
     clangXX,
     canonicalPath: canonicalClang,
     digest: capture.digest,
+    sdkAlias: EXPECTED_MACOS_SDK.alias,
+    sdkCanonicalPath,
+    sdkDigest: sdkManifest.digest,
+    sdkEntryCount: sdkManifest.entryCount,
+    sdkSettingsDigest: sdkSettings.digest,
     resolutionCwd: cwd,
   });
 }
 
-async function runHostXcrunIsolationSelfTest() {
+async function verifyPinnedMacosToolchainFiles(expected) {
+  const [compilerCanonicalPath, sdkCanonicalPath] = await Promise.all([
+    realpath(expected.clang),
+    realpath(expected.sdkAlias),
+  ]);
+  if (
+    compilerCanonicalPath !== expected.canonicalPath
+    || sdkCanonicalPath !== expected.sdkCanonicalPath
+  ) {
+    fail("caller-reviewed compiler or SDK canonical path changed");
+  }
+  const [compiler, sdkSettings] = await Promise.all([
+    captureRegularFile(expected.canonicalPath, "macOS compiler postflight"),
+    captureRegularFile(
+      path.join(expected.sdkCanonicalPath, "SDKSettings.json"),
+      "macOS SDK settings postflight",
+    ),
+  ]);
+  if (
+    compiler.digest !== expected.digest
+    || sdkSettings.digest !== expected.sdkSettingsDigest
+  ) {
+    fail("caller-reviewed compiler or SDK file digest changed");
+  }
+}
+
+async function verifyPinnedMacosSdkManifest(expected) {
+  await verifyPinnedMacosToolchainFiles(expected);
+  const sdkManifest = await computeTreeManifest(expected.sdkCanonicalPath);
+  if (
+    sdkManifest.digest !== expected.sdkDigest
+    || sdkManifest.entryCount !== expected.sdkEntryCount
+  ) {
+    fail("caller-reviewed macOS SDK manifest changed during acceptance");
+  }
+}
+
+function createPinnedSafeFsToolchainPolicy(toolchain) {
+  const digestInput = {
+    schemaVersion: 1,
+    kind: "v3.9.2-pinned-safe-fs-toolchain",
+    compiler: {
+      configuredPath: toolchain.clang,
+      canonicalPath: toolchain.canonicalPath,
+      digest: toolchain.digest,
+    },
+    sdk: {
+      configuredPath: toolchain.sdkAlias,
+      canonicalPath: toolchain.sdkCanonicalPath,
+      settingsDigest: toolchain.sdkSettingsDigest,
+    },
+    safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
+  };
+  return { ...digestInput, digest: hashCanonical(digestInput) };
+}
+
+async function runHostToolchainIsolationSelfTest() {
   if (process.platform !== "darwin") {
-    console.log(JSON.stringify({ hostXcrunIsolationSelfTest: "skipped" }));
+    console.log(JSON.stringify({ hostToolchainIsolationSelfTest: "skipped" }));
     return;
   }
   const privateRoot = await realpath(await mkdtemp(
@@ -1988,18 +2101,47 @@ async function runHostXcrunIsolationSelfTest() {
       { encoding: "utf8" },
     );
     const cacheRoot = await realpath(darwinUserTempOutput.trim());
-    await writePrivateFile(
-      profilePath,
-      Buffer.from(buildAcceptanceSandboxProfile({
-        readableRoots: [
-          privateRoot,
-          path.dirname(path.dirname(trustedNodePath)),
-          ...SYSTEM_SANDBOX_READ_ROOTS,
-        ],
-        writableRoots: [privateRoot],
-        network: false,
-      })),
+    const policyPath = path.join(
+      privateRoot,
+      PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME,
     );
+    const writableRoot = path.join(privateRoot, "writable");
+    await mkdir(writableRoot, { mode: 0o700 });
+    await writePrivateFile(
+      policyPath,
+      Buffer.from(`${JSON.stringify(
+        createPinnedSafeFsToolchainPolicy(compiler),
+        null,
+        2,
+      )}\n`),
+    );
+    const electronProfilePath = path.join(privateRoot, "electron.sb");
+    const readableRoots = [
+      writableRoot,
+      path.dirname(path.dirname(trustedNodePath)),
+      ...SYSTEM_SANDBOX_READ_ROOTS,
+    ];
+    await Promise.all([
+      writePrivateFile(
+        profilePath,
+        Buffer.from(buildAcceptanceSandboxProfile({
+          readableRoots,
+          readableFiles: [policyPath],
+          writableRoots: [writableRoot],
+          network: false,
+        })),
+      ),
+      writePrivateFile(
+        electronProfilePath,
+        Buffer.from(buildAcceptanceSandboxProfile({
+          readableRoots,
+          readableFiles: [policyPath],
+          writableRoots: [writableRoot],
+          network: false,
+          allowMach: true,
+        })),
+      ),
+    ]);
     const environment = {
       HOME: privateRoot,
       LANG: "en_US.UTF-8",
@@ -2007,16 +2149,20 @@ async function runHostXcrunIsolationSelfTest() {
       SHELL: "/bin/sh",
       TMPDIR: privateRoot,
     };
-    await verifyHostXcrunCacheIsolation({
-      profilePath,
+    await verifyHostToolchainIsolation({
+      profiles: [
+        { label: "command", path: profilePath },
+        { label: "electron", path: electronProfilePath },
+      ],
       nodePath: trustedNodePath,
-      cwd: privateRoot,
+      cwd: writableRoot,
       environment,
       cacheRoot,
       compiler,
+      policyPath,
     });
     console.log(JSON.stringify({
-      hostXcrunIsolationSelfTest: "passed",
+      hostToolchainIsolationSelfTest: "passed",
       compilerDigest: compiler.digest,
     }));
   } finally {
@@ -2024,21 +2170,23 @@ async function runHostXcrunIsolationSelfTest() {
   }
 }
 
-async function verifyHostXcrunCacheIsolation({
-  profilePath,
+async function verifyHostToolchainIsolation({
+  profiles,
   nodePath: trustedNodePath,
   cwd,
   environment,
   cacheRoot,
   compiler,
+  policyPath,
 }) {
   await verifyExternalXcrunResolution(compiler);
   const baseline = await captureHostXcrunCacheState(cacheRoot);
-  const hostilePrefixPath = path.join(
-    cacheRoot,
-    `xcrun_db-hostile-${process.pid}-${randomUUID()}`,
-  );
   const exactCachePath = path.join(cacheRoot, "xcrun_db");
+  const compilerPath = compiler.canonicalPath;
+  const sdkSettingsPath = path.join(
+    compiler.sdkCanonicalPath,
+    "SDKSettings.json",
+  );
   const hostileSource = [
     "const fs=require('node:fs');",
     "let denied=0;",
@@ -2046,10 +2194,10 @@ async function verifyHostXcrunCacheIsolation({
     "try{fs.writeFileSync(target,'zerox-hostile-xcrun-cache');}",
     "catch(error){if(error.code==='EPERM'||error.code==='EACCES')denied+=1;else throw error;}",
     "}",
-    "if(denied!==2)process.exit(9);",
+    "if(denied!==5)process.exit(9);",
     "if(process.env.ZEROX_HOSTILE_FAILURE==='1')process.exit(17);",
   ].join("");
-  const invokeHostileCandidate = (failure) => execFile(
+  const invokeHostileCandidate = (profilePath, hostilePrefixPath, failure) => execFile(
     "/usr/bin/sandbox-exec",
     [
       "-f",
@@ -2059,6 +2207,9 @@ async function verifyHostXcrunCacheIsolation({
       hostileSource,
       hostilePrefixPath,
       exactCachePath,
+      compilerPath,
+      sdkSettingsPath,
+      policyPath,
     ],
     {
       cwd,
@@ -2072,18 +2223,36 @@ async function verifyHostXcrunCacheIsolation({
     },
   );
 
-  await invokeHostileCandidate(false);
-  await assertHostXcrunStateUnchanged(cacheRoot, compiler, baseline, "success");
-  let failureObserved = false;
-  try {
-    await invokeHostileCandidate(true);
-  } catch (error) {
-    failureObserved = error?.code === 17;
+  for (const profile of profiles) {
+    const hostilePrefixPath = path.join(
+      cacheRoot,
+      `xcrun_db-hostile-${profile.label}-${process.pid}-${randomUUID()}`,
+    );
+    await invokeHostileCandidate(profile.path, hostilePrefixPath, false);
+    await assertHostXcrunStateUnchanged(
+      cacheRoot,
+      compiler,
+      baseline,
+      `${profile.label} success`,
+    );
+    let failureObserved = false;
+    try {
+      await invokeHostileCandidate(profile.path, hostilePrefixPath, true);
+    } catch (error) {
+      failureObserved = error?.code === 17;
+    }
+    if (!failureObserved) {
+      fail(
+        `hostile xcrun cache ${profile.label} failure lane did not preserve its exit status`,
+      );
+    }
+    await assertHostXcrunStateUnchanged(
+      cacheRoot,
+      compiler,
+      baseline,
+      `${profile.label} failure`,
+    );
   }
-  if (!failureObserved) {
-    fail("hostile xcrun cache failure lane did not preserve its exit status");
-  }
-  await assertHostXcrunStateUnchanged(cacheRoot, compiler, baseline, "failure");
 }
 
 async function assertHostXcrunStateUnchanged(
@@ -2093,6 +2262,7 @@ async function assertHostXcrunStateUnchanged(
   lane,
 ) {
   await verifyExternalXcrunResolution(compiler);
+  await verifyPinnedMacosToolchainFiles(compiler);
   const current = await captureHostXcrunCacheState(cacheRoot);
   if (JSON.stringify(current) !== JSON.stringify(baseline)) {
     fail(`host xcrun cache changed during hostile ${lane} lane`);
@@ -3632,7 +3802,7 @@ function requiresElectronSandbox(command, args) {
 }
 
 async function runTrustedSeatbeltRegressionLane(privateRoot) {
-  if (TRUSTED_SEATBELT_REQUIREMENTS.length !== 13) {
+  if (TRUSTED_SEATBELT_REQUIREMENTS.length !== 15) {
     fail("trusted Seatbelt requirement roster changed");
   }
   const testRoot = await realpath(await mkdtemp(
@@ -3728,13 +3898,11 @@ async function runTrustedSeatbeltRegressionLane(privateRoot) {
           ],
           readablePrefixes: [
             path.join(electronTemp, "scoped_dir"),
-            path.join(electronTemp, "xcrun_db-"),
           ],
           metadataRoots: [],
           writableRoots: [workspace, privateTempA],
           writablePrefixes: [
             path.join(electronTemp, "scoped_dir"),
-            path.join(electronTemp, "xcrun_db-"),
           ],
           localSocketPrefixes: [path.join(electronTemp, "scoped_dir")],
           network: false,
@@ -3933,6 +4101,7 @@ async function verifyCommandIdentity(command, args, cwd) {
       fail("npm CLI changed at a subprocess boundary");
     }
   }
+  await verifyPinnedMacosToolchainFiles(macosCompiler);
   await verifyNativeNodeAddon(
     isWithin(executionRoot, cwd) ? executionRoot : repositoryRealpath,
   );

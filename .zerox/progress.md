@@ -14417,3 +14417,45 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `137` restoration; the production dependency audit reports zero
   vulnerabilities. Exact-byte dual review and the external package gate remain
   required before merge and release.
+- Candidate `b156fe69500723c2510e38a599f91ff972965a24` was rejected before
+  receipts after the security lane reported `0C/1M/0m`. Although the ordinary
+  command profile no longer exposed host `xcrun_db` state, the Electron profile
+  still retained the same filename-prefix capability for smoke, acceptance,
+  and packaged-app execution. This was the same authority defect split across
+  independently maintained profiles, not a distinct product failure.
+- Host `xcrun_db` read/write capability is now absent from every candidate
+  profile. Electron retains only its required `scoped_dir` file/socket prefix.
+  The runtime hostile-cache self-test now exercises both command and Electron
+  profiles, and for each profile covers successful and failing child exits
+  while proving unchanged host cache bytes/entries and unchanged external
+  `xcrun` resolution. The four-lane real Seatbelt self-test and focused
+  package/helper validation pass `19/19`; a fresh full verification and
+  exact-byte dual review are required for the replacement candidate.
+- The same rejected candidate's completed security report added a second Major
+  (`0C/2M/0m` total): `CC` and `SDKROOT` were trusted only in the outer npm
+  environment, so candidate-controlled child code could attempt to override
+  them before invoking the safe-fs build. The package receipt also compared the
+  helper only with itself rather than with a caller-reviewed deterministic
+  digest.
+- Compiler and SDK authority is now enforced at every external-acceptance
+  layer. The runner places a caller-owned, exact-read-only toolchain policy
+  outside the candidate execution root. Its presence automatically switches
+  the helper into pinned mode: only the reviewed canonical Clang and SDK paths
+  are accepted, compiler and SDK settings digests are validated before and
+  after compilation, combined build/postflight failures are preserved, and
+  `CC`/`SDKROOT` overrides are rejected. Outside caller-pinned acceptance the
+  helper still resolves the active Xcode toolchain, preserving macOS CI and
+  developer-build portability. The external runner pins the complete
+  49,730-entry SDK manifest, revalidates compiler/SDK files at each subprocess
+  boundary, revalidates the full SDK before publication, and requires the
+  packaged safe-fs helper to equal the deterministic digest
+  `sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6`.
+  Hostile success/failure probes now test cache, compiler, and SDK writes across
+  both command and Electron profiles. The real host-toolchain isolation
+  self-test passes and focused package/helper validation passes `20/20`.
+- Fresh full `npm run verify` passes `4023` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2–Round12 compatibility lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  again passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration;
+  the production dependency audit remains at zero vulnerabilities.
