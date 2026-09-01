@@ -938,7 +938,7 @@ function startPlanReplayDriver() {
         app.exit(terminal ? 0 : 3);
       } catch (error) {
         log("retryFailedRound 失败", {
-          error: error instanceof Error ? error.message : String(error),
+          category: classifyPlanReplayReadFailure(error),
         });
         clearTimeout(timeout);
         app.exit(2);

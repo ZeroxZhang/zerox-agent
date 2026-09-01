@@ -53,7 +53,11 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(source).toContain("RENAME_EXCL");
     expect(source).toContain("restore_moved_entry(");
     expect(source).toContain("record_reconciliation_marker(");
+    expect(source).toContain("record_reconciliation_marker_at(");
     expect(source).toContain("validate_reconciliation_marker(");
+    expect(source).toContain("require_no_reconciliation_marker(");
+    expect(source).toContain("lock_transaction_file(");
+    expect(source).toContain("flock(transaction_fd, LOCK_EX | LOCK_NB)");
     expect(source).toContain("verify_opened_regular_path(");
     expect(source).toContain("verify-into-category");
     expect(source).toContain("journal-bound");
@@ -71,6 +75,7 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(source).toMatch(/renameatx_np\(\s*log_fd,\s*temporary_name,\s*log_fd,\s*marker_name,\s*RENAME_EXCL/);
     expect(source).toContain("unlinkat(log_fd, temporary_name, 0)");
     expect(source).not.toContain("unlinkat(log_fd, marker_name, 0)");
+    expect(source).toMatch(/record_reconciliation_marker\([^]*open_child_directory\([^]*TRANSACTION_DIRECTORY[^]*verify_directories\([^]*record_reconciliation_marker_at\([^]*verify_directories\(/);
     expect(source).not.toMatch(/\blinkat\(/);
     expect(source).not.toContain("remove-category-duplicate");
     const organizerSource = readFileSync(

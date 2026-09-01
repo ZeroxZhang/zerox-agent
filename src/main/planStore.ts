@@ -89,20 +89,43 @@ export function createPlanStore(options: {
     return path.join(plansDir, SESSION_INDEX_FILENAME);
   }
 
+  function detachProjection(plan: PlanRecord): PlanRecord {
+    const { projection: _projection, ...detached } = plan;
+    return detached;
+  }
+
+  async function migrateDiagnosticProjection(
+    plan: PlanRecord,
+  ): Promise<PlanRecord> {
+    if (!plan.projection) return plan;
+    const detached = detachProjection(plan);
+    if (!plan.workspaceRoot) return detached;
+    try {
+      return await rewriteSanitizedPlanProjection(plan, now);
+    } catch {
+      // The persistent record must remain readable and content-free when an
+      // old workspace is offline, removed, read-only, or no longer canonical.
+      // Detaching the unverified projection also keeps IPC consumers from
+      // treating a legacy diagnostic artifact as authoritative.
+      return detached;
+    }
+  }
+
   async function readSqlitePlanPayload(payload: string): Promise<PlanRecord> {
     const parsed = JSON.parse(payload) as PlanRecord;
     const diagnosticSafe = sanitizePlanRecordDiagnostics(parsed);
-    const diagnosticsChanged =
-      JSON.stringify(parsed) !== JSON.stringify(diagnosticSafe);
+    const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
     const validated = validatePlanRecord(diagnosticSafe);
-    const migrated = diagnosticsChanged
-      ? await rewriteSanitizedPlanProjection(validated, now)
-      : validated;
-    if (
-      options.storage &&
-      JSON.stringify(parsed) !== JSON.stringify(migrated)
-    ) {
-      writeSqlitePlan(options.storage, migrated);
+    let migrated = validated;
+    if (diagnosticsChanged && options.storage) {
+      const detached = detachProjection(validated);
+      writeSqlitePlan(options.storage, detached);
+      migrated = await migrateDiagnosticProjection(validated);
+      if (!recordsEqual(detached, migrated)) {
+        writeSqlitePlan(options.storage, migrated);
+      }
+    } else if (options.storage && !recordsEqual(parsed, validated)) {
+      writeSqlitePlan(options.storage, validated);
     }
     return recoverInterruptedPlanRecord(migrated, activeRunIds);
   }
@@ -121,16 +144,18 @@ export function createPlanStore(options: {
         await readFile(planPath(planId), "utf8"),
       ) as PlanRecord;
       const diagnosticSafe = sanitizePlanRecordDiagnostics(parsed);
-      const diagnosticsChanged =
-        JSON.stringify(parsed) !== JSON.stringify(diagnosticSafe);
+      const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
       const validated = validatePlanRecord(diagnosticSafe);
-      const migrated = diagnosticsChanged
-        ? await rewriteSanitizedPlanProjection(validated, now)
-        : validated;
-      if (
-        JSON.stringify(parsed) !== JSON.stringify(migrated)
-      ) {
-        await writePlan(migrated);
+      let migrated = validated;
+      if (diagnosticsChanged) {
+        const detached = detachProjection(validated);
+        await writePlan(detached);
+        migrated = await migrateDiagnosticProjection(validated);
+        if (!recordsEqual(detached, migrated)) {
+          await writePlan(migrated);
+        }
+      } else if (!recordsEqual(parsed, validated)) {
+        await writePlan(validated);
       }
       return recoverInterruptedPlanRecord(migrated, activeRunIds);
     } catch (error) {
@@ -249,8 +274,8 @@ export function createPlanStore(options: {
         };
         const diagnosticSafe = sanitizePlanRecordDiagnostics(candidate);
         const validated = validatePlanRecord(diagnosticSafe);
-        const created = JSON.stringify(candidate) !== JSON.stringify(diagnosticSafe)
-          ? await rewriteSanitizedPlanProjection(validated, now)
+        const created = !recordsEqual(candidate, diagnosticSafe)
+          ? await migrateDiagnosticProjection(validated)
           : validated;
         const event: PlanStoreEvent = {
           id: `plan_event_${createId()}`,
@@ -295,8 +320,8 @@ export function createPlanStore(options: {
         };
         const diagnosticSafe = sanitizePlanRecordDiagnostics(candidate);
         const validated = validatePlanRecord(diagnosticSafe);
-        const updated = JSON.stringify(candidate) !== JSON.stringify(diagnosticSafe)
-          ? await rewriteSanitizedPlanProjection(validated, now)
+        const updated = !recordsEqual(candidate, diagnosticSafe)
+          ? await migrateDiagnosticProjection(validated)
           : validated;
         const event: PlanStoreEvent = {
           id: `plan_event_${createId()}`,
@@ -484,6 +509,24 @@ function safePlanId(planId: string): string {
   const normalized = planId.trim();
   assertSafePlanId(normalized);
   return normalized;
+}
+
+function recordsEqual(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+    return `{${entries.map(([key, entry]) =>
+      `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function validatePlanRecord(plan: PlanRecord): PlanRecord {

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -625,7 +626,37 @@ static int validate_reconciliation_marker(
   return 0;
 }
 
-static int record_reconciliation_marker(
+static int require_no_reconciliation_marker(
+  int log_fd,
+  const char *transaction_id
+) {
+  char marker_name[NAME_MAX + 1];
+  struct stat marker_stats;
+  int written = snprintf(
+    marker_name,
+    sizeof(marker_name),
+    "%s%s",
+    transaction_id,
+    RECONCILIATION_SUFFIX
+  );
+  if (written < 0 || (size_t)written >= sizeof(marker_name)) {
+    return fail_message("reconciliation marker name is too long");
+  }
+  if (fstatat(log_fd, marker_name, &marker_stats, AT_SYMLINK_NOFOLLOW) == 0) {
+    return fail_message("transaction requires manual reconciliation");
+  }
+  return errno == ENOENT
+    ? 0
+    : fail_errno("cannot inspect transaction reconciliation state");
+}
+
+static int lock_transaction_file(int transaction_fd) {
+  return flock(transaction_fd, LOCK_EX | LOCK_NB) == 0
+    ? 0
+    : fail_errno("transaction is already active");
+}
+
+static int record_reconciliation_marker_at(
   int log_fd,
   const char *transaction_id
 ) {
@@ -767,6 +798,65 @@ static int record_reconciliation_marker(
     : fail_errno("cannot synchronize reconciliation directory");
 }
 
+static int record_reconciliation_marker(
+  int root_fd,
+  const char *root_path,
+  const directory_identity *root_identity,
+  const char *transaction_id
+) {
+  unsigned int attempt;
+  for (attempt = 0U; attempt < 3U; attempt += 1U) {
+    int canonical_log_fd = -1;
+    int result;
+    char canonical_log_path[MAXPATHLEN];
+    mode_t canonical_log_mode = 0;
+    result = open_child_directory(
+      root_fd,
+      root_path,
+      TRANSACTION_DIRECTORY,
+      1,
+      &canonical_log_fd,
+      canonical_log_path,
+      &canonical_log_mode
+    );
+    if (result != 0) return result;
+    result = verify_directories(
+      root_fd,
+      root_path,
+      root_identity,
+      canonical_log_fd,
+      canonical_log_path,
+      canonical_log_mode
+    );
+    if (result == 0) {
+      result = record_reconciliation_marker_at(
+        canonical_log_fd,
+        transaction_id
+      );
+    }
+    if (result == 0) {
+      result = verify_directories(
+        root_fd,
+        root_path,
+        root_identity,
+        canonical_log_fd,
+        canonical_log_path,
+        canonical_log_mode
+      );
+    }
+    if (result == 0 && fsync(root_fd) != 0) {
+      result = fail_errno("cannot synchronize reconciliation root");
+    }
+    if (close(canonical_log_fd) != 0 && result == 0) {
+      result = fail_errno("cannot close reconciliation directory");
+    }
+    if (result == 0) return 0;
+  }
+  return fail_message(
+    "canonical reconciliation directory changed during marker publication"
+  );
+}
+
 static int restore_moved_entry(
   int source_fd,
   const char *source_name,
@@ -887,6 +977,8 @@ static int move_between_directories(
     0
   );
   if (result != 0) goto done;
+  result = require_no_reconciliation_marker(log_fd, transaction_id);
+  if (result != 0) goto done;
   if (
     renameatx_np(
       source_fd,
@@ -902,7 +994,12 @@ static int move_between_directories(
     goto done;
   }
   if (fstatat(target_fd, target_name, &moved_stats, AT_SYMLINK_NOFOLLOW) != 0) {
-    if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
+    if (record_reconciliation_marker(
+      root_fd,
+      root_path,
+      root_identity,
+      transaction_id
+    ) != 0) {
       result = fail_message(
         "cannot observe atomically moved target and reconciliation marker could not be persisted"
       );
@@ -1048,7 +1145,12 @@ static int move_between_directories(
       result = fail_message("move postcondition failed; original layout restored");
       goto done;
     }
-    if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
+    if (record_reconciliation_marker(
+      root_fd,
+      root_path,
+      root_identity,
+      transaction_id
+    ) != 0) {
       result = fail_message(
         "move path was restored but authority is unresolved and reconciliation marker could not be persisted"
       );
@@ -1059,7 +1161,12 @@ static int move_between_directories(
     );
     goto done;
   }
-  if (record_reconciliation_marker(log_fd, transaction_id) != 0) {
+  if (record_reconciliation_marker(
+    root_fd,
+    root_path,
+    root_identity,
+    transaction_id
+  ) != 0) {
     result = fail_message(
       "move postcondition failed and reconciliation marker could not be persisted"
     );
@@ -1132,11 +1239,15 @@ static int run_move(int argc, char **argv, int reverse) {
     &log_mode
   );
   if (result != 0) goto done;
-  journal_fd = openat(log_fd, journal_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  journal_fd = openat(log_fd, journal_name, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
   if (journal_fd < 0) {
     result = fail_errno("cannot open transaction journal authority");
     goto done;
   }
+  result = lock_transaction_file(journal_fd);
+  if (result != 0) goto done;
+  result = require_no_reconciliation_marker(log_fd, argv[15]);
+  if (result != 0) goto done;
   result = verify_opened_regular_path(
     log_fd,
     log_path,
@@ -1283,11 +1394,15 @@ static int run_verify_into_category(int argc, char **argv) {
     &log_mode
   );
   if (result != 0) goto done;
-  journal_fd = openat(log_fd, journal_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  journal_fd = openat(log_fd, journal_name, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
   if (journal_fd < 0) {
     result = fail_errno("cannot open verify journal authority");
     goto done;
   }
+  result = lock_transaction_file(journal_fd);
+  if (result != 0) goto done;
+  result = require_no_reconciliation_marker(log_fd, argv[15]);
+  if (result != 0) goto done;
   target_fd = openat(category_fd, argv[9], O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
   if (target_fd < 0) {
     result = fail_errno("cannot open verified target capability");
@@ -1508,6 +1623,8 @@ static int run_log(int argc, char **argv, int append) {
     root_fd, argv[2], &root_identity, log_fd, log_path, log_mode
   );
   if (result != 0) goto done;
+  result = require_no_reconciliation_marker(log_fd, argv[7]);
+  if (result != 0) goto done;
   output_fd = openat(
     log_fd,
     final_name,
@@ -1522,6 +1639,10 @@ static int run_log(int argc, char **argv, int append) {
     goto done;
   }
   if (!append) mutation_started = 1;
+  result = lock_transaction_file(output_fd);
+  if (result != 0) goto done;
+  result = require_no_reconciliation_marker(log_fd, argv[7]);
+  if (result != 0) goto done;
   if (fstat(output_fd, &opened_stats) != 0) {
     result = fail_errno("cannot inspect opened transaction log");
     goto done;
@@ -1639,7 +1760,12 @@ static int run_log(int argc, char **argv, int append) {
 done:
   saved_errno = errno;
   if (result != 0 && (mutation_started || append) && log_fd >= 0) {
-    if (record_reconciliation_marker(log_fd, argv[7]) != 0) {
+    if (record_reconciliation_marker(
+      root_fd,
+      argv[2],
+      &root_identity,
+      argv[7]
+    ) != 0) {
       (void)fail_message(
         "transaction journal mutated but reconciliation marker could not be persisted"
       );

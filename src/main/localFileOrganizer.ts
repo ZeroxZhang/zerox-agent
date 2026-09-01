@@ -602,6 +602,9 @@ export async function readLocalFileOrganizationTransaction(
     ) {
       throw new Error("Local file organization journal path does not match its transaction.");
     }
+    markerStats ??= await readReconciliationMarker(
+      reconciliationContext.markerPath,
+    );
     return {
       ...transaction,
       ...(markerStats

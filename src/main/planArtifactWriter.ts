@@ -94,16 +94,17 @@ export async function rewriteSanitizedPlanProjection(
   plan: PlanRecord,
   now = () => new Date().toISOString(),
 ): Promise<PlanRecord> {
-  if (!plan.projection || !plan.workspaceRoot || !plan.finalArtifact) {
-    return sanitizePlanRecordDiagnostics(plan);
+  const sanitized = sanitizePlanRecordDiagnostics(plan);
+  const { projection: _projection, ...detached } = sanitized;
+  if (!sanitized.projection || !sanitized.workspaceRoot) {
+    return detached;
   }
-  const safeInput = sanitizeArtifactProjection(plan, plan.finalArtifact);
-  assertArtifactPlanId(safeInput.plan.id);
-  const root = await realpath(safeInput.plan.workspaceRoot!);
+  assertArtifactPlanId(sanitized.id);
+  const root = await realpath(sanitized.workspaceRoot);
   const zeroxDir = path.join(root, ".zerox");
   const plansDir = path.join(zeroxDir, "plans");
-  const destination = path.join(plansDir, `${safeInput.plan.id}.md`);
-  if (safeInput.plan.projection!.path !== destination) {
+  const destination = path.join(plansDir, `${sanitized.id}.md`);
+  if (sanitized.projection.path !== destination) {
     throw new Error("计划投影路径不是当前计划的规范路径。");
   }
   assertInside(root, destination);
@@ -112,7 +113,9 @@ export async function rewriteSanitizedPlanProjection(
   await assertNotSymlinkIfPresent(zeroxDir);
   await assertNotSymlinkIfPresent(plansDir);
   await assertNoSymlinkChain(root, destination);
-  const markdown = renderPlanMarkdown(safeInput.plan, safeInput.artifact);
+  const markdown = sanitized.finalArtifact
+    ? renderPlanMarkdown(sanitized, sanitized.finalArtifact)
+    : "# Plan projection unavailable\n\nLegacy diagnostic projection removed.\n";
   const sha256 = hash(markdown);
   let current = "";
   try {
@@ -123,19 +126,20 @@ export async function rewriteSanitizedPlanProjection(
   if (hash(current) !== sha256) {
     const temp = path.join(
       plansDir,
-      `.${safeInput.plan.id}.${randomUUID()}.migration.tmp`,
+      `.${sanitized.id}.${randomUUID()}.migration.tmp`,
     );
     await writeFile(temp, markdown, { encoding: "utf8", mode: 0o600 });
     await rename(temp, destination);
   }
+  if (!sanitized.finalArtifact) return detached;
   return {
-    ...safeInput.plan,
+    ...sanitized,
     projection: {
       path: destination,
       sha256,
       writtenAt:
-        safeInput.plan.projection!.sha256 === sha256
-          ? safeInput.plan.projection!.writtenAt
+        sanitized.projection.sha256 === sha256
+          ? sanitized.projection.writtenAt
           : now(),
     },
   };

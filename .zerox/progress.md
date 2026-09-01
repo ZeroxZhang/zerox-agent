@@ -13786,3 +13786,44 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   restoration. Production audit reports zero vulnerabilities; dependency,
   caller-pinned Program/Harness, and whitespace checks pass. A fresh eighth
   exact-byte code/security review is the next mandatory gate.
+
+## 2026-09-01 - v3.9.2 closed Plan DTO and canonical reconciliation authority
+
+- The eighth frozen candidate was rejected by code review with two Majors and
+  by security review with one Major and one Minor. No review receipts were
+  issued. The remaining shared boundary defects were permissive object spreads
+  in Plan diagnostic containers, migration coupled to a live writable
+  workspace, reconciliation checks that could miss a concurrently published
+  marker, native marker publication tied to a displaced directory capability,
+  and a retry catch that still logged arbitrary exception text.
+- Plan diagnostic sanitation now reconstructs an exact top-level Plan DTO and
+  exact owned round, stage, quality, evidence-coverage, artifact, proposal,
+  milestone, risk, model-binding, task-profile, brief, Skill-decision, and
+  task-contract containers. Unknown legacy fields cannot survive JSON/SQLite
+  migration or plans IPC. Canonical equality is key-order independent, so
+  sanitation no longer mistakes harmless object ordering for diagnostic drift
+  or auto-heals a user-modified projection.
+- Storage migration first persists the sanitized record with an unverified
+  projection detached. It then rewrites a canonical projection when the
+  workspace is available, tombstones a legacy projection that has no final
+  artifact, or leaves the clean record readable when the workspace is offline,
+  removed, read-only, or non-canonical. Private Skill snapshots continue to be
+  sanitized and rewritten without invoking projection migration.
+- Native organizer operations now take a per-transaction exclusive lock and
+  reject an existing reconciliation marker before journal or move mutation.
+  Marker publication reopens the canonical transaction directory under the
+  pinned root identity, validates it before and after atomic publication, and
+  retries boundedly if the directory changes. The TypeScript reader checks the
+  marker again after a successful journal parse, so rollback and verification
+  cannot cross a concurrent manual-reconciliation gate. Both Plan replay catch
+  paths now emit only fixed failure categories.
+- Focused Plan, container, projection, renderer, native-helper, and file-
+  organizer validation passes. Full `npm run verify` passes strict test type
+  coverage `433/433`, `324` current files / `3903` current tests with declared
+  skips, all Round2-Round12 historical lanes, production build, Agent eval
+  `26/26`, and Memory eval `2/2`. The native helper is `52944` bytes with digest
+  `sha256:d04bfa94c4b86a2242fbee3e5ea08c903e5a100c7bb3250c5414c53766797986`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration. A fresh ninth exact-byte code/security review is the next
+  mandatory gate.

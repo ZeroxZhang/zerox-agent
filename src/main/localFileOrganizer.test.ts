@@ -446,6 +446,32 @@ describe("local file organizer", () => {
       });
   });
 
+  it("rejects a new native transaction mutation when reconciliation already exists", async () => {
+    const transactionId = "tx_existing_reconciliation_gate";
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const transactionDirectory = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => transactionId,
+    });
+    await mkdir(transactionDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(
+      path.join(transactionDirectory, `${transactionId}.reconciliation`),
+      '{"schemaVersion":1,"kind":"local-file-organization-reconciliation-required"}\n',
+      { encoding: "utf8", mode: 0o600 },
+    );
+
+    await expect(applyLocalFileOrganization(preview)).rejects.toThrow(
+      /manual reconciliation/i,
+    );
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expectPath(target, false);
+  });
+
   it("persists reconciliation state when a moved source is concurrently repopulated", async () => {
     const source = path.join(tempDir, "photo.jpg");
     const target = path.join(tempDir, "Images", "photo.jpg");
@@ -824,6 +850,59 @@ describe("local file organizer", () => {
     }
   });
 
+  it("rebinds marker publication to the canonical transaction directory", async () => {
+    const transactionId = "tx_log_post_move_rebind";
+    const source = path.join(tempDir, "photo.jpg");
+    const target = path.join(tempDir, "Images", "photo.jpg");
+    const transactionDirectory = path.join(
+      tempDir,
+      ".zerox-organize-transactions",
+    );
+    const displaced = path.join(
+      tempDir,
+      ".zerox-organize-transactions-displaced",
+    );
+    await writeFile(source, "original", "utf8");
+    const preview = await previewLocalFileOrganization(tempDir, {
+      createId: () => transactionId,
+    });
+    const ready = waitForSafeFsCommand("move-into-category");
+    const outcome = applyLocalFileOrganization(preview, {
+      safeFsTestDelayMs: 750,
+      safeFsTestReadyStage: "move-applied",
+      safeFsTestOnReady: ready.onReady,
+    }).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    await ready.promise;
+    await rename(transactionDirectory, displaced);
+    await mkdir(transactionDirectory, { mode: 0o700 });
+
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    expect(String(result.ok ? "" : result.error)).toMatch(
+      /reconciliation marker persisted/i,
+    );
+    await expect(readFile(source, "utf8")).resolves.toBe("original");
+    await expectPath(target, false);
+    const canonicalJournal = path.join(
+      transactionDirectory,
+      `${transactionId}.json`,
+    );
+    await expect(readLocalFileOrganizationTransaction(canonicalJournal))
+      .resolves.toMatchObject({
+        id: transactionId,
+        status: "reconciliation_required",
+        reconciliation: {
+          required: true,
+          kind: "marker",
+          reason: "journal_unreadable_requires_manual_reconciliation",
+        },
+      });
+  });
+
   it("rejects a transaction directory moved after its native capability is opened", async () => {
     const outside = await realpath(
       await mkdtemp(path.join(os.tmpdir(), "local-file-organizer-log-race-outside-")),
@@ -862,7 +941,7 @@ describe("local file organizer", () => {
     }
   });
 
-  it("persists reconciliation beside a journal moved after an append mutation", async () => {
+  it("never treats a displaced journal directory as canonical reconciliation", async () => {
     const outside = await realpath(
       await mkdtemp(path.join(os.tmpdir(), "local-file-organizer-log-post-outside-")),
     );
@@ -890,16 +969,15 @@ describe("local file organizer", () => {
       const result = await outcome;
       expect(result.ok).toBe(false);
       expect(String(result.ok ? "" : result.error)).toMatch(
-        /capability moved from its authorized path/i,
+        /reconciliation marker could not be persisted/i,
       );
       await expect(readFile(
         path.join(displaced, "tx_log_post_mutation.json"),
         "utf8",
       )).resolves.toContain('"status":"applied"');
-      await expect(readFile(
+      await expect(access(
         path.join(displaced, "tx_log_post_mutation.reconciliation"),
-        "utf8",
-      )).resolves.toContain("local-file-organization-reconciliation-required");
+      )).rejects.toMatchObject({ code: "ENOENT" });
       await expect(access(path.join(outside, "tx_log_post_mutation.json")))
         .rejects.toMatchObject({ code: "ENOENT" });
       await expect(readFile(path.join(tempDir, "Images", "photo.jpg"), "utf8"))

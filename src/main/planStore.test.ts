@@ -49,6 +49,18 @@ describe("plan store parity", () => {
     );
   });
 
+  it("keeps both Plan replay failure paths on the fixed classifier boundary", async () => {
+    const source = await readFile(path.join(process.cwd(), "src/main/main.ts"), "utf8");
+    const replayDriver = source.slice(
+      source.indexOf("function startPlanReplayDriver()"),
+      source.indexOf("function stopAppUpdateScheduler()"),
+    );
+    expect(replayDriver.match(/classifyPlanReplayReadFailure\(error\)/g))
+      .toHaveLength(2);
+    expect(replayDriver).not.toContain("error.message");
+    expect(replayDriver).not.toContain("String(error)");
+  });
+
   it("keeps JSON and SQLite backends behaviorally equivalent", async () => {
     let jsonEvent = 0;
     let sqliteEvent = 0;
@@ -207,12 +219,40 @@ describe("plan store parity", () => {
         writtenAt: "2026-09-01T00:00:00.000Z",
       },
     };
+    Object.assign(raw, { rawDiagnostic: `root ${secret}` });
+    Object.assign(raw.rounds[0]!, { rawDiagnostic: `round ${secret}` });
+    Object.assign(raw.planningStages![0]!, {
+      rawDiagnostic: `stage ${secret}`,
+    });
+    Object.assign(raw.qualityReport!, { rawDiagnostic: `quality ${secret}` });
+    Object.assign(raw.qualityReport!.evidenceCoverage, {
+      rawDiagnostic: `coverage ${secret}`,
+    });
+    Object.assign(raw.finalArtifact!, {
+      rawDiagnostic: `artifact ${secret}`,
+    });
+    Object.assign(raw.finalArtifact!.scope, {
+      rawDiagnostic: `artifact scope ${secret}`,
+    });
 
     try {
       const jsonCreated = await json.create(raw);
       const sqliteCreated = await sqlite.create(raw);
       expect(JSON.stringify(jsonCreated)).not.toContain(secret);
       expect(JSON.stringify(sqliteCreated)).not.toContain(secret);
+      expect(jsonCreated).not.toHaveProperty("rawDiagnostic");
+      expect(jsonCreated.rounds[0]).not.toHaveProperty("rawDiagnostic");
+      expect(jsonCreated.planningStages?.[0]).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.qualityReport).not.toHaveProperty("rawDiagnostic");
+      expect(jsonCreated.qualityReport?.evidenceCoverage).not.toHaveProperty(
+        "rawDiagnostic",
+      );
+      expect(jsonCreated.finalArtifact).not.toHaveProperty("rawDiagnostic");
+      expect(jsonCreated.finalArtifact?.scope).not.toHaveProperty(
+        "rawDiagnostic",
+      );
       expect(JSON.stringify(jsonCreated)).not.toContain("SECRET_REVIEW");
       expect(jsonCreated.qualityReport?.blockingIssues[0]?.code).toBe(
         "INVALID_SCHEMA",
@@ -251,6 +291,98 @@ describe("plan store parity", () => {
     } finally {
       storage.close();
     }
+  });
+
+  it("cleans stored diagnostics even when the legacy workspace is offline", async () => {
+    const secret = "local-canary-offline-plan-0123456789abcdef";
+    const configDir = path.join(tempDir, "offline-diagnostic-json");
+    const workspaceInput = path.join(tempDir, "offline-diagnostic-workspace");
+    await mkdir(workspaceInput, { recursive: true });
+    const workspaceRoot = await realpath(workspaceInput);
+    const projectionPath = path.join(
+      workspaceRoot,
+      ".zerox",
+      "plans",
+      "plan-store-test.md",
+    );
+    await mkdir(path.dirname(projectionPath), { recursive: true });
+    await writeFile(projectionPath, `# legacy ${secret}\n`, "utf8");
+    const storage = createStorageImpl({
+      dbPath: path.join(tempDir, "offline-diagnostic.sqlite"),
+      skipFts5Check: true,
+    });
+    const json = createPlanStore({ configDir });
+    const sqlite = createPlanStore({
+      configDir: path.join(tempDir, "offline-sqlite-unused"),
+      storage,
+    });
+    const raw: PlanRecord = {
+      ...createRecord(),
+      workspaceRoot,
+      finalArtifact: createDiagnosticArtifact("offline-safe"),
+      projection: {
+        path: projectionPath,
+        sha256: `legacy-${secret}`,
+        writtenAt: "2026-09-01T00:00:00.000Z",
+      },
+    };
+    Object.assign(raw, { rawDiagnostic: secret });
+
+    try {
+      await json.create(raw);
+      await sqlite.create(raw);
+      const planFile = path.join(configDir, "plans", `${raw.id}.json`);
+      await writeFile(planFile, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+      storage.db.prepare("UPDATE plan_records SET payload = ? WHERE id = ?")
+        .run(JSON.stringify(raw), raw.id);
+      await rm(workspaceRoot, { recursive: true, force: true });
+
+      const jsonMigrated = await json.get(raw.id);
+      const sqliteMigrated = await sqlite.get(raw.id);
+      expect(jsonMigrated).toMatchObject({ id: raw.id });
+      expect(sqliteMigrated).toMatchObject({ id: raw.id });
+      expect(jsonMigrated?.projection).toBeUndefined();
+      expect(sqliteMigrated?.projection).toBeUndefined();
+      await expect(readFile(planFile, "utf8")).resolves.not.toContain(secret);
+      expect(storage.db.prepare("SELECT payload FROM plan_records WHERE id = ?")
+        .get<{ payload: string }>(raw.id)?.payload).not.toContain(secret);
+    } finally {
+      storage.close();
+    }
+  });
+
+  it("tombstones a legacy diagnostic projection without a final artifact", async () => {
+    const secret = "local-canary-detached-plan-0123456789abcdef";
+    const workspaceInput = path.join(tempDir, "detached-diagnostic-workspace");
+    await mkdir(workspaceInput, { recursive: true });
+    const workspaceRoot = await realpath(workspaceInput);
+    const projectionPath = path.join(
+      workspaceRoot,
+      ".zerox",
+      "plans",
+      "plan-store-test.md",
+    );
+    await mkdir(path.dirname(projectionPath), { recursive: true });
+    await writeFile(projectionPath, `# legacy ${secret}\n`, "utf8");
+    const store = createPlanStore({
+      configDir: path.join(tempDir, "detached-diagnostic-json"),
+    });
+    const raw: PlanRecord = {
+      ...createRecord(),
+      workspaceRoot,
+      projection: {
+        path: projectionPath,
+        sha256: `legacy-${secret}`,
+        writtenAt: "2026-09-01T00:00:00.000Z",
+      },
+    };
+    Object.assign(raw, { rawDiagnostic: secret });
+
+    const created = await store.create(raw);
+    expect(created.projection).toBeUndefined();
+    await expect(readFile(projectionPath, "utf8")).resolves.not.toContain(
+      secret,
+    );
   });
 
   it("persists and returns credential-free Skill snapshots for JSON, SQLite, and legacy Plans", async () => {
