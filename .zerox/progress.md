@@ -14594,3 +14594,21 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `sha256:2953b9cbdcde7870eb457f370caf9355afb1644c48e854b41f03455c4d18e230`
   and
   `sha256:863395e8dc2c71e43b3ee960b954b81c118d791518054140c79491f08140d855`.
+- External acceptance attempt in `/private/tmp/zerox-v392-final4.cw25ZE`
+  correctly stopped without an anchor after its isolated `npm run verify`
+  passed: the command rebuilt `dist-native`, but the runner's live mutation
+  allowlist omitted that generated tree even though the canonical source and
+  acceptance manifests already exclude it. The postflight therefore rejected
+  expected build output as `private execution source mutated`.
+- The runner now has one `GENERATED_BUILD_DIRECTORIES` authority for `dist`,
+  `dist-electron`, and `dist-native`. Source filtering, acceptance-input
+  filtering, per-command watcher allowances, and generated-state capture all
+  consume the same list. A directly executable self-test checks directory and
+  descendant treatment across all three boundaries; focused package-script
+  validation passes `18/18` and syntax/whitespace checks pass.
+- Fresh full `npm run verify` passes `4029` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2–Round12 compatibility lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration;
+  the production dependency audit reports zero vulnerabilities.

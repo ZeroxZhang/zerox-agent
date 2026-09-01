@@ -246,6 +246,11 @@ const GENERATED_NATIVE_CACHE_PATH = path.join(
   "better-sqlite3",
   "bin",
 );
+const GENERATED_BUILD_DIRECTORIES = Object.freeze([
+  "dist",
+  "dist-electron",
+  "dist-native",
+]);
 const GENERATED_PUBLICATION_FILES = Object.freeze(FINAL_FILES.filter(
   (relativePath) =>
     LIFECYCLE_PUBLICATION_FILES.includes(relativePath)
@@ -286,6 +291,13 @@ if (
   && process.argv[2] === "--self-test-host-toolchain-isolation"
 ) {
   await runHostToolchainIsolationSelfTest();
+  process.exit(0);
+}
+if (
+  process.argv.length === 3
+  && process.argv[2] === "--self-test-generated-build-boundary"
+) {
+  verifyGeneratedBuildBoundarySelfTest();
   process.exit(0);
 }
 
@@ -4221,8 +4233,7 @@ function isGeneratedOrPlanningPath(relativePath) {
   return relativePath.startsWith("release-local/")
     || relativePath.startsWith("release/")
     || relativePath.startsWith("release-test-")
-    || relativePath.startsWith("dist/")
-    || relativePath.startsWith("dist-electron/")
+    || isGeneratedBuildPath(relativePath)
     || relativePath.startsWith(".zerox/")
     || relativePath === "task_plan.md"
     || relativePath === "findings.md"
@@ -4234,8 +4245,7 @@ function isAcceptanceInputExcluded(relativePath) {
     relativePath.startsWith("release-local/")
     || relativePath.startsWith("release/")
     || relativePath.startsWith("release-test-")
-    || relativePath.startsWith("dist/")
-    || relativePath.startsWith("dist-electron/")
+    || isGeneratedBuildPath(relativePath)
   ) {
     return true;
   }
@@ -4274,6 +4284,38 @@ function normalizeWatchRelativePath(filename) {
     return "";
   }
   return normalized;
+}
+
+function isGeneratedBuildPath(relativePath) {
+  return GENERATED_BUILD_DIRECTORIES.some((directory) =>
+    relativePath === directory
+    || relativePath.startsWith(`${directory}${path.sep}`),
+  );
+}
+
+function verifyGeneratedBuildBoundarySelfTest() {
+  for (const directory of GENERATED_BUILD_DIRECTORIES) {
+    for (const relativePath of [
+      directory,
+      path.join(directory, "self-test-artifact"),
+    ]) {
+      if (
+        !isGeneratedBuildPath(relativePath)
+        || !isGeneratedOrPlanningPath(relativePath)
+        || !isAcceptanceInputExcluded(relativePath)
+        || !isAllowedExecutionMutation(
+          relativePath,
+          GENERATED_BUILD_DIRECTORIES,
+        )
+      ) {
+        fail(`generated build boundary is inconsistent: ${relativePath}`);
+      }
+    }
+  }
+  console.log(JSON.stringify({
+    generatedBuildBoundarySelfTest: "passed",
+    directories: GENERATED_BUILD_DIRECTORIES,
+  }));
 }
 
 function isAllowedExecutionMutation(relativePath, allowedPrefixes) {
@@ -4333,7 +4375,7 @@ function expectedCommandMutationPrefixes(args, cwd) {
     || args[0] === "scripts/run-conversation-disclosure-acceptance.mjs"
     || args[0] === "scripts/package-local-candidate.mjs"
   ) {
-    prefixes.push("dist", "dist-electron", "node_modules/.vite");
+    prefixes.push(...GENERATED_BUILD_DIRECTORIES, "node_modules/.vite");
   }
   if (commandMutatesNativeAddon(args, cwd)) {
     prefixes.push(
@@ -4464,7 +4506,10 @@ async function captureExecutionGeneratedState(repositoryRoot) {
       digest: capture?.digest ?? null,
     });
   }
-  for (const relativePath of ["dist", "dist-electron", "release-local"]) {
+  for (const relativePath of [
+    ...GENERATED_BUILD_DIRECTORIES,
+    "release-local",
+  ]) {
     const absolutePath = path.join(repositoryRoot, relativePath);
     const metadata = await optionalLstat(absolutePath);
     entries.push({

@@ -53,6 +53,24 @@ describe("package scripts", () => {
     }
   });
 
+  it("keeps every generated build tree inside one external-runner boundary", () => {
+    const result = JSON.parse(execFileSync(
+      process.execPath,
+      [
+        "scripts/build-v392-acceptance-anchor.mjs",
+        "--self-test-generated-build-boundary",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    )) as {
+      generatedBuildBoundarySelfTest?: string;
+      directories?: string[];
+    };
+
+    expect(result).toEqual({
+      generatedBuildBoundarySelfTest: "passed",
+      directories: ["dist", "dist-electron", "dist-native"],
+    });
+  });
 
   it("binds macOS release artifacts to one clean Git commit", () => {
     const source = readFileSync(
@@ -414,6 +432,11 @@ describe("package scripts", () => {
     expect(runner).toContain("--expected-code-review-receipt-digest");
     expect(runner).toContain("--expected-security-review-receipt-digest");
     expect(runner).toContain("private execution source mutated during acceptance");
+    expect(runner).toContain("const GENERATED_BUILD_DIRECTORIES = Object.freeze([");
+    expect(runner).toContain('"dist-native",');
+    expect(runner).toContain("|| isGeneratedBuildPath(relativePath)");
+    expect(runner).toContain("prefixes.push(...GENERATED_BUILD_DIRECTORIES");
+    expect(runner).toContain("...GENERATED_BUILD_DIRECTORIES,\n    \"release-local\",");
     expect(runner).toContain("canonical repository mutated outside publication");
     expect(runner).toContain("const repositoryWatcher = watch(");
     expect(runner).toContain("await verifyCanonicalRepositoryPostflight()");
