@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { chmod, mkdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { McpServerInitConfig } from "./skillRegistry";
 import {
@@ -34,22 +34,15 @@ export async function createSkillMcpClient(
   }
 
   if (config.transport === "stdio") {
-    const sandboxRoot = path.join(
-      options.configDir,
-      "mcp-process-sandbox",
-      createHash("sha256")
-        .update(
-          JSON.stringify([
-            config.sourceSkill,
-            config.name,
-            config.command,
-            config.args ?? [],
-          ]),
-        )
-        .digest("hex")
-        .slice(0, 24),
-    );
-    await mkdir(sandboxRoot, { recursive: true, mode: 0o700 });
+    const sandboxParent = path.join(options.configDir, "mcp-process-sandbox");
+    await mkdir(sandboxParent, { recursive: true, mode: 0o700 });
+    await chmod(sandboxParent, 0o700);
+    await scrubLegacySandboxVerifiers(sandboxParent);
+    // This identifier must remain independent of command/args/env. Those are
+    // private runtime configuration and cannot participate in an unkeyed,
+    // persistent value that can be used to test secret candidates offline.
+    const sandboxRoot = path.join(sandboxParent, randomUUID());
+    await mkdir(sandboxRoot, { mode: 0o700 });
     await chmod(sandboxRoot, 0o700);
     return (options.createStdioClient ?? createMcpClient)({
       name: config.name,
@@ -73,4 +66,20 @@ export async function createSkillMcpClient(
     url: config.url,
     headers: config.headers,
   });
+}
+
+async function scrubLegacySandboxVerifiers(sandboxParent: string) {
+  const entries = await readdir(sandboxParent, { withFileTypes: true });
+  await Promise.all(
+    entries
+      .filter(
+        (entry) => entry.isDirectory() && /^[0-9a-f]{24}$/.test(entry.name),
+      )
+      .map((entry) =>
+        rm(path.join(sandboxParent, entry.name), {
+          recursive: true,
+          force: true,
+        })
+      ),
+  );
 }

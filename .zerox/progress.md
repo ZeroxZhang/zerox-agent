@@ -14113,3 +14113,32 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   and Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
   zero-vulnerability production audit pass. Exact-byte dual review and external
   package acceptance remain required before merge and release.
+
+## 2026-09-02 - v3.9.2 opaque Skill MCP sandbox identity
+
+- Candidate `610974af5845e44d7b98a10605bb6ae7b9c4564a` was rejected before review
+  completion after the security/data lane found one Major private-configuration
+  verifier; no PASS receipts were issued. The stdio Skill MCP sandbox directory
+  used an unkeyed stable digest over `sourceSkill`, server name, command, and
+  private arguments. Although private MCP fields no longer crossed model, DTO,
+  or audit boundaries, a retained directory name still allowed offline testing
+  of argument or credential candidates.
+- Every stdio Skill MCP activation now receives a random UUID sandbox directory
+  whose name is independent of command, arguments, environment, and all other
+  manifest fields. The private parent and instance remain mode `0700`. Startup
+  removes only the retired 24-hex sandbox directories created by the former
+  deterministic scheme, eliminating persisted legacy verifiers without
+  matching the new opaque namespace.
+- The regression constructs two real legacy digest candidates from distinct
+  sentinel token arguments, pre-populates both directories, activates both
+  candidates, and proves only two unique UUID roots remain and no persistent
+  path or observed sandbox policy contains either private argument. Focused
+  Skill MCP plus container validation passes `99/99`. Full `npm run verify`
+  passes strict test type coverage `435/435`, `326` current files / `3969`
+  current tests with declared skips, every Round2–Round12 lane, production
+  build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke passes
+  Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations, eight
+  authority domains, renderer startup, and Node ABI `137` restoration.
+  Caller-pinned Program/Harness checks and the zero-vulnerability production
+  audit pass. Exact-byte dual review and external package acceptance remain
+  required before merge and release.

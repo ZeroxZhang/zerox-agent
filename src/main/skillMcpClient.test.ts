@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import {
+  mkdir,
   lstat,
   mkdtemp,
   readdir,
@@ -61,6 +63,70 @@ describe("Skill MCP client activation", () => {
     expect(
       (await lstat(path.join(stateParent, stateRoots[0]!))).mode & 0o777,
     ).toBe(0o700);
+  });
+
+  it("uses opaque sandbox ids and removes legacy private-argument verifiers", async () => {
+    const configDir = await tempDir();
+    const stateParent = path.join(configDir, "mcp-process-sandbox");
+    const secretCandidates = [
+      "skill-mcp-private-arg-candidate-a",
+      "skill-mcp-private-arg-candidate-b",
+    ];
+    const [legacyCandidateA, legacyCandidateB] = secretCandidates.map((secret) =>
+      createHash("sha256")
+        .update(JSON.stringify([
+          "research",
+          "local-index",
+          "node",
+          ["server.js", `--token=${secret}`],
+        ]))
+        .digest("hex")
+        .slice(0, 24)
+    );
+    await mkdir(path.join(stateParent, legacyCandidateA), { recursive: true });
+    await mkdir(path.join(stateParent, legacyCandidateB), { recursive: true });
+    const observedRoots: string[] = [];
+    const createStdioClient = vi.fn((config: McpServerConfig) => {
+      observedRoots.push(config.sandboxPolicy?.workspaceRoot ?? "");
+      return client();
+    });
+
+    for (const secret of secretCandidates) {
+      await createSkillMcpClient(
+        {
+          sourceSkill: "research",
+          name: "local-index",
+          transport: "stdio",
+          command: "node",
+          args: ["server.js", `--token=${secret}`],
+          readRoots: [],
+          network: false,
+        },
+        { configDir, processSandbox: sandbox(), createStdioClient },
+      );
+    }
+
+    const stateRoots = (await readdir(stateParent)).sort();
+    expect(stateRoots).toHaveLength(2);
+    expect(stateRoots).not.toContain(legacyCandidateA);
+    expect(stateRoots).not.toContain(legacyCandidateB);
+    expect(stateRoots).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        ),
+        expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        ),
+      ]),
+    );
+    expect(new Set(stateRoots).size).toBe(2);
+    expect(observedRoots.map((root) => path.basename(root)).sort()).toEqual(
+      stateRoots,
+    );
+    expect(JSON.stringify({ stateRoots, observedRoots })).not.toContain(
+      "skill-mcp-private-arg-candidate",
+    );
   });
 
   it("routes trusted HTTP manifests to the remote transport client", async () => {
