@@ -2187,6 +2187,45 @@ static int open_projection_transaction(
   );
 }
 
+static int scrub_projection_descriptor(
+  int transaction_fd,
+  file_identity *transaction_identity
+) {
+  struct stat scrubbed_stats;
+  if (
+    fstat(transaction_fd, &scrubbed_stats) != 0
+    || !S_ISREG(scrubbed_stats.st_mode)
+    || scrubbed_stats.st_dev != transaction_identity->dev
+    || scrubbed_stats.st_ino != transaction_identity->ino
+    || scrubbed_stats.st_uid != transaction_identity->uid
+    || scrubbed_stats.st_nlink > 1
+  ) {
+    return fail_message("retired plan projection descriptor is unsafe");
+  }
+  if (ftruncate(transaction_fd, 0) != 0 || fsync(transaction_fd) != 0) {
+    return fail_errno("cannot scrub retired plan projection transaction");
+  }
+  if (fstat(transaction_fd, &scrubbed_stats) != 0) {
+    return fail_errno("cannot inspect scrubbed plan projection transaction");
+  }
+  if (
+    !S_ISREG(scrubbed_stats.st_mode)
+    || scrubbed_stats.st_size != 0
+    || scrubbed_stats.st_dev != transaction_identity->dev
+    || scrubbed_stats.st_ino != transaction_identity->ino
+    || scrubbed_stats.st_uid != transaction_identity->uid
+    || scrubbed_stats.st_nlink > 1
+    || capture_file_identity(
+      transaction_fd,
+      &scrubbed_stats,
+      transaction_identity
+    ) != 0
+  ) {
+    return fail_message("retired plan projection transaction was not scrubbed");
+  }
+  return 0;
+}
+
 static int scrub_projection_transaction(
   int plans_fd,
   const char *plans_path,
@@ -2194,7 +2233,6 @@ static int scrub_projection_transaction(
   int transaction_fd,
   file_identity *transaction_identity
 ) {
-  struct stat scrubbed_stats;
   int result = verify_opened_regular_path(
     plans_fd,
     plans_path,
@@ -2205,24 +2243,8 @@ static int scrub_projection_transaction(
     1
   );
   if (result != 0) return result;
-  if (ftruncate(transaction_fd, 0) != 0 || fsync(transaction_fd) != 0) {
-    return fail_errno("cannot scrub retired plan projection transaction");
-  }
-  if (fstat(transaction_fd, &scrubbed_stats) != 0) {
-    return fail_errno("cannot inspect scrubbed plan projection transaction");
-  }
-  if (
-    !S_ISREG(scrubbed_stats.st_mode)
-    || scrubbed_stats.st_size != 0
-    || scrubbed_stats.st_nlink != 1
-    || capture_file_identity(
-      transaction_fd,
-      &scrubbed_stats,
-      transaction_identity
-    ) != 0
-  ) {
-    return fail_message("retired plan projection transaction was not scrubbed");
-  }
+  result = scrub_projection_descriptor(transaction_fd, transaction_identity);
+  if (result != 0) return result;
   return verify_opened_regular_path(
     plans_fd,
     plans_path,
@@ -2503,16 +2525,15 @@ static int run_projection_write(int argc, char **argv) {
   } else if (strcmp(output_identity.sha256, next_digest) == 0) {
     output_owned = 1;
     goto projection_prepared;
-  } else if (
-    strcmp(
-      output_identity.sha256,
-      "e3b0c44298fc1c149afbf4c8996fb924"
-      "27ae41e4649b934ca495991b7852b855"
-    ) != 0
-  ) {
-    result = fail_message("plan projection transaction contains unknown state");
-    goto done;
   }
+  /*
+   * Before publication the canonical leaf still proves expected authority.
+   * Any safe, single-link transaction bytes that are neither empty nor the
+   * exact next digest are therefore interrupted scratch from a prior writer.
+   * Reuse the already-open descriptor and rewrite it; after publication the
+   * idempotent branch above remains strict and accepts only empty or the exact
+   * retired digest.
+   */
   output_owned = 1;
   if (ftruncate(output_fd, 0) != 0 || lseek(output_fd, 0, SEEK_SET) < 0) {
     result = fail_errno("cannot prepare plan projection transaction");
@@ -2604,6 +2625,13 @@ projection_prepared:
       goto done;
     }
     swapped = 1;
+    /*
+     * The old canonical inode is now known exactly through existing_fd. Scrub
+     * it before any path/directory postflight so a concurrent displacement can
+     * make the operation fail but can never preserve the retired contents.
+     */
+    result = scrub_projection_descriptor(existing_fd, &existing_identity);
+    if (result != 0) goto done;
   }
   published = 1;
   maybe_test_checkpoint("projection-published");
@@ -2730,6 +2758,9 @@ projection_prepared:
   }
   print_identity(&output_identity);
 done:
+  if (swapped && existing_fd >= 0 && existing_identity.size > 0) {
+    (void)scrub_projection_descriptor(existing_fd, &existing_identity);
+  }
   if (!published && plans_fd >= 0 && output_fd >= 0 && output_owned) {
     struct stat cleanup_stats;
     file_identity cleanup_identity;

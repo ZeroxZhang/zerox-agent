@@ -17,6 +17,7 @@ import type {
   PlanQualityIssueCode,
   PlanRecord,
 } from "../shared/planMode";
+import type { SkillRecord } from "../shared/skills";
 import {
   assertSafePlanId,
   createPlanStore,
@@ -627,6 +628,8 @@ describe("plan store parity", () => {
 
     expect(JSON.stringify(jsonCreated)).not.toContain("PLAN_STDIO_SECRET");
     expect(JSON.stringify(jsonCreated)).not.toContain("PLAN_REMOTE_SECRET");
+    expect(JSON.stringify(jsonCreated)).not.toContain("PLAN_ARGS_SECRET");
+    expect(JSON.stringify(jsonCreated)).not.toContain("PLAN_URL_SECRET");
     expect(jsonPayload).not.toContain("PLAN_STDIO_SECRET");
     expect(jsonPayload).not.toContain("PLAN_REMOTE_SECRET");
 
@@ -909,6 +912,65 @@ describe("plan store parity", () => {
     ).resolves.toBe(true);
   });
 
+  it("samples cancellation once at projection commit and returns the stored outcome", async () => {
+    const configDir = path.join(tempDir, "projection-cancel-linearization");
+    const workspaceRoot = path.join(tempDir, "projection-cancel-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const store = createPlanStore({ configDir });
+    const created = await store.create({ ...createRecord(), workspaceRoot });
+    const artifact: PlanArtifact = {
+      ...createDiagnosticArtifact("safe"),
+      actionGate: "ready",
+      gateReason: "ready",
+    };
+    const target: PlanRecord = {
+      ...created,
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+      finalArtifact: artifact,
+    };
+    const description = await describePlanProjection(
+      { ...target, revision: created.revision + 1 },
+      artifact,
+    );
+    const prepared = await store.saveProjectionIntent(
+      target,
+      created.revision,
+      description,
+      "plan_synthesized",
+    );
+    const projection = await createPlanArtifactWriter().writePrepared(
+      prepared,
+      description,
+    );
+    let abortedReads = 0;
+    const signal = {
+      get aborted() {
+        abortedReads += 1;
+        return abortedReads > 1;
+      },
+    } as AbortSignal;
+
+    const finalized = await store.finalizeProjectionIntent(
+      prepared.id,
+      prepared.revision,
+      projection,
+      "plan_synthesized",
+      undefined,
+      signal,
+    );
+
+    expect(abortedReads).toBe(1);
+    expect(finalized).toMatchObject({
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+    });
+    await expect(store.get(prepared.id)).resolves.toMatchObject({
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+    });
+  });
+
   it("rejects a mismatched prepared projection before persisting or publishing it", async () => {
     const configDir = path.join(tempDir, "projection-intent-mismatch");
     const workspaceRoot = path.join(tempDir, "projection-intent-mismatch-workspace");
@@ -1066,6 +1128,73 @@ describe("plan store parity", () => {
     }
   });
 
+  it("binds decoded payload identity to its JSON or SQLite storage envelope", async () => {
+    const jsonConfigDir = path.join(tempDir, "plan-envelope-json");
+    const json = createPlanStore({ configDir: jsonConfigDir });
+    const safe = await json.create({
+      ...createRecord(),
+      id: "plan-safe-envelope",
+    });
+    const other = await json.create({
+      ...createRecord(),
+      id: "plan-other-envelope",
+      sessionId: "session-other-envelope",
+    });
+    await writeFile(
+      path.join(jsonConfigDir, "plans", `${safe.id}.json`),
+      JSON.stringify({ ...safe, id: "../cross-record" }),
+      "utf8",
+    );
+    await expect(json.get(safe.id)).rejects.toBeInstanceOf(
+      InvalidPersistedPlanRecordError,
+    );
+    await expect(json.listAll()).resolves.toEqual([other]);
+
+    const storage = createStorageImpl({
+      dbPath: path.join(tempDir, "plan-envelope.sqlite"),
+      skipFts5Check: true,
+    });
+    const sqlite = createPlanStore({
+      configDir: path.join(tempDir, "plan-envelope-sqlite-unused"),
+      storage,
+    });
+    try {
+      const victim = await sqlite.create({
+        ...createRecord(),
+        id: "plan-envelope-victim",
+        sourceMessage: "VICTIM",
+      });
+      const rogue = await sqlite.create({
+        ...createRecord(),
+        id: "plan-envelope-rogue",
+        sessionId: "session-envelope-rogue",
+        sourceMessage: "ROGUE",
+      });
+      storage.db.prepare("UPDATE plan_records SET payload = ? WHERE id = ?")
+        .run(JSON.stringify({
+          ...rogue,
+          id: victim.id,
+          rawDiagnostic: "force-migration",
+        }), rogue.id);
+      await expect(sqlite.get(rogue.id)).rejects.toBeInstanceOf(
+        InvalidPersistedPlanRecordError,
+      );
+      await expect(sqlite.get(victim.id)).resolves.toMatchObject({
+        id: victim.id,
+        sourceMessage: "VICTIM",
+      });
+
+      storage.db.prepare(
+        "UPDATE plan_records SET session_id = ? WHERE id = ?",
+      ).run("session-envelope-mismatch", victim.id);
+      await expect(sqlite.get(victim.id)).rejects.toBeInstanceOf(
+        InvalidPersistedPlanRecordError,
+      );
+    } finally {
+      storage.close();
+    }
+  });
+
   it("quarantines malformed JSON Plans without blocking valid list queries", async () => {
     const configDir = path.join(tempDir, "malformed-json");
     const store = createPlanStore({ configDir });
@@ -1118,6 +1247,46 @@ describe("plan store parity", () => {
             }],
           },
         },
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-selected-skill-input-values",
+        selectedSkillInputValues: {
+          token: { rawDiagnostic: "secret" },
+        } as unknown as PlanRecord["selectedSkillInputValues"],
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-decision-input-values",
+        skillDecision: {
+          source: "none",
+          reason: "none",
+          evidenceRefs: [],
+          alternatives: [],
+          inputValues: { token: { rawDiagnostic: "secret" } },
+          inputEvidenceRefs: {},
+          missingInputFields: [],
+          invalidInputFields: [],
+        } as unknown as PlanRecord["skillDecision"],
+      },
+      {
+        ...createRecord(),
+        id: "plan-malformed-brief-input-values",
+        planningBrief: {
+          objective: "test",
+          deliverables: [],
+          inScope: [],
+          outOfScope: [],
+          constraints: [],
+          assumptions: [],
+          unresolvedQuestions: [],
+          targetRefs: [],
+          evidenceRefs: [],
+          skillCandidates: [],
+          recommendedSkillInputValues: {
+            token: { rawDiagnostic: "secret" },
+          },
+        } as unknown as PlanRecord["planningBrief"],
       },
     ];
     for (const malformed of malformedRecords) {
@@ -1301,7 +1470,7 @@ function createDiagnosticArtifact(secret: string): PlanArtifact {
   };
 }
 
-function createPrivateSkillSnapshot(): NonNullable<PlanRecord["selectedSkill"]> {
+function createPrivateSkillSnapshot(): SkillRecord {
   return {
     rootDir: "/tmp/private-plan-skill",
     skillFile: "/tmp/private-plan-skill/SKILL.md",
@@ -1324,12 +1493,13 @@ function createPrivateSkillSnapshot(): NonNullable<PlanRecord["selectedSkill"]> 
           name: "local-private",
           transport: "stdio",
           command: "node",
+          args: ["server.js", "--token", "PLAN_ARGS_SECRET"],
           env: { PRIVATE_TOKEN: "PLAN_STDIO_SECRET" },
         },
         {
           name: "remote-private",
           transport: "sse",
-          url: "https://mcp.example.test/events",
+          url: "https://user:PLAN_URL_SECRET@mcp.example.test/events?token=secret",
           headers: { authorization: "PLAN_REMOTE_SECRET" },
         },
       ],

@@ -172,6 +172,43 @@ describe("plan artifact writer", () => {
     );
   });
 
+  it("rewrites safe partial transaction bytes left by a pre-publication crash", async () => {
+    const writer = createPlanArtifactWriter();
+    const firstPlan = createPlan(workspaceRoot);
+    const plansDir = path.join(workspaceRoot, ".zerox", "plans");
+    await mkdir(plansDir, { recursive: true });
+    const firstTransaction = path.join(
+      plansDir,
+      `.${firstPlan.id}.projection.transaction`,
+    );
+    await writeFile(firstTransaction, "PARTIAL-FIRST-PUBLICATION", {
+      mode: 0o600,
+    });
+
+    const first = await writer.write(firstPlan, createArtifact());
+    await expect(readFile(first.path, "utf8")).resolves.toContain(
+      "# Writer Test",
+    );
+
+    const revised = { ...createArtifact(), summary: "recovered replacement" };
+    const replacementTransaction = path.join(
+      path.dirname(first.path),
+      `.${firstPlan.id}.projection.transaction`,
+    );
+    await writeFile(replacementTransaction, "PARTIAL-REPLACEMENT", {
+      mode: 0o600,
+    });
+    const second = await writer.write(
+      { ...firstPlan, projection: first },
+      revised,
+    );
+
+    await expect(readFile(second.path, "utf8")).resolves.toContain(
+      "recovered replacement",
+    );
+    await expect(readFile(replacementTransaction, "utf8")).resolves.toBe("");
+  });
+
   it("recovers idempotently when the canonical projection already has the next digest", async () => {
     const writer = createPlanArtifactWriter();
     const plan = createPlan(workspaceRoot);
@@ -269,6 +306,10 @@ describe("plan artifact writer", () => {
     await expect(readFile(displaced, "utf8")).resolves.toContain(
       "displaced safe next",
     );
+    await expect(readFile(path.join(
+      path.dirname(first.path),
+      `.${plan.id}.projection.transaction`,
+    ), "utf8")).resolves.toBe("");
   });
 
   it("scrubs the deterministic retired transaction even when unlink would be blocked", async () => {

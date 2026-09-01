@@ -10,7 +10,10 @@ import type {
   PlanningStageRecord,
 } from "../shared/planMode";
 import type { SkillInputValue } from "../shared/skillExecutionContract";
-import type { SkillDiscoveryResult, SkillRecord } from "../shared/skills";
+import type {
+  SkillDiscoveryResult,
+  SkillSnapshotSource,
+} from "../shared/skills";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { TaskPermissionPolicy } from "../shared/toolPermissions";
 import {
@@ -59,7 +62,7 @@ class PlanningBriefBoundaryError extends Error {
 export type PlanInvestigationResult = {
   brief: PlanningBrief;
   evidence: PlanEvidenceItem[];
-  skills: SkillRecord[];
+  skills: SkillSnapshotSource[];
   stage: PlanningStageRecord;
   stages: PlanningStageRecord[];
   depth: PlanInvestigationDepth;
@@ -86,7 +89,7 @@ export type PlanInvestigatorService = {
     autonomyMode?: PlanAutonomyMode;
     profile: PlanTaskProfile;
     baseEvidence: PlanEvidenceItem[];
-    explicitSkill?: SkillRecord;
+    explicitSkill?: SkillSnapshotSource;
     model: BoundModelClient;
     onStageUpdate?: (
       stage: PlanningStageRecord,
@@ -112,7 +115,7 @@ export function createPlanInvestigatorService(options: {
 
   return {
     async investigate(input) {
-      let skills: SkillRecord[];
+      let skills: SkillSnapshotSource[];
       try {
         skills = (await options.discoverSkills()).skills;
       } catch (error) {
@@ -588,7 +591,7 @@ function createReadOnlyPlanContext(input: {  runId: string;
 
 function createPlanInvestigationPermissions(
   workspaceRoot: string,
-  explicitSkill?: SkillRecord,
+  explicitSkill?: SkillSnapshotSource,
   allowedToolNames: string[] = [...PLAN_MODE_ALLOWED_TOOL_NAMES],
 ): TaskPermissionPolicy {
   return {
@@ -671,7 +674,7 @@ function buildInvestigatorSystemPrompt(
 
 function buildInvestigatorUserPrompt(
   input: Parameters<PlanInvestigatorService["investigate"]>[0],
-  skills: SkillRecord[],
+  skills: SkillSnapshotSource[],
   depth: PlanInvestigationDepth,
   evidence: PlanEvidenceItem[],
   tokenBudget: number,
@@ -757,9 +760,9 @@ function buildInvestigatorUserPrompt(
 }
 
 function prioritizeExplicitSkill(
-  skills: SkillRecord[],
-  explicitSkill: SkillRecord | undefined,
-): SkillRecord[] {
+  skills: SkillSnapshotSource[],
+  explicitSkill: SkillSnapshotSource | undefined,
+): SkillSnapshotSource[] {
   if (!explicitSkill) return skills;
   return [
     explicitSkill,
@@ -800,7 +803,7 @@ function normalizePlanningBrief(
   value: Record<string, unknown>,
   input: Parameters<PlanInvestigatorService["investigate"]>[0],
   evidence: PlanEvidenceItem[],
-  skills: SkillRecord[],
+  skills: SkillSnapshotSource[],
 ): PlanningBrief {
   const canonical = canonicalizePlanningBriefShape(value);
   assertPlanningBriefShape(canonical);
@@ -1101,9 +1104,9 @@ function nextInvestigationDepth(
 }
 
 function selectPromptSkills(
-  skills: SkillRecord[],
+  skills: SkillSnapshotSource[],
   sourceMessage: string,
-): SkillRecord[] {
+): SkillSnapshotSource[] {
   if (skills.length <= MAX_PROMPT_SKILL_CANDIDATES) return skills;
   const terms = unique(
     sourceMessage

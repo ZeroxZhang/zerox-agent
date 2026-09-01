@@ -196,7 +196,7 @@ execution:
 mcpServers:
   - name: local-index
     command: node
-    args: ["server.js"]
+    args: ["server.js", "--token", "ARGS_SECRET_DO_NOT_PERSIST"]
     readRoots: ["./data"]
     network: false
   - name: remote-http
@@ -217,7 +217,7 @@ mcpServers:
         name: "local-index",
         transport: "stdio",
         command: "node",
-        args: ["server.js"],
+        args: ["server.js", "--token", "ARGS_SECRET_DO_NOT_PERSIST"],
         readRoots: ["./data"],
         network: false,
       },
@@ -245,7 +245,7 @@ mcpServers:
   - name: local-private
     transport: stdio
     command: node
-    args: ["server.js"]
+    args: ["server.js", "--token", "ARGS_SECRET_DO_NOT_PERSIST"]
     env:
       PRIVATE_TOKEN: STDIO_SECRET_DO_NOT_PERSIST
     readRoots: ["./data"]
@@ -281,21 +281,21 @@ mcpServers:
         name: "local-private",
         transport: "stdio",
         command: "node",
-        args: ["server.js"],
         readRoots: ["./data"],
         network: false,
       },
       {
         name: "remote-private",
         transport: "http",
-        url: "https://mcp.example.test/rpc",
       },
     ]);
     expect(JSON.stringify(snapshot)).not.toContain("STDIO_SECRET_DO_NOT_PERSIST");
     expect(JSON.stringify(snapshot)).not.toContain("REMOTE_SECRET_DO_NOT_PERSIST");
+    expect(JSON.stringify(snapshot)).not.toContain("ARGS_SECRET_DO_NOT_PERSIST");
     expect(JSON.stringify(snapshot)).not.toContain(unknownSentinel);
     expect(JSON.stringify(runtimeSkill)).toContain("STDIO_SECRET_DO_NOT_PERSIST");
     expect(JSON.stringify(runtimeSkill)).toContain("REMOTE_SECRET_DO_NOT_PERSIST");
+    expect(JSON.stringify(runtimeSkill)).toContain("ARGS_SECRET_DO_NOT_PERSIST");
   });
 
   it.each([
@@ -306,6 +306,10 @@ mcpServers:
     [
       "insecure remote URL",
       `name: bad\ntransport: sse\nurl: http://mcp.example.test`,
+    ],
+    [
+      "remote URL credentials",
+      `name: bad\ntransport: sse\nurl: https://user:password@mcp.example.test`,
     ],
     [
       "missing stdio command",

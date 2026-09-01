@@ -47,7 +47,7 @@ import type { PlanStore } from "./planStore";
 import {
   createPublicSkillSnapshot,
   type SkillDiscoveryResult,
-  type SkillRecord,
+  type SkillSnapshotSource,
 } from "../shared/skills";
 import {
   PlanInvestigationError,
@@ -297,7 +297,7 @@ export function createPlanDebateOrchestrator(options: {
     let unknownExplicitSkill = false;
     let brief = initial.planningBrief!;
     let evidence = initial.evidence;
-    let skills: SkillRecord[] = explicitSkill
+    let skills: SkillSnapshotSource[] = explicitSkill
       ? [explicitSkill]
       : [];
     let investigationStages: PlanningStageRecord[] = [];
@@ -1106,7 +1106,7 @@ export function createPlanDebateOrchestrator(options: {
       { actionGate: canonicalArtifact.actionGate },
       signal,
     );
-    throwIfAborted(signal);
+    throwIfProjectionFinalizedCanceled(synthesized, signal);
     return synthesized;
   }
 
@@ -1532,7 +1532,7 @@ export function createPlanDebateOrchestrator(options: {
       },
       signal,
     );
-    throwIfAborted(signal);
+    throwIfProjectionFinalizedCanceled(saved, signal);
     return {
       ok: true,
       plan: saved,
@@ -3266,4 +3266,13 @@ function throwIfAborted(signal: AbortSignal | undefined) {
   if (signal?.aborted) {
     throw signal.reason ?? new DOMException("Plan canceled.", "AbortError");
   }
+}
+
+function throwIfProjectionFinalizedCanceled(
+  plan: PlanRecord,
+  signal: AbortSignal | undefined,
+): void {
+  if (plan.status !== "canceled") return;
+  if (signal?.reason !== undefined) throw signal.reason;
+  throw new DOMException("用户取消规划。", "AbortError");
 }

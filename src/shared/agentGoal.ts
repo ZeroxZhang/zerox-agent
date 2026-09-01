@@ -1,6 +1,6 @@
 import type { GoalReviewPolicy } from "./agentGoalReview";
 import type { AgentTaskContract } from "./agentTaskContract";
-import type { SkillRecord } from "./skills";
+import type { PublicSkillSnapshot } from "./skills";
 import type { ModelServiceNotice } from "./modelServiceNotice";
 import type { AgentContextUsage } from "./contextUsage";
 import type { ResolvedModelBinding } from "./modelSettings";
@@ -380,7 +380,7 @@ export type GoalRuntimeCheckpoint = {
 };
 
 export type GoalSelectedSkill = Pick<
-  SkillRecord,
+  PublicSkillSnapshot,
   "manifest" | "body" | "rootDir" | "skillFile"
 >;
 

@@ -247,11 +247,9 @@ const selectedSkillSchema = objectOf({
       name: stringSchema,
       transport: enumOf(["stdio", "http", "sse"]),
       command: stringSchema,
-      args: stringArraySchema,
       readRoots: stringArraySchema,
       network: booleanSchema,
-      url: stringSchema,
-    })),
+    }, ["name", "transport"])),
     dependencies: stringArraySchema,
   }, [
     "name",
@@ -364,7 +362,7 @@ const planRecordSchema = objectOf({
     failureExcerpt: stringSchema,
   })),
   skillDecision: objectOf({
-    source: stringSchema,
+    source: enumOf(["explicit", "automatic", "none"]),
     selectedSkillName: stringSchema,
     reason: stringSchema,
     evidenceRefs: stringArraySchema,
@@ -559,6 +557,19 @@ export function decodePersistedPlanRecord(value: unknown): PlanRecord {
       ?.recommendedSkillInputEvidenceRefs,
     "$.planningBrief.recommendedSkillInputEvidenceRefs",
   );
+  assertSkillInputValueRecord(
+    (record.planningBrief as Record<string, unknown> | undefined)
+      ?.recommendedSkillInputValues,
+    "$.planningBrief.recommendedSkillInputValues",
+  );
+  assertSkillInputValueRecord(
+    (record.skillDecision as Record<string, unknown> | undefined)?.inputValues,
+    "$.skillDecision.inputValues",
+  );
+  assertSkillInputValueRecord(
+    record.selectedSkillInputValues,
+    "$.selectedSkillInputValues",
+  );
   assertStringArrayRecord(
     (record.skillDecision as Record<string, unknown> | undefined)
       ?.inputEvidenceRefs,
@@ -587,6 +598,24 @@ function assertStringArrayRecord(value: unknown, path: string): void {
   }
 }
 
+function assertSkillInputValueRecord(value: unknown, path: string): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new InvalidPersistedPlanRecordError(path);
+  }
+  for (const [key, input] of Object.entries(value)) {
+    if (
+      !key
+      || (typeof input !== "string"
+        && typeof input !== "number"
+        && typeof input !== "boolean")
+      || (typeof input === "number" && !Number.isFinite(input))
+    ) {
+      throw new InvalidPersistedPlanRecordError(path);
+    }
+  }
+}
+
 function assertSelectedSkillServers(value: unknown): void {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const manifest = (value as Record<string, unknown>).manifest;
@@ -597,9 +626,8 @@ function assertSelectedSkillServers(value: unknown): void {
   if (servers === undefined) return;
   for (const server of servers as Array<Record<string, unknown>>) {
     const valid = server.transport === "stdio"
-      ? typeof server.command === "string"
-      : (server.transport === "http" || server.transport === "sse")
-        && typeof server.url === "string";
+      || server.transport === "http"
+      || server.transport === "sse";
     if (!valid) {
       throw new InvalidPersistedPlanRecordError(
         "$.selectedSkill.manifest.mcpServers",

@@ -13946,3 +13946,40 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   dependency tree, caller-pinned Program/Harness, and whitespace checks pass.
   A fresh exact-byte code and security review remains mandatory before package
   acceptance and release.
+
+## 2026-09-01 - v3.9.2 storage-envelope, cancellation, and public-Skill authority repair
+
+- The twelfth frozen candidate was rejected by code review with no Critical,
+  two Major, and no Minor findings, and by security/data review with no
+  Critical, four Major, and no Minor findings. No PASS receipts or release
+  attestation were issued for that candidate.
+- JSON filenames and SQLite `id` / `session_id` columns are now storage
+  envelopes that must exactly match the decoded Plan payload. Unsafe or
+  cross-bound records are isolated as corrupt data, while systemic storage
+  failures remain observable. Persisted Skill decisions and input-value maps
+  use closed, finite scalar schemas.
+- Projection finalization samples cancellation once inside the serialized
+  commit boundary. The stored terminal state is authoritative: cancellation
+  before that point commits `canceled`, while a later abort cannot make the
+  caller report cancellation after a ready projection was durably committed.
+- The native projection transaction rewrites safe interrupted scratch before
+  publication and scrubs the retired canonical inode through its verified
+  descriptor immediately after the atomic swap. Concurrent pathname
+  displacement can make the operation fail but cannot retain the old Plan
+  bytes in the deterministic transaction inode.
+- All Plan IPC handlers now map storage, status-summary, retry, discard,
+  confirm, and adopt exceptions to fixed content-free errors. Durable/public
+  Skill DTOs structurally exclude stdio arguments and environment variables,
+  plus remote URLs and headers; runtime-only MCP configuration remains private.
+- Focused validation passes `214/214` tests across nine files. Full
+  `npm run verify` passes strict test type coverage `434/434`, `325` current
+  files / `3943` current tests with declared skips, every Round2-Round12 lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. The native
+  helper is `53488` bytes with digest
+  `sha256:cfc1733b56f0d3028c8bc2a202918ee4959a270f1cad2d1460ef4837755faaf4`.
+  Production smoke passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven
+  migrations, eight authority domains, renderer startup, and Node ABI `137`
+  restoration. Production audit reports zero vulnerabilities; dependency,
+  caller-pinned Program/Harness, and whitespace checks pass. Fresh exact-byte
+  code and security review remains mandatory before external package acceptance
+  and release.

@@ -1195,17 +1195,18 @@ describe("plan debate orchestrator", () => {
               name: "private-local",
               transport: "stdio",
               command: "node",
+              args: ["server.js", "--token", "PLAN_SERVICE_ARGS_SECRET"],
               env: { PRIVATE_TOKEN: "PLAN_SERVICE_STDIO_SECRET" },
             },
             {
               name: "private-remote",
               transport: "http",
-              url: "https://mcp.example.test/rpc",
+              url: "https://user:PLAN_SERVICE_URL_SECRET@mcp.example.test/rpc?token=secret",
               headers: { authorization: "PLAN_SERVICE_REMOTE_SECRET" },
             },
           ],
         },
-      },
+      } as SkillRecord,
       mode: "direct",
       modelAssignments: { direct: "profileDirect" },
     });
@@ -1213,6 +1214,8 @@ describe("plan debate orchestrator", () => {
     expect(plan.selectedSkill?.manifest.name).toBe("dbs");
     expect(JSON.stringify(plan)).not.toContain("PLAN_SERVICE_STDIO_SECRET");
     expect(JSON.stringify(plan)).not.toContain("PLAN_SERVICE_REMOTE_SECRET");
+    expect(JSON.stringify(plan)).not.toContain("PLAN_SERVICE_ARGS_SECRET");
+    expect(JSON.stringify(plan)).not.toContain("PLAN_SERVICE_URL_SECRET");
     expect(plan.evidence).toContainEqual(
       expect.objectContaining({
         id: "evidence_selected_skill",
@@ -1971,6 +1974,62 @@ describe("plan debate orchestrator", () => {
         status: "completed",
       }),
     ]);
+  });
+
+  it("keeps a ready projection authoritative when cancellation arrives after commit", async () => {
+    const calls: Array<{ profileId: string; request: ChatCompletionRequest }> =
+      [];
+    const router = createQueuedRouter(
+      { profileDirect: [artifact("Committed before cancellation")] },
+      calls,
+    );
+    let id = 0;
+    const store = createPlanStore({
+      configDir: path.join(tempDir, "config-cancel-after-commit"),
+      createId: () => `event_${++id}`,
+    });
+    const controller = new AbortController();
+    const finalizeProjectionIntent =
+      store.finalizeProjectionIntent.bind(store);
+    const committingStore = {
+      ...store,
+      async finalizeProjectionIntent(
+        ...args: Parameters<typeof store.finalizeProjectionIntent>
+      ) {
+        const committed = await finalizeProjectionIntent(...args);
+        controller.abort(
+          new DOMException("提交完成后的迟到取消。", "AbortError"),
+        );
+        return committed;
+      },
+    };
+    const orchestrator = createPlanDebateOrchestrator({
+      planStore: committingStore,
+      artifactWriter: createPlanArtifactWriter(),
+      modelRouter: router,
+      createId: () => `id_${++id}`,
+    });
+
+    await expect(
+      orchestrator.createPlan({
+        sessionId: "session-cancel-after-commit",
+        workspaceRoot,
+        sourceMessage: "生成计划，并在线性化提交后忽略迟到取消。",
+        mode: "direct",
+        modelAssignments: { direct: "profileDirect" },
+        signal: controller.signal,
+      }),
+    ).resolves.toMatchObject({
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+    });
+    expect(controller.signal.aborted).toBe(true);
+    await expect(
+      store.getLatestBySession("session-cancel-after-commit"),
+    ).resolves.toMatchObject({
+      status: "awaiting_confirmation",
+      actionGate: "ready",
+    });
   });
 
   it("lets the public discard action abandon an unrecoverable projection intent", async () => {

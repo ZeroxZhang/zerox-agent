@@ -567,6 +567,78 @@ describe("chat IPC handlers", () => {
     }
   });
 
+  it("maps Plan status-summary failures to the same content-free read error", async () => {
+    electronState.ipcHandlers.clear();
+    const { registerAllIpcHandlers } = await import("./index");
+    const secret = "local-canary-plan-summary-secret-0123456789abcdef";
+    const container = {
+      onGoalProgressEvent: vi.fn(),
+      onAgentRunsChanged: vi.fn(),
+      planStore: () => ({
+        getLatestBySession: vi.fn(async () => ({
+          id: "plan_1",
+          sessionId: "session_1",
+          status: "awaiting_confirmation",
+          revision: 1,
+          taskContract: { objective: "验证错误边界" },
+          finalArtifact: {
+            title: "可确认计划",
+            gateReason: "验证通过。",
+            unresolvedQuestions: [],
+          },
+          rounds: [],
+        })),
+      }),
+      chatSessionStore: () => ({
+        get: vi.fn(async () => {
+          throw new Error(secret);
+        }),
+      }),
+    } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+    registerAllIpcHandlers(container, { isTrustedSender: () => true });
+
+    const error = await Promise.resolve(
+      electronState.ipcHandlers.get("plans:getLatestBySession")?.(
+        {},
+        "session_1",
+      ),
+    ).catch((caught) => caught);
+    expect(String(error)).toContain("计划存储读取失败");
+    expect(String(error)).not.toContain(secret);
+  });
+
+  it.each([
+    ["plans:retryFailedRound", ["plan_1"]],
+    ["plans:discard", ["plan_1", 1]],
+    ["plans:confirm", [{ planId: "plan_1", expectedRevision: 1 }]],
+    ["plans:adoptGoalPlan", [{ planId: "plan_1", expectedRevision: 1 }]],
+  ] as const)(
+    "maps %s failures to a content-free operation error",
+    async (channel, args) => {
+      electronState.ipcHandlers.clear();
+      const { registerAllIpcHandlers } = await import("./index");
+      const secret = `local-canary-${channel}-secret-0123456789abcdef`;
+      const fail = vi.fn(async () => {
+        throw new Error(secret);
+      });
+      const container = {
+        onGoalProgressEvent: vi.fn(),
+        onAgentRunsChanged: vi.fn(),
+        planDebateOrchestrator: () => ({ retryFailedRound: fail }),
+        discardPlan: fail,
+        confirmPlan: fail,
+        adoptGoalPlan: fail,
+      } as unknown as Parameters<typeof registerAllIpcHandlers>[0];
+      registerAllIpcHandlers(container, { isTrustedSender: () => true });
+
+      const error = await Promise.resolve(
+        electronState.ipcHandlers.get(channel)?.({}, ...args),
+      ).catch((caught) => caught);
+      expect(String(error)).toContain("计划操作失败");
+      expect(String(error)).not.toContain(secret);
+    },
+  );
+
   it.each([
     "goal:continueAcceptance",
     "goal:markCompletedUnverified",

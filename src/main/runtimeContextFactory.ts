@@ -5,7 +5,7 @@ import type {
 import { createAgentRuntimeContextSnapshot } from "../shared/agentRuntimeContext";
 import type { AgentRunContext } from "../shared/agentWorkspace";
 import type { ExecutionContextMemoryScope } from "../shared/executionContextPackage";
-import type { SkillRecord } from "../shared/skills";
+import type { SkillSnapshotSource } from "../shared/skills";
 import type { ToolDefinition } from "./openAiCompatibleClient";
 
 export type RuntimeContextFactoryModelProfile = {
@@ -44,7 +44,7 @@ export type CreateRuntimeContextSnapshotForRunInput = {
   modelProfile: RuntimeContextFactoryModelProfile;
   tools?: ToolDefinition[];
   getToolSource?: (toolName: string) => string | null;
-  selectedSkill?: SkillRecord;
+  selectedSkill?: SkillSnapshotSource;
   permission: RuntimeContextFactoryPermissionInput;
   memory?: RuntimeContextFactoryMemoryInput;
   checkpoint?: RuntimeContextFactoryCheckpointInput;
@@ -148,9 +148,9 @@ function toToolVisibility(
   });
 }
 
-function toSkillSnapshot(skill: SkillRecord) {
+function toSkillSnapshot(skill: SkillSnapshotSource) {
   const extendedResources = (
-    skill as SkillRecord & {
+    skill as SkillSnapshotSource & {
       resources?: Array<{
         kind: "skill" | "reference" | "asset" | "script";
         path: string;

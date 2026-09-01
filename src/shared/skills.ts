@@ -97,12 +97,12 @@ export type SkillRecord = ParsedSkillMarkdown & {
 
 export type PublicSkillMcpStdioServerConfig = Omit<
   SkillMcpStdioServerConfig,
-  "env"
+  "args" | "env"
 >;
 
-export type PublicSkillMcpRemoteServerConfig = Omit<
+export type PublicSkillMcpRemoteServerConfig = Pick<
   SkillMcpRemoteServerConfig,
-  "headers"
+  "name" | "transport"
 >;
 
 export type PublicSkillMcpServerConfig =
@@ -117,6 +117,10 @@ export type PublicSkillSnapshot = Omit<SkillRecord, "manifest"> & {
   manifest: PublicSkillManifest;
 };
 
+export type SkillSnapshotSource = Omit<SkillRecord, "manifest"> & {
+  manifest: SkillManifest | PublicSkillManifest;
+};
+
 export type SkillDiscoveryError = {
   folderName: string;
   message: string;
@@ -128,7 +132,7 @@ export type SkillDiscoveryResult = {
 };
 
 export function createPublicSkillSnapshot(
-  skill: Pick<SkillRecord, "manifest" | "body" | "rootDir" | "skillFile">,
+  skill: SkillSnapshotSource,
 ): PublicSkillSnapshot {
   const manifest = skill.manifest;
   return {
@@ -198,7 +202,11 @@ export function createPublicSkillSnapshot(
           }
         : {}),
       ...(manifest.mcpServers !== undefined
-        ? { mcpServers: manifest.mcpServers.map(createPublicMcpServerConfig) }
+        ? {
+            mcpServers: manifest.mcpServers.map((server) =>
+              createPublicMcpServerConfig(server),
+            ),
+          }
         : {}),
       ...(manifest.dependencies !== undefined
         ? { dependencies: [...manifest.dependencies] }
@@ -219,14 +227,13 @@ export function createPublicSkillDiscoveryResult(
 }
 
 function createPublicMcpServerConfig(
-  server: SkillMcpServerConfig,
+  server: SkillMcpServerConfig | PublicSkillMcpServerConfig,
 ): PublicSkillMcpServerConfig {
   if (server.transport === "stdio") {
     return {
       name: server.name,
       transport: "stdio",
       command: server.command,
-      ...(server.args !== undefined ? { args: [...server.args] } : {}),
       ...(server.readRoots !== undefined
         ? { readRoots: [...server.readRoots] }
         : {}),
@@ -236,7 +243,6 @@ function createPublicMcpServerConfig(
   return {
     name: server.name,
     transport: server.transport,
-    url: server.url,
   };
 }
 
@@ -539,7 +545,8 @@ function readStrictBoolean(value: unknown, label: string): boolean {
 
 function isHttpsUrl(value: string): boolean {
   try {
-    return new URL(value).protocol === "https:";
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
   } catch {
     return false;
   }

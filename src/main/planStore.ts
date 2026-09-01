@@ -148,10 +148,13 @@ export function createPlanStore(options: {
   }
 
   async function readSqlitePlanPayload(
-    payload: string,
+    row: { id: string; session_id: string; payload: string },
     recoverProjection = true,
   ): Promise<PlanRecord> {
-    const { parsed, diagnosticSafe, validated } = decodeAndValidatePlan(payload);
+    const { parsed, diagnosticSafe, validated } = decodeAndValidatePlan(
+      row.payload,
+      { id: row.id, sessionId: row.session_id },
+    );
     const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
     let migrated = validated;
     if (diagnosticsChanged && options.storage) {
@@ -173,17 +176,25 @@ export function createPlanStore(options: {
     planId: string,
     recoverProjection = true,
   ): Promise<PlanRecord | null> {
-    safePlanId(planId);
+    let normalizedPlanId: string;
+    try {
+      normalizedPlanId = safePlanId(planId);
+    } catch {
+      throw new InvalidPersistedPlanRecordError("$.id");
+    }
     if (options.storage) {
       const row = options.storage.db
-        .prepare("SELECT payload FROM plan_records WHERE id = ?")
-        .get<{ payload: string }>(planId);
+        .prepare("SELECT id, session_id, payload FROM plan_records WHERE id = ?")
+        .get<{ id: string; session_id: string; payload: string }>(
+          normalizedPlanId,
+        );
       if (!row) return null;
-      return readSqlitePlanPayload(row.payload, recoverProjection);
+      return readSqlitePlanPayload(row, recoverProjection);
     }
     try {
       const { parsed, diagnosticSafe, validated } = decodeAndValidatePlan(
-        await readFile(planPath(planId), "utf8"),
+        await readFile(planPath(normalizedPlanId), "utf8"),
+        { id: normalizedPlanId },
       );
       const diagnosticsChanged = !recordsEqual(parsed, diagnosticSafe);
       let migrated = validated;
@@ -263,42 +274,48 @@ export function createPlanStore(options: {
   async function recoverProjectionIntent(plan: PlanRecord): Promise<PlanRecord> {
     const intent = plan.projectionIntent;
     if (!intent) return plan;
+    let published: PlanProjection;
     try {
       const prepared = intentProjection(intent);
-      const published = await projectionRecoveryWriter.writePrepared(
+      published = await projectionRecoveryWriter.writePrepared(
         plan,
         prepared,
       );
-      if (
-        published.path !== intent.nextPath
-        || published.sha256 !== intent.nextSha256
-      ) {
-        return plan;
-      }
-      const recovered = validatePlanRecord({
-        ...plan,
-        status: intent.targetStatus,
-        actionGate: intent.targetActionGate,
-        projection: published,
-        projectionIntent: undefined,
-      });
-      const event: PlanStoreEvent = {
-        id: `plan_event_${createId()}`,
-        planId: recovered.id,
-        type: "plan_projection_recovered",
-        revision: recovered.revision,
-        createdAt: now(),
-      };
-      await persistPlanAndEvent(recovered, event);
-      return recovered;
     } catch {
       // A pending intent is a valid, non-confirmable recovery state. Workspace
       // drift/offline errors must not make the Plan store unreadable.
       return plan;
     }
+    if (
+      published.path !== intent.nextPath
+      || published.sha256 !== intent.nextSha256
+    ) {
+      return plan;
+    }
+    const recovered = validatePlanRecord({
+      ...plan,
+      status: intent.targetStatus,
+      actionGate: intent.targetActionGate,
+      projection: published,
+      projectionIntent: undefined,
+    });
+    const event: PlanStoreEvent = {
+      id: `plan_event_${createId()}`,
+      planId: recovered.id,
+      type: "plan_projection_recovered",
+      revision: recovered.revision,
+      createdAt: now(),
+    };
+    // Storage failures are systemic and must remain observable. Only the
+    // workspace publication boundary above is recoverable as a pending intent.
+    await persistPlanAndEvent(recovered, event);
+    return recovered;
   }
 
-  function decodeAndValidatePlan(payload: string): {
+  function decodeAndValidatePlan(
+    payload: string,
+    envelope?: { id: string; sessionId?: string },
+  ): {
     parsed: unknown;
     diagnosticSafe: PlanRecord;
     validated: PlanRecord;
@@ -311,10 +328,21 @@ export function createPlanStore(options: {
     }
     try {
       const diagnosticSafe = decodePersistedPlanRecord(parsed);
+      const validated = validatePlanRecord(diagnosticSafe);
+      if (
+        envelope
+        && (
+          safePlanId(envelope.id) !== validated.id
+          || (envelope.sessionId !== undefined
+            && envelope.sessionId !== validated.sessionId)
+        )
+      ) {
+        throw new InvalidPersistedPlanRecordError("$.storageEnvelope");
+      }
       return {
         parsed,
         diagnosticSafe,
-        validated: validatePlanRecord(diagnosticSafe),
+        validated,
       };
     } catch (error) {
       if (error instanceof InvalidPersistedPlanRecordError) throw error;
@@ -574,19 +602,24 @@ export function createPlanStore(options: {
         ) {
           throw new Error("计划投影提交结果与持久化 intent 不一致。");
         }
+        // This single read is the cancellation linearization point. An abort
+        // observed before it commits canceled/blocked; an abort arriving after
+        // it is too late for this already-committing projection revision and
+        // must not make the caller report a cancellation that was not stored.
+        const canceledAtCommit = signal?.aborted === true;
         const finalized = validatePlanRecord({
           ...existing,
-          status: signal?.aborted ? "canceled" : intent.targetStatus,
-          actionGate: signal?.aborted ? "blocked" : intent.targetActionGate,
+          status: canceledAtCommit ? "canceled" : intent.targetStatus,
+          actionGate: canceledAtCommit ? "blocked" : intent.targetActionGate,
           projection,
           projectionIntent: undefined,
         });
         const event: PlanStoreEvent = {
           id: `plan_event_${createId()}`,
           planId,
-          type: signal?.aborted ? "plan_canceled" : eventType,
+          type: canceledAtCommit ? "plan_canceled" : eventType,
           revision: finalized.revision,
-          ...(signal?.aborted
+          ...(canceledAtCommit
             ? { payload: { afterProjection: true } }
             : payload
               ? { payload: structuredClone(payload) }
@@ -640,11 +673,11 @@ export function createPlanStore(options: {
       if (options.storage) {
         const rows = options.storage.db
           .prepare(
-            "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
+            "SELECT id, session_id, payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
           )
-          .all<{ payload: string }>(sessionId);
+          .all<{ id: string; session_id: string; payload: string }>(sessionId);
         return collectValidPlans(
-          rows.map((row) => readSqlitePlanPayload(row.payload)),
+          rows.map((row) => readSqlitePlanPayload(row)),
         );
       }
       try {
@@ -676,10 +709,12 @@ export function createPlanStore(options: {
     async listAll() {
       if (options.storage) {
         const rows = options.storage.db
-          .prepare("SELECT payload FROM plan_records ORDER BY updated_at DESC")
-          .all<{ payload: string }>();
+          .prepare(
+            "SELECT id, session_id, payload FROM plan_records ORDER BY updated_at DESC",
+          )
+          .all<{ id: string; session_id: string; payload: string }>();
         return collectValidPlans(
-          rows.map((row) => readSqlitePlanPayload(row.payload)),
+          rows.map((row) => readSqlitePlanPayload(row)),
         );
       }
       try {
@@ -709,11 +744,11 @@ export function createPlanStore(options: {
       if (options.storage) {
         const rows = options.storage.db
           .prepare(
-            "SELECT payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
+            "SELECT id, session_id, payload FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC",
           )
-          .all<{ payload: string }>(sessionId);
+          .all<{ id: string; session_id: string; payload: string }>(sessionId);
         return (await collectValidPlans(
-          rows.map((row) => readSqlitePlanPayload(row.payload)),
+          rows.map((row) => readSqlitePlanPayload(row)),
         ))[0] ?? null;
       }
       await sessionIndexQueue;
@@ -871,9 +906,8 @@ export function assertSafePlanId(planId: string): void {
 }
 
 function safePlanId(planId: string): string {
-  const normalized = planId.trim();
-  assertSafePlanId(normalized);
-  return normalized;
+  assertSafePlanId(planId);
+  return planId;
 }
 
 function recordsEqual(left: unknown, right: unknown): boolean {
@@ -905,6 +939,7 @@ function validatePlanRecord(plan: PlanRecord): PlanRecord {
   if (!plan.id || !plan.sessionId || !plan.sourceMessage) {
     throw new Error("计划记录缺少必要字段。");
   }
+  assertSafePlanId(plan.id);
   if (plan.mode !== "direct" && plan.mode !== "debate") {
     throw new Error("计划模式非法。");
   }

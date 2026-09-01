@@ -21,7 +21,7 @@ import type {
   PlanningBrief,
 } from "../shared/planMode";
 import type { SkillInputValue } from "../shared/skillExecutionContract";
-import type { SkillRecord } from "../shared/skills";
+import type { SkillSnapshotSource } from "../shared/skills";
 import type {
   GoalContractIssue,
   GoalContractRef,
@@ -49,7 +49,7 @@ const USER_AUTHORITY_QUESTION_PATTERNS = [
 
 export type PlannerSkillRoutingInput = {
   brief: PlanningBrief;
-  skills: SkillRecord[];
+  skills: SkillSnapshotSource[];
   explicitSkill?: GoalSelectedSkill;
   workspaceId?: string;
   workspaceRoot?: string;
@@ -142,7 +142,7 @@ export function createFallbackPlanningBrief(input: {
   sourceMessage: string;
   profile: PlanTaskProfile;
   evidence: PlanEvidenceItem[];
-  skills?: SkillRecord[];
+  skills?: SkillSnapshotSource[];
 }): PlanningBrief {
   const targetRefs = input.profile.targetRefs.map(
     (reference) => reference.canonical,

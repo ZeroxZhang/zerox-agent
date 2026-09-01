@@ -3,7 +3,11 @@ import {
   validatePathInsideRunContext,
   type AgentRunContext,
 } from "../shared/agentWorkspace";
-import type { SkillInput, SkillRecord } from "../shared/skills";
+import type {
+  SkillInput,
+  SkillRecord,
+  SkillSnapshotSource,
+} from "../shared/skills";
 import {
   transitionSkillExecution,
   type SkillExecutionBudgets,
@@ -36,7 +40,7 @@ export type SkillExecutionServiceInput = {
 };
 
 export type SkillInputResolutionInput = {
-  skill: SkillRecord;
+  skill: SkillSnapshotSource;
   values?: Record<string, unknown>;
   runContext?: AgentRunContext;
 };

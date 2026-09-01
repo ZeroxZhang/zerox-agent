@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Goal, GoalStatus, SuccessCriterion } from "../shared/agentGoal";
+import type { SkillRecord } from "../shared/skills";
 import {
   createAgentGoalStore,
   type ProgressLedgerEvent,
@@ -90,11 +91,12 @@ describe("agent goal store", () => {
       {
         name: "remote-private",
         transport: "http",
-        url: "https://mcp.example.test/rpc",
       },
     ]);
     expect(freshPayload).not.toContain("GOAL_STDIO_SECRET");
     expect(freshPayload).not.toContain("GOAL_REMOTE_SECRET");
+    expect(freshPayload).not.toContain("GOAL_ARGS_SECRET");
+    expect(freshPayload).not.toContain("GOAL_URL_SECRET");
 
     const legacy = {
       ...createGoal("goal_legacy_private_skill", "planning"),
@@ -1303,7 +1305,7 @@ function createGoal(
   };
 }
 
-function createPrivateSkillSnapshot(): NonNullable<Goal["selectedSkill"]> {
+function createPrivateSkillSnapshot(): SkillRecord {
   return {
     rootDir: "/tmp/private-skill",
     skillFile: "/tmp/private-skill/SKILL.md",
@@ -1326,12 +1328,13 @@ function createPrivateSkillSnapshot(): NonNullable<Goal["selectedSkill"]> {
           name: "local-private",
           transport: "stdio",
           command: "node",
+          args: ["server.js", "--token", "GOAL_ARGS_SECRET"],
           env: { PRIVATE_TOKEN: "GOAL_STDIO_SECRET" },
         },
         {
           name: "remote-private",
           transport: "http",
-          url: "https://mcp.example.test/rpc",
+          url: "https://user:GOAL_URL_SECRET@mcp.example.test/rpc?token=secret",
           headers: { authorization: "GOAL_REMOTE_SECRET" },
         },
       ],

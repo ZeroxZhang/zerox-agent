@@ -749,22 +749,15 @@ function registerGoalsIpcHandlers(container: AppContainer): void {
 }
 
 function registerPlansIpcHandlers(container: AppContainer): void {
-  handleTrustedIpc("plans:get", async (_event, planId: string) => {
-    try {
-      return await container.planStore().get(planId);
-    } catch {
-      throw new Error("计划存储读取失败。");
-    }
-  });
-  handleTrustedIpc(
+  handleContentFreePlanIpc(
+    "plans:get",
+    (_event, planId: string) => container.planStore().get(planId),
+    "计划存储读取失败。",
+  );
+  handleContentFreePlanIpc(
     "plans:getLatestBySession",
     async (_event, sessionId: string) => {
-      let plan: PlanRecord | null;
-      try {
-        plan = await container.planStore().getLatestBySession(sessionId);
-      } catch {
-        throw new Error("计划存储读取失败。");
-      }
+      const plan = await container.planStore().getLatestBySession(sessionId);
       if (
         plan &&
         (plan.status === "awaiting_confirmation" ||
@@ -774,8 +767,9 @@ function registerPlansIpcHandlers(container: AppContainer): void {
       }
       return plan;
     },
+    "计划存储读取失败。",
   );
-  handleTrustedIpc(
+  handleContentFreePlanIpc(
     "plans:retryFailedRound",
     async (
       _event,
@@ -799,25 +793,39 @@ function registerPlansIpcHandlers(container: AppContainer): void {
       return result;
     },
   );
-  handleTrustedIpc(
+  handleContentFreePlanIpc(
     "plans:discard",
     (_event, planId: string, expectedRevision: number) =>
       container.discardPlan(planId, expectedRevision),
   );
-  handleTrustedIpc(
+  handleContentFreePlanIpc(
     "plans:confirm",
     (
       _event,
       input: ConfirmPlanInput,
     ): Promise<ConfirmPlanResult> => container.confirmPlan(input),
   );
-  handleTrustedIpc(
+  handleContentFreePlanIpc(
     "plans:adoptGoalPlan",
     (
       _event,
       input: AdoptGoalPlanInput,
     ): Promise<AdoptGoalPlanResult> => container.adoptGoalPlan(input),
   );
+}
+
+function handleContentFreePlanIpc(
+  channel: string,
+  listener: IpcInvokeHandler,
+  failureMessage = "计划操作失败。",
+): void {
+  handleTrustedIpc(channel, async (event, ...args) => {
+    try {
+      return await listener(event, ...args);
+    } catch {
+      throw new Error(failureMessage);
+    }
+  });
 }
 
 async function persistPlanStatusSummaryIfNeeded(
