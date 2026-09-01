@@ -493,23 +493,28 @@ const { stdout: darwinUserTempOutput } = await execFile(
 );
 const darwinUserTempAlias = path.resolve(darwinUserTempOutput.trim());
 const darwinUserTempCanonical = await realpath(darwinUserTempAlias);
-const electronEphemeralPrefixes = [...new Set([
+const darwinUserTempRoots = [...new Set([
   darwinUserTempAlias,
   darwinUserTempCanonical,
-])].flatMap((root) => [
+])];
+const xcrunEphemeralPrefixes = darwinUserTempRoots.map((root) =>
+  path.join(root, "xcrun_db-")
+);
+const electronEphemeralPrefixes = darwinUserTempRoots.flatMap((root) => [
   path.join(root, "scoped_dir"),
   path.join(root, "xcrun_db-"),
 ]);
-const electronSocketPrefixes = [...new Set([
-  darwinUserTempAlias,
-  darwinUserTempCanonical,
-])].map((root) => path.join(root, "scoped_dir"));
+const electronSocketPrefixes = darwinUserTempRoots.map((root) =>
+  path.join(root, "scoped_dir")
+);
 await writePrivateFile(
   commandSandboxProfile,
   Buffer.from(buildAcceptanceSandboxProfile({
     readableRoots: sandboxReadableRoots,
+    readablePrefixes: xcrunEphemeralPrefixes,
     metadataRoots: ["/Users"],
     writableRoots: sandboxWritableRoots,
+    writablePrefixes: xcrunEphemeralPrefixes,
     network: false,
   })),
 );

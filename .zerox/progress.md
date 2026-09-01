@@ -14360,3 +14360,24 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Program/Harness checks and the zero-vulnerability production audit pass.
   Exact-byte dual review and external package acceptance remain required before
   merge and release.
+
+## 2026-09-02 - v3.9.2 macOS xcrun acceptance sandbox closure
+
+- Candidate `c7ec27797321d8b7217968b3056d7b7b352864ba` passed both independent
+  reviews at `0C/0M/0m`, but was rejected by the external package gate before
+  an acceptance anchor was issued. The isolated full verification reached
+  native signature tests, where macOS `xcrun` ignored the private `TMPDIR` and
+  atomically refreshed its cache under `DARWIN_USER_TEMP_DIR`. The ordinary
+  command Seatbelt profile denied that exact system prefix, so the test command
+  failed even though the product test suite was green outside the sandbox.
+- The runner now derives canonical and alias user-temp roots once, grants the
+  ordinary offline command profile read/write access only to the
+  `xcrun_db-` filename prefix, and retains the broader `scoped_dir` permission
+  exclusively in the Electron profile. This preserves denial for unrelated
+  user-temp siblings while allowing the macOS toolchain's documented atomic
+  cache refresh during codesign verification.
+- Static release-runner regression validation passes `17/17`, both production
+  TypeScript projects pass, and whitespace validation is clean. Because the
+  acceptance runner is part of the reviewed control set, the previous receipts
+  are not reused: a new exact-byte dual review and a fresh external acceptance
+  run are required before merge and release.
