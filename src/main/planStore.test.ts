@@ -996,6 +996,98 @@ describe("plan store parity", () => {
     },
   );
 
+  it("rebinds SQLite session selection after queued authoritative reads", async () => {
+    const configDir = path.join(tempDir, "sqlite-session-rebind");
+    const workspaceRoot = path.join(tempDir, "sqlite-session-rebind-workspace");
+    await mkdir(workspaceRoot, { recursive: true });
+    const storage = createStorageImpl({
+      dbPath: path.join(configDir, "zerox.db"),
+      skipFts5Check: true,
+    });
+    await storage.migrate();
+    try {
+      const initialStore = createPlanStore({ configDir, storage });
+      const created = await initialStore.create({
+        ...createRecord(),
+        id: "plan-session-rebind",
+        sessionId: "session-before-rebind",
+        workspaceRoot,
+      });
+      const artifact = createDiagnosticArtifact("session-rebind");
+      const target = {
+        ...created,
+        status: "awaiting_input" as const,
+        actionGate: "needs_input" as const,
+        finalArtifact: artifact,
+      };
+      const description = await describePlanProjection(
+        { ...target, revision: created.revision + 1 },
+        artifact,
+      );
+      const pending = await initialStore.saveProjectionIntent(
+        target,
+        created.revision,
+        description,
+        "plan_synthesized",
+      );
+      let release!: () => void;
+      let started!: () => void;
+      let recoveryCalls = 0;
+      const recoveryStarted = new Promise<void>((resolve) => { started = resolve; });
+      const recoveryRelease = new Promise<void>((resolve) => { release = resolve; });
+      const store = createPlanStore({
+        configDir,
+        storage,
+        projectionRecoveryWriter: {
+          async writePrepared(_plan, projection) {
+            recoveryCalls += 1;
+            if (recoveryCalls === 1) {
+              started();
+              await recoveryRelease;
+            }
+            return {
+              path: `${projection.path}.mismatch`,
+              sha256: projection.sha256,
+              writtenAt: "2026-09-02T00:00:00.000Z",
+            };
+          },
+          async write() { throw new Error("unused"); },
+          async verify() { return true; },
+        },
+      });
+
+      const blockingRead = store.get(pending.id);
+      await recoveryStarted;
+      const listed = store.listBySession("session-before-rebind");
+      const latest = store.getLatestBySession("session-before-rebind");
+      storage.db.prepare(
+        "UPDATE plan_records SET session_id = ?, payload = ? WHERE id = ?",
+      ).run(
+        "session-after-rebind",
+        JSON.stringify({ ...pending, sessionId: "session-after-rebind" }),
+        pending.id,
+      );
+      release();
+
+      await expect(blockingRead).resolves.toMatchObject({
+        id: pending.id,
+        sessionId: "session-before-rebind",
+      });
+      await expect(listed).resolves.toEqual([]);
+      await expect(latest).resolves.toBeNull();
+      await expect(
+        store.listBySession("session-after-rebind"),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          id: pending.id,
+          sessionId: "session-after-rebind",
+        }),
+      ]);
+    } finally {
+      storage.close();
+    }
+  });
+
   it("samples cancellation once at projection commit and returns the stored outcome", async () => {
     const configDir = path.join(tempDir, "projection-cancel-linearization");
     const workspaceRoot = path.join(tempDir, "projection-cancel-workspace");

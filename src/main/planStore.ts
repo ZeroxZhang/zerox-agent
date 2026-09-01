@@ -280,6 +280,20 @@ export function createPlanStore(options: {
     }
   }
 
+  async function readCurrentSqlitePlans(
+    rows: SqlitePlanRow[],
+    sessionId?: string,
+  ): Promise<PlanRecord[]> {
+    const plans = await collectValidPlans(
+      rows.map((row) => serialize(row.id, () => readPlan(row.id))),
+    );
+    return plans
+      .filter(
+        (plan) => sessionId === undefined || plan.sessionId === sessionId,
+      )
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
   async function appendEvent(event: PlanStoreEvent) {
     if (options.storage) {
       writeSqliteEvent(options.storage, event);
@@ -706,9 +720,10 @@ export function createPlanStore(options: {
             `SELECT ${SQLITE_PLAN_SELECT_COLUMNS} FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC`,
           )
           .all<SqlitePlanRow>(sessionId);
-        return collectValidPlans(
-          rows.map((row) => serialize(row.id, () => readPlan(row.id))),
-        );
+        // The row query is only a candidate-id scan. A queued recovery may let
+        // the authoritative record change before readPlan runs, so selection
+        // and ordering must be applied again to the recovered records.
+        return readCurrentSqlitePlans(rows, sessionId);
       }
       try {
         const names = await readdir(plansDir);
@@ -746,9 +761,7 @@ export function createPlanStore(options: {
             `SELECT ${SQLITE_PLAN_SELECT_COLUMNS} FROM plan_records ORDER BY updated_at DESC`,
           )
           .all<SqlitePlanRow>();
-        return collectValidPlans(
-          rows.map((row) => serialize(row.id, () => readPlan(row.id))),
-        );
+        return readCurrentSqlitePlans(rows);
       }
       try {
         const names = await readdir(plansDir);
@@ -783,9 +796,7 @@ export function createPlanStore(options: {
             `SELECT ${SQLITE_PLAN_SELECT_COLUMNS} FROM plan_records WHERE session_id = ? ORDER BY updated_at DESC`,
           )
           .all<SqlitePlanRow>(sessionId);
-        return (await collectValidPlans(
-          rows.map((row) => serialize(row.id, () => readPlan(row.id))),
-        ))[0] ?? null;
+        return (await readCurrentSqlitePlans(rows, sessionId))[0] ?? null;
       }
       await sessionIndexQueue;
       const entry = (await readSessionIndex()).sessions[sessionId];

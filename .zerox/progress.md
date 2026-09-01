@@ -14086,3 +14086,30 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   and Node ABI `137` restoration. Caller-pinned Program/Harness checks pass and
   production audit reports zero vulnerabilities. Exact-byte dual review and
   external package acceptance remain required before merge and release.
+
+## 2026-09-02 - v3.9.2 recovered-session selection rebind
+
+- Candidate `3e1eae3e8818702c17c22048fbefe34497db38c5` was rejected before review
+  completion after the security/data lane found one Major SQLite selection
+  race; no PASS receipts were issued. A session query selected candidate ids
+  from outer columns before queued per-Plan recovery, then trusted the later
+  authoritative read without reapplying the requested session predicate or
+  recovered ordering. A concurrent whole-record session move could therefore
+  project a self-consistent Plan into the former session.
+- SQLite session and global queries now treat their first row scan only as a
+  candidate-id set. Every id is reread inside the per-Plan serialization
+  boundary, corrupt records remain isolated, and the recovered authoritative
+  records are re-filtered by session and re-sorted by their decoded `updatedAt`
+  before projection. `getLatestBySession` uses the same rebound result contract.
+- A deterministic barrier regression queues both list and latest reads behind
+  projection recovery, atomically changes the stored envelope and payload to a
+  different session after the first query, and proves neither old-session API
+  can return the moved Plan while the new session can. Focused PlanStore
+  validation passes `27/27`. Full `npm run verify` passes strict test type
+  coverage `435/435`, `326` current files / `3968` current tests with declared
+  skips, every Round2–Round12 lane, production build, Agent eval `26/26`, and
+  Memory eval `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`,
+  SQLite `3.53.2`, seven migrations, eight authority domains, renderer startup,
+  and Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
+  zero-vulnerability production audit pass. Exact-byte dual review and external
+  package acceptance remain required before merge and release.
