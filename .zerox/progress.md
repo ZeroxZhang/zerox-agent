@@ -14204,3 +14204,29 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
   zero-vulnerability production audit pass. Exact-byte dual review and external
   package acceptance remain required before merge and release.
+
+## 2026-09-02 - v3.9.2 bounded SSE framing
+
+- Candidate `738cd0addb37ebaa560f8c26842a70c4920620b5` was rejected before review
+  completion after the security/data lane found one Major resource-boundary
+  defect; no PASS receipts were issued. The shared terminal reader bounded
+  time but not bytes, so a provider could keep each read active while sending
+  an endless line without `\n`, growing the Electron main-process buffer until
+  the later request deadline or memory exhaustion.
+- The shared SSE reader now enforces both a 4 MiB maximum physical line and a
+  32 MiB maximum raw stream before decoding bytes. Either violation raises a
+  fixed error, closes the async iterator, and initiates transport cancellation;
+  providers cannot override the production defaults. Separate limits prevent
+  both an unterminated-line flood and many individually small frames from
+  growing model output without bound.
+- Regressions use pull-driven never-ending streams to prove the line limit and
+  aggregate limit fail before unbounded reads, cancel the source, and preserve
+  the published production limits. Focused SSE/provider/IME validation passes
+  `72/72`. Full `npm run verify` passes strict test type coverage `436/436`,
+  `327` current files / `3977` current tests with declared skips, every
+  Round2–Round12 lane, production build, Agent eval `26/26`, and Memory eval
+  `2/2`. Production smoke passes Electron `42.9.0` / ABI `146`, SQLite
+  `3.53.2`, seven migrations, eight authority domains, renderer startup, and
+  Node ABI `137` restoration. Caller-pinned Program/Harness checks and the
+  zero-vulnerability production audit pass. Exact-byte dual review and external
+  package acceptance remain required before merge and release.

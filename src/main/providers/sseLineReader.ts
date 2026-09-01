@@ -2,7 +2,15 @@ export interface SseLineReaderOptions {
   isTerminal: () => boolean;
   idleTimeoutMs?: number;
   idleTimeoutMessage?: string;
+  maxLineBytes?: number;
+  maxStreamBytes?: number;
 }
+
+export const SSE_MAX_LINE_BYTES = 4 * 1024 * 1024;
+export const SSE_MAX_STREAM_BYTES = 32 * 1024 * 1024;
+
+const SSE_LINE_LIMIT_ERROR = "SSE stream line exceeded the maximum byte limit.";
+const SSE_STREAM_LIMIT_ERROR = "SSE stream exceeded the maximum total byte limit.";
 
 /**
  * Decode an SSE response one line at a time and stop at the protocol terminal
@@ -17,6 +25,16 @@ export async function* readSseLinesUntilTerminal(
   const decoder = new TextDecoder();
   let buffer = "";
   let eofObserved = false;
+  let totalBytes = 0;
+  let currentLineBytes = 0;
+  const maxLineBytes = normalizeByteLimit(
+    options.maxLineBytes,
+    SSE_MAX_LINE_BYTES,
+  );
+  const maxStreamBytes = normalizeByteLimit(
+    options.maxStreamBytes,
+    SSE_MAX_STREAM_BYTES,
+  );
 
   try {
     while (!options.isTerminal()) {
@@ -25,6 +43,16 @@ export async function* readSseLinesUntilTerminal(
         eofObserved = true;
         break;
       }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxStreamBytes) {
+        throw new Error(SSE_STREAM_LIMIT_ERROR);
+      }
+      currentLineBytes = countTrailingLineBytes(
+        value,
+        currentLineBytes,
+        maxLineBytes,
+      );
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -65,6 +93,33 @@ export async function* readSseLinesUntilTerminal(
         });
     }
   }
+}
+
+function normalizeByteLimit(value: number | undefined, fallback: number): number {
+  return Number.isSafeInteger(value) && (value ?? 0) > 0
+    ? Number(value)
+    : fallback;
+}
+
+function countTrailingLineBytes(
+  chunk: Uint8Array,
+  previousLineBytes: number,
+  maxLineBytes: number,
+): number {
+  let lineBytes = previousLineBytes;
+  let segmentStart = 0;
+  while (segmentStart < chunk.byteLength) {
+    const newlineIndex = chunk.indexOf(0x0a, segmentStart);
+    const segmentEnd = newlineIndex === -1 ? chunk.byteLength : newlineIndex;
+    lineBytes += segmentEnd - segmentStart;
+    if (lineBytes > maxLineBytes) {
+      throw new Error(SSE_LINE_LIMIT_ERROR);
+    }
+    if (newlineIndex === -1) break;
+    lineBytes = 0;
+    segmentStart = newlineIndex + 1;
+  }
+  return lineBytes;
 }
 
 async function readWithOptionalIdleTimeout(
