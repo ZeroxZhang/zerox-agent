@@ -14742,3 +14742,37 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   SQLite `3.53.2`, seven migrations, eight authority domains, renderer startup,
   and Node ABI `137` restoration; dependency audit reports zero
   vulnerabilities and dependency-tree and whitespace checks pass.
+
+## 2026-09-02 - P113/CD09 caller-pinned unsigned helper enforcement
+
+- Frozen candidate `a53523466312696d53bd705236859737873ac070` passed the
+  independent code lane at `0C/0M/0m` but was rejected by the independent
+  security lane at `0C/1M/0m`. The caller-owned policy carried the reviewed
+  unsigned helper digest, yet the production build only validated the policy
+  shape and toolchain identity; it did not compare that digest with the helper
+  bytes it had actually compiled. Packaging could therefore bind a newly
+  generated signed helper without first proving that its unsigned input was
+  the caller-reviewed binary.
+- Native helper inspection now opens the canonical 0755 single-link file with
+  `O_NOFOLLOW`, hashes through the file descriptor, and verifies descriptor,
+  pathname, inode, size, timestamps, and digest remain stable across metadata
+  inspection. The build postflight compares the actual unsigned digest with
+  `safeFsHelperDigest`; packaging independently repeats the pinned inspection
+  after Electron rebuild and again after Electron Builder, and rejects any
+  byte, mode, architecture, deployment-target, or linked-library drift.
+- Negative coverage mutates the native source while retaining a valid policy
+  and proves the build fails on digest drift; a second case proves replacement
+  between build and package fails closed. Package-structure coverage requires
+  all three pinned inspections to bracket Electron Builder. Focused controls
+  pass `33/33`, and a real local package passes with reviewed unsigned digest
+  `sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6`
+  and signed packaged digest
+  `sha256:19336a5e9460001e0bb218d8ca08875610e98c7e5d70a3e645a4bf0653f0cfa9`.
+- Fresh full `npm run verify` passes `4034` current tests with declared skips,
+  strict test type coverage `437/437`, every Round2-Round12 compatibility lane,
+  production build, Agent eval `26/26`, and Memory eval `2/2`. Production smoke
+  passes Electron `42.9.0` / ABI `146`, SQLite `3.53.2`, seven migrations,
+  eight authority domains, renderer startup, and Node ABI `137` restoration;
+  dependency audit reports zero vulnerabilities and dependency-tree and
+  whitespace checks pass. Fresh exact-byte dual review and the isolated
+  package-to-postflight acceptance remain mandatory before release.

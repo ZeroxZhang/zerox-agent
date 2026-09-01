@@ -245,6 +245,8 @@ describe("package scripts", () => {
     expect(source).toContain(
       "local candidate package contains generated native ABI cache",
     );
+    expect(source.match(/inspectPinnedUnsignedSafeFsHelper\(/g)).toHaveLength(3);
+    expect(source.match(/assertUnchangedUnsignedSafeFsHelper\(/g)).toHaveLength(2);
     const packagingTryIndex = source.indexOf("let packagingError = null;");
     const electronRebuildIndex = source.indexOf(
       'await run(path.join(root, "node_modules/.bin/electron-rebuild")',
@@ -259,6 +261,15 @@ describe("package scripts", () => {
     expect(electronRebuildIndex).toBeGreaterThan(packagingTryIndex);
     expect(electronBuilderIndex).toBeGreaterThan(electronRebuildIndex);
     expect(nodeRestoreIndex).toBeGreaterThan(electronBuilderIndex);
+    const firstUnsignedRecheck = source.indexOf(
+      "const prePackageUnsignedSafeFsHelper = inspectPinnedUnsignedSafeFsHelper(",
+    );
+    const finalUnsignedRecheck = source.lastIndexOf(
+      "inspectPinnedUnsignedSafeFsHelper(",
+    );
+    expect(firstUnsignedRecheck).toBeGreaterThan(electronRebuildIndex);
+    expect(firstUnsignedRecheck).toBeLessThan(electronBuilderIndex);
+    expect(finalUnsignedRecheck).toBeGreaterThan(electronBuilderIndex);
     // The Node-ABI restore must not compile against the Electron headers that
     // npm_config_nodedir points at during packaging (anchor postflight pins
     // the Node-ABI better-sqlite3 binary).

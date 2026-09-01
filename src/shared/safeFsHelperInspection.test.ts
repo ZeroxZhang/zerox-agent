@@ -13,8 +13,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-// @ts-expect-error Local build inspection intentionally remains executable JavaScript.
-import { inspectSafeFsHelper } from "../../scripts/inspect-safe-fs-helper.mjs";
+// @ts-expect-error Local helper integrity utilities intentionally remain executable JavaScript.
+import { assertUnchangedUnsignedSafeFsHelper, inspectSafeFsHelper, inspectPinnedUnsignedSafeFsHelper } from "../../scripts/inspect-safe-fs-helper.mjs";
 // @ts-expect-error Local toolchain selection intentionally remains executable JavaScript.
 import * as safeFsToolchain from "../../scripts/safe-fs-toolchain-selection.mjs";
 
@@ -200,6 +200,10 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       path.join(scriptsRoot, "safe-fs-toolchain-selection.mjs"),
     );
     copyFileSync(
+      path.join(process.cwd(), "scripts/inspect-safe-fs-helper.mjs"),
+      path.join(scriptsRoot, "inspect-safe-fs-helper.mjs"),
+    );
+    copyFileSync(
       path.join(process.cwd(), "native/macos/zerox-safe-fs.c"),
       path.join(nativeRoot, "zerox-safe-fs.c"),
     );
@@ -285,6 +289,22 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     expect(() => build({ SDKROOT: "macosx" }))
       .toThrowError(/SDKROOT differs from the caller-reviewed SDK path/);
 
+    const copiedSourcePath = path.join(nativeRoot, "zerox-safe-fs.c");
+    const originalSource = readFileSync(copiedSourcePath, "utf8");
+    writeFileSync(
+      copiedSourcePath,
+      originalSource.replace(
+        'fprintf(stderr, "zerox-safe-fs: %s\\n", message);',
+        'fprintf(stderr, "zerox-safe-fs-policy-drift: %s\\n", message);',
+      ),
+    );
+    expect(() => build({
+      CC: EXPECTED_SAFE_FS_COMPILER.configuredPath,
+      SDKROOT: EXPECTED_SAFE_FS_SDK.configuredPath,
+    })).toThrowError(
+      /unsigned safe-fs helper digest differs from the caller-reviewed policy/,
+    );
+
     writeFileSync(
       policyPath,
       `${JSON.stringify({ ...policy, digest: `sha256:${"0".repeat(64)}` })}\n`,
@@ -310,6 +330,21 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     );
     expect(() => loadPinnedSafeFsToolchainPolicy(executionRoot))
       .toThrowError("caller-owned safe-fs toolchain policy is invalid");
+  });
+
+  it("rejects unsigned helper replacement between build and packaging", () => {
+    const helperPath = path.join(
+      process.cwd(),
+      `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+    );
+    const policy = {
+      safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
+    };
+    const built = inspectPinnedUnsignedSafeFsHelper(helperPath, policy);
+    expect(() => assertUnchangedUnsignedSafeFsHelper(
+      built,
+      { ...built, sha256: `sha256:${"0".repeat(64)}` },
+    )).toThrowError("unsigned safe-fs helper changed before packaging");
   });
 
   it("loads the external runner's generated toolchain policy with the production parser", () => {

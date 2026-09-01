@@ -16,7 +16,12 @@ import {
   computeLocalCandidateSourceManifest,
   computeTreeManifest,
 } from "./local-candidate-source-manifest.mjs";
-import { inspectSafeFsHelper } from "./inspect-safe-fs-helper.mjs";
+import {
+  assertUnchangedUnsignedSafeFsHelper,
+  inspectSafeFsHelper,
+  inspectPinnedUnsignedSafeFsHelper,
+} from "./inspect-safe-fs-helper.mjs";
+import { loadPinnedSafeFsToolchainPolicy } from "./safe-fs-toolchain-selection.mjs";
 
 if (process.argv.includes("--self-test-failure-preservation")) {
   verifyFailurePreservationSelfTest();
@@ -92,13 +97,30 @@ async function run(command, args, options = {}) {
 
 const sourceManifest = await computeLocalCandidateSourceManifest(root);
 const sourceDigest = sourceManifest.digest;
+const safeFsToolchainPolicy = loadPinnedSafeFsToolchainPolicy(root);
+const unsignedSafeFsHelperPath = path.join(
+  root,
+  `dist-native/darwin-${process.arch}/zerox-safe-fs`,
+);
 
 await run(process.execPath, [npmCli, "run", "build"]);
+const builtUnsignedSafeFsHelper = inspectPinnedUnsignedSafeFsHelper(
+  unsignedSafeFsHelperPath,
+  safeFsToolchainPolicy,
+);
 let packagingError = null;
 try {
   await run(path.join(root, "node_modules/.bin/electron-rebuild"), [
     "-f", "-w", "better-sqlite3",
   ], { requireNativeCacheAfter: true });
+  const prePackageUnsignedSafeFsHelper = inspectPinnedUnsignedSafeFsHelper(
+    unsignedSafeFsHelperPath,
+    safeFsToolchainPolicy,
+  );
+  assertUnchangedUnsignedSafeFsHelper(
+    builtUnsignedSafeFsHelper,
+    prePackageUnsignedSafeFsHelper,
+  );
   await run(path.join(root, "node_modules/.bin/electron-builder"), [
     "--mac", "dir",
     "--publish", "never",
@@ -120,6 +142,13 @@ try {
     requireNativeCacheBefore: true,
     requireNativeCacheAfter: true,
   });
+  assertUnchangedUnsignedSafeFsHelper(
+    builtUnsignedSafeFsHelper,
+    inspectPinnedUnsignedSafeFsHelper(
+      unsignedSafeFsHelperPath,
+      safeFsToolchainPolicy,
+    ),
+  );
 } catch (error) {
   packagingError = error;
 }

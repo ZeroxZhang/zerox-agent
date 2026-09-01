@@ -10,7 +10,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
 } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -18,6 +17,7 @@ import {
   loadPinnedSafeFsToolchainPolicy,
   selectSafeFsToolchain,
 } from "./safe-fs-toolchain-selection.mjs";
+import { inspectPinnedUnsignedSafeFsHelper } from "./inspect-safe-fs-helper.mjs";
 
 if (process.platform !== "darwin") {
   console.log(JSON.stringify({ kind: "zerox-safe-fs-build", status: "skipped", platform: process.platform }));
@@ -105,29 +105,10 @@ if (buildError && toolchainPostflightError) {
 if (buildError) throw buildError;
 if (toolchainPostflightError) throw toolchainPostflightError;
 
-const bytes = readFileSync(outputPath);
-const metadata = statSync(outputPath);
-if (!metadata.isFile() || (metadata.mode & 0o777) !== 0o755) {
-  throw new Error("safe-fs helper must be a regular 0755 file");
-}
-const fileOutput = run("/usr/bin/file", [outputPath], true);
-if (!fileOutput.includes(`Mach-O 64-bit executable ${architecture}`)) {
-  throw new Error(`safe-fs helper architecture is invalid: ${fileOutput.trim()}`);
-}
-const loadCommands = run("/usr/bin/otool", ["-l", outputPath], true);
-if (!/cmd LC_BUILD_VERSION[\s\S]*?minos 12\.0(?:\.0)?\b/.test(loadCommands)) {
-  throw new Error("safe-fs helper does not preserve the macOS 12.0 deployment target");
-}
-const linkedLibraries = run("/usr/bin/otool", ["-L", outputPath], true);
-const unexpectedLibraries = linkedLibraries
-  .split("\n")
-  .slice(1)
-  .map((line) => line.trim())
-  .filter(Boolean)
-  .filter((line) => !line.startsWith("/usr/lib/libSystem.B.dylib "));
-if (unexpectedLibraries.length > 0) {
-  throw new Error(`safe-fs helper has unexpected libraries: ${unexpectedLibraries.join(", ")}`);
-}
+const helper = inspectPinnedUnsignedSafeFsHelper(
+  outputPath,
+  toolchainPolicy,
+);
 
 console.log(JSON.stringify({
   kind: "zerox-safe-fs-build",
@@ -136,8 +117,8 @@ console.log(JSON.stringify({
   architecture: process.arch,
   minimumSystemVersion: "12.0",
   outputPath: path.relative(root, outputPath),
-  bytes: bytes.length,
-  sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+  bytes: helper.bytes,
+  sha256: helper.sha256,
 }));
 
 function run(command, args, capture = false) {

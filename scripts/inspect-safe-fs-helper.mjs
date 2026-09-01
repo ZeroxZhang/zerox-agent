@@ -1,21 +1,20 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 
 export function inspectSafeFsHelper(helperPath, options = {}) {
   const run = options.run ?? runCommand;
   const absolutePath = path.resolve(helperPath);
-  const metadata = lstatSync(absolutePath);
-  if (
-    !metadata.isFile()
-    || metadata.isSymbolicLink()
-    || (metadata.mode & 0o777) !== 0o755
-    || realpathSync(absolutePath) !== absolutePath
-  ) {
-    throw new Error("safe-fs helper must be a canonical 0755 regular file");
-  }
-  const bytes = readFileSync(absolutePath);
+  const initialCapture = captureSafeFsHelper(absolutePath);
   const fileOutput = runChecked(
     run,
     "/usr/bin/file",
@@ -61,10 +60,15 @@ export function inspectSafeFsHelper(helperPath, options = {}) {
     );
   }
 
+  assertSameSafeFsCapture(
+    initialCapture,
+    captureSafeFsHelper(absolutePath),
+  );
+
   const result = {
     path: absolutePath,
-    bytes: bytes.length,
-    sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+    bytes: initialCapture.bytes.length,
+    sha256: initialCapture.digest,
     mode: "0755",
     architecture,
     minimumSystemVersion,
@@ -98,12 +102,110 @@ export function inspectSafeFsHelper(helperPath, options = {}) {
   if (!/<dict>\s*<\/dict>/.test(entitlements) || /<key>/.test(entitlements)) {
     throw new Error("safe-fs helper must have an empty entitlement set");
   }
+  assertSameSafeFsCapture(
+    initialCapture,
+    captureSafeFsHelper(absolutePath),
+  );
   return {
     ...result,
     signatureVerified: true,
     hardenedRuntime: true,
     entitlements: "empty",
   };
+}
+
+export function inspectPinnedUnsignedSafeFsHelper(
+  helperPath,
+  policy,
+  options = {},
+) {
+  const inspection = inspectSafeFsHelper(helperPath, options);
+  if (
+    policy
+    && inspection.sha256 !== policy.safeFsHelperDigest
+  ) {
+    throw new Error(
+      "unsigned safe-fs helper digest differs from the caller-reviewed policy",
+    );
+  }
+  return inspection;
+}
+
+export function assertUnchangedUnsignedSafeFsHelper(before, after) {
+  const fields = [
+    "bytes",
+    "sha256",
+    "mode",
+    "architecture",
+    "minimumSystemVersion",
+  ];
+  if (
+    fields.some((field) => before?.[field] !== after?.[field])
+    || JSON.stringify(before?.linkedLibraries)
+      !== JSON.stringify(after?.linkedLibraries)
+  ) {
+    throw new Error("unsigned safe-fs helper changed before packaging");
+  }
+}
+
+function captureSafeFsHelper(absolutePath) {
+  const descriptor = openSync(
+    absolutePath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const before = fstatSync(descriptor);
+    if (
+      !before.isFile()
+      || before.nlink !== 1
+      || (before.mode & 0o777) !== 0o755
+    ) {
+      throw new Error("safe-fs helper must be a canonical 0755 regular file");
+    }
+    const bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor);
+    const leaf = lstatSync(absolutePath);
+    if (
+      !after.isFile()
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || after.mtimeMs !== before.mtimeMs
+      || after.ctimeMs !== before.ctimeMs
+      || !leaf.isFile()
+      || leaf.isSymbolicLink()
+      || leaf.nlink !== 1
+      || leaf.dev !== before.dev
+      || leaf.ino !== before.ino
+      || realpathSync(absolutePath) !== absolutePath
+    ) {
+      throw new Error("safe-fs helper identity changed while reading");
+    }
+    return {
+      bytes,
+      dev: before.dev,
+      ino: before.ino,
+      size: before.size,
+      mtimeMs: before.mtimeMs,
+      ctimeMs: before.ctimeMs,
+      digest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+    };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function assertSameSafeFsCapture(before, after) {
+  if (
+    before.dev !== after.dev
+    || before.ino !== after.ino
+    || before.size !== after.size
+    || before.mtimeMs !== after.mtimeMs
+    || before.ctimeMs !== after.ctimeMs
+    || before.digest !== after.digest
+  ) {
+    throw new Error("safe-fs helper identity changed during inspection");
+  }
 }
 
 function runCommand(command, args) {

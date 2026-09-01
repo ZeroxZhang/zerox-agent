@@ -136,7 +136,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/probe-native-sqlite.mjs":
     "sha256:41925fe9c348540d46abb43f275ffbf40ea86139304a27e33da465b4f220f34b",
   "scripts/package-local-candidate.mjs":
-    "sha256:5dc447b6e7822e36b35b222f125e070db2ca8268f39d7640568839beacdef329",
+    "sha256:291b515be6a3072eac6409b08d2d8fa140973bbae33ea47cd5115e9c899dd5f6",
   "scripts/local-candidate-source-manifest.mjs":
     "sha256:62198db25f2246fa45baba16534a4d912437e253d5d135690d3eb940a7ccbc91",
 });
