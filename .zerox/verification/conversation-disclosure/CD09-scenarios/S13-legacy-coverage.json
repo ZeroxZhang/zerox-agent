@@ -3,14 +3,14 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S13-legacy-coverage",
   "scenarioDigest": "sha256:1da0ad6ff0d434ad92845f1cea5d528fd01a1737ad0f443d1c45ef43687cf53f",
-  "executionId": "4d2c9bec-10a0-4e15-a07a-5981fcbbf8c1",
+  "executionId": "76bbe240-0b7d-4ded-8e2d-11bfff95c0d3",
   "processEpochs": [
-    "main_3bb379a3-be60-4615-9f53-e1f1d79411a3",
-    "main_5b984a2e-233b-4bb5-b29c-3eb22d35639e"
+    "main_e132db24-6623-485b-a4ca-029c5c2da597",
+    "main_472d6f0d-6fbb-4d52-a892-2466fc637032"
   ],
   "attemptNonces": [
-    "bf9a7e7a-5938-493b-9fe3-f1e8315e03da",
-    "75a5e512-aaef-444e-8a66-549af7322a44"
+    "e3e8cc4e-1876-44c1-af0f-fcf87d58615e",
+    "a2eb87fe-70cc-4f47-8b22-c84f27a02988"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -39,7 +39,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_3bb379a3-be60-4615-9f53-e1f1d79411a3"
+        "process:main_e132db24-6623-485b-a4ca-029c5c2da597"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -70,7 +70,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_3bb379a3-be60-4615-9f53-e1f1d79411a3"
+        "process:main_e132db24-6623-485b-a4ca-029c5c2da597"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -99,7 +99,7 @@
       "executor": "production_restart",
       "ok": true,
       "evidenceIds": [
-        "process:main_3bb379a3-be60-4615-9f53-e1f1d79411a3",
+        "process:main_e132db24-6623-485b-a4ca-029c5c2da597",
         "cd09-v391-session",
         "cd09-v391-goal",
         "cd09-v391-plan",
@@ -108,7 +108,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_5b984a2e-233b-4bb5-b29c-3eb22d35639e",
+        "process:main_472d6f0d-6fbb-4d52-a892-2466fc637032",
         "restart:persisted-authority"
       ],
       "observations": {
@@ -135,7 +135,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:47f7e8094c4f6459c08991ff05d2d1bab719cb3962a012e323436b844375cc3a",
-        "screenshot:sha256:7aa0db3a8119b81d0ee4afb48dc2b98008a160973e4e9b13b56b8c0efa48af28"
+        "screenshot:sha256:9180cc79c7140271af7ebf8fb002887736de30e3cccf05470f1263f938b7312d"
       ]
     },
     {
@@ -144,7 +144,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:e5190b95c94a7751f60cb045425129f4f928df22859c04da66a7893e229603bb",
-        "screenshot:sha256:7aa0db3a8119b81d0ee4afb48dc2b98008a160973e4e9b13b56b8c0efa48af28"
+        "screenshot:sha256:9180cc79c7140271af7ebf8fb002887736de30e3cccf05470f1263f938b7312d"
       ]
     },
     {
@@ -153,7 +153,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:39b4f836bec74207a7e73bc9157244cca0325ac02175a408695a99f4c75c71d2",
-        "screenshot:sha256:3471306c18a3f6f06b93476dad0fa763e2efdc0c4309d16949cc4f2aeb6eaaba"
+        "screenshot:sha256:00e86cf46ec307114754260604830d4c48e36184e6f4facb8e706acd10daa77f"
       ]
     }
   ],
@@ -275,7 +275,7 @@
     },
     {
       "ordinal": 24,
-      "channel": "toolApproval:setGoalModeEnabled",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
@@ -285,7 +285,7 @@
     },
     {
       "ordinal": 26,
-      "channel": "chatSessions:list",
+      "channel": "toolApproval:setGoalModeEnabled",
       "ok": true
     },
     {
@@ -385,12 +385,12 @@
     },
     {
       "ordinal": 46,
-      "channel": "scheduledTasks:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 47,
-      "channel": "modelSettings:load",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
@@ -475,9 +475,9 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:3471306c18a3f6f06b93476dad0fa763e2efdc0c4309d16949cc4f2aeb6eaaba",
-    "sha256:7aa0db3a8119b81d0ee4afb48dc2b98008a160973e4e9b13b56b8c0efa48af28"
+    "sha256:00e86cf46ec307114754260604830d4c48e36184e6f4facb8e706acd10daa77f",
+    "sha256:9180cc79c7140271af7ebf8fb002887736de30e3cccf05470f1263f938b7312d"
   ],
   "status": "passed",
-  "digest": "sha256:68fbd6aaf0c8041aaf71bd8fea483d31227a0ce3c415ceb779ce332f8f501c97"
+  "digest": "sha256:c7b2bbe8198e899d89ea37d71444eea7e1b7c5cd28a5ccb3661d490e20b5bd4e"
 }

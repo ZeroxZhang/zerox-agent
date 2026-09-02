@@ -3,14 +3,14 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S17-cancel-interruption",
   "scenarioDigest": "sha256:e06c224ecc01de33bc483eb90f0ef0c4367d475b5a4dd4d86c3d53bb5c92e52f",
-  "executionId": "756e15b4-9c63-4609-9e26-cbaf3c61fce5",
+  "executionId": "0238789a-55ee-485e-b802-cceeda61f5c0",
   "processEpochs": [
-    "main_8aa46e71-6d74-4066-929c-cb0fa4a1bf9b",
-    "main_e1c2f67e-3810-4589-956b-701affe1069c"
+    "main_2b938959-ac6d-4722-ad01-65a76b030891",
+    "main_cbc2f52b-759c-4067-87ea-85f4b585a3fa"
   ],
   "attemptNonces": [
-    "0d958de8-38f7-4c35-91a7-7f01003e14a7",
-    "2d5885a8-cc84-47ed-a68a-05f7d0ef1953"
+    "644fab33-eeee-4a90-9850-1dff18e04ad5",
+    "3b315be1-ee16-449a-b16a-f697525e8902"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -31,10 +31,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "ab6b4a74-fb21-4a69-ae01-dbb2c47e7a7b",
+        "087381f4-540d-49df-b10e-c669d4915337",
         "cd09-run-S17-cancel-interruption",
         "trajectory-S17-cancel-interruption",
-        "process:main_8aa46e71-6d74-4066-929c-cb0fa4a1bf9b"
+        "process:main_2b938959-ac6d-4722-ad01-65a76b030891"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,8 +52,8 @@
       "executor": "production_restart",
       "ok": true,
       "evidenceIds": [
-        "process:main_8aa46e71-6d74-4066-929c-cb0fa4a1bf9b",
-        "ab6b4a74-fb21-4a69-ae01-dbb2c47e7a7b",
+        "process:main_2b938959-ac6d-4722-ad01-65a76b030891",
+        "087381f4-540d-49df-b10e-c669d4915337",
         "cd09-run-S17-cancel-interruption",
         "trajectory-S17-cancel-interruption"
       ],
@@ -75,12 +75,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "ab6b4a74-fb21-4a69-ae01-dbb2c47e7a7b",
+        "087381f4-540d-49df-b10e-c669d4915337",
         "approval-S17-cancel-interruption",
-        "tool-invocation:36:3d79a553-15e1-4711-a12d-c104777a0b1d:22:cd09-s17-shell-dry-run",
-        "3d79a553-15e1-4711-a12d-c104777a0b1d",
-        "chat_run_ab6b4a74-fb21-4a69-ae01-dbb2c47e7a7b_cd09-s17-pending-approval",
-        "process:main_e1c2f67e-3810-4589-956b-701affe1069c",
+        "tool-invocation:36:4ce26240-b82c-4e3a-ac8d-2ec5e80699df:22:cd09-s17-shell-dry-run",
+        "4ce26240-b82c-4e3a-ac8d-2ec5e80699df",
+        "chat_run_087381f4-540d-49df-b10e-c669d4915337_cd09-s17-pending-approval",
+        "process:main_cbc2f52b-759c-4067-87ea-85f4b585a3fa",
         "restart:approval-interrupted",
         "restart:tool-invocation-aborted",
         "restart:causal-attempt-interrupted"
@@ -113,7 +113,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:d1b0a144a194a19ec529476e3e8e648daf8736b8d946ca27af798d58a1757640",
-        "screenshot:sha256:40e310779c8e578f8b015c81d3c3e3f161bbf322bdcf29b7cde9d7d3b7d7a43d"
+        "screenshot:sha256:9c1ac4692e805a4a184da267d477f2912823c719da19b50b409aadc3f0168369"
       ]
     },
     {
@@ -122,7 +122,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:26373a06cf93b9e21fd6acbb87392c3c983f195c6816349cef06abdfd83a59c5",
-        "screenshot:sha256:54049d10abb953a94e4e0a3b958faa14fc0d5154b07063d07b6018732d45a0b2"
+        "screenshot:sha256:2bb0419c9f08ecc0f02a4db033306eb77c3c1fbf2e69e38bd232f0613435be28"
       ]
     },
     {
@@ -131,7 +131,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:9c0f7b4a26097ac2c2fc8a5247189ebddae9a4d1724c73ba2d9a157da0065c23",
-        "screenshot:sha256:54049d10abb953a94e4e0a3b958faa14fc0d5154b07063d07b6018732d45a0b2"
+        "screenshot:sha256:2bb0419c9f08ecc0f02a4db033306eb77c3c1fbf2e69e38bd232f0613435be28"
       ]
     }
   ],
@@ -233,47 +233,47 @@
     },
     {
       "ordinal": 20,
-      "channel": "memory:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 21,
-      "channel": "agentWorkspaces:list",
+      "channel": "memory:list",
       "ok": true
     },
     {
       "ordinal": 22,
-      "channel": "agentBootstrap:loadValidation",
+      "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
       "ordinal": 23,
-      "channel": "app:getMeta",
+      "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
       "ordinal": 24,
-      "channel": "app:getRuntimeInfo",
+      "channel": "app:getMeta",
       "ok": true
     },
     {
       "ordinal": 25,
-      "channel": "navigation:list",
+      "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
       "ordinal": 26,
-      "channel": "chatSessions:list",
+      "channel": "navigation:list",
       "ok": true
     },
     {
       "ordinal": 27,
-      "channel": "app:getUpdateState",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 28,
-      "channel": "modelSettings:load",
+      "channel": "app:getUpdateState",
       "ok": true
     },
     {
@@ -453,9 +453,9 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:54049d10abb953a94e4e0a3b958faa14fc0d5154b07063d07b6018732d45a0b2",
-    "sha256:40e310779c8e578f8b015c81d3c3e3f161bbf322bdcf29b7cde9d7d3b7d7a43d"
+    "sha256:2bb0419c9f08ecc0f02a4db033306eb77c3c1fbf2e69e38bd232f0613435be28",
+    "sha256:9c1ac4692e805a4a184da267d477f2912823c719da19b50b409aadc3f0168369"
   ],
   "status": "passed",
-  "digest": "sha256:a6c6e4e672e242064c79563fc582c00af60a4aadef63dc9b99257922024f41f6"
+  "digest": "sha256:c608e21f8d0061201ced61f61185b39b22f14e3d0cfff932cda817745ed90015"
 }

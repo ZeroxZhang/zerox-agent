@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S10-accessibility",
   "scenarioDigest": "sha256:3fdfc7cd9183c89b18b5cb2771543213dfe031e31abcf33f86c2e8d9a4b09065",
-  "executionId": "a37a6e1e-7990-426c-82e7-3946c38986da",
+  "executionId": "4ec0de3e-ae35-46a3-b8a9-df5e3b2bbf05",
   "processEpochs": [
-    "main_47e847c3-3c66-4bb3-994a-291893cb8d3a"
+    "main_c7ce5a4e-484c-4f4c-8f5c-5b465f125ae6"
   ],
   "attemptNonces": [
-    "54315dca-bbdf-472c-9342-559b60ffcddd"
+    "5cc8555c-a6c6-46cd-b7e8-9d8019a718e2"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "2effc7a2-b45f-4711-9aae-fa5c75218dd6",
+        "df445096-12b6-4a34-8c19-64f3d3787a38",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_47e847c3-3c66-4bb3-994a-291893cb8d3a"
+        "process:main_c7ce5a4e-484c-4f4c-8f5c-5b465f125ae6"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -62,10 +62,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "2effc7a2-b45f-4711-9aae-fa5c75218dd6",
+        "df445096-12b6-4a34-8c19-64f3d3787a38",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_47e847c3-3c66-4bb3-994a-291893cb8d3a"
+        "process:main_c7ce5a4e-484c-4f4c-8f5c-5b465f125ae6"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -86,10 +86,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "2effc7a2-b45f-4711-9aae-fa5c75218dd6",
+        "df445096-12b6-4a34-8c19-64f3d3787a38",
         "cd09-run-S10-accessibility",
         "trajectory-S10-accessibility",
-        "process:main_47e847c3-3c66-4bb3-994a-291893cb8d3a"
+        "process:main_c7ce5a4e-484c-4f4c-8f5c-5b465f125ae6"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -113,7 +113,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:8f0557f59ea5ba72cae59debfacb446c8f4181086e5396e671965fbbc00e5fac",
-        "screenshot:sha256:bbd4d28fa6bb039972c3a608f0723efc03cc254645ff999ab76493d60070c391"
+        "screenshot:sha256:9eb6cf55568b9a77101f49719c577eb1101e3aa97b563d4ac74c03b7fa84bd37"
       ]
     },
     {
@@ -122,7 +122,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:9ba031c97a64af3b6aa74eb80dd5d29918655b633142db81b9afaf880bc6221d",
-        "screenshot:sha256:bbd4d28fa6bb039972c3a608f0723efc03cc254645ff999ab76493d60070c391"
+        "screenshot:sha256:9eb6cf55568b9a77101f49719c577eb1101e3aa97b563d4ac74c03b7fa84bd37"
       ]
     },
     {
@@ -131,7 +131,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:d585182d23b67c8ab06b3ef528d060b858720e75bbd147d7aabf558459e70001",
-        "screenshot:sha256:bbd4d28fa6bb039972c3a608f0723efc03cc254645ff999ab76493d60070c391"
+        "screenshot:sha256:9eb6cf55568b9a77101f49719c577eb1101e3aa97b563d4ac74c03b7fa84bd37"
       ]
     }
   ],
@@ -303,22 +303,22 @@
     },
     {
       "ordinal": 34,
-      "channel": "modelCatalog:load",
-      "ok": true
-    },
-    {
-      "ordinal": 35,
       "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
+      "ordinal": 35,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
       "ordinal": 36,
-      "channel": "skills:list",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 37,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -533,8 +533,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:bbd4d28fa6bb039972c3a608f0723efc03cc254645ff999ab76493d60070c391"
+    "sha256:9eb6cf55568b9a77101f49719c577eb1101e3aa97b563d4ac74c03b7fa84bd37"
   ],
   "status": "passed",
-  "digest": "sha256:94d3474b7054567f3ab8998328f3dd714b7a46e24d2c606d7144c295373f5010"
+  "digest": "sha256:aa91b2a8eb82d7a18abe10fe829c8c24dd8101db50cab1052d98b9228426216d"
 }

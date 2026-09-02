@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S03-evidence-handoff",
   "scenarioDigest": "sha256:8040007dfb92f72b8b2e3a305cf2e705ce8a7ed80e7fd5c0907c06743cad125c",
-  "executionId": "3669345e-d985-4067-afe3-1bcbac84d543",
+  "executionId": "918fb8fe-524d-4bdc-b026-e07151eedfe4",
   "processEpochs": [
-    "main_7bd8d2d1-9bf8-4c98-95cc-b43ba3d52e23"
+    "main_898befe2-8247-423e-985f-a9f9218947a4"
   ],
   "attemptNonces": [
-    "7764d7e1-7ca5-4541-9293-69043a630517"
+    "af656e0f-ca5b-4703-9c32-c88a80e95fea"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "b79e2970-b7a3-4b60-933e-40e6ffa26776",
+        "47e8ee17-61a1-4d60-b32d-01e175c39522",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_7bd8d2d1-9bf8-4c98-95cc-b43ba3d52e23"
+        "process:main_898befe2-8247-423e-985f-a9f9218947a4"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,10 +52,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "b79e2970-b7a3-4b60-933e-40e6ffa26776",
+        "47e8ee17-61a1-4d60-b32d-01e175c39522",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_7bd8d2d1-9bf8-4c98-95cc-b43ba3d52e23"
+        "process:main_898befe2-8247-423e-985f-a9f9218947a4"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -295,5 +295,5 @@
     "sha256:8d75658875c68939df891860d3d2f25d50dea13f3501c882237468906fa6b83b"
   ],
   "status": "passed",
-  "digest": "sha256:96fee86ec7a9e0cb322a682afe95862923ef1c40b6351522e001101de4239be0"
+  "digest": "sha256:8f83cb1840a4142abd8493eeae3ea4943c774b1ec3d7ad69f6a96bbc13cd9baa"
 }

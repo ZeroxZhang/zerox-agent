@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S07-plan-progress",
   "scenarioDigest": "sha256:93e611cabbd360e91c44b9ec2a70377013c1a8140c77a2d97e18fbcf3be5b7e0",
-  "executionId": "eb2f9d3b-b291-4e50-a042-6e9c22072255",
+  "executionId": "9a41f910-75f6-45ac-a102-dba51d117e34",
   "processEpochs": [
-    "main_87f18e65-4a10-4869-95ce-b5bc43f876df"
+    "main_ba744314-f9a4-41c0-91f6-91ed1d6db735"
   ],
   "attemptNonces": [
-    "cc0a7eba-0ff6-48c3-b146-a020d30fb878"
+    "e0fc3c54-a6f3-4a5f-9c0b-3850c2b925c7"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "68c99a21-efd8-40a9-8c48-476360d20a4d",
+        "3626e0f0-908a-499f-9348-893fefcacf2b",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "plan_cd09_s07_1",
-        "process:main_87f18e65-4a10-4869-95ce-b5bc43f876df"
+        "process:main_ba744314-f9a4-41c0-91f6-91ed1d6db735"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -54,11 +54,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "68c99a21-efd8-40a9-8c48-476360d20a4d",
+        "3626e0f0-908a-499f-9348-893fefcacf2b",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "plan_cd09_s07_1",
-        "process:main_87f18e65-4a10-4869-95ce-b5bc43f876df"
+        "process:main_ba744314-f9a4-41c0-91f6-91ed1d6db735"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,11 +75,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "68c99a21-efd8-40a9-8c48-476360d20a4d",
+        "3626e0f0-908a-499f-9348-893fefcacf2b",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "plan_cd09_s07_1",
-        "process:main_87f18e65-4a10-4869-95ce-b5bc43f876df"
+        "process:main_ba744314-f9a4-41c0-91f6-91ed1d6db735"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -102,7 +102,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:ec8f718d7e37774954b89c539fb4606d207efdde9ab2a7c8f7ead0fd77ad2103",
-        "screenshot:sha256:a86f79fdde2050447a2bd8dfca1b806475aad4f9417b6cf034d6cbbd8f09a152"
+        "screenshot:sha256:5ff99dcc6fd21c0fdd9e5b97fd185b6a5c94eeacb90e536abe75727c5f18c495"
       ]
     },
     {
@@ -111,7 +111,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:b1fc92ab41f94f17c7a9e47e124417d37b29be164d20cd636af894966c39e041",
-        "screenshot:sha256:a86f79fdde2050447a2bd8dfca1b806475aad4f9417b6cf034d6cbbd8f09a152"
+        "screenshot:sha256:5ff99dcc6fd21c0fdd9e5b97fd185b6a5c94eeacb90e536abe75727c5f18c495"
       ]
     },
     {
@@ -120,7 +120,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:071590e736ce1d628eccb8d4895cfca05f4cdade85000996001259ac27214529",
-        "screenshot:sha256:a86f79fdde2050447a2bd8dfca1b806475aad4f9417b6cf034d6cbbd8f09a152"
+        "screenshot:sha256:5ff99dcc6fd21c0fdd9e5b97fd185b6a5c94eeacb90e536abe75727c5f18c495"
       ]
     }
   ],
@@ -202,12 +202,12 @@
     },
     {
       "ordinal": 16,
-      "channel": "chatSessions:get",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 17,
-      "channel": "skills:list",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
@@ -252,12 +252,12 @@
     },
     {
       "ordinal": 26,
-      "channel": "plans:get",
+      "channel": "toolApproval:setGoalModeEnabled",
       "ok": true
     },
     {
       "ordinal": 27,
-      "channel": "toolApproval:setGoalModeEnabled",
+      "channel": "plans:get",
       "ok": true
     },
     {
@@ -422,8 +422,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:a86f79fdde2050447a2bd8dfca1b806475aad4f9417b6cf034d6cbbd8f09a152"
+    "sha256:5ff99dcc6fd21c0fdd9e5b97fd185b6a5c94eeacb90e536abe75727c5f18c495"
   ],
   "status": "passed",
-  "digest": "sha256:83c429ac7529a847dd785efdcdc5bebdd327f7aed4db5c41cda02c228b29a130"
+  "digest": "sha256:362c1ede2de2918f86962d4a6abd52b07eb7065ae9efc3175e2b3839d50e4b12"
 }

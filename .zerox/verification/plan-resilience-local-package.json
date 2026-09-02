@@ -5,7 +5,7 @@
   "accepted": true,
   "package": {
     "path": "release-local/mac-arm64/Zerox Agent.app",
-    "appAsarSha256": "sha256:e120b7e9c2048577c556b7160a3514932f7b1955b6aa14b4b981ce6eee06fab6"
+    "appAsarSha256": "sha256:46ed25176b959a15e2eb061cd07f1384c16135a14c1e5efb4825519283b98c9e"
   },
   "source": {
     "planId": "plan_resilience_fixture",
@@ -18,7 +18,7 @@
     "injectedFailureCount": 1,
     "slowSuccessCount": 1,
     "responseDelayMs": 35000,
-    "elapsedMs": 39849
+    "elapsedMs": 39892
   },
   "resumedPlan": {
     "exitCode": 0,

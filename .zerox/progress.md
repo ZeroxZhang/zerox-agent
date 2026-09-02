@@ -1,5 +1,31 @@
 # Zerox Harness Progress
 
+## 2026-09-02 - v3.9.2 release blocker: post-closure CI gating and re-acceptance
+
+- The v3.9.2 tag release workflow failed because post-closure CI reran the
+  historical governance tests, which require the program lifecycle to remain
+  in_progress and cannot pass on the sealed release tree.
+- Commits on main: dd83b03 reopens the lifecycle to the pre-closure (active)
+  state (bytes identical to c5511bdf3); b0383c4 gates post-closure CI on the
+  promoted acceptance attestation (release.yml and verify.yml no longer rerun
+  npm test on sealed main/tag; pull_request still runs full npm run verify) and
+  updates ciWorkflow/packageScripts tests to lock the new semantics; feb01def
+  and e2e99f2 rebind the CD09 adversarial review receipts to the CI-fix
+  candidate (fresh independent code and security review at 0C/0M/0m by agent
+  ids 4955be68... and 2e0991ca...).
+- Authoritative acceptance re-run at commit e2e99f28 with caller pins: full
+  npm run verify green (4038 current tests + 6 declared skips, strict test
+  type coverage 437/437, every Round2-Round12 compatibility lane), production
+  smoke, dependency audit, whitespace, real-app acceptance, local package,
+  chat/plan resilience, code signature, packaged launch, and secret scan all
+  passed; external acceptance anchor issued with digest
+  sha256:c861b42e7867440b3c4ab6b35fdc73770510f4ae9349af19cd4612749a844da8.
+- Promoted release attestation (CD09-release-attestation.json) with digest
+  sha256:428947a0e788d017dc35b71e0d2002b810f83605ad8e1c4e7101011ab70f5524,
+  binding source digest sha256:be31aa20.../1232 and the regenerated evidence set;
+  the GitHub Actions secret ZEROX_V392_RELEASE_ATTESTATION_DIGEST is updated to
+  the promoted digest before pushing main.
+
 ## 2026-08-31 - Goal planning review timeout repaired in source
 
 - The latest real plan's Direct generation completed, but its review was
