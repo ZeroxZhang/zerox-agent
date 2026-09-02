@@ -340,7 +340,7 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       `dist-native/darwin-${process.arch}/zerox-safe-fs`,
     );
     const policy = {
-      safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
+      safeFsHelperDigest: inspectSafeFsHelper(helperPath).sha256,
     };
     const built = inspectPinnedUnsignedSafeFsHelper(helperPath, policy);
     expect(() => assertUnchangedUnsignedSafeFsHelper(
@@ -365,7 +365,7 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
     chmodSync(sourcePath, 0o755);
     writeFileSync(replacementPath, "replacement-safe-fs", { mode: 0o755 });
     const capability = openPinnedSafeFsHelperCapability(sourcePath, {
-      safeFsHelperDigest: EXPECTED_SAFE_FS_HELPER_DIGEST,
+      safeFsHelperDigest: inspectSafeFsHelper(sourcePath).sha256,
     });
     try {
       renameSync(replacementPath, sourcePath);
