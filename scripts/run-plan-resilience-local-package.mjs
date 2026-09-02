@@ -84,7 +84,7 @@ try {
   );
 
   const startedAt = Date.now();
-  const child = spawn(executable, [], {
+  const child = spawn(executable, ["--no-sandbox"], {
     cwd: root,
     env: {
       ...process.env,

@@ -40,17 +40,21 @@ let cdp;
 
 try {
   await seedModelSettings(userDataDir, provider.baseUrl);
-  appProcess = spawn(executable, [`--remote-debugging-port=${debugPort}`], {
-    cwd: root,
-    env: {
-      ...process.env,
-      ZEROX_AGENT_USER_DATA_DIR: userDataDir,
-      ZEROX_STORAGE_BACKEND: "sqlite",
-      ZEROX_DISABLE_AUTO_UPDATE: "1",
-      OPENAI_API_KEY: "local-fixture-key",
+  appProcess = spawn(
+    executable,
+    ["--no-sandbox", `--remote-debugging-port=${debugPort}`],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        ZEROX_AGENT_USER_DATA_DIR: userDataDir,
+        ZEROX_STORAGE_BACKEND: "sqlite",
+        ZEROX_DISABLE_AUTO_UPDATE: "1",
+        OPENAI_API_KEY: "local-fixture-key",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
   const stderr = [];
   appProcess.stderr.on("data", (chunk) => {
     stderr.push(String(chunk).slice(-2_000));

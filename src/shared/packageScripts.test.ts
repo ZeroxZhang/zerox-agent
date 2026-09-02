@@ -630,6 +630,20 @@ describe("package scripts", () => {
     expect(runner).toContain(
       '["scripts/run-plan-resilience-local-package.mjs"]',
     );
+    const chatResilience = readFileSync(
+      path.join(process.cwd(), "scripts", "run-chat-resilience-local-package.mjs"),
+      "utf8",
+    );
+    const planResilience = readFileSync(
+      path.join(process.cwd(), "scripts", "run-plan-resilience-local-package.mjs"),
+      "utf8",
+    );
+    expect(chatResilience).toContain(
+      '["--no-sandbox", `--remote-debugging-port=${debugPort}`]',
+    );
+    expect(planResilience).toContain(
+      'spawn(executable, ["--no-sandbox"], {',
+    );
     expect(runner).toContain(
       'args[0] === "scripts/run-chat-resilience-local-package.mjs"',
     );
