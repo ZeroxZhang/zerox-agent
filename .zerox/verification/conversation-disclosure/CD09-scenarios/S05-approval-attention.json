@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S05-approval-attention",
   "scenarioDigest": "sha256:fc382536c2750c9ae7fc17b392e2847dc96f757f9a5da3076dd8766ab405eb33",
-  "executionId": "6e78954a-be7a-4653-acbf-878f15a90ac5",
+  "executionId": "4619c25a-3e79-429a-8ef9-39a96f5fa9c0",
   "processEpochs": [
-    "main_da97b716-476a-4901-ba8e-a56aa4cdf1f9"
+    "main_fc608f2b-29f6-4029-b784-d94daa5a4bfc"
   ],
   "attemptNonces": [
-    "1708daff-228a-4d0d-bb57-4479fe6f0d35"
+    "5fc14d88-fed9-4713-abb3-f6a381707b20"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "d9756434-df33-4fc0-ab37-8c058f358988",
+        "69e8d615-54e4-497e-8ab7-96d33db1a0ac",
         "cd09-run-S05-approval-attention",
         "trajectory-S05-approval-attention",
-        "process:main_da97b716-476a-4901-ba8e-a56aa4cdf1f9",
+        "process:main_fc608f2b-29f6-4029-b784-d94daa5a4bfc",
         "approval:approval-S05-approval-attention"
       ],
       "observations": {
@@ -54,10 +54,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "d9756434-df33-4fc0-ab37-8c058f358988",
+        "69e8d615-54e4-497e-8ab7-96d33db1a0ac",
         "cd09-run-S05-approval-attention",
         "trajectory-S05-approval-attention",
-        "process:main_da97b716-476a-4901-ba8e-a56aa4cdf1f9",
+        "process:main_fc608f2b-29f6-4029-b784-d94daa5a4bfc",
         "approval:approval-S05-approval-attention"
       ],
       "observations": {
@@ -79,10 +79,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "d9756434-df33-4fc0-ab37-8c058f358988",
+        "69e8d615-54e4-497e-8ab7-96d33db1a0ac",
         "cd09-run-S05-approval-attention",
         "trajectory-S05-approval-attention",
-        "process:main_da97b716-476a-4901-ba8e-a56aa4cdf1f9",
+        "process:main_fc608f2b-29f6-4029-b784-d94daa5a4bfc",
         "approval:approval-S05-approval-attention"
       ],
       "observations": {
@@ -102,7 +102,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:44cc049125fa5864ac39c8689992fd427c3356eaea015d7a3f8411dfd4bab340",
-        "screenshot:sha256:e326ab334ce19edc59e6ac43d3f64ed3abe51aa644ce760f97ab7b66d772f32b"
+        "screenshot:sha256:25b50d5b6887b9b0cc3a0479d163e086ac0cf11ad674747a8af851aa9202a4e6"
       ]
     },
     {
@@ -111,7 +111,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:44cc049125fa5864ac39c8689992fd427c3356eaea015d7a3f8411dfd4bab340",
-        "screenshot:sha256:e326ab334ce19edc59e6ac43d3f64ed3abe51aa644ce760f97ab7b66d772f32b"
+        "screenshot:sha256:25b50d5b6887b9b0cc3a0479d163e086ac0cf11ad674747a8af851aa9202a4e6"
       ]
     },
     {
@@ -120,7 +120,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:c1baa0c7e3dfabe57756ec1803aa12b5181dd6ed821af5e822389fc6fbf6c716",
-        "screenshot:sha256:e326ab334ce19edc59e6ac43d3f64ed3abe51aa644ce760f97ab7b66d772f32b"
+        "screenshot:sha256:25b50d5b6887b9b0cc3a0479d163e086ac0cf11ad674747a8af851aa9202a4e6"
       ]
     }
   ],
@@ -407,8 +407,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:e326ab334ce19edc59e6ac43d3f64ed3abe51aa644ce760f97ab7b66d772f32b"
+    "sha256:25b50d5b6887b9b0cc3a0479d163e086ac0cf11ad674747a8af851aa9202a4e6"
   ],
   "status": "passed",
-  "digest": "sha256:be4c5c50f01e0e9229b10fa609795540d42d202ba78660655f839b28692ba0d7"
+  "digest": "sha256:0d6c8376079bc1d85d81dd6da8dbbf4d95370a60d2df7c0a88f2ccea3bd546a8"
 }

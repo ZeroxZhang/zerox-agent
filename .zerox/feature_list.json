@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-01T00:25:00.000+08:00",
+  "updatedAt": "2026-08-31T23:30:00.000+08:00",
   "features": [
     {
       "id": "P113-v3.9.2-disclosure-adversarial-acceptance",
       "priority": 144,
-      "status": "in_progress",
+      "status": "done",
       "title": "Complete adversarial acceptance and local v3.9.2 packaging",
       "files": [
         ".zerox/verification/conversation-disclosure/CD09-real-app-acceptance.json",
