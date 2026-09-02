@@ -64,7 +64,10 @@ describe("GitHub verify workflow", () => {
       },
     });
     expect(workflow.jobs?.verify?.["runs-on"]).toBe("ubuntu-latest");
-    expect(steps).toContainEqual({ uses: "actions/checkout@v4" });
+    expect(steps).toContainEqual({
+      uses: "actions/checkout@v4",
+      with: { "fetch-depth": 0 },
+    });
     expect(steps).toContainEqual({
       uses: "actions/setup-node@v4",
       with: {
