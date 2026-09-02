@@ -5,7 +5,7 @@
   "accepted": true,
   "package": {
     "path": "release-local/mac-arm64/Zerox Agent.app",
-    "appAsarSha256": "sha256:9938922fa83ab1028358b9d8d03684b17a9c6e5afac89e77658d7b6af7e159fd"
+    "appAsarSha256": "sha256:b6a38721930b1a58c2b6ab29f2e0cb6e304c1e0f22ac4a8789aeb3f6b84e424c"
   },
   "outputLimit": {
     "accepted": true,

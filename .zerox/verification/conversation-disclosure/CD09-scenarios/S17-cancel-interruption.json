@@ -3,14 +3,14 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S17-cancel-interruption",
   "scenarioDigest": "sha256:e06c224ecc01de33bc483eb90f0ef0c4367d475b5a4dd4d86c3d53bb5c92e52f",
-  "executionId": "19457a44-4598-47a9-8ed1-7c1b80b45da9",
+  "executionId": "74698a4e-c337-4179-a963-efac0917a816",
   "processEpochs": [
-    "main_2fe1fcf4-1761-49ee-89a8-fadb88549f99",
-    "main_6538c2a7-a624-4e70-bd71-0ec604a06e2f"
+    "main_0f334097-c9d2-4b4e-b7fc-65fa7498098f",
+    "main_d43dcfda-4872-4ccf-91a0-29703ed339f5"
   ],
   "attemptNonces": [
-    "8f930d00-a7c6-4525-aab1-ad703738434e",
-    "4a497f44-3257-45c3-b6f3-0c095c2a8024"
+    "2392563f-ddc3-4bd3-992d-d30667a737e5",
+    "a44568f9-c2c2-4c2b-bb7b-4318d7e1711b"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -31,10 +31,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "eb29f854-fd38-486b-9a91-5a94ac9bcc53",
+        "79840a89-30e8-4548-90c6-58641332bc3e",
         "cd09-run-S17-cancel-interruption",
         "trajectory-S17-cancel-interruption",
-        "process:main_2fe1fcf4-1761-49ee-89a8-fadb88549f99"
+        "process:main_0f334097-c9d2-4b4e-b7fc-65fa7498098f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,8 +52,8 @@
       "executor": "production_restart",
       "ok": true,
       "evidenceIds": [
-        "process:main_2fe1fcf4-1761-49ee-89a8-fadb88549f99",
-        "eb29f854-fd38-486b-9a91-5a94ac9bcc53",
+        "process:main_0f334097-c9d2-4b4e-b7fc-65fa7498098f",
+        "79840a89-30e8-4548-90c6-58641332bc3e",
         "cd09-run-S17-cancel-interruption",
         "trajectory-S17-cancel-interruption"
       ],
@@ -75,12 +75,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "eb29f854-fd38-486b-9a91-5a94ac9bcc53",
+        "79840a89-30e8-4548-90c6-58641332bc3e",
         "approval-S17-cancel-interruption",
-        "tool-invocation:36:16c34dc9-fdf0-40d2-bfb7-542a623ed155:22:cd09-s17-shell-dry-run",
-        "16c34dc9-fdf0-40d2-bfb7-542a623ed155",
-        "chat_run_eb29f854-fd38-486b-9a91-5a94ac9bcc53_cd09-s17-pending-approval",
-        "process:main_6538c2a7-a624-4e70-bd71-0ec604a06e2f",
+        "tool-invocation:36:80a31286-4dca-48d6-80f6-073e4cb18afe:22:cd09-s17-shell-dry-run",
+        "80a31286-4dca-48d6-80f6-073e4cb18afe",
+        "chat_run_79840a89-30e8-4548-90c6-58641332bc3e_cd09-s17-pending-approval",
+        "process:main_d43dcfda-4872-4ccf-91a0-29703ed339f5",
         "restart:approval-interrupted",
         "restart:tool-invocation-aborted",
         "restart:causal-attempt-interrupted"
@@ -113,7 +113,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:d1b0a144a194a19ec529476e3e8e648daf8736b8d946ca27af798d58a1757640",
-        "screenshot:sha256:865ce9b6f386a4064a83a5e95b4e2484f5348a298d7e3e3c7fdcbb0664e04523"
+        "screenshot:sha256:71b21aaa7b7fe0b9be30c1fb7661564808d2e47137dfdadc021a8078b0c30717"
       ]
     },
     {
@@ -122,7 +122,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:26373a06cf93b9e21fd6acbb87392c3c983f195c6816349cef06abdfd83a59c5",
-        "screenshot:sha256:318ff96f7558c74bd8d1412e6254843551167b99da979e4fa23b37123524ea20"
+        "screenshot:sha256:2f393780c2903b9526bf266d3f330cc75d13dce9cd331d3494189dacdd6b4936"
       ]
     },
     {
@@ -131,7 +131,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:9c0f7b4a26097ac2c2fc8a5247189ebddae9a4d1724c73ba2d9a157da0065c23",
-        "screenshot:sha256:318ff96f7558c74bd8d1412e6254843551167b99da979e4fa23b37123524ea20"
+        "screenshot:sha256:2f393780c2903b9526bf266d3f330cc75d13dce9cd331d3494189dacdd6b4936"
       ]
     }
   ],
@@ -413,44 +413,49 @@
     },
     {
       "ordinal": 56,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 57,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 58,
-      "channel": "plans:getLatestBySession",
-      "ok": true
-    },
-    {
-      "ordinal": 59,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 60,
       "channel": "modelSettings:load",
       "ok": true
     },
     {
-      "ordinal": 61,
+      "ordinal": 57,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 58,
       "channel": "modelCatalog:load",
       "ok": true
     },
     {
-      "ordinal": 62,
+      "ordinal": 59,
       "channel": "skills:list",
+      "ok": true
+    },
+    {
+      "ordinal": 60,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 61,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 62,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 63,
+      "channel": "chatSessions:list",
       "ok": true
     }
   ],
   "screenshotDigests": [
-    "sha256:318ff96f7558c74bd8d1412e6254843551167b99da979e4fa23b37123524ea20",
-    "sha256:865ce9b6f386a4064a83a5e95b4e2484f5348a298d7e3e3c7fdcbb0664e04523"
+    "sha256:2f393780c2903b9526bf266d3f330cc75d13dce9cd331d3494189dacdd6b4936",
+    "sha256:71b21aaa7b7fe0b9be30c1fb7661564808d2e47137dfdadc021a8078b0c30717"
   ],
   "status": "passed",
-  "digest": "sha256:7e18c98babcdc0cbf690aa6e8ab7130ce0d119a951e7e933f654bfad34c21cbf"
+  "digest": "sha256:6f98ce687140942bd5d45af321ee6ac47a69fd0ca65f8acdadbbe254b208b4e9"
 }

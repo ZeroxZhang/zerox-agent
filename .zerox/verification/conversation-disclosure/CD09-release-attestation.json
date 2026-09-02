@@ -4,31 +4,31 @@
   "version": "3.9.2",
   "status": "accepted",
   "identityAssurance": "caller-promoted-external-anchor-not-signed",
-  "acceptanceAnchorDigest": "sha256:2a77c1e1d25add82372a35b9650853e07032c22ce0d6fc244fd82b52f585d4ad",
-  "acceptedGitHead": "8e266e4d8bb45e4aa82e8be3d3538a11a17364fe",
-  "acceptedGitTree": "7c9c7f593aa80df8bbd1db3ba60b3c98d73ae370",
+  "acceptanceAnchorDigest": "sha256:1eaa67101a9643388d619db29f100ed684b3ca2fa6b175d0d4b12629edd06953",
+  "acceptedGitHead": "56663769162f11dce97d76bcb7ed366c6d11323b",
+  "acceptedGitTree": "e831c308e61d8558d4bee68f0d90fdc71490d2f4",
   "cd04AnchorDigest": "sha256:99b8b7af27e24d2c44e2bb3b2433ada877fd68aeac2d1de80427931de15c01ef",
-  "sourceDigest": "sha256:2fea0ae2ea63469230301474766646861b403c097e68ca544100a54e38812996",
-  "sourceFileCount": 1233,
+  "sourceDigest": "sha256:319ec63082cc06cb60a0c86fd56ebb3c6a3b551125802c942ad83d8f90adc637",
+  "sourceFileCount": 1234,
   "reviewPins": {
     "code": {
       "reviewerAgentId": "4955be68-6c56-42c1-ba10-9dfb51adf55e",
-      "challenge": "sha256:8d95c27fba6afad1b1e68043746f18949766d7c444d4720be3317a56902fc20c",
-      "receiptDigest": "sha256:d59c44accb4eda9ace6c59aeb598d6380cb0608d7028dfccdee543e26659bdf8"
+      "challenge": "sha256:fa1eb8991ff75a1de4546ab3f9fab84f82e52f7eae15b4050a8fb15fb1005d72",
+      "receiptDigest": "sha256:81d4555eb7e4c97e199206d0040e550745460d2040d72a56bad49dd2e9117e93"
     },
     "security": {
       "reviewerAgentId": "2e0991ca-258e-4f63-af61-2a318c0bdc85",
-      "challenge": "sha256:4c8d0fe57c5dea6e368bee424647816755e13ae69efc97204c8f880cef2789a3",
-      "receiptDigest": "sha256:affdbb948eaf6b597df27d0e11abaddf61c3ac038458894aae907de198af99fb"
+      "challenge": "sha256:b2a0ed9196411f31021759f483c6cadee7242c8d6e640467fca55188e1e1a1dd",
+      "receiptDigest": "sha256:5b7321d5642004fd16e3b952f883cd70734fdbbc023626df44f6e7f983230afc"
     }
   },
   "evidenceDigests": {
-    "codeReview": "sha256:ef09e06bf665e618fdc80151a0ec91b91987b70dbbcabfa03f38ae8b29bef049",
-    "securityReview": "sha256:a970620eeb8b8c3a71b08e51c23482046666dbcf49615efb0dbb58c936bae780",
-    "realAppAcceptance": "sha256:0d12796d1cc5c6db340196d224f62c09b2fe8199b64735ecd1c2c56276e1a266",
-    "localPackage": "sha256:15a03fb07083688fce09f6f0ecaccca6b5f71d95ac5e1c485f543fb3529ab658",
-    "chatResilience": "sha256:420254f3eae92ed9ffe4e4faaff109fd9f73b51ae1bf300a388443453b402424",
-    "planResilience": "sha256:552df022ddcdb87175919297c293b478f5c0d5e18ff4cfec666e0e095a989f89"
+    "codeReview": "sha256:84a42dff61c537241ee9aad223ddc6c2cf58ea52f007d14c14e09cdc5e09941c",
+    "securityReview": "sha256:7e6725f6ead308018ee05a9d157603c92a7bf65c4efd6df823ec681a0f691824",
+    "realAppAcceptance": "sha256:aeee9debfd5e4bb7bafadababd8c40a5c37ad0d24651e053a010044a8aad693a",
+    "localPackage": "sha256:49701aac8386416d57cb851b8deb5eb9075999de8c83a50677983883715e05fd",
+    "chatResilience": "sha256:d62013351af786b07c4c39af11cb98ab676621658a5efd2f7c3bfd00256900c5",
+    "planResilience": "sha256:716b5810f1f32d8689fe81193a4d2af2c3d24ff86b93cfb6d0b420af5e687259"
   },
   "verification": {
     "fullVerify": "split-equivalent-passed",
@@ -44,5 +44,5 @@
     "packagedLaunch": "passed",
     "packageSecretScan": "passed"
   },
-  "digest": "sha256:78e85752cb919b3f85400c5b23a6417d5da0f7bfeb0e9cc34ef118f489d7269e"
+  "digest": "sha256:f130c52a08519b0a41cd1dbdc08953c004d24ae87c6bd8d1a23dc55871bed636"
 }

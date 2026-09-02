@@ -12,42 +12,42 @@
       "command": "./node_modules/.bin/electron --no-sandbox scripts/capture-cd05-chat-browser.mjs",
       "status": "passed",
       "stdoutSha256": "sha256:5bee26cd1eee962436651d88c3dfa4c05c7569f0ce5934acfb4b92a75b51bf2c",
-      "stderrSha256": "sha256:ab9279d53718d0dd6f6253a58729a3c1ed27b0c8f9b8d1943f3500c2394e080a"
+      "stderrSha256": "sha256:c3d3f3c53158d656668d72728a49bdd9c12f4efc4e1dda1abc354d5b20831055"
     },
     {
       "command": "./node_modules/.bin/electron --no-sandbox scripts/capture-cd06-cross-surface-browser.mjs",
       "status": "passed",
       "stdoutSha256": "sha256:a78273a78e3d80eabab6e0ef29272b6ec524923f1fc3f29fd1af0bf17845ac0f",
-      "stderrSha256": "sha256:df6b1adcf9ee7022faea534cebbe9ed4e648aeea3ce7110868a12cbe3d1f3b44"
+      "stderrSha256": "sha256:c201a109ea609a561a59f73ef32e9519234b0eb251b693bbbb4b08b205675e41"
     },
     {
       "command": "./node_modules/.bin/electron --no-sandbox scripts/capture-cd07-inspector-browser.mjs",
       "status": "passed",
       "stdoutSha256": "sha256:75bf27b787d3df63184c4dd4d9caab49bd9f90d5b3f0b26140fd030447167a79",
-      "stderrSha256": "sha256:e92f57bb9bd26d921bc1eed09cfb37d8b4ccfcef7d278446c84248d1e40d5e77"
+      "stderrSha256": "sha256:848de659c3f58b8dc6747daf75dccca6155aa40046d898573191cf22ab414207"
     },
     {
       "command": "/private/tmp/zerox-v392-release/runtime/bin/node scripts/run-conversation-disclosure-hardening.mjs",
       "status": "passed",
-      "stdoutSha256": "sha256:78cf1f80eeab66fda787b8b26b77d4f29f17c4626a28cdc01423945ccdc6b949",
+      "stdoutSha256": "sha256:f370ed964151c6cd23670132a4847ea425381115ca54070ec36f796d027cce4e",
       "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "command": "/private/tmp/zerox-v392-release/runtime/bin/node scripts/run-production-smoke.mjs --skip-build",
       "status": "passed",
-      "stdoutSha256": "sha256:861d5f675c3cce13950bd31551a35ccdc7de8a7560d0ff2f0cb6746ba0e80c84",
-      "stderrSha256": "sha256:35099ad6f23c5b5b75aaf4548a0a2f5bc55492f011dfd6ca7c2c71c291df52b0"
+      "stdoutSha256": "sha256:9f3bf3f565c091a272bba2ceaf84ce6a44fd88d8dd30fc148cdefa55260171d0",
+      "stderrSha256": "sha256:6e7fcb9db2ae70c13da5b14102e8d7a5e986038383d2afcedb2d78133019b01f"
     },
     {
       "command": "/private/tmp/zerox-v392-release/runtime/bin/node scripts/run-conversation-disclosure-real-app.mjs",
       "status": "passed",
-      "stdoutSha256": "sha256:ca52bde2e41ad5794cbcc539e5082089175c4718fae220b45f260cc58530b4bc",
+      "stdoutSha256": "sha256:bb7f650b5300f5f8fede04be7c961635f36683033df812933fc8a98a4021b139",
       "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "command": "/private/tmp/zerox-v392-release/runtime/bin/node node_modules/vitest/vitest.mjs run --run src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts src/renderer/toolApprovalProjection.test.ts src/renderer/toolApprovalVisibility.test.ts src/renderer/goalAcceptanceInteraction.test.ts src/renderer/goalTerminalTruth.test.ts src/renderer/chatTaskActivityRestore.test.ts src/main/conversationEvidenceResolver.test.ts src/main/planStore.test.ts src/main/chatSessionStore.test.ts src/main/jsonlRecovery.test.ts --maxWorkers=1 --reporter=json",
       "status": "passed",
-      "stdoutSha256": "sha256:324e38c312a3188013e3b28b9f4ef021ea2bc7999487f62b69e8d0513f12c2ae",
+      "stdoutSha256": "sha256:c0d7f8c363dd243df1e4e131fcf2020af7f6b3e3bebc35bdc1213c0a30eb635f",
       "stderrSha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "testFiles": [
         "src/renderer/chatStreamReducer.test.ts",
@@ -63,370 +63,6 @@
         "src/main/jsonlRecovery.test.ts"
       ],
       "passedTests": [
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store starts empty when no chat session file exists"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists attachment metadata without persisting attachment bytes"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists guided-input attachment payloads for restart recovery"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store preserves a processing guided-input claim across restart"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store sanitizes guided-input metadata before durable activity persistence"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store preserves a failed guided-input settlement tombstone across restart"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store preserves a canceled guided-input settlement tombstone across restart"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store preserves a superseded guided-input settlement tombstone across restart"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store reuses the pending user record when the same attachment turn is retried"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store quarantines corrupt chat JSON and exposes a recovery notice to the user"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store handles concurrent corrupt chat session recovery without surfacing rename errors"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store creates a session with a brief generated title and persists messages"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists causal attempt witnesses and canceled settlement with the json backend"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists causal attempt witnesses and canceled settlement with the sqlite backend"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store pages json transcripts by stable message sequence without hydrating metadata"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store pages sqlite transcripts by stable message sequence without hydrating metadata"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store pages bounded json Chat activity with honest source coverage"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store pages bounded sqlite Chat activity with honest source coverage"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store rejects a stale json Chat activity cursor after a new owner event"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store rejects a stale sqlite Chat activity cursor after a new owner event"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store preserves message content exactly when persisting markdown output"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists workspace identity and summary on chat sessions"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store preserves prior workspace fields on follow-up messages"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store lists sessions with last assistant response time and token usage"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store bounds session summaries used by the sidebar list"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists rebuildable chat activity snapshots with a bounded event history"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists the latest isolated context snapshot on the session and list item"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store archives restores and deletes sessions without touching other sessions"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store renames a session title without changing message timestamps or summary"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store normalizes legacy sessions without archive or token metadata"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store drops malformed persisted workspace summaries"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store normalizes persisted streaming and waiting input activity states"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store serializes concurrent session mutations without dropping messages"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store summarizes long goal-style prompts without keeping project paths in the title"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store searches raw chat messages as conversation evidence"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store persists active and historical goal ids on chat sessions"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store clears the active goal while preserving goal history"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store stores a stalled goal as recovery context instead of an active goal"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "chat session store deduplicates an exact required settlement and rejects conflicting reuse"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "SQLite chat session store matches message, list, activity, goal, usage, archive, and search behavior"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "SQLite chat session store serializes concurrent message appends with monotonic event order"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "SQLite chat session store generates a fresh session id when a requested session does not exist"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "SQLite chat session store imports legacy JSON once, verifies parity, and leaves the source untouched"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "SQLite chat session store imports the legacy corrupt-file recovery notice into SQLite"
-        },
-        {
-          "testFile": "src/main/chatSessionStore.test.ts",
-          "fullName": "SQLite chat session store deduplicates required settlement ids in SQLite"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver binds target and trusted scope to a server-issued anchor"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver redacts path-shaped values inside allowlisted scalar fields"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver issues contributor targets from server-owned snapshot identity"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver returns an incomplete bounded page without inventing a cursor"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver reauthorizes every page and binds its cursor to authority revision"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver reauthorizes after the backend read before returning evidence"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver rejects an anchor after the current materializer generation rotates"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver advances a byte-truncated page by the entries actually returned"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver returns indistinguishable forbidden responses without backend access"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver rejects caller-downgraded sensitivity before backend access"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver rejects tampered, cross-session, expired, and cross-limit cursors"
-        },
-        {
-          "testFile": "src/main/conversationEvidenceResolver.test.ts",
-          "fullName": "conversation evidence resolver keeps infrastructure failure distinct from missing or forbidden"
-        },
-        {
-          "testFile": "src/main/jsonlRecovery.test.ts",
-          "fullName": "bounded recoverable JSONL pages reads forward from byte offsets without hydrating the whole file"
-        },
-        {
-          "testFile": "src/main/jsonlRecovery.test.ts",
-          "fullName": "bounded recoverable JSONL pages keeps an original cut stable when later bytes are appended"
-        },
-        {
-          "testFile": "src/main/jsonlRecovery.test.ts",
-          "fullName": "bounded recoverable JSONL pages reports malformed and unterminated records without quarantine writes"
-        },
-        {
-          "testFile": "src/main/jsonlRecovery.test.ts",
-          "fullName": "bounded recoverable JSONL pages rejects aliases, oversized records, source replacement, and abort"
-        },
-        {
-          "testFile": "src/main/jsonlRecovery.test.ts",
-          "fullName": "bounded recoverable JSONL pages stops at the page byte ceiling"
-        },
-        {
-          "testFile": "src/main/jsonlRecovery.test.ts",
-          "fullName": "bounded recoverable JSONL pages does not emit a non-advancing cursor when the first record exceeds the page byte ceiling"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity rejects unsafe plan ids used by stores and replay drivers"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity classifies replay read failures without retaining arbitrary parser input"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity decodes persisted model context-window provenance objects"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity keeps both Plan replay failure paths on the fixed classifier boundary"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity keeps JSON and SQLite backends behaviorally equivalent"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity sanitizes and migrates Plan diagnostics at every storage boundary"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity cleans stored diagnostics even when the legacy workspace is offline"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity tombstones a legacy diagnostic projection without a final artifact"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity keeps a non-confirmable recovery intent without overwriting a drifted legacy projection"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity persists and returns credential-free Skill snapshots for JSON, SQLite, and legacy Plans"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity rejects stale revisions without overwriting the canonical record"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity rejects an invalid persisted Plan autonomy mode"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity persists PlanRecord v3 lineage and rejects non-Direct runtime replans"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity uses the durable session index without parsing unrelated Plan files"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity recovers a durable projection intent before exposing a confirmable Plan"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity serializes json recovery writes with concurrent abandonment"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity serializes sqlite recovery writes with concurrent abandonment"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity rebinds SQLite session selection after queued authoritative reads"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity samples cancellation once at projection commit and returns the stored outcome"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity rejects a mismatched prepared projection before persisting or publishing it"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity atomically abandons an unrecoverable projection intent so the Plan can be discarded"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity isolates only corrupt records and propagates systemic Plan I/O failures"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity converts malformed JSON parser output to a content-free record error"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity converts malformed SQLite JSON parser output to a content-free record error"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity binds decoded payload identity to its JSON or SQLite storage envelope"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity quarantines malformed JSON Plans without blocking valid list queries"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity quarantines malformed SQLite Plans and skips a corrupt newest session record"
-        },
-        {
-          "testFile": "src/main/planStore.test.ts",
-          "fullName": "plan store parity recovers an interrupted v2 planning stage as a retryable failure in a new runtime"
-        },
         {
           "testFile": "src/renderer/chatStreamReducer.test.ts",
           "fullName": "chat stream reducer groups status events by stable authority identity without duplicating updates"
@@ -986,6 +622,370 @@
         {
           "testFile": "src/renderer/toolApprovalVisibility.test.ts",
           "fullName": "tool approval visibility hides ordinary approval requests while auto approval is enabled"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store starts empty when no chat session file exists"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists attachment metadata without persisting attachment bytes"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists guided-input attachment payloads for restart recovery"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a processing guided-input claim across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store sanitizes guided-input metadata before durable activity persistence"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a failed guided-input settlement tombstone across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a canceled guided-input settlement tombstone across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves a superseded guided-input settlement tombstone across restart"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store reuses the pending user record when the same attachment turn is retried"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store quarantines corrupt chat JSON and exposes a recovery notice to the user"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store handles concurrent corrupt chat session recovery without surfacing rename errors"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store creates a session with a brief generated title and persists messages"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists causal attempt witnesses and canceled settlement with the json backend"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists causal attempt witnesses and canceled settlement with the sqlite backend"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages json transcripts by stable message sequence without hydrating metadata"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages sqlite transcripts by stable message sequence without hydrating metadata"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages bounded json Chat activity with honest source coverage"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store pages bounded sqlite Chat activity with honest source coverage"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store rejects a stale json Chat activity cursor after a new owner event"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store rejects a stale sqlite Chat activity cursor after a new owner event"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves message content exactly when persisting markdown output"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists workspace identity and summary on chat sessions"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store preserves prior workspace fields on follow-up messages"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store lists sessions with last assistant response time and token usage"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store bounds session summaries used by the sidebar list"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists rebuildable chat activity snapshots with a bounded event history"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists the latest isolated context snapshot on the session and list item"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store archives restores and deletes sessions without touching other sessions"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store renames a session title without changing message timestamps or summary"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store normalizes legacy sessions without archive or token metadata"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store drops malformed persisted workspace summaries"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store normalizes persisted streaming and waiting input activity states"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store serializes concurrent session mutations without dropping messages"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store summarizes long goal-style prompts without keeping project paths in the title"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store searches raw chat messages as conversation evidence"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store persists active and historical goal ids on chat sessions"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store clears the active goal while preserving goal history"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store stores a stalled goal as recovery context instead of an active goal"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "chat session store deduplicates an exact required settlement and rejects conflicting reuse"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store matches message, list, activity, goal, usage, archive, and search behavior"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store serializes concurrent message appends with monotonic event order"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store generates a fresh session id when a requested session does not exist"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store imports legacy JSON once, verifies parity, and leaves the source untouched"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store imports the legacy corrupt-file recovery notice into SQLite"
+        },
+        {
+          "testFile": "src/main/chatSessionStore.test.ts",
+          "fullName": "SQLite chat session store deduplicates required settlement ids in SQLite"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver binds target and trusted scope to a server-issued anchor"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver redacts path-shaped values inside allowlisted scalar fields"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver issues contributor targets from server-owned snapshot identity"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver returns an incomplete bounded page without inventing a cursor"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver reauthorizes every page and binds its cursor to authority revision"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver reauthorizes after the backend read before returning evidence"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver rejects an anchor after the current materializer generation rotates"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver advances a byte-truncated page by the entries actually returned"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver returns indistinguishable forbidden responses without backend access"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver rejects caller-downgraded sensitivity before backend access"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver rejects tampered, cross-session, expired, and cross-limit cursors"
+        },
+        {
+          "testFile": "src/main/conversationEvidenceResolver.test.ts",
+          "fullName": "conversation evidence resolver keeps infrastructure failure distinct from missing or forbidden"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages reads forward from byte offsets without hydrating the whole file"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages keeps an original cut stable when later bytes are appended"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages reports malformed and unterminated records without quarantine writes"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages rejects aliases, oversized records, source replacement, and abort"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages stops at the page byte ceiling"
+        },
+        {
+          "testFile": "src/main/jsonlRecovery.test.ts",
+          "fullName": "bounded recoverable JSONL pages does not emit a non-advancing cursor when the first record exceeds the page byte ceiling"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rejects unsafe plan ids used by stores and replay drivers"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity classifies replay read failures without retaining arbitrary parser input"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity decodes persisted model context-window provenance objects"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity keeps both Plan replay failure paths on the fixed classifier boundary"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity keeps JSON and SQLite backends behaviorally equivalent"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity sanitizes and migrates Plan diagnostics at every storage boundary"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity cleans stored diagnostics even when the legacy workspace is offline"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity tombstones a legacy diagnostic projection without a final artifact"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity keeps a non-confirmable recovery intent without overwriting a drifted legacy projection"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity persists and returns credential-free Skill snapshots for JSON, SQLite, and legacy Plans"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rejects stale revisions without overwriting the canonical record"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rejects an invalid persisted Plan autonomy mode"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity persists PlanRecord v3 lineage and rejects non-Direct runtime replans"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity uses the durable session index without parsing unrelated Plan files"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity recovers a durable projection intent before exposing a confirmable Plan"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity serializes json recovery writes with concurrent abandonment"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity serializes sqlite recovery writes with concurrent abandonment"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rebinds SQLite session selection after queued authoritative reads"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity samples cancellation once at projection commit and returns the stored outcome"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity rejects a mismatched prepared projection before persisting or publishing it"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity atomically abandons an unrecoverable projection intent so the Plan can be discarded"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity isolates only corrupt records and propagates systemic Plan I/O failures"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity converts malformed JSON parser output to a content-free record error"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity converts malformed SQLite JSON parser output to a content-free record error"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity binds decoded payload identity to its JSON or SQLite storage envelope"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity quarantines malformed JSON Plans without blocking valid list queries"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity quarantines malformed SQLite Plans and skips a corrupt newest session record"
+        },
+        {
+          "testFile": "src/main/planStore.test.ts",
+          "fullName": "plan store parity recovers an interrupted v2 planning stage as a retryable failure in a new runtime"
         }
       ]
     }
@@ -1013,10 +1013,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S01-default-narrative.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S01-default-narrative.png",
-        "receiptDigest": "sha256:6c2050327301f8e565212b8bffa28330220808d445b5ad4897ece034145cb14a",
-        "executionId": "8cfe2d6b-a866-443c-9612-f78944213f30",
+        "receiptDigest": "sha256:8aeb03e64bd3a4099fab26171742ab002470eb3bd4021d7493cc4af55fd67c00",
+        "executionId": "97be5310-2ee5-410b-b317-ec6e67e46c18",
         "processEpochs": [
-          "main_ecff17e5-f30a-4713-b547-575b49bd458a"
+          "main_3831cf3f-d7ba-4676-a4b2-6865d95765d7"
         ],
         "validationErrors": []
       },
@@ -1058,10 +1058,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S02-inline-expansion.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S02-inline-expansion.png",
-        "receiptDigest": "sha256:501bcd5eef7b24055cd4fc2bd4bea584b6fe7c655ca8735820edc441cfc1e350",
-        "executionId": "6dccabc1-a5cc-4161-aedc-b09b53a84614",
+        "receiptDigest": "sha256:8d38de385e0169fcc19ca918b6c6434b3aba2659d2acd008706a92ffa830865e",
+        "executionId": "61a2b2ee-6c4f-480e-91af-66cc277da56e",
         "processEpochs": [
-          "main_c186348e-2b49-4dba-a729-28792fc15036"
+          "main_d6f6570b-6488-4e36-896a-3f86f69e3677"
         ],
         "validationErrors": []
       },
@@ -1107,10 +1107,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S03-evidence-handoff.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S03-evidence-handoff.png",
-        "receiptDigest": "sha256:f56649d17578412a5a29f65c9421ca1f551728c5e89ddd77ab15ba8d0e13be84",
-        "executionId": "9e17117a-14bc-4e09-b5e4-0e19c78248be",
+        "receiptDigest": "sha256:f3a549af225d3bc869df37d5bef3fe87dc3250c25c79c31fb986a964add11b80",
+        "executionId": "44756973-bca6-48f1-b6fd-fa35a733a648",
         "processEpochs": [
-          "main_f835abbc-50a2-4dfa-9af4-41a2d0ac2c07"
+          "main_5d75f2d1-04fe-414c-9bec-fea5d4b233ed"
         ],
         "validationErrors": []
       },
@@ -1156,10 +1156,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S04-failure-attention.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S04-failure-attention.png",
-        "receiptDigest": "sha256:356ffe45a451b6ffceddc792212964e34ac9587769736e963bd9c1be73e02ec0",
-        "executionId": "d609b036-7126-4a2e-a05b-57a99e342837",
+        "receiptDigest": "sha256:4cfe17b605c2461a772d3eb1ba02b8cec3a1880d3b4be16ec72ab3c235384887",
+        "executionId": "a2eb82ed-8da9-4657-950c-07fb72e490ec",
         "processEpochs": [
-          "main_36c26e59-290a-4d3b-a8c5-9937cd86dbbe"
+          "main_923b20a9-b3bf-48c9-ba36-ecd1b9d39f26"
         ],
         "validationErrors": []
       },
@@ -1206,10 +1206,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S05-approval-attention.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S05-approval-attention.png",
-        "receiptDigest": "sha256:00c752f464486668921cae4a88416f0356f3a62e78e94cb721c56470af9aaffc",
-        "executionId": "3d62c1aa-ce12-4a55-8e44-1b5d6c87749c",
+        "receiptDigest": "sha256:f7bfd023aabd2c5bdbe88b5c85b2dbda859f98fac85f5f0bf40cb99e780f935b",
+        "executionId": "31e9cefb-f89d-4a04-8c0b-f8b24034c148",
         "processEpochs": [
-          "main_31410ae3-9c04-4f44-ab0f-ab5007ffdcd4"
+          "main_62b98783-c328-4e2a-aa60-cec8afb7de05"
         ],
         "validationErrors": []
       },
@@ -1258,10 +1258,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S06-pause-reload-recovery.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S06-pause-reload-recovery.png",
-        "receiptDigest": "sha256:2c63c014414e4c0b5849eeb89a1ab0d6871e20eba26e6c3eccc9c3126300d7fc",
-        "executionId": "55a74018-f7db-450d-a7bc-f21b6b135bad",
+        "receiptDigest": "sha256:400b67e8034a743e96dcde35d68d063bb21512eb9e2efb9171eec961a8d92c39",
+        "executionId": "44e73dcd-2850-486d-8877-6073695fd42e",
         "processEpochs": [
-          "main_17dd1824-1d43-4851-94f1-de115e020d65"
+          "main_94e9c725-50c5-41a0-9455-460829d37af0"
         ],
         "validationErrors": []
       },
@@ -1303,10 +1303,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S07-plan-progress.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S07-plan-progress.png",
-        "receiptDigest": "sha256:c5ec1cb8edbe875deb86b56f190458d98b8328f681324dcb2687b50053c21bc2",
-        "executionId": "36313cd3-618c-411e-bec1-454c634fd49b",
+        "receiptDigest": "sha256:0a6790f8bcc816b6b3bb2a4fb2b36e0acceef062c008695d5a52885c3907dbda",
+        "executionId": "aa23dc80-ce9c-4c6e-8c99-3271d5db3f42",
         "processEpochs": [
-          "main_3c6ed7cc-24d1-49a9-ae87-8c8de7f30d35"
+          "main_382df161-331b-4a29-87cb-5e84a57875cc"
         ],
         "validationErrors": []
       },
@@ -1350,10 +1350,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S08-scheduled-progress.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S08-scheduled-progress.png",
-        "receiptDigest": "sha256:8ff2b05af43d9585c68d733b410de606939e0db082a6807060ccdd3d1c13d910",
-        "executionId": "f03ce99a-e75f-4fe5-b5bb-a62fc5983d63",
+        "receiptDigest": "sha256:628192cbd75ee436f764ef6074254bfa36af065dcea712da45a0cbefc44f6707",
+        "executionId": "94cc5872-0850-4a37-b55b-a2266b27745e",
         "processEpochs": [
-          "main_1204cbc2-8094-4f05-b882-572e53509468"
+          "main_856cd442-b412-4c20-8271-066134fa4c0a"
         ],
         "validationErrors": []
       },
@@ -1399,10 +1399,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S09-long-session.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S09-long-session.png",
-        "receiptDigest": "sha256:4557495182d839ac9e10bf57976e41554267c55cc202c6a503daf2c69f51b106",
-        "executionId": "f2c9c14b-5840-4171-ba44-4c5e78c0ef25",
+        "receiptDigest": "sha256:80bed3d7a89ee195afc496081bf8c4f030b77101c2ff5ec4ed35e813056f2e57",
+        "executionId": "ae3fba68-a012-4486-ac1a-02d3759eb589",
         "processEpochs": [
-          "main_2e6e2be4-c662-4437-92f5-017271ce3d93"
+          "main_933fb8c1-1bbf-4d1b-a094-484405b3fe25"
         ],
         "validationErrors": []
       },
@@ -1448,10 +1448,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S10-accessibility.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S10-accessibility.png",
-        "receiptDigest": "sha256:ebc8ed32de4f2973df5c0a9f9c294ea85852829b2a01974fb08f93b7da1e6725",
-        "executionId": "2c209003-48ee-4bf9-8e6a-86ef8138808d",
+        "receiptDigest": "sha256:eef98d371adf393d0519dbe2a9e2751587f1a1f66a3b4234ce10d788f584b13e",
+        "executionId": "de8c7b7e-0210-40cb-b1bf-37ac3d1e4f2d",
         "processEpochs": [
-          "main_7297f39b-672e-40ee-86ed-dfac4432d90b"
+          "main_19451be0-c5f0-4888-a202-4f768e29b2d7"
         ],
         "validationErrors": []
       },
@@ -1512,10 +1512,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S11-secret-safety.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S11-secret-safety.png",
-        "receiptDigest": "sha256:e85b4627ba012ec0d2ccca1c9bce11eb3cbba66772e3aa1806b4e71a9e4588a5",
-        "executionId": "6f7c171e-536b-4361-ae89-d1e19d1b1e8e",
+        "receiptDigest": "sha256:1a1555d56c2cbbcfed5cb361f459bd45efd3c2fa9a4e8a65f073e6622f2c7cb6",
+        "executionId": "38292fdd-638b-4f40-801a-e4057624e5ac",
         "processEpochs": [
-          "main_bff96cd3-5289-49fc-b521-f11fb764e83b"
+          "main_6edba14b-64d4-48b8-892c-a8c5084b75f6"
         ],
         "validationErrors": []
       },
@@ -1566,10 +1566,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S12-retry-attempt.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S12-retry-attempt.png",
-        "receiptDigest": "sha256:16928157227ea65499d634af2dd2d8efc1744034407d663b4291e32a12787086",
-        "executionId": "868f520e-6579-4030-9185-5c81b3fd76a5",
+        "receiptDigest": "sha256:11b4c03fcacd371dc4ee48fe03d82581b676277850a4c618a039aa087b04a4d3",
+        "executionId": "0acac37e-0aec-49b0-a2f7-4a129082e7b8",
         "processEpochs": [
-          "main_50fe29c4-8b7e-4e65-b23b-f23e6f16011d"
+          "main_99e4db8c-1c27-4d86-b38a-af32d25a0d1b"
         ],
         "validationErrors": []
       },
@@ -1618,11 +1618,11 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S13-legacy-coverage.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S13-legacy-coverage.png",
-        "receiptDigest": "sha256:9562101ae6918ccc9259653da4201c95e7e67f54120986b2b2ac77dff7536101",
-        "executionId": "c8717509-40a4-4b6b-afce-d3cbda3114cc",
+        "receiptDigest": "sha256:7ded3937cb9127180e032da1e3267ec8f1d5bc512df5984af5a8078052f83445",
+        "executionId": "764ac921-0987-405d-ac31-5322e3fef3f9",
         "processEpochs": [
-          "main_676cde4f-13b6-4049-a050-25eaebd6bedb",
-          "main_aae4d5d3-6790-4564-b91b-0a941cb69304"
+          "main_74d9a60d-6bcf-419f-921b-d7e3d2a74187",
+          "main_74a6e135-c787-4bfa-b0c9-deb5ee5b3d4e"
         ],
         "validationErrors": []
       },
@@ -1664,10 +1664,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S14-guided-input.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S14-guided-input.png",
-        "receiptDigest": "sha256:879230d23a769751814350fd635372d469e2d9812683c9b85543246b4130fc5e",
-        "executionId": "73a09a27-4d5b-4aea-ac5c-16044658ea02",
+        "receiptDigest": "sha256:da71f8c5c9889f8a1877f5879fd27f8cab17f27b9d6349ea3c937af80d6056ac",
+        "executionId": "ecc3fded-05b9-4438-b4e4-f33043f9575c",
         "processEpochs": [
-          "main_84295b7f-4775-4de4-af57-7b8f42b05321"
+          "main_ad5c443d-4148-4063-84b9-ff469e2b3b3f"
         ],
         "validationErrors": []
       },
@@ -1711,10 +1711,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S15-goal-acceptance.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S15-goal-acceptance.png",
-        "receiptDigest": "sha256:a580fb896d320b6848291868eeda3f2340b96bcf435811cd6fb61da84d7c9f7a",
-        "executionId": "7dc2267c-4775-4670-b850-182605ff8f8d",
+        "receiptDigest": "sha256:b4e8a6b7f2ebd94b780b9c923514a1b2a415a63395b0c33a37d31dbee3f0351a",
+        "executionId": "419e601b-232f-46aa-8d92-f213a4f61581",
         "processEpochs": [
-          "main_2487c704-1787-4996-80bf-6d774d4e404e"
+          "main_02dc0f00-0d24-4443-80f7-49412ec6e03f"
         ],
         "validationErrors": []
       },
@@ -1763,10 +1763,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S16-plan-confirmation.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S16-plan-confirmation.png",
-        "receiptDigest": "sha256:5d4e4d6d554acba2490c6238d570d159ee7b560a8f01aa6f2bcf241823aa7bdf",
-        "executionId": "8265d19e-736e-4116-8520-9fbe4fa55895",
+        "receiptDigest": "sha256:bca087f0e25a77809956e82dcb1aa1703e2dd458cdb4c22bd31c62f625b7411d",
+        "executionId": "bea70140-63a3-4987-a9dd-717fc5ac3a9c",
         "processEpochs": [
-          "main_309ac722-e556-4b6b-823f-d6c7fc7fe4a7"
+          "main_c65f75ae-3db4-4823-b04b-91b6e6cdc710"
         ],
         "validationErrors": []
       },
@@ -1815,11 +1815,11 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S17-cancel-interruption.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S17-cancel-interruption.png",
-        "receiptDigest": "sha256:7e18c98babcdc0cbf690aa6e8ab7130ce0d119a951e7e933f654bfad34c21cbf",
-        "executionId": "19457a44-4598-47a9-8ed1-7c1b80b45da9",
+        "receiptDigest": "sha256:6f98ce687140942bd5d45af321ee6ac47a69fd0ca65f8acdadbbe254b208b4e9",
+        "executionId": "74698a4e-c337-4179-a963-efac0917a816",
         "processEpochs": [
-          "main_2fe1fcf4-1761-49ee-89a8-fadb88549f99",
-          "main_6538c2a7-a624-4e70-bd71-0ec604a06e2f"
+          "main_0f334097-c9d2-4b4e-b7fc-65fa7498098f",
+          "main_d43dcfda-4872-4ccf-91a0-29703ed339f5"
         ],
         "validationErrors": []
       },
@@ -1866,10 +1866,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S18-context-usage.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S18-context-usage.png",
-        "receiptDigest": "sha256:b8af28520f04e040d22789e195dc39bfc99da24de307bb003e1505cc4dbf9ace",
-        "executionId": "58bf6331-b83a-4709-a901-3eb7d83da0f3",
+        "receiptDigest": "sha256:bc858dd885adb030e95224db65b61c32b480802f8c3f6cef38b0f0fea9473777",
+        "executionId": "962e27a0-6fc2-4c0f-8255-ab97e2662ba1",
         "processEpochs": [
-          "main_947bf550-da4b-4422-819c-85186e274fa7"
+          "main_af2384a2-b03a-45ca-8809-f310da833442"
         ],
         "validationErrors": []
       },
@@ -1921,10 +1921,10 @@
         "passed": true,
         "receipt": ".zerox/verification/conversation-disclosure/CD09-scenarios/S19-unknown-coverage.json",
         "screenshot": ".zerox/verification/conversation-disclosure/CD09-scenarios/S19-unknown-coverage.png",
-        "receiptDigest": "sha256:1c1db85d05acd4734e42ac215615914b36825c137bbbc543f0541337f39ae9a0",
-        "executionId": "16af1c5f-3ce7-473a-87d3-f9715ddff9cb",
+        "receiptDigest": "sha256:be181a70b14adee59cf3105a2c3ab63ad25ef1d1678ad1834823e4a4493a551d",
+        "executionId": "d13ea80f-2ba6-4b21-88cc-271c2d627151",
         "processEpochs": [
-          "main_b635b6bb-c3c1-4551-8510-e3ec53a55481"
+          "main_b0a6acfc-dd6e-41f2-b42d-edc05e8bae31"
         ],
         "validationErrors": []
       },

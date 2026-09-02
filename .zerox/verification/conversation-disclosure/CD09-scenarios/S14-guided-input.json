@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S14-guided-input",
   "scenarioDigest": "sha256:3c9874af0ecbbb0423379639f72878eaf8861332e3c49791c79eb05abfc98dfd",
-  "executionId": "73a09a27-4d5b-4aea-ac5c-16044658ea02",
+  "executionId": "ecc3fded-05b9-4438-b4e4-f33043f9575c",
   "processEpochs": [
-    "main_84295b7f-4775-4de4-af57-7b8f42b05321"
+    "main_ad5c443d-4148-4063-84b9-ff469e2b3b3f"
   ],
   "attemptNonces": [
-    "cc20421e-e75b-41bb-838e-182c47ac62b6"
+    "1443b899-ea93-452c-876a-8fd4d0de1d54"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "c4b3e27c-8ab9-4e54-af08-79bde1fb3e8c",
+        "72ad92a2-6712-4185-9809-e9506f3382a0",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_84295b7f-4775-4de4-af57-7b8f42b05321"
+        "process:main_ad5c443d-4148-4063-84b9-ff469e2b3b3f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -40,11 +40,11 @@
         "runListed": true,
         "trajectoryLoaded": true,
         "guidedInputRequired": true,
-        "inputRequestId": "skill_input_fc69ab38-c7ab-4fa4-941f-5a86d231c94e",
+        "inputRequestId": "skill_input_066faf86-5694-4e8e-9276-7d4399bf015c",
         "waitingEventObserved": true,
         "workspaceBound": true,
         "reloadRecoveredPending": true,
-        "recoveredInputRequestId": "skill_input_fc69ab38-c7ab-4fa4-941f-5a86d231c94e"
+        "recoveredInputRequestId": "skill_input_066faf86-5694-4e8e-9276-7d4399bf015c"
       }
     },
     {
@@ -53,10 +53,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "c4b3e27c-8ab9-4e54-af08-79bde1fb3e8c",
+        "72ad92a2-6712-4185-9809-e9506f3382a0",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_84295b7f-4775-4de4-af57-7b8f42b05321"
+        "process:main_ad5c443d-4148-4063-84b9-ff469e2b3b3f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,10 +75,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "c4b3e27c-8ab9-4e54-af08-79bde1fb3e8c",
+        "72ad92a2-6712-4185-9809-e9506f3382a0",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_84295b7f-4775-4de4-af57-7b8f42b05321"
+        "process:main_ad5c443d-4148-4063-84b9-ff469e2b3b3f"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,8 +96,8 @@
       "requirement": "the required prompt remains prominent after window reload",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:de46dd7b32763deab1075ab60b1341c800c3d9b93979f74c47afb96d1a0748b1",
-        "screenshot:sha256:1023d789b9ba41e94ba10f65d48e57df6948f6b397ba0743b539ce459cde9124"
+        "action:0:sha256:c11c605a7c73e66936bebbe8f6c908277f5a0801a9e7d72d012995dab06d8367",
+        "screenshot:sha256:ec08a4ca936d3e14c6e4087d51ac787e2751a0f01ecf8aa42dbcd94b641d2122"
       ]
     },
     {
@@ -106,7 +106,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:fe81b31a39c35e40f7975f73dd55d5a7c00cc3500460ba0eb962429928cc893c",
-        "screenshot:sha256:1023d789b9ba41e94ba10f65d48e57df6948f6b397ba0743b539ce459cde9124"
+        "screenshot:sha256:ec08a4ca936d3e14c6e4087d51ac787e2751a0f01ecf8aa42dbcd94b641d2122"
       ]
     },
     {
@@ -115,7 +115,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:ec1abfa94913d38b7f1ce061b28c312886c483b8f645aa546eb36a5a9d2cd2d4",
-        "screenshot:sha256:1023d789b9ba41e94ba10f65d48e57df6948f6b397ba0743b539ce459cde9124"
+        "screenshot:sha256:ec08a4ca936d3e14c6e4087d51ac787e2751a0f01ecf8aa42dbcd94b641d2122"
       ]
     }
   ],
@@ -192,12 +192,12 @@
     },
     {
       "ordinal": 15,
-      "channel": "agentWorkspaces:createTemporary",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 16,
-      "channel": "skills:list",
+      "channel": "agentWorkspaces:createTemporary",
       "ok": true
     },
     {
@@ -482,8 +482,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:1023d789b9ba41e94ba10f65d48e57df6948f6b397ba0743b539ce459cde9124"
+    "sha256:ec08a4ca936d3e14c6e4087d51ac787e2751a0f01ecf8aa42dbcd94b641d2122"
   ],
   "status": "passed",
-  "digest": "sha256:879230d23a769751814350fd635372d469e2d9812683c9b85543246b4130fc5e"
+  "digest": "sha256:da71f8c5c9889f8a1877f5879fd27f8cab17f27b9d6349ea3c937af80d6056ac"
 }

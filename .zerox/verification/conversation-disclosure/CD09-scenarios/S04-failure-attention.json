@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S04-failure-attention",
   "scenarioDigest": "sha256:9c7eb05998e2d24ecc2a53e27d8dfce91df3d7d5f84d54085f0dea50bcd37d00",
-  "executionId": "d609b036-7126-4a2e-a05b-57a99e342837",
+  "executionId": "a2eb82ed-8da9-4657-950c-07fb72e490ec",
   "processEpochs": [
-    "main_36c26e59-290a-4d3b-a8c5-9937cd86dbbe"
+    "main_923b20a9-b3bf-48c9-ba36-ecd1b9d39f26"
   ],
   "attemptNonces": [
-    "fd5a57b3-9100-46bf-bf52-af0b80e43f03"
+    "7f101042-9f95-4aec-9083-b34eebc273e6"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "e12c6304-d9fe-47a4-895e-a651a26091cb",
+        "bcc1a5eb-a8a2-42d8-be40-807cf0d577a1",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_36c26e59-290a-4d3b-a8c5-9937cd86dbbe"
+        "process:main_923b20a9-b3bf-48c9-ba36-ecd1b9d39f26"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -50,10 +50,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "e12c6304-d9fe-47a4-895e-a651a26091cb",
+        "bcc1a5eb-a8a2-42d8-be40-807cf0d577a1",
         "cd09-run-S04-failure-attention",
         "trajectory-S04-failure-attention",
-        "process:main_36c26e59-290a-4d3b-a8c5-9937cd86dbbe"
+        "process:main_923b20a9-b3bf-48c9-ba36-ecd1b9d39f26"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -274,37 +274,37 @@
     },
     {
       "ordinal": 36,
-      "channel": "modelSettings:load",
-      "ok": true
-    },
-    {
-      "ordinal": 37,
-      "channel": "modelCatalog:load",
-      "ok": true
-    },
-    {
-      "ordinal": 38,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 39,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 40,
+      "ordinal": 37,
       "channel": "agentRuns:listActiveExecutions",
       "ok": true
     },
     {
-      "ordinal": 41,
+      "ordinal": 38,
       "channel": "agentEvalCandidates:list",
       "ok": true
     },
     {
-      "ordinal": 42,
+      "ordinal": 39,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 40,
       "channel": "agentRuns:getTrajectoryPage",
+      "ok": true
+    },
+    {
+      "ordinal": 41,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
+      "ordinal": 42,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -337,5 +337,5 @@
     "sha256:9c9adab49c998b5205ca85134c0a3e7095047f1ed1429d1c7db635a05970b366"
   ],
   "status": "passed",
-  "digest": "sha256:356ffe45a451b6ffceddc792212964e34ac9587769736e963bd9c1be73e02ec0"
+  "digest": "sha256:4cfe17b605c2461a772d3eb1ba02b8cec3a1880d3b4be16ec72ab3c235384887"
 }
