@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S15-goal-acceptance",
   "scenarioDigest": "sha256:9fe6e0e486a9911753026a3e062c00e9ff43e114acd8c7860df6e184e16e5e72",
-  "executionId": "a7b55c5d-72ab-4296-82e4-6f15baf181b8",
+  "executionId": "a7ed09f2-96ff-4774-958a-1f51612f10fe",
   "processEpochs": [
-    "main_27c89fa2-ff57-43c8-9be1-14a90261b9be"
+    "main_506a2fdc-2f59-4769-b828-79113985eb10"
   ],
   "attemptNonces": [
-    "b87724a8-0628-4c8f-9729-5314ad9bcc8e"
+    "a79c4a24-082e-4f8f-be22-dfdf40377620"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "87fe292b-7964-4316-b896-5c59cf03862d",
+        "344e54fa-5fbf-4cd6-9ab0-071af6d4fad9",
         "cd09-run-S15-goal-acceptance",
         "trajectory-S15-goal-acceptance",
         "cd09-goal-S15-goal-acceptance",
-        "process:main_27c89fa2-ff57-43c8-9be1-14a90261b9be"
+        "process:main_506a2fdc-2f59-4769-b828-79113985eb10"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,11 +52,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "87fe292b-7964-4316-b896-5c59cf03862d",
+        "344e54fa-5fbf-4cd6-9ab0-071af6d4fad9",
         "cd09-run-S15-goal-acceptance",
         "trajectory-S15-goal-acceptance",
         "cd09-goal-S15-goal-acceptance",
-        "process:main_27c89fa2-ff57-43c8-9be1-14a90261b9be"
+        "process:main_506a2fdc-2f59-4769-b828-79113985eb10"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,11 +75,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "87fe292b-7964-4316-b896-5c59cf03862d",
+        "344e54fa-5fbf-4cd6-9ab0-071af6d4fad9",
         "cd09-run-S15-goal-acceptance",
         "trajectory-S15-goal-acceptance",
         "cd09-goal-S15-goal-acceptance",
-        "process:main_27c89fa2-ff57-43c8-9be1-14a90261b9be"
+        "process:main_506a2fdc-2f59-4769-b828-79113985eb10"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -101,7 +101,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:16982675051ddd2309d5ec179469837d6a879bb76ed3abd3ce54da8e9fa4c5ef",
-        "screenshot:sha256:a82e9212879559bf7cdc80451760e4d05d97c7886ff488b5590bc2bf4e4e0ed1"
+        "screenshot:sha256:9dd16e1acf994314f80655c6ea3cd60be53bef73aded5c49eb039ce13ae8ca52"
       ]
     },
     {
@@ -110,7 +110,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:33b8852ba1340de9b73b174ea98c55a5a7ce2987428edf8919a5992ccc72132e",
-        "screenshot:sha256:a82e9212879559bf7cdc80451760e4d05d97c7886ff488b5590bc2bf4e4e0ed1"
+        "screenshot:sha256:9dd16e1acf994314f80655c6ea3cd60be53bef73aded5c49eb039ce13ae8ca52"
       ]
     },
     {
@@ -119,7 +119,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:e6e054140e3ac79c0a71aa0357e799e949bcb850989e298b7cfa6b71b1a1fd00",
-        "screenshot:sha256:a82e9212879559bf7cdc80451760e4d05d97c7886ff488b5590bc2bf4e4e0ed1"
+        "screenshot:sha256:9dd16e1acf994314f80655c6ea3cd60be53bef73aded5c49eb039ce13ae8ca52"
       ]
     }
   ],
@@ -491,8 +491,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:a82e9212879559bf7cdc80451760e4d05d97c7886ff488b5590bc2bf4e4e0ed1"
+    "sha256:9dd16e1acf994314f80655c6ea3cd60be53bef73aded5c49eb039ce13ae8ca52"
   ],
   "status": "passed",
-  "digest": "sha256:c41bcde7031ee7d7886e1744a1ca4b496b0b0dba41298fa024db7bf03585a0f7"
+  "digest": "sha256:37ca72cdb721816e6f70181d7c8e38d6ea41f0175397731b08286ef8e92b40de"
 }

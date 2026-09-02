@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S07-plan-progress",
   "scenarioDigest": "sha256:93e611cabbd360e91c44b9ec2a70377013c1a8140c77a2d97e18fbcf3be5b7e0",
-  "executionId": "e7042966-6cdb-432f-8748-1c6e2d980e4e",
+  "executionId": "a5d7eb90-66cc-476d-ae9f-5880451aa17f",
   "processEpochs": [
-    "main_faefc5b2-8fb1-417a-9918-d024c51de65c"
+    "main_b5ee027c-404d-4f7a-886b-7840917a5904"
   ],
   "attemptNonces": [
-    "ae2db144-a201-4c19-aaff-df18be60a950"
+    "890cbc98-a636-4623-9e2a-a97ead33d5da"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "392daa82-10ea-4f2e-8f95-c4679c30a121",
+        "bcd863d8-ab33-448b-a5f9-c4f4224f1b1a",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "plan_cd09_s07_1",
-        "process:main_faefc5b2-8fb1-417a-9918-d024c51de65c"
+        "process:main_b5ee027c-404d-4f7a-886b-7840917a5904"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -54,11 +54,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "392daa82-10ea-4f2e-8f95-c4679c30a121",
+        "bcd863d8-ab33-448b-a5f9-c4f4224f1b1a",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "plan_cd09_s07_1",
-        "process:main_faefc5b2-8fb1-417a-9918-d024c51de65c"
+        "process:main_b5ee027c-404d-4f7a-886b-7840917a5904"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,11 +75,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "392daa82-10ea-4f2e-8f95-c4679c30a121",
+        "bcd863d8-ab33-448b-a5f9-c4f4224f1b1a",
         "cd09-run-S07-plan-progress",
         "trajectory-S07-plan-progress",
         "plan_cd09_s07_1",
-        "process:main_faefc5b2-8fb1-417a-9918-d024c51de65c"
+        "process:main_b5ee027c-404d-4f7a-886b-7840917a5904"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -102,7 +102,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:ec8f718d7e37774954b89c539fb4606d207efdde9ab2a7c8f7ead0fd77ad2103",
-        "screenshot:sha256:33c6f43a07a655e57a330c2fdf35565475628992bc08e708a3cf451b6e9f7423"
+        "screenshot:sha256:50d22719a2d73fb8c86bd48248fd24e7c06a0d42a6d74cdc335d89abfaf57442"
       ]
     },
     {
@@ -111,7 +111,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:b1fc92ab41f94f17c7a9e47e124417d37b29be164d20cd636af894966c39e041",
-        "screenshot:sha256:33c6f43a07a655e57a330c2fdf35565475628992bc08e708a3cf451b6e9f7423"
+        "screenshot:sha256:50d22719a2d73fb8c86bd48248fd24e7c06a0d42a6d74cdc335d89abfaf57442"
       ]
     },
     {
@@ -120,7 +120,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:071590e736ce1d628eccb8d4895cfca05f4cdade85000996001259ac27214529",
-        "screenshot:sha256:33c6f43a07a655e57a330c2fdf35565475628992bc08e708a3cf451b6e9f7423"
+        "screenshot:sha256:50d22719a2d73fb8c86bd48248fd24e7c06a0d42a6d74cdc335d89abfaf57442"
       ]
     }
   ],
@@ -307,52 +307,52 @@
     },
     {
       "ordinal": 37,
-      "channel": "agentRuns:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 38,
-      "channel": "memory:list",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 39,
-      "channel": "agentWorkspaces:list",
+      "channel": "memory:list",
       "ok": true
     },
     {
       "ordinal": 40,
-      "channel": "agentBootstrap:loadValidation",
+      "channel": "agentWorkspaces:list",
       "ok": true
     },
     {
       "ordinal": 41,
-      "channel": "app:getMeta",
+      "channel": "agentBootstrap:loadValidation",
       "ok": true
     },
     {
       "ordinal": 42,
-      "channel": "app:getRuntimeInfo",
+      "channel": "app:getMeta",
       "ok": true
     },
     {
       "ordinal": 43,
-      "channel": "navigation:list",
+      "channel": "app:getRuntimeInfo",
       "ok": true
     },
     {
       "ordinal": 44,
-      "channel": "chatSessions:list",
+      "channel": "navigation:list",
       "ok": true
     },
     {
       "ordinal": 45,
-      "channel": "app:getUpdateState",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 46,
-      "channel": "modelSettings:load",
+      "channel": "app:getUpdateState",
       "ok": true
     },
     {
@@ -422,8 +422,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:33c6f43a07a655e57a330c2fdf35565475628992bc08e708a3cf451b6e9f7423"
+    "sha256:50d22719a2d73fb8c86bd48248fd24e7c06a0d42a6d74cdc335d89abfaf57442"
   ],
   "status": "passed",
-  "digest": "sha256:8c5a239e2abb2fbe2da0a1b065c611522ead4f0803764f08cb62c8d7d0df2871"
+  "digest": "sha256:1d8246b6655957719dfaa0f9eb5e6d7ae3d7f1620da13170bf4959f79558de4b"
 }

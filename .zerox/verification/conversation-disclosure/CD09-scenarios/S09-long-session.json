@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S09-long-session",
   "scenarioDigest": "sha256:391645bd0c600e15825713b417f169204e755588942cde863dd80d527b095ae8",
-  "executionId": "77a9e07f-085b-4d92-8e32-beefac22af7b",
+  "executionId": "13860dea-aa6d-4ece-b19f-4f9f60e0e3c9",
   "processEpochs": [
-    "main_4063b96c-6748-4f80-aa2a-0349824f53a8"
+    "main_89216a77-4eee-4106-965f-2cf595565530"
   ],
   "attemptNonces": [
-    "002b57b4-7a8b-46ab-89f6-8fe7b2f130a2"
+    "0cddb26a-0eed-4ec9-8ae6-f6482a6d8b19"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "54550e45-b610-4aab-89d7-70ec2343eda8",
+        "14d3395d-7d1a-46ea-ba39-521abf6d0bf3",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_4063b96c-6748-4f80-aa2a-0349824f53a8"
+        "process:main_89216a77-4eee-4106-965f-2cf595565530"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -55,10 +55,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "54550e45-b610-4aab-89d7-70ec2343eda8",
+        "14d3395d-7d1a-46ea-ba39-521abf6d0bf3",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_4063b96c-6748-4f80-aa2a-0349824f53a8"
+        "process:main_89216a77-4eee-4106-965f-2cf595565530"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -79,10 +79,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "54550e45-b610-4aab-89d7-70ec2343eda8",
+        "14d3395d-7d1a-46ea-ba39-521abf6d0bf3",
         "cd09-run-S09-long-session",
         "trajectory-S09-long-session",
-        "process:main_4063b96c-6748-4f80-aa2a-0349824f53a8"
+        "process:main_89216a77-4eee-4106-965f-2cf595565530"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -93,14 +93,14 @@
         "streamEventCount": 17,
         "renderedRowCount": 81,
         "renderedRowsBounded": true,
-        "renderDurationMs": 817.5,
+        "renderDurationMs": 800.3999999761581,
         "postUpdateTailCount": 50,
         "performanceBounded": true,
         "rendererMetricsAvailable": true,
-        "cpuTaskDurationMs": 537.445,
-        "heapBeforeBytes": 7728544,
-        "heapAfterBytes": 8521384,
-        "heapGrowthBytes": 792840,
+        "cpuTaskDurationMs": 478.64,
+        "heapBeforeBytes": 7449640,
+        "heapAfterBytes": 8275360,
+        "heapGrowthBytes": 825720,
         "domNodeCount": 2744,
         "domNodeGrowth": 1094,
         "cpuHeapDomBounded": true
@@ -114,7 +114,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:fe56335ed0de87c1fc646078abbb93733c15e3890390807f04c1bcfe30ee958c",
-        "screenshot:sha256:7a0d379042dd22a4d6de042b724a4c81db7490f675d1d2307994420af1655c0e"
+        "screenshot:sha256:15a9f34214fca63151e6de4962cc3105e0012a67e35d8a1de4edeacc00fae1f2"
       ]
     },
     {
@@ -123,7 +123,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:e17ae8f2e63c4ff2f3854b66ef6931efcdcddcdb115cc09c492f25865951803c",
-        "screenshot:sha256:7a0d379042dd22a4d6de042b724a4c81db7490f675d1d2307994420af1655c0e"
+        "screenshot:sha256:15a9f34214fca63151e6de4962cc3105e0012a67e35d8a1de4edeacc00fae1f2"
       ]
     },
     {
@@ -131,8 +131,8 @@
       "requirement": "raw payloads are paged truncated or offloaded",
       "ok": true,
       "evidenceIds": [
-        "action:2:sha256:7163b567c68d1c8194cd99c5ada6bd726da0085cd07c586cec6fb1d5932e52a0",
-        "screenshot:sha256:7a0d379042dd22a4d6de042b724a4c81db7490f675d1d2307994420af1655c0e"
+        "action:2:sha256:74e97b3d7ba6f679ac103f6c2bdb5abcb103aad6fda94f56f15591427e09621b",
+        "screenshot:sha256:15a9f34214fca63151e6de4962cc3105e0012a67e35d8a1de4edeacc00fae1f2"
       ]
     }
   ],
@@ -409,8 +409,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:7a0d379042dd22a4d6de042b724a4c81db7490f675d1d2307994420af1655c0e"
+    "sha256:15a9f34214fca63151e6de4962cc3105e0012a67e35d8a1de4edeacc00fae1f2"
   ],
   "status": "passed",
-  "digest": "sha256:e790688531e8d70245ea784dfb1aef6a488a0c85d77c0b93d636ccf2cb3fb8ec"
+  "digest": "sha256:f3cb0e5c912965a5fd5984db2daae03ca61a789cadbd6528ecb61cc5fbfb66e4"
 }

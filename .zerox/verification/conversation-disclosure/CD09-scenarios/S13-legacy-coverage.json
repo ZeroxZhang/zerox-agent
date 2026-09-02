@@ -3,14 +3,14 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S13-legacy-coverage",
   "scenarioDigest": "sha256:1da0ad6ff0d434ad92845f1cea5d528fd01a1737ad0f443d1c45ef43687cf53f",
-  "executionId": "7564741c-0d95-4ee0-a193-6fe15839cb0d",
+  "executionId": "06326b7b-b867-40c3-beb7-5e58e8e2402d",
   "processEpochs": [
-    "main_451740eb-96d3-4c61-bad4-c8b5d1e5da86",
-    "main_df2c84cb-3bbc-48b5-b3cc-97a71577bd85"
+    "main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a",
+    "main_93049f6b-e21d-4761-81ed-9de07bc7dcce"
   ],
   "attemptNonces": [
-    "c8796ca0-6967-40b2-b5de-9ae809af7442",
-    "f498e9d7-cf12-43fa-8442-abbcb101bda4"
+    "70e8feca-3395-4245-abea-c73f2fd3e41e",
+    "cdf5bcd1-f2de-4b56-8f1e-22103daf70f0"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -39,7 +39,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_451740eb-96d3-4c61-bad4-c8b5d1e5da86"
+        "process:main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -70,7 +70,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_451740eb-96d3-4c61-bad4-c8b5d1e5da86"
+        "process:main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -99,7 +99,7 @@
       "executor": "production_restart",
       "ok": true,
       "evidenceIds": [
-        "process:main_451740eb-96d3-4c61-bad4-c8b5d1e5da86",
+        "process:main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a",
         "cd09-v391-session",
         "cd09-v391-goal",
         "cd09-v391-plan",
@@ -108,7 +108,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_df2c84cb-3bbc-48b5-b3cc-97a71577bd85",
+        "process:main_93049f6b-e21d-4761-81ed-9de07bc7dcce",
         "restart:persisted-authority"
       ],
       "observations": {
@@ -135,7 +135,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:47f7e8094c4f6459c08991ff05d2d1bab719cb3962a012e323436b844375cc3a",
-        "screenshot:sha256:9180cc79c7140271af7ebf8fb002887736de30e3cccf05470f1263f938b7312d"
+        "screenshot:sha256:744a0f132bca6f8afe2c5c2d1e151f929413a71b9c9e6f121d00884fb60cf17f"
       ]
     },
     {
@@ -144,7 +144,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:e5190b95c94a7751f60cb045425129f4f928df22859c04da66a7893e229603bb",
-        "screenshot:sha256:9180cc79c7140271af7ebf8fb002887736de30e3cccf05470f1263f938b7312d"
+        "screenshot:sha256:744a0f132bca6f8afe2c5c2d1e151f929413a71b9c9e6f121d00884fb60cf17f"
       ]
     },
     {
@@ -153,7 +153,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:39b4f836bec74207a7e73bc9157244cca0325ac02175a408695a99f4c75c71d2",
-        "screenshot:sha256:00e86cf46ec307114754260604830d4c48e36184e6f4facb8e706acd10daa77f"
+        "screenshot:sha256:fb4a1441978774da2547a105acf91f3aa0625ffa9f8e71526c51b8d3c697f134"
       ]
     }
   ],
@@ -230,17 +230,17 @@
     },
     {
       "ordinal": 15,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 16,
-      "channel": "chatSessions:get",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 17,
-      "channel": "skills:list",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
@@ -390,12 +390,12 @@
     },
     {
       "ordinal": 47,
-      "channel": "memory:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 48,
-      "channel": "modelSettings:load",
+      "channel": "memory:list",
       "ok": true
     },
     {
@@ -475,9 +475,9 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:00e86cf46ec307114754260604830d4c48e36184e6f4facb8e706acd10daa77f",
-    "sha256:9180cc79c7140271af7ebf8fb002887736de30e3cccf05470f1263f938b7312d"
+    "sha256:fb4a1441978774da2547a105acf91f3aa0625ffa9f8e71526c51b8d3c697f134",
+    "sha256:744a0f132bca6f8afe2c5c2d1e151f929413a71b9c9e6f121d00884fb60cf17f"
   ],
   "status": "passed",
-  "digest": "sha256:5b5f718caebcd94ffae0360836fcd1bdaf0da669b760ddf588c64f2c66f60003"
+  "digest": "sha256:ffea7e6d23bdbee82aba7ce981d9b3e57423da66bd9b59a204c05f4fd3b48d40"
 }

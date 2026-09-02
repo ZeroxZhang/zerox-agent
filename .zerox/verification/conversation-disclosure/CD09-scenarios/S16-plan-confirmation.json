@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S16-plan-confirmation",
   "scenarioDigest": "sha256:b629d2c39b858f620076e3b26976ba7261d6f4d04db51565df665f1ff1b3c432",
-  "executionId": "9c1889c0-3a4c-4366-9ac0-04d4ff2b5c24",
+  "executionId": "34946fdc-a17b-4a3a-82e9-31dae36345c9",
   "processEpochs": [
-    "main_00fe717d-f765-4c55-97f8-eb73b8111784"
+    "main_23738ad3-340b-4409-9e33-66796e6a07ff"
   ],
   "attemptNonces": [
-    "f6a8ff55-6303-46c4-8f81-6e1676122c65"
+    "b5569a0b-d02f-42d3-84ec-3d8d1cc768f6"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,12 +29,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "63432755-aa78-4707-9b06-163ee936fea8",
+        "1ec533f6-0033-4ec5-9e77-757a6468c4e7",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_00fe717d-f765-4c55-97f8-eb73b8111784"
+        "process:main_23738ad3-340b-4409-9e33-66796e6a07ff"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,12 +52,12 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "63432755-aa78-4707-9b06-163ee936fea8",
+        "1ec533f6-0033-4ec5-9e77-757a6468c4e7",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_00fe717d-f765-4c55-97f8-eb73b8111784"
+        "process:main_23738ad3-340b-4409-9e33-66796e6a07ff"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,12 +75,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "63432755-aa78-4707-9b06-163ee936fea8",
+        "1ec533f6-0033-4ec5-9e77-757a6468c4e7",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_00fe717d-f765-4c55-97f8-eb73b8111784"
+        "process:main_23738ad3-340b-4409-9e33-66796e6a07ff"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -100,7 +100,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:43e2d06eda831b91f4c049f4d65bb0410ad7d960c7a5cc0d0768d8be01ff0769",
-        "screenshot:sha256:eedd8cc46e1b821720af101acc320a5864aa755af506c0917c961982853ac7a3"
+        "screenshot:sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
       ]
     },
     {
@@ -109,7 +109,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:dd6342067e590b4cc3b680da6e67e0cdf09c28740c71871408663da8edea3aa1",
-        "screenshot:sha256:eedd8cc46e1b821720af101acc320a5864aa755af506c0917c961982853ac7a3"
+        "screenshot:sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
       ]
     },
     {
@@ -118,7 +118,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:cd49bae0bca16954d7b19b5a50e4f5bfecdf98e3579d85678ce0c8b2daf2aa17",
-        "screenshot:sha256:eedd8cc46e1b821720af101acc320a5864aa755af506c0917c961982853ac7a3"
+        "screenshot:sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
       ]
     }
   ],
@@ -325,12 +325,12 @@
     },
     {
       "ordinal": 41,
-      "channel": "plans:get",
+      "channel": "toolApproval:setGoalModeEnabled",
       "ok": true
     },
     {
       "ordinal": 42,
-      "channel": "toolApproval:setGoalModeEnabled",
+      "channel": "plans:get",
       "ok": true
     },
     {
@@ -595,8 +595,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:eedd8cc46e1b821720af101acc320a5864aa755af506c0917c961982853ac7a3"
+    "sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
   ],
   "status": "passed",
-  "digest": "sha256:42304ef5102f1a5f3e671787aa6acf112f06bec5876cc84ab6f522c1aef9cb12"
+  "digest": "sha256:55d695e700850e1024350a1fd02410f48878ceb1d6ebc8cea4bd71e72b240ed3"
 }

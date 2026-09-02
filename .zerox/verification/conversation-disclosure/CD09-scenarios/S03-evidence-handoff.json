@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S03-evidence-handoff",
   "scenarioDigest": "sha256:8040007dfb92f72b8b2e3a305cf2e705ce8a7ed80e7fd5c0907c06743cad125c",
-  "executionId": "c612b0ab-73cb-4aca-949c-e9e051c6f0df",
+  "executionId": "88df842c-cb95-4534-9d59-67c210be3669",
   "processEpochs": [
-    "main_3b14771e-9ff1-4ed3-a496-9d5a9411663d"
+    "main_9227c87a-2c8b-4bdf-a0a9-30d69944c6f3"
   ],
   "attemptNonces": [
-    "e2542f78-279a-411c-8a27-c76dbab84af2"
+    "2a0326b8-d413-4446-8061-fcfd2eac0d35"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "b0bb1dd1-c2a2-4d20-9839-bdd68abe04ad",
+        "78e52b08-9043-47f9-bac6-e36d8684c78d",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_3b14771e-9ff1-4ed3-a496-9d5a9411663d"
+        "process:main_9227c87a-2c8b-4bdf-a0a9-30d69944c6f3"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,10 +52,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "b0bb1dd1-c2a2-4d20-9839-bdd68abe04ad",
+        "78e52b08-9043-47f9-bac6-e36d8684c78d",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_3b14771e-9ff1-4ed3-a496-9d5a9411663d"
+        "process:main_9227c87a-2c8b-4bdf-a0a9-30d69944c6f3"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -172,22 +172,22 @@
     },
     {
       "ordinal": 15,
-      "channel": "agentRuns:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 16,
-      "channel": "agentRuns:listActiveExecutions",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 17,
-      "channel": "agentEvalCandidates:list",
+      "channel": "agentRuns:listActiveExecutions",
       "ok": true
     },
     {
       "ordinal": 18,
-      "channel": "skills:list",
+      "channel": "agentEvalCandidates:list",
       "ok": true
     },
     {
@@ -197,12 +197,12 @@
     },
     {
       "ordinal": 20,
-      "channel": "agentRuns:getTrajectoryPage",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 21,
-      "channel": "chatSessions:get",
+      "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
@@ -295,5 +295,5 @@
     "sha256:8d75658875c68939df891860d3d2f25d50dea13f3501c882237468906fa6b83b"
   ],
   "status": "passed",
-  "digest": "sha256:38d4b2a2fcfbfb69ac73e11fefe29f9dd95ec8594791ebb99a78a87157074480"
+  "digest": "sha256:30cb44fb922f0bf93248aedb55645dc91ace65e3f1a30f6fa0315e156a45e35b"
 }

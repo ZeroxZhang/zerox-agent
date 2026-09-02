@@ -8,19 +8,19 @@
   "runtimeStress": [
     {
       "scenario": "context-25k",
-      "elapsedMs": 149
+      "elapsedMs": 142
     },
     {
       "scenario": "chat-10k",
-      "elapsedMs": 1079
+      "elapsedMs": 1061
     },
     {
       "scenario": "trajectory-25k",
-      "elapsedMs": 1211
+      "elapsedMs": 1142
     },
     {
       "scenario": "parallel-5k",
-      "elapsedMs": 32
+      "elapsedMs": 30
     },
     {
       "scenario": "cancel-5k",
@@ -28,7 +28,7 @@
     },
     {
       "scenario": "worker-timeout-recovery",
-      "elapsedMs": 244
+      "elapsedMs": 256
     }
   ],
   "checks": [
