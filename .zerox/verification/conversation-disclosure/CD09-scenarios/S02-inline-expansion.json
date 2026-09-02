@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S02-inline-expansion",
   "scenarioDigest": "sha256:77db761fce99867af81da1cdae159c0fd6ba0106b5253825f4cdbddaf95d365b",
-  "executionId": "6b2bf065-3999-452b-bdf9-63647a16df66",
+  "executionId": "1be2aa88-cd1e-4f4f-b0fe-270fce789a51",
   "processEpochs": [
-    "main_21b4972a-14e5-4370-983f-08a969dce968"
+    "main_6ad5f0ab-5012-4157-8f93-5dc94d085e0a"
   ],
   "attemptNonces": [
-    "fd501495-fc8d-4d99-9bcf-7b93eb97ceda"
+    "42cc7229-5346-4bdf-b0dc-4b899701edc2"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "b3b08d80-4642-4462-9be1-fa17963b9583",
+        "d2980e0f-855b-4872-9d1f-fda43a46c025",
         "cd09-run-S02-inline-expansion",
         "trajectory-S02-inline-expansion",
-        "process:main_21b4972a-14e5-4370-983f-08a969dce968"
+        "process:main_6ad5f0ab-5012-4157-8f93-5dc94d085e0a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -50,10 +50,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "b3b08d80-4642-4462-9be1-fa17963b9583",
+        "d2980e0f-855b-4872-9d1f-fda43a46c025",
         "cd09-run-S02-inline-expansion",
         "trajectory-S02-inline-expansion",
-        "process:main_21b4972a-14e5-4370-983f-08a969dce968"
+        "process:main_6ad5f0ab-5012-4157-8f93-5dc94d085e0a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -71,10 +71,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "b3b08d80-4642-4462-9be1-fa17963b9583",
+        "d2980e0f-855b-4872-9d1f-fda43a46c025",
         "cd09-run-S02-inline-expansion",
         "trajectory-S02-inline-expansion",
-        "process:main_21b4972a-14e5-4370-983f-08a969dce968"
+        "process:main_6ad5f0ab-5012-4157-8f93-5dc94d085e0a"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -92,7 +92,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:9aa08338c61023343a11593b0a2d93505eba0275463e514eccccf94d6b47cf9c",
-        "screenshot:sha256:751155607603a7b21ae38abc7e0ac8675f2ad46786ba4c3903a1ebb6729392db"
+        "screenshot:sha256:2ff9f753f23f12a0a1da7b46ca8d5fb398ba4fe8cf1d1dfc4db7a33a0e394bcc"
       ]
     },
     {
@@ -101,7 +101,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:6806a98a73bb800eb855135317524376f4a8f0902ecd5f7283d11e4be1b5ad38",
-        "screenshot:sha256:751155607603a7b21ae38abc7e0ac8675f2ad46786ba4c3903a1ebb6729392db"
+        "screenshot:sha256:2ff9f753f23f12a0a1da7b46ca8d5fb398ba4fe8cf1d1dfc4db7a33a0e394bcc"
       ]
     },
     {
@@ -110,7 +110,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:8f90bbfc3f840d259c298ede926ef9b6962a8444817e956c4ead8de665c2e2d2",
-        "screenshot:sha256:751155607603a7b21ae38abc7e0ac8675f2ad46786ba4c3903a1ebb6729392db"
+        "screenshot:sha256:2ff9f753f23f12a0a1da7b46ca8d5fb398ba4fe8cf1d1dfc4db7a33a0e394bcc"
       ]
     }
   ],
@@ -187,42 +187,42 @@
     },
     {
       "ordinal": 15,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 16,
-      "channel": "chatSessions:get",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 17,
-      "channel": "agentRuns:list",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 18,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 19,
-      "channel": "scheduledTasks:list",
+      "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
       "ordinal": 20,
-      "channel": "chatSessions:getTranscriptPage",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
       "ordinal": 21,
-      "channel": "plans:getLatestBySession",
+      "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
       "ordinal": 22,
-      "channel": "chatSessions:list",
+      "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
@@ -232,27 +232,27 @@
     },
     {
       "ordinal": 24,
-      "channel": "chatSessions:get",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 25,
-      "channel": "agentRuns:list",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 26,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 27,
-      "channel": "scheduledTasks:list",
+      "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
       "ordinal": 28,
-      "channel": "skills:list",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
@@ -332,53 +332,53 @@
     },
     {
       "ordinal": 44,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 45,
-      "channel": "chatSessions:get",
-      "ok": true
-    },
-    {
-      "ordinal": 46,
-      "channel": "agentRuns:list",
-      "ok": true
-    },
-    {
-      "ordinal": 47,
-      "channel": "agentRuns:listTrajectory",
-      "ok": true
-    },
-    {
-      "ordinal": 48,
-      "channel": "scheduledTasks:list",
-      "ok": true
-    },
-    {
-      "ordinal": 49,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 50,
-      "channel": "plans:getLatestBySession",
-      "ok": true
-    },
-    {
-      "ordinal": 51,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
+      "ordinal": 46,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 47,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 48,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 49,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 50,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 51,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
       "ordinal": 52,
-      "channel": "skills:list",
+      "channel": "chatSessions:list",
       "ok": true
     }
   ],
   "screenshotDigests": [
-    "sha256:751155607603a7b21ae38abc7e0ac8675f2ad46786ba4c3903a1ebb6729392db"
+    "sha256:2ff9f753f23f12a0a1da7b46ca8d5fb398ba4fe8cf1d1dfc4db7a33a0e394bcc"
   ],
   "status": "passed",
-  "digest": "sha256:7e5396cae849d101b47ff510ed6cc03d08e2c36ba5bc2228af51f9fe2cb05364"
+  "digest": "sha256:9b20529fa8fcd406eb4bd6aa05622162d280349a161aa0cd94946f79976a2bab"
 }

@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S06-pause-reload-recovery",
   "scenarioDigest": "sha256:735d4a84adf2b87e2081d1a81638aaf9a96d79b5b6328f3c9cf6a6516d9a98ed",
-  "executionId": "d9b62d11-40ae-40b5-a9ed-d526392753c5",
+  "executionId": "bbb24b95-c7ec-4386-b257-0ce165bc966d",
   "processEpochs": [
-    "main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
+    "main_deb5f7f6-71af-4a20-8de4-f168be01e391"
   ],
   "attemptNonces": [
-    "331f4dd0-868c-46e1-bb30-96aac2886592"
+    "ec41c843-374b-4d85-bc7d-3bcae758a422"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,11 +29,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "855d54ef-772b-477d-b92b-bda0bb179e20",
+        "93b2a989-b8f3-4b68-bffc-954891f231b3",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "29dea494-c555-42bc-b931-2236b9a769fa",
-        "process:main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
+        "480f9343-9116-436a-bdfe-99119bb2ffb4",
+        "process:main_deb5f7f6-71af-4a20-8de4-f168be01e391"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -51,11 +51,11 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "855d54ef-772b-477d-b92b-bda0bb179e20",
+        "93b2a989-b8f3-4b68-bffc-954891f231b3",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "29dea494-c555-42bc-b931-2236b9a769fa",
-        "process:main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
+        "480f9343-9116-436a-bdfe-99119bb2ffb4",
+        "process:main_deb5f7f6-71af-4a20-8de4-f168be01e391"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -72,11 +72,11 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "855d54ef-772b-477d-b92b-bda0bb179e20",
+        "93b2a989-b8f3-4b68-bffc-954891f231b3",
         "cd09-run-S06-pause-reload-recovery",
         "trajectory-S06-pause-reload-recovery",
-        "29dea494-c555-42bc-b931-2236b9a769fa",
-        "process:main_cba2ffbb-d5cc-4907-b590-9f8c626edd0a"
+        "480f9343-9116-436a-bdfe-99119bb2ffb4",
+        "process:main_deb5f7f6-71af-4a20-8de4-f168be01e391"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,7 +96,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:dc8944961296d113ae68e87923d8a0b35963a3bee7b4219c75ece92d13cb46cd",
-        "screenshot:sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
+        "screenshot:sha256:0ce4e9fe2d7f773b803e784698b3881d85898cabfd1120c89f55488a460c58fa"
       ]
     },
     {
@@ -105,7 +105,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:a6ec076aaccb7730677ddad1c3661f70dc9060d81b40d9dc768b607bb2c1848f",
-        "screenshot:sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
+        "screenshot:sha256:0ce4e9fe2d7f773b803e784698b3881d85898cabfd1120c89f55488a460c58fa"
       ]
     },
     {
@@ -114,7 +114,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:11e70d7f8572dfea7ca1cc0d79c32579f00c7f4387ce496c457769e6be356ec4",
-        "screenshot:sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
+        "screenshot:sha256:0ce4e9fe2d7f773b803e784698b3881d85898cabfd1120c89f55488a460c58fa"
       ]
     }
   ],
@@ -191,32 +191,32 @@
     },
     {
       "ordinal": 15,
-      "channel": "toolApproval:listPending",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 16,
-      "channel": "toolApproval:getMode",
+      "channel": "toolApproval:listPending",
       "ok": true
     },
     {
       "ordinal": 17,
-      "channel": "scheduledTasks:list",
+      "channel": "toolApproval:getMode",
       "ok": true
     },
     {
       "ordinal": 18,
-      "channel": "agentRuns:list",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
       "ordinal": 19,
-      "channel": "memory:list",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 20,
-      "channel": "modelSettings:load",
+      "channel": "memory:list",
       "ok": true
     },
     {
@@ -256,52 +256,52 @@
     },
     {
       "ordinal": 28,
-      "channel": "modelCatalog:load",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 29,
-      "channel": "chatSessions:list",
+      "channel": "modelCatalog:load",
       "ok": true
     },
     {
       "ordinal": 30,
-      "channel": "chatSessions:get",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 31,
-      "channel": "agentRuns:list",
-      "ok": true
-    },
-    {
-      "ordinal": 32,
-      "channel": "agentRuns:listTrajectory",
-      "ok": true
-    },
-    {
-      "ordinal": 33,
-      "channel": "scheduledTasks:list",
-      "ok": true
-    },
-    {
-      "ordinal": 34,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 35,
-      "channel": "plans:getLatestBySession",
-      "ok": true
-    },
-    {
-      "ordinal": 36,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
+      "ordinal": 32,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 33,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 34,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 35,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 36,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
       "ordinal": 37,
-      "channel": "agentRuns:listActiveExecutions",
+      "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
@@ -311,157 +311,157 @@
     },
     {
       "ordinal": 39,
-      "channel": "chatSessions:get",
+      "channel": "agentRuns:listActiveExecutions",
       "ok": true
     },
     {
       "ordinal": 40,
-      "channel": "agentRuns:list",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 41,
-      "channel": "agentRuns:listTrajectory",
-      "ok": true
-    },
-    {
-      "ordinal": 42,
-      "channel": "scheduledTasks:list",
-      "ok": true
-    },
-    {
-      "ordinal": 43,
-      "channel": "agentRuns:listActiveExecutions",
-      "ok": true
-    },
-    {
-      "ordinal": 44,
-      "channel": "toolApproval:listPending",
-      "ok": true
-    },
-    {
-      "ordinal": 45,
-      "channel": "toolApproval:getMode",
-      "ok": true
-    },
-    {
-      "ordinal": 46,
-      "channel": "scheduledTasks:list",
-      "ok": true
-    },
-    {
-      "ordinal": 47,
-      "channel": "agentRuns:list",
-      "ok": true
-    },
-    {
-      "ordinal": 48,
-      "channel": "modelSettings:load",
-      "ok": true
-    },
-    {
-      "ordinal": 49,
-      "channel": "memory:list",
-      "ok": true
-    },
-    {
-      "ordinal": 50,
-      "channel": "agentWorkspaces:list",
-      "ok": true
-    },
-    {
-      "ordinal": 51,
-      "channel": "agentBootstrap:loadValidation",
-      "ok": true
-    },
-    {
-      "ordinal": 52,
-      "channel": "app:getMeta",
-      "ok": true
-    },
-    {
-      "ordinal": 53,
-      "channel": "app:getRuntimeInfo",
-      "ok": true
-    },
-    {
-      "ordinal": 54,
-      "channel": "navigation:list",
-      "ok": true
-    },
-    {
-      "ordinal": 55,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 56,
-      "channel": "app:getUpdateState",
-      "ok": true
-    },
-    {
-      "ordinal": 57,
-      "channel": "modelCatalog:load",
-      "ok": true
-    },
-    {
-      "ordinal": 58,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 59,
       "channel": "chatSessions:get",
       "ok": true
     },
     {
-      "ordinal": 60,
+      "ordinal": 42,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 61,
+      "ordinal": 43,
       "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
-      "ordinal": 62,
+      "ordinal": 44,
       "channel": "scheduledTasks:list",
       "ok": true
     },
     {
-      "ordinal": 63,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 64,
-      "channel": "plans:getLatestBySession",
-      "ok": true
-    },
-    {
-      "ordinal": 65,
-      "channel": "chatSessions:list",
-      "ok": true
-    },
-    {
-      "ordinal": 66,
+      "ordinal": 45,
       "channel": "agentRuns:listActiveExecutions",
       "ok": true
     },
     {
-      "ordinal": 67,
+      "ordinal": 46,
+      "channel": "toolApproval:listPending",
+      "ok": true
+    },
+    {
+      "ordinal": 47,
+      "channel": "toolApproval:getMode",
+      "ok": true
+    },
+    {
+      "ordinal": 48,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 49,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 50,
+      "channel": "memory:list",
+      "ok": true
+    },
+    {
+      "ordinal": 51,
+      "channel": "agentWorkspaces:list",
+      "ok": true
+    },
+    {
+      "ordinal": 52,
+      "channel": "agentBootstrap:loadValidation",
+      "ok": true
+    },
+    {
+      "ordinal": 53,
+      "channel": "app:getMeta",
+      "ok": true
+    },
+    {
+      "ordinal": 54,
+      "channel": "app:getRuntimeInfo",
+      "ok": true
+    },
+    {
+      "ordinal": 55,
+      "channel": "navigation:list",
+      "ok": true
+    },
+    {
+      "ordinal": 56,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 57,
+      "channel": "app:getUpdateState",
+      "ok": true
+    },
+    {
+      "ordinal": 58,
+      "channel": "modelSettings:load",
+      "ok": true
+    },
+    {
+      "ordinal": 59,
+      "channel": "modelCatalog:load",
+      "ok": true
+    },
+    {
+      "ordinal": 60,
       "channel": "skills:list",
+      "ok": true
+    },
+    {
+      "ordinal": 61,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 62,
+      "channel": "chatSessions:get",
+      "ok": true
+    },
+    {
+      "ordinal": 63,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 64,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 65,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 66,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 67,
+      "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
       "ordinal": 68,
-      "channel": "skills:list",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 69,
-      "channel": "skills:list",
+      "channel": "agentRuns:listActiveExecutions",
       "ok": true
     },
     {
@@ -476,8 +476,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:9c37e3506df2420143ede35e502432d7cb481a8723b8be67c2a9ec05597745ce"
+    "sha256:0ce4e9fe2d7f773b803e784698b3881d85898cabfd1120c89f55488a460c58fa"
   ],
   "status": "passed",
-  "digest": "sha256:fb4a9ce544bb633e0dbff0fdbe8dd43dbea63769bd053bc605ab0c8decd935ed"
+  "digest": "sha256:511711a13535fd38ab6526a31be49c112debe4459182e4d6b4c65d52dfff22d2"
 }

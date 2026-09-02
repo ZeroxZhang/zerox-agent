@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S14-guided-input",
   "scenarioDigest": "sha256:3c9874af0ecbbb0423379639f72878eaf8861332e3c49791c79eb05abfc98dfd",
-  "executionId": "f9ff7d58-f252-464b-8433-5f8532a148a1",
+  "executionId": "5e5669b5-4ae6-4581-9289-956e871d7572",
   "processEpochs": [
-    "main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
+    "main_634054af-a2a9-4162-8a5b-e183d23cf6e3"
   ],
   "attemptNonces": [
-    "4f44ab6e-7bce-4f84-b57f-b3014b361244"
+    "a0aab390-63ba-4be2-8765-f80b27f56c3f"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "6324e50c-2bf7-436e-9526-4fae24092f0b",
+        "0422382e-7da7-4ebd-a9e4-13ec7cbfa118",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
+        "process:main_634054af-a2a9-4162-8a5b-e183d23cf6e3"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -40,11 +40,11 @@
         "runListed": true,
         "trajectoryLoaded": true,
         "guidedInputRequired": true,
-        "inputRequestId": "skill_input_f415b74d-c8d3-4118-b429-37d4ba83ba66",
+        "inputRequestId": "skill_input_3a22a4bd-8bd6-4963-bac9-55d5ac4da510",
         "waitingEventObserved": true,
         "workspaceBound": true,
         "reloadRecoveredPending": true,
-        "recoveredInputRequestId": "skill_input_f415b74d-c8d3-4118-b429-37d4ba83ba66"
+        "recoveredInputRequestId": "skill_input_3a22a4bd-8bd6-4963-bac9-55d5ac4da510"
       }
     },
     {
@@ -53,10 +53,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "6324e50c-2bf7-436e-9526-4fae24092f0b",
+        "0422382e-7da7-4ebd-a9e4-13ec7cbfa118",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
+        "process:main_634054af-a2a9-4162-8a5b-e183d23cf6e3"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,10 +75,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "6324e50c-2bf7-436e-9526-4fae24092f0b",
+        "0422382e-7da7-4ebd-a9e4-13ec7cbfa118",
         "cd09-run-S14-guided-input",
         "trajectory-S14-guided-input",
-        "process:main_689207c4-ba29-4fd4-8af7-1456f0d94ae1"
+        "process:main_634054af-a2a9-4162-8a5b-e183d23cf6e3"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -96,8 +96,8 @@
       "requirement": "the required prompt remains prominent after window reload",
       "ok": true,
       "evidenceIds": [
-        "action:0:sha256:24f017ac1e4ccddf0ad717dff8b115da8cd2ce3ac7a931e214e5566adb44aeeb",
-        "screenshot:sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
+        "action:0:sha256:9b4cf3353174e62e15b57c97f36b1d8b713053dcd07b07ccf193071b626f3aef",
+        "screenshot:sha256:00bf99ea75e00b0f13daf893a412992e7804e1f69836ebfc5f6a48a25e2c2309"
       ]
     },
     {
@@ -106,7 +106,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:fe81b31a39c35e40f7975f73dd55d5a7c00cc3500460ba0eb962429928cc893c",
-        "screenshot:sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
+        "screenshot:sha256:00bf99ea75e00b0f13daf893a412992e7804e1f69836ebfc5f6a48a25e2c2309"
       ]
     },
     {
@@ -115,7 +115,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:ec1abfa94913d38b7f1ce061b28c312886c483b8f645aa546eb36a5a9d2cd2d4",
-        "screenshot:sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
+        "screenshot:sha256:00bf99ea75e00b0f13daf893a412992e7804e1f69836ebfc5f6a48a25e2c2309"
       ]
     }
   ],
@@ -277,42 +277,42 @@
     },
     {
       "ordinal": 32,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 33,
-      "channel": "chatSessions:get",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 34,
-      "channel": "agentRuns:list",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 35,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 36,
-      "channel": "scheduledTasks:list",
+      "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
       "ordinal": 37,
-      "channel": "chatSessions:getTranscriptPage",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
       "ordinal": 38,
-      "channel": "plans:getLatestBySession",
+      "channel": "chatSessions:getTranscriptPage",
       "ok": true
     },
     {
       "ordinal": 39,
-      "channel": "chatSessions:list",
+      "channel": "plans:getLatestBySession",
       "ok": true
     },
     {
@@ -322,27 +322,27 @@
     },
     {
       "ordinal": 41,
-      "channel": "chatSessions:get",
+      "channel": "chatSessions:list",
       "ok": true
     },
     {
       "ordinal": 42,
-      "channel": "agentRuns:list",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 43,
-      "channel": "agentRuns:listTrajectory",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 44,
-      "channel": "scheduledTasks:list",
+      "channel": "agentRuns:listTrajectory",
       "ok": true
     },
     {
       "ordinal": 45,
-      "channel": "skills:list",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
@@ -427,63 +427,63 @@
     },
     {
       "ordinal": 62,
-      "channel": "chatSessions:list",
+      "channel": "skills:list",
       "ok": true
     },
     {
       "ordinal": 63,
-      "channel": "chatSessions:get",
-      "ok": true
-    },
-    {
-      "ordinal": 64,
-      "channel": "agentRuns:list",
-      "ok": true
-    },
-    {
-      "ordinal": 65,
-      "channel": "agentRuns:listTrajectory",
-      "ok": true
-    },
-    {
-      "ordinal": 66,
-      "channel": "scheduledTasks:list",
-      "ok": true
-    },
-    {
-      "ordinal": 67,
-      "channel": "chatSessions:getTranscriptPage",
-      "ok": true
-    },
-    {
-      "ordinal": 68,
-      "channel": "plans:getLatestBySession",
-      "ok": true
-    },
-    {
-      "ordinal": 69,
       "channel": "chatSessions:list",
       "ok": true
     },
     {
-      "ordinal": 70,
+      "ordinal": 64,
       "channel": "chatSessions:get",
       "ok": true
     },
     {
+      "ordinal": 65,
+      "channel": "agentRuns:list",
+      "ok": true
+    },
+    {
+      "ordinal": 66,
+      "channel": "agentRuns:listTrajectory",
+      "ok": true
+    },
+    {
+      "ordinal": 67,
+      "channel": "scheduledTasks:list",
+      "ok": true
+    },
+    {
+      "ordinal": 68,
+      "channel": "chatSessions:getTranscriptPage",
+      "ok": true
+    },
+    {
+      "ordinal": 69,
+      "channel": "plans:getLatestBySession",
+      "ok": true
+    },
+    {
+      "ordinal": 70,
+      "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
       "ordinal": 71,
-      "channel": "chat:respondSkillInput",
+      "channel": "chatSessions:get",
       "ok": true
     },
     {
       "ordinal": 72,
-      "channel": "skills:list",
+      "channel": "chat:respondSkillInput",
       "ok": true
     }
   ],
   "screenshotDigests": [
-    "sha256:369115bd5820ba99d878884aefc3fde9b9dfe3c67fc5a4b499b73dd87ff0b26f"
+    "sha256:00bf99ea75e00b0f13daf893a412992e7804e1f69836ebfc5f6a48a25e2c2309"
   ],
   "status": "passed",
-  "digest": "sha256:eeb7145eb19b9f1153eacba41c6aa3a10565ea402a609451080bfcb2bbdf116a"
+  "digest": "sha256:0d8baf247decdfe57ce80029487394ccbdc295d08ad5214db37b4c92e30ce5fd"
 }

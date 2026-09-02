@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "kind": "v3.9.2-release-attestation",
+  "version": "3.9.2",
+  "status": "accepted",
+  "identityAssurance": "caller-promoted-external-anchor-not-signed",
+  "acceptanceAnchorDigest": "sha256:1c60f4ced62cacb5c76a90429f06efd6625376e17aa18bda093bb595a6b10ac8",
+  "acceptedGitHead": "c5511bdf3e87c493905ca91bcd3ea7de307b627c",
+  "acceptedGitTree": "6c4c659acf0977390c5456b225b0ebf350e12e99",
+  "cd04AnchorDigest": "sha256:99b8b7af27e24d2c44e2bb3b2433ada877fd68aeac2d1de80427931de15c01ef",
+  "sourceDigest": "sha256:a1e0fed7f662987ef1b91cbf7b8a0f23361c84df51f8ce0dca94a9f1cffd84e5",
+  "sourceFileCount": 1231,
+  "reviewPins": {
+    "code": {
+      "reviewerAgentId": "/root/v392_code_review_r10",
+      "challenge": "sha256:3f54bac083c12251fb626817980fd91ffbaa93535a012e3b87cdab3795e8741b",
+      "receiptDigest": "sha256:4db3c0fafe015352d61cba467a0aa944d5bc7a9e9e0f53d98158c8c89b6c066e"
+    },
+    "security": {
+      "reviewerAgentId": "/root/v392_security_review_r9",
+      "challenge": "sha256:6c3ccd152e682f448f8693277069b6e0aa24be12ab3142961c3607fa0df75a78",
+      "receiptDigest": "sha256:c653d82e4a6b8e72c68a692f74d95cb749cbf3a0990ad7843c023f996b96a487"
+    }
+  },
+  "evidenceDigests": {
+    "codeReview": "sha256:4438dc56da769ff29b45a081a5a1c62d6453a06fad5216fd36b78f61968ce760",
+    "securityReview": "sha256:bed77aaae9cf44459b31edc9b572e003652e75820e6a0a683be7caf44ca353ba",
+    "realAppAcceptance": "sha256:887561a1b5d3dae8a4c28618e47184df37743ab5577bfd9cc306ca375d2c6703",
+    "localPackage": "sha256:0917a0da8e4d32e44c3f6f85e59284bb681c6df97f3a31055aae80b21b66f0bf",
+    "chatResilience": "sha256:4a574bb118ef48e1f02b560a1d801d1f5c1b9f03ca4fc31971bd9cce222692a6",
+    "planResilience": "sha256:ff8c02f1a8d7e820c63279c4bb97b6ecdeefea73b1d49cc86a3df99c679ed372"
+  },
+  "verification": {
+    "fullVerify": "split-equivalent-passed",
+    "nestedSandboxRegression": "passed",
+    "productionSmoke": "passed",
+    "productionAudit": "passed",
+    "dependencyTree": "passed",
+    "whitespace": "passed",
+    "realAppAcceptance": "passed",
+    "localPackage": "passed",
+    "nativeNodeRestore": "passed",
+    "codeSignature": "passed",
+    "packagedLaunch": "passed",
+    "packageSecretScan": "passed"
+  },
+  "digest": "sha256:291716528a9beb7cf3888403c078c1c2899bcba1b264510c3e0453ea686d2f9e"
+}
