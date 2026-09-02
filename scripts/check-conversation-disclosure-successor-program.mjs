@@ -221,6 +221,7 @@ const expectedFinalAnchorKeys = [
   "controlDigests",
   "verification",
   "fileDigests",
+  "fileModes",
   "digest",
 ].sort();
 const expectedFinalVerification = {
@@ -922,9 +923,12 @@ async function validateFinalAcceptanceAnchor(options, canonicalRoot, errors) {
     return null;
   }
   const paths = Object.keys(anchor.fileDigests ?? {});
+  const modePaths = Object.keys(anchor.fileModes ?? {});
   if (
     paths.length !== expectedFinalAnchorFiles.length
-    || expectedFinalAnchorFiles.some((entry, index) => paths[index] !== entry)
+    || modePaths.length !== expectedFinalAnchorFiles.length
+    || expectedFinalAnchorFiles.some((entry, index) =>
+      paths[index] !== entry || modePaths[index] !== entry)
   ) {
     errors.push("v3.9.2 acceptance anchor file roster changed");
     return null;
@@ -937,7 +941,18 @@ async function validateFinalAcceptanceAnchor(options, canonicalRoot, errors) {
     );
     if (
       capture
-      && anchor.fileDigests[relativePath] !== sha256BytesV13(capture.bytes)
+      && (
+        anchor.fileDigests[relativePath] !== sha256BytesV13(capture.bytes)
+        || anchor.fileModes[relativePath]
+          !== (capture.metadata.mode & 0o777)
+        || (
+          [
+            ".zerox/conversation-disclosure-program.json",
+            ".zerox/feature_list.json",
+          ].includes(relativePath)
+          && anchor.fileModes[relativePath] !== 0o644
+        )
+      )
     ) {
       errors.push(`v3.9.2 acceptance anchor drift: ${relativePath}`);
     }

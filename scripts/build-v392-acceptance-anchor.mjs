@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
+const trustedGitContexts = new Map();
 const SELF_PATH = await realpath(fileURLToPath(import.meta.url));
 const SOURCE_BASELINE_GIT_HEAD =
   "942712279426601c1a5162dabc6fb9b663262e07";
@@ -123,7 +124,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/after-pack-mac.mjs":
     "sha256:376f81d437bc6b06876ed4bcbcc7889d698103b9a91b9fc46f96512d0b52901b",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:bdac730df8f5cae1cd572aa513d75b59c5134385e6eb58892de852e0af25bca1",
+    "sha256:da444ddce27133cd13158199740d85c61d1c25b887b91002460eca30b91d6d9e",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
@@ -327,6 +328,13 @@ if (
   && process.argv[2] === "--self-test-lifecycle-publication"
 ) {
   await runLifecyclePublicationSelfTest();
+  process.exit(0);
+}
+if (
+  process.argv.length === 3
+  && process.argv[2] === "--self-test-trusted-git-baseline"
+) {
+  await runTrustedGitBaselineSelfTest();
   process.exit(0);
 }
 if (
@@ -891,10 +899,14 @@ try {
   await verifySourceManifest(repositoryRealpath, options);
   await verifyGitIdentity(repositoryRealpath, options);
   const fileDigests = {};
+  const fileModes = {};
   for (const relativePath of FINAL_FILES) {
-    fileDigests[relativePath] = (
-      await captureRepositoryFile(repositoryRealpath, relativePath)
-    ).digest;
+    const capture = await captureRepositoryFile(
+      repositoryRealpath,
+      relativePath,
+    );
+    fileDigests[relativePath] = capture.digest;
+    fileModes[relativePath] = capture.metadata.mode & 0o777;
   }
   const packageReceipt = JSON.parse((
     await captureRepositoryFile(
@@ -968,6 +980,7 @@ try {
       packageSecretScan: "passed",
     },
     fileDigests,
+    fileModes,
   };
   completedAnchor = {
     ...anchor,
@@ -1238,10 +1251,13 @@ async function verifyCompletedOutputs(
   outputPath,
 ) {
   const anchorPaths = Object.keys(anchor.fileDigests ?? {});
+  const anchorModePaths = Object.keys(anchor.fileModes ?? {});
   if (
     anchorPaths.length !== FINAL_FILES.length
+    || anchorModePaths.length !== FINAL_FILES.length
     || FINAL_FILES.some((relativePath, index) =>
-      anchorPaths[index] !== relativePath)
+      anchorPaths[index] !== relativePath
+      || anchorModePaths[index] !== relativePath)
   ) {
     fail("completed acceptance anchor file roster changed");
   }
@@ -1250,7 +1266,14 @@ async function verifyCompletedOutputs(
       targetRepositoryRoot,
       relativePath,
     );
-    if (capture.digest !== anchor.fileDigests[relativePath]) {
+    if (
+      capture.digest !== anchor.fileDigests[relativePath]
+      || (capture.metadata.mode & 0o777) !== anchor.fileModes[relativePath]
+      || (
+        LIFECYCLE_PUBLICATION_FILES.includes(relativePath)
+        && anchor.fileModes[relativePath] !== 0o644
+      )
+    ) {
       fail(`post-commit final file drift: ${relativePath}`);
     }
   }
@@ -1722,23 +1745,15 @@ async function captureCommittedLifecycleBaseline(repositoryRoot, gitHead) {
   const captures = new Map();
   for (const relativePath of LIFECYCLE_PUBLICATION_FILES) {
     const [{ stdout: treeOutput }, { stdout: bytes }] = await Promise.all([
-      execFile(
-        "/usr/bin/git",
+      runTrustedGit(
+        repositoryRoot,
         ["ls-tree", "-z", gitHead, "--", relativePath],
-        {
-          cwd: repositoryRoot,
-          encoding: null,
-          maxBuffer: 1024 * 1024,
-        },
+        null,
       ),
-      execFile(
-        "/usr/bin/git",
+      runTrustedGit(
+        repositoryRoot,
         ["show", `${gitHead}:${relativePath}`],
-        {
-          cwd: repositoryRoot,
-          encoding: null,
-          maxBuffer: 16 * 1024 * 1024,
-        },
+        null,
       ),
     ]);
     const treeEntry = Buffer.from(treeOutput).toString("utf8");
@@ -1953,6 +1968,142 @@ async function runLifecyclePublicationSelfTest() {
       modeTamperRejected,
     }));
   } finally {
+    await rm(testRoot, { recursive: true, force: true });
+  }
+}
+
+async function runTrustedGitBaselineSelfTest() {
+  const testRoot = await realpath(await mkdtemp(
+    path.join(
+      process.env.TMPDIR ?? "/private/tmp",
+      "zerox-v392-trusted-git-",
+    ),
+  ));
+  const repositoryRoot = path.join(testRoot, "repository");
+  const hostileRoot = path.join(testRoot, "hostile");
+  const originalEnvironment = new Map(
+    ["GIT_DIR", "GIT_OBJECT_DIRECTORY", "GIT_REPLACE_REF_BASE"].map(
+      (name) => [name, process.env[name]],
+    ),
+  );
+  const git = (cwd, args) => execFile(
+    "/usr/bin/git",
+    ["--no-replace-objects", ...args],
+    {
+      cwd,
+      env: trustedGitEnvironment(),
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  try {
+    await Promise.all([
+      mkdir(path.join(repositoryRoot, ".zerox"), { recursive: true }),
+      mkdir(hostileRoot, { recursive: true }),
+    ]);
+    const originalProgramBytes = Buffer.from(`${JSON.stringify({
+      status: "active",
+      activeFeatureId: "P113-v3.9.2-disclosure-adversarial-acceptance",
+      nextFeatureId: "P113-v3.9.2-disclosure-adversarial-acceptance",
+      updatedAt: "reviewed",
+      workstreams: [{
+        id: "CD09",
+        state: "in_progress",
+        featureId: "P113-v3.9.2-disclosure-adversarial-acceptance",
+      }],
+    }, null, 2)}\n`);
+    const featureListBytes = Buffer.from(`${JSON.stringify({
+      updatedAt: "reviewed",
+      features: [{
+        id: "P113-v3.9.2-disclosure-adversarial-acceptance",
+        status: "in_progress",
+      }],
+    }, null, 2)}\n`);
+    const programPath = path.join(
+      repositoryRoot,
+      LIFECYCLE_PUBLICATION_FILES[0],
+    );
+    const featureListPath = path.join(
+      repositoryRoot,
+      LIFECYCLE_PUBLICATION_FILES[1],
+    );
+    await Promise.all([
+      writePrivateFile(programPath, originalProgramBytes),
+      writePrivateFile(featureListPath, featureListBytes),
+    ]);
+    await Promise.all([chmod(programPath, 0o644), chmod(featureListPath, 0o644)]);
+    await git(repositoryRoot, ["init", "-q"]);
+    await git(repositoryRoot, ["add", "--all"]);
+    await git(repositoryRoot, [
+      "-c", "user.name=Zerox Acceptance",
+      "-c", "user.email=acceptance@invalid.local",
+      "commit", "-q", "-m", "reviewed",
+    ]);
+    const reviewedHead = (await git(
+      repositoryRoot,
+      ["rev-parse", "HEAD"],
+    )).stdout.trim();
+
+    const maliciousProgram = JSON.parse(originalProgramBytes.toString("utf8"));
+    maliciousProgram.unreviewedGovernanceField = true;
+    const handle = await open(
+      programPath,
+      constants.O_WRONLY | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0),
+    );
+    try {
+      await handle.writeFile(
+        Buffer.from(`${JSON.stringify(maliciousProgram, null, 2)}\n`),
+      );
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await git(repositoryRoot, ["add", "--all"]);
+    await git(repositoryRoot, [
+      "-c", "user.name=Zerox Acceptance",
+      "-c", "user.email=acceptance@invalid.local",
+      "commit", "-q", "-m", "replacement",
+    ]);
+    const replacementHead = (await git(
+      repositoryRoot,
+      ["rev-parse", "HEAD"],
+    )).stdout.trim();
+    await git(repositoryRoot, ["checkout", "-q", reviewedHead]);
+    await git(repositoryRoot, ["replace", reviewedHead, replacementHead]);
+    await git(hostileRoot, ["init", "-q"]);
+
+    process.env.GIT_DIR = path.join(hostileRoot, ".git");
+    process.env.GIT_OBJECT_DIRECTORY = path.join(hostileRoot, "objects");
+    process.env.GIT_REPLACE_REF_BASE = "refs/replace/hostile";
+    let inheritedGitRejected = false;
+    try {
+      rejectPreloadEnvironment();
+    } catch {
+      inheritedGitRejected = true;
+    }
+    const baseline = await captureCommittedLifecycleBaseline(
+      repositoryRoot,
+      reviewedHead,
+    );
+    if (
+      !inheritedGitRejected
+      || baseline.get(LIFECYCLE_PUBLICATION_FILES[0]).digest
+        !== sha256(originalProgramBytes)
+      || baseline.get(LIFECYCLE_PUBLICATION_FILES[1]).digest
+        !== sha256(featureListBytes)
+    ) {
+      fail("trusted Git lifecycle baseline accepted inherited or replacement state");
+    }
+    console.log(JSON.stringify({
+      trustedGitBaselineSelfTest: "passed",
+      inheritedGitRejected,
+      replacementIgnored: true,
+    }));
+  } finally {
+    for (const [name, value] of originalEnvironment) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     await rm(testRoot, { recursive: true, force: true });
   }
 }
@@ -2264,6 +2415,7 @@ async function publishGeneratedOutputs(
           : null,
         backupName: entry.backupName,
         nextDigest: entry.next.digest,
+        nextMode: entry.next.metadata.mode & 0o777,
       })),
       previousRelease,
       nextRelease: nextReleaseTree,
@@ -2471,6 +2623,9 @@ async function runPublicationJournalSelfTest() {
             previousMode: capture.metadata.mode & 0o777,
             backupName: `${index}.bin`,
             nextDigest: sha256(nextFiles[index].bytes),
+            nextMode: LIFECYCLE_PUBLICATION_FILES.includes(entry.relativePath)
+              ? 0o644
+              : 0o600,
           };
         },
       )),
@@ -2485,35 +2640,95 @@ async function runPublicationJournalSelfTest() {
     if (rolledBackRecovery?.status !== "rolled_back") {
       fail("rolled-back journal cleanup did not converge without backups");
     }
-    const committedRecovery = await exercisePublicationRecoveryState({
-      repositoryRoot,
-      privateRoot,
-      outputPath,
+    let committedModeTamperRejected = false;
+    try {
+      await exercisePublicationRecoveryState({
+        repositoryRoot,
+        privateRoot,
+        outputPath,
+        journalPath,
+        sourceDigest,
+        runnerDigest,
+        previousFiles,
+        nextFiles,
+        committed: true,
+        beforeRecovery: async () => {
+          await chmod(
+            path.join(repositoryRoot, LIFECYCLE_PUBLICATION_FILES[0]),
+            0o777,
+          );
+        },
+      });
+    } catch {
+      committedModeTamperRejected = true;
+    }
+    await chmod(
+      path.join(repositoryRoot, LIFECYCLE_PUBLICATION_FILES[0]),
+      0o644,
+    );
+    const committedRecovery = await recoverPublicationJournal({
       journalPath,
-      sourceDigest,
-      runnerDigest,
-      previousFiles,
-      nextFiles,
-      committed: true,
+      repositoryRoot,
+      outputPath,
     });
     if (committedRecovery?.status !== "committed") {
       fail("committed journal did not return the accepted result");
     }
+    const validateSelfTestCommitted = async (anchor) => {
+      if (
+        anchor.sourceDigest !== sourceDigest
+        || anchor.runnerDigest !== runnerDigest
+      ) {
+        fail("journal-free committed replay changed anchor identity");
+      }
+      for (const entry of nextFiles) {
+        const capture = await captureRepositoryFile(
+          repositoryRoot,
+          entry.relativePath,
+        );
+        if (
+          anchor.fileDigests?.[entry.relativePath] !== capture.digest
+          || anchor.fileModes?.[entry.relativePath]
+            !== (capture.metadata.mode & 0o777)
+          || (
+            LIFECYCLE_PUBLICATION_FILES.includes(entry.relativePath)
+            && anchor.fileModes[entry.relativePath] !== 0o644
+          )
+        ) {
+          fail(`journal-free generated output drifted: ${entry.relativePath}`);
+        }
+      }
+    };
     const completedReplay = await recoverPublicationJournal({
       journalPath,
       repositoryRoot,
       outputPath,
-      validateCommitted: async (anchor) => {
-        if (
-          anchor.sourceDigest !== sourceDigest
-          || anchor.runnerDigest !== runnerDigest
-        ) {
-          fail("journal-free committed replay changed anchor identity");
-        }
-      },
+      validateCommitted: validateSelfTestCommitted,
     });
     if (completedReplay?.status !== "committed") {
       fail("journal-free committed replay did not return the accepted result");
+    }
+    await chmod(
+      path.join(repositoryRoot, LIFECYCLE_PUBLICATION_FILES[1]),
+      0o777,
+    );
+    let journalFreeModeTamperRejected = false;
+    try {
+      await recoverPublicationJournal({
+        journalPath,
+        repositoryRoot,
+        outputPath,
+        validateCommitted: validateSelfTestCommitted,
+      });
+    } catch {
+      journalFreeModeTamperRejected = true;
+    }
+    await chmod(
+      path.join(repositoryRoot, LIFECYCLE_PUBLICATION_FILES[1]),
+      0o644,
+    );
+    if (!committedModeTamperRejected || !journalFreeModeTamperRejected) {
+      fail("committed lifecycle mode tamper was not rejected");
     }
     for (const entry of nextFiles) {
       const capture = await captureRepositoryFile(
@@ -2552,6 +2767,8 @@ async function runPublicationJournalSelfTest() {
     console.log(JSON.stringify({
       publicationJournalSelfTest: "passed",
       generatedFileCount: GENERATED_PUBLICATION_FILES.length,
+      committedModeTamperRejected,
+      journalFreeModeTamperRejected,
     }, null, 2));
   } finally {
     await rm(testRoot, { recursive: true, force: true });
@@ -3003,6 +3220,7 @@ async function exercisePublicationRecoveryState({
   committed,
   afterJournalRename,
   leavePublishedAnchorHardlink = false,
+  beforeRecovery,
 }) {
   const transactionId = randomUUID();
   const backupRoot = `${journalPath}.backup-${transactionId}`;
@@ -3029,6 +3247,9 @@ async function exercisePublicationRecoveryState({
       previousMode: previous.metadata.mode & 0o777,
       backupName: `${index}.bin`,
       nextDigest: sha256(nextFiles[index].bytes),
+      nextMode: LIFECYCLE_PUBLICATION_FILES.includes(
+        previousFiles[index].relativePath,
+      ) ? 0o644 : 0o600,
     });
   }
   await syncDirectory(backupRoot);
@@ -3052,7 +3273,9 @@ async function exercisePublicationRecoveryState({
   for (let index = 0; index < nextFiles.length; index += 1) {
     await replaceFileAtomically(
       nextFiles[index].bytes,
-      0o600,
+      LIFECYCLE_PUBLICATION_FILES.includes(nextFiles[index].relativePath)
+        ? 0o644
+        : 0o600,
       path.join(repositoryRoot, nextFiles[index].relativePath),
       repositoryRoot,
     );
@@ -3062,11 +3285,23 @@ async function exercisePublicationRecoveryState({
     recursive: true,
     preserveTimestamps: true,
   });
+  const fileDigests = {};
+  const fileModes = {};
+  for (const entry of nextFiles) {
+    const capture = await captureRepositoryFile(
+      repositoryRoot,
+      entry.relativePath,
+    );
+    fileDigests[entry.relativePath] = capture.digest;
+    fileModes[entry.relativePath] = capture.metadata.mode & 0o777;
+  }
   const anchorInput = {
     kind: "v3.9.2-local-acceptance-external-anchor",
     repositoryRealpath: repositoryRoot,
     sourceDigest,
     runnerDigest,
+    fileDigests,
+    fileModes,
   };
   const anchor = { ...anchorInput, digest: hashCanonical(anchorInput) };
   const anchorTemporaryPath = `${outputPath}.partial-${transactionId}`;
@@ -3095,6 +3330,7 @@ async function exercisePublicationRecoveryState({
       anchorDigest: anchor.digest,
     });
   }
+  await beforeRecovery?.({ journal, outputPath, repositoryRoot });
   const recovery = await recoverPublicationJournal({
     journalPath,
     repositoryRoot,
@@ -3230,8 +3466,14 @@ async function recoverPublicationJournal({
         );
         if (
           current
-          && current.digest !== entry.nextDigest
-          && current.digest !== entry.previousDigest
+          && (
+            current.digest !== entry.nextDigest
+            || (current.metadata.mode & 0o777) !== entry.nextMode
+          )
+          && (
+            current.digest !== entry.previousDigest
+            || (current.metadata.mode & 0o777) !== entry.previousMode
+          )
         ) {
           fail(`generated output has a third state: ${entry.relativePath}`);
         }
@@ -3435,7 +3677,10 @@ async function validateCommittedPublication({
       repositoryRoot,
       entry.relativePath,
     );
-    if (current.digest !== entry.nextDigest) {
+    if (
+      current.digest !== entry.nextDigest
+      || (current.metadata.mode & 0o777) !== entry.nextMode
+    ) {
       fail(`committed generated output drifted: ${entry.relativePath}`);
     }
   }
@@ -3563,11 +3808,19 @@ function validatePublicationJournal(journal, repositoryRoot, outputPath) {
       JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify([
         "backupName",
         "nextDigest",
+        "nextMode",
         "previousDigest",
         "previousMode",
         "relativePath",
       ])
       || !/^sha256:[0-9a-f]{64}$/.test(entry.nextDigest ?? "")
+      || !Number.isInteger(entry.nextMode)
+      || entry.nextMode < 0
+      || entry.nextMode > 0o777
+      || (
+        LIFECYCLE_PUBLICATION_FILES.includes(entry.relativePath)
+        && entry.nextMode !== 0o644
+      )
       || (entry.previousDigest !== null
         && !/^sha256:[0-9a-f]{64}$/.test(entry.previousDigest ?? ""))
       || (entry.previousDigest === null
@@ -3801,12 +4054,8 @@ async function verifyNativeNodeAddon(repositoryRoot) {
 
 async function verifyGitIdentity(repositoryRoot, expected) {
   const [head, tree] = await Promise.all([
-    readCommandOutput("/usr/bin/git", ["rev-parse", "HEAD"], repositoryRoot),
-    readCommandOutput(
-      "/usr/bin/git",
-      ["rev-parse", "--verify", "HEAD^{tree}"],
-      repositoryRoot,
-    ),
+    runTrustedGit(repositoryRoot, ["rev-parse", "HEAD"]),
+    runTrustedGit(repositoryRoot, ["rev-parse", "--verify", "HEAD^{tree}"]),
   ]);
   if (
     head.trim() !== expected.expectedGitHead
@@ -3852,18 +4101,13 @@ async function computeSourceManifest(repositoryRoot) {
 }
 
 async function listSourcePaths(repositoryRoot) {
-  const { stdout } = await execFile(
-    "/usr/bin/git",
+  const { stdout } = await runTrustedGit(
+    repositoryRoot,
     [
       "-c", "core.fsmonitor=false",
       "-c", "core.untrackedCache=false",
       "ls-files", "--cached", "--others", "--exclude-standard", "-z",
     ],
-    {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024,
-    },
   );
   return stdout
     .split("\0")
@@ -4741,6 +4985,58 @@ async function readCommandOutput(command, args, cwd) {
   return result.stdout;
 }
 
+function trustedGitEnvironment() {
+  return {
+    HOME: "/var/empty",
+    LANG: "en_US.UTF-8",
+    PATH: "/usr/bin:/bin",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_COUNT: "0",
+    GIT_OPTIONAL_LOCKS: "0",
+  };
+}
+
+async function resolveTrustedGitContext(repositoryRoot) {
+  const canonicalRoot = await realpath(repositoryRoot);
+  const cached = trustedGitContexts.get(canonicalRoot);
+  if (cached) return cached;
+  const { stdout } = await execFile(
+    "/usr/bin/git",
+    ["--no-replace-objects", "rev-parse", "--absolute-git-dir"],
+    {
+      cwd: canonicalRoot,
+      env: trustedGitEnvironment(),
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  const gitDirectory = await realpath(stdout.trim());
+  const context = { repositoryRoot: canonicalRoot, gitDirectory };
+  trustedGitContexts.set(canonicalRoot, context);
+  return context;
+}
+
+async function runTrustedGit(repositoryRoot, args, encoding = "utf8") {
+  const context = await resolveTrustedGitContext(repositoryRoot);
+  return execFile(
+    "/usr/bin/git",
+    [
+      "--no-replace-objects",
+      "--literal-pathspecs",
+      `--git-dir=${context.gitDirectory}`,
+      `--work-tree=${context.repositoryRoot}`,
+      ...args,
+    ],
+    {
+      cwd: context.repositoryRoot,
+      env: trustedGitEnvironment(),
+      encoding,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+}
+
 async function verifyCommandIdentity(command, args, cwd) {
   if (executionMutation) {
     fail(`private execution source mutated during acceptance: ${executionMutation}`);
@@ -5183,6 +5479,12 @@ function rejectPreloadEnvironment() {
     ) {
       fail(`external acceptance runner rejects inherited ${name}`);
     }
+  }
+  const inheritedGitVariable = Object.entries(process.env).find(
+    ([key, value]) => key.toUpperCase().startsWith("GIT_") && value,
+  );
+  if (inheritedGitVariable) {
+    fail(`external acceptance runner rejects inherited ${inheritedGitVariable[0]}`);
   }
 }
 
