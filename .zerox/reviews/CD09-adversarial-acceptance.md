@@ -1,7 +1,7 @@
 # CD09 Adversarial Acceptance
 
-Code receipt: sha256:9b70ef81f0fc57efdfdf1934ee1e3fc9805e83781eee672922934ba6208ff01e
-Security receipt: sha256:7ac7baf43ede73e88a2dba5b0f866bf9a63279c8520660a0d258e1a784fd829a
+Code receipt: sha256:f546cb13d49c1ecc5e74a8e043a1f7ac989106fb8c89726bdfdd0a39329d589e
+Security receipt: sha256:314ccab9d35e6cf083120e7a54e2c32e9411a22f1513ebbe334a9b52b4238906
 
 FINAL_VERDICT: PASS
 FINAL_COUNTS: 0C/0M/0m

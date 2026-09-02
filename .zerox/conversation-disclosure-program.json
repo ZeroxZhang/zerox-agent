@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "programId": "conversation-progressive-disclosure-v3.9.2-2026-08",
   "title": "Zerox Agent v3.9.2 Conversation Progressive Disclosure",
-  "updatedAt": "2026-08-31T23:30:00.000+08:00",
+  "updatedAt": "2026-08-31T11:37:17.000+08:00",
   "sourceBaseline": {
     "release": "v3.9.1",
     "releaseCommit": "8850389",
@@ -12,9 +12,9 @@
   "operatingGuide": ".zerox/conversation-disclosure-program.md",
   "architectureDecision": ".zerox/decisions/CD01-conversation-disclosure-program.md",
   "acceptanceManifest": ".zerox/verification/conversation-disclosure/CD09-real-app-acceptance.json",
-  "status": "completed",
-  "activeFeatureId": null,
-  "nextFeatureId": null,
+  "status": "active",
+  "activeFeatureId": "P113-v3.9.2-disclosure-adversarial-acceptance",
+  "nextFeatureId": "P113-v3.9.2-disclosure-adversarial-acceptance",
   "maxActiveFeatures": 1,
   "implementationCompletionWorkstreamId": "CD08",
   "postImplementationGates": [
@@ -1172,7 +1172,7 @@
     {
       "id": "CD09",
       "title": "Independent adversarial review real application acceptance and local package closure",
-      "state": "completed",
+      "state": "in_progress",
       "featureId": "P113-v3.9.2-disclosure-adversarial-acceptance",
       "findings": [
         "D1",
