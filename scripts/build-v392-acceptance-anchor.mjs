@@ -5547,6 +5547,13 @@ function isAcceptanceInputExcluded(relativePath) {
   if (LIFECYCLE_PUBLICATION_FILES.includes(relativePath)) {
     return true;
   }
+  if (
+    relativePath === ".zerox/verification/chat-resilience-local-package.json"
+    || relativePath === ".zerox/verification/chat-resilience-local-package.png"
+    || relativePath === ".zerox/verification/plan-resilience-local-package.json"
+  ) {
+    return true;
+  }
   if (!relativePath.startsWith(
     ".zerox/verification/conversation-disclosure/",
   )) {

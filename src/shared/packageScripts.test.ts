@@ -366,6 +366,28 @@ describe("package scripts", () => {
 
       expect(after).toEqual(before);
       expect(after.fileCount).toBe(1);
+
+      const helperSource = readFileSync(
+        path.join(process.cwd(), "scripts", "local-candidate-source-manifest.mjs"),
+        "utf8",
+      );
+      const runnerSource = readFileSync(
+        path.join(process.cwd(), "scripts", "build-v392-acceptance-anchor.mjs"),
+        "utf8",
+      );
+      const helperExclusion = helperSource.match(
+        /function isAcceptanceInputExcluded\(relativePath\) \{([\s\S]*?)\n\}/,
+      )?.[1];
+      const runnerExclusion = runnerSource.match(
+        /function isAcceptanceInputExcluded\(relativePath\) \{([\s\S]*?)\n\}\n\nfunction normalizeWatchRelativePath/,
+      )?.[1];
+      expect(helperExclusion).toBeDefined();
+      expect(runnerExclusion).toBeDefined();
+      for (const name of generatedReceipts) {
+        const relativePath = `.zerox/verification/${name}`;
+        expect(helperExclusion).toContain(JSON.stringify(relativePath));
+        expect(runnerExclusion).toContain(JSON.stringify(relativePath));
+      }
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
