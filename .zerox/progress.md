@@ -1,5 +1,23 @@
 # Zerox Harness Progress
 
+## 2026-09-02 - v3.9.3-line CI-platform hardening (merged to main)
+
+- Fixed the 4th latent CI gap: the PR verify gate ran npm run verify on ubuntu
+  while the product is macOS-only (native src/main tests require darwin and
+  safe-fs helper). verify.yml now runs on macos-14; the safeFsHelperInspection
+  tests were made toolchain-agnostic (they now use the actual built helper
+  digest instead of the acceptance-host pin) while production pinning stays
+  unchanged in package-mac.mjs / safe-fs-toolchain-selection.mjs.
+- Added scripts/release-acceptance-preflight.mjs (read-only fail-fast env
+  check) and .zerox/release-runbook.md (machine/CI/mode/seal invariants).
+- Fresh independent code and security review at 0C/0M/0m; authoritative
+  acceptance re-run (external anchor digest sha256:1eaa6710...) passed;
+  promoted release attestation digest
+  sha256:f130c52a08519b0a41cd1dbdc08953c004d24ae87c6bd8d1a23dc55871bed636;
+  GitHub secret updated; main pushed at b8711ea and sealed-main verify is
+  green. Product version remains 3.9.2 (bumping it is a separate governance
+  migration); the shipped v3.9.2 tag stays at 34e62f4.
+
 ## 2026-09-02 - v3.9.2 released: final CI packaging fix, re-acceptance, and publication
 
 - The sealed-main verify workflow (and the tag release workflow) surfaced two
