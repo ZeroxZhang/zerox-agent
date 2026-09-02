@@ -182,6 +182,9 @@ const expectedFinalAnchorFiles = [
     `.zerox/verification/conversation-disclosure/CD09-scenarios/${scenarioId}.initial.png`
   ),
   ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+  ".zerox/verification/chat-resilience-local-package.json",
+  ".zerox/verification/chat-resilience-local-package.png",
+  ".zerox/verification/plan-resilience-local-package.json",
   ".zerox/reviews/CD09-code-review.json",
   ".zerox/reviews/CD09-security-review.json",
   ".zerox/reviews/CD09-adversarial-acceptance.md",
@@ -301,7 +304,7 @@ const expectedExternalControlFiles = [
 ];
 if (
   expectedExternalControlFiles.length !== 17
-  || expectedFinalAnchorFiles.length !== 70
+  || expectedFinalAnchorFiles.length !== 73
 ) {
   throw new Error("v3.9.2 final acceptance roster invariant changed");
 }
@@ -602,6 +605,21 @@ async function validateReleaseAttestation(
         : null,
     ]),
   );
+  const evidenceValues = evidenceCaptures.map((capture) => {
+    try {
+      return capture ? JSON.parse(capture.bytes.toString("utf8")) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [
+    _codeReview,
+    _securityReview,
+    _realAppAcceptance,
+    localPackage,
+    chatResilience,
+    planResilience,
+  ] = evidenceValues;
   let acceptedTree = null;
   let acceptedIsAncestor = false;
   try {
@@ -642,6 +660,12 @@ async function validateReleaseAttestation(
     || JSON.stringify(evidenceKeys) !== JSON.stringify(expectedEvidenceKeys)
     || JSON.stringify(attestation.evidenceDigests)
       !== JSON.stringify(evidenceDigests)
+    || chatResilience?.package?.path !== localPackage?.appPath
+    || chatResilience?.package?.appAsarSha256
+      !== localPackage?.appAsarSha256
+    || planResilience?.package?.path !== localPackage?.appPath
+    || planResilience?.package?.appAsarSha256
+      !== localPackage?.appAsarSha256
     || JSON.stringify(attestation.verification)
       !== JSON.stringify(expectedFinalVerification)
   ) {

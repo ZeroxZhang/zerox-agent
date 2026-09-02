@@ -107,10 +107,8 @@ for (const [name, relativePath] of Object.entries(evidencePaths)) {
   evidenceValues[name] = JSON.parse(bytes.toString("utf8"));
   const anchorDigest = anchor.fileDigests?.[relativePath];
   if (
-    anchorDigest !== undefined
-      ? anchorDigest !== evidence[name]
-        || anchor.fileModes?.[relativePath] !== 0o644
-      : !["chatResilience", "planResilience"].includes(name)
+    anchorDigest !== evidence[name]
+    || anchor.fileModes?.[relativePath] !== 0o644
   ) {
     throw new Error("accepted v3.9.2 evidence bytes drifted from the anchor");
   }
@@ -126,7 +124,17 @@ if (
   || evidenceValues.localPackage.sourceDigest !== source.digest
   || evidenceValues.localPackage.sourceFileCount !== source.fileCount
   || evidenceValues.chatResilience.status !== "passed"
+  || evidenceValues.chatResilience.accepted !== true
+  || evidenceValues.chatResilience.package?.path
+    !== evidenceValues.localPackage.appPath
+  || evidenceValues.chatResilience.package?.appAsarSha256
+    !== evidenceValues.localPackage.appAsarSha256
   || evidenceValues.planResilience.status !== "passed"
+  || evidenceValues.planResilience.accepted !== true
+  || evidenceValues.planResilience.package?.path
+    !== evidenceValues.localPackage.appPath
+  || evidenceValues.planResilience.package?.appAsarSha256
+    !== evidenceValues.localPackage.appAsarSha256
 ) {
   throw new Error("accepted v3.9.2 evidence set is incomplete or drifted");
 }

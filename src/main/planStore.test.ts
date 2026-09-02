@@ -27,7 +27,10 @@ import {
   createPlanArtifactWriter,
   describePlanProjection,
 } from "./planArtifactWriter";
-import { InvalidPersistedPlanRecordError } from "./planRecordDecoder";
+import {
+  decodePersistedPlanRecord,
+  InvalidPersistedPlanRecordError,
+} from "./planRecordDecoder";
 import { createStorageImpl } from "./storage/storageDb";
 import { ensurePlanGoalContract } from "./goalPlanContractService";
 import { classifyPlanReplayReadFailure } from "../shared/planDiagnostics";
@@ -56,6 +59,41 @@ describe("plan store parity", () => {
     expect(classifyPlanReplayReadFailure(new Error(secret))).toBe(
       "plan_file_unavailable",
     );
+  });
+
+  it("decodes persisted model context-window provenance objects", () => {
+    const record = createRecord();
+    record.frozenModelAssignments.direct = {
+      profileId: "profile-direct",
+      connectionId: "connection-direct",
+      providerKind: "dashscope-coding",
+      modelId: "qwen3.7-plus",
+      contextWindow: 1_000_000,
+      contextWindowSource: {
+        kind: "public_catalog",
+        label: "Zerox 公开模型目录",
+        checkedAt: "2026-07-28",
+      },
+      revision: 4,
+      connectionRevision: 1,
+      profileRevision: 1,
+      capabilities: {
+        tools: true,
+        vision: true,
+        pdf: false,
+        streaming: true,
+        parallelToolCalls: true,
+      },
+      generation: {
+        temperature: 0.2,
+        maxTokens: 8192,
+        thinkingEnabled: false,
+        thinkingBudgetTokens: 8192,
+      },
+    };
+
+    expect(decodePersistedPlanRecord(record).frozenModelAssignments.direct)
+      .toEqual(record.frozenModelAssignments.direct);
   });
 
   it("keeps both Plan replay failure paths on the fixed classifier boundary", async () => {

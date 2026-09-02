@@ -41,7 +41,11 @@ const modelBindingSchema = objectOf({
   providerKind: stringSchema,
   modelId: stringSchema,
   contextWindow: numberSchema,
-  contextWindowSource: stringSchema,
+  contextWindowSource: objectOf({
+    kind: enumOf(["public_catalog", "provider_metadata"]),
+    label: stringSchema,
+    checkedAt: stringSchema,
+  }, ["kind", "label"]),
   revision: numberSchema,
   connectionRevision: numberSchema,
   profileRevision: numberSchema,

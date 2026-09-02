@@ -93,6 +93,27 @@ describe("package scripts", () => {
     });
   });
 
+  it("rejects resilience evidence from a different packaged app", () => {
+    const result = JSON.parse(execFileSync(
+      process.execPath,
+      [
+        "scripts/build-v392-acceptance-anchor.mjs",
+        "--self-test-resilience-package-binding",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    )) as {
+      resiliencePackageBindingSelfTest?: string;
+      chatMismatchRejected?: boolean;
+      planMismatchRejected?: boolean;
+    };
+
+    expect(result).toEqual({
+      resiliencePackageBindingSelfTest: "passed",
+      chatMismatchRejected: true,
+      planMismatchRejected: true,
+    });
+  });
+
   it("binds macOS release artifacts to one clean Git commit", () => {
     const source = readFileSync(
       path.join(process.cwd(), "scripts", "package-mac.mjs"),
@@ -597,10 +618,10 @@ describe("package scripts", () => {
     expect(runner).toContain(
       'forms.push(network ? "(allow network*)" : "(deny network*)")',
     );
-    expect(runner).toContain("FINAL_FILES.length !== 70");
+    expect(runner).toContain("FINAL_FILES.length !== 73");
     expect(runner).toContain("GENERATED_PUBLICATION_FILES.length !== 55");
     expect(checker).toContain("expectedExternalControlFiles.length !== 17");
-    expect(checker).toContain("expectedFinalAnchorFiles.length !== 70");
+    expect(checker).toContain("expectedFinalAnchorFiles.length !== 73");
     expect(runner).toContain("post-commit final file drift");
     expect(runner).toContain("post-commit local package tree drifted");
     expect(runner).toContain('fullVerify: "split-equivalent-passed"');
@@ -694,6 +715,12 @@ describe("package scripts", () => {
     );
     expect(promoter).toContain(
       "evidenceValues.localPackage.sourceDigest !== source.digest",
+    );
+    expect(promoter).toContain(
+      "evidenceValues.chatResilience.package?.appAsarSha256",
+    );
+    expect(promoter).toContain(
+      "evidenceValues.planResilience.package?.appAsarSha256",
     );
     expect(promoter).toContain("sourceDigest: source.digest");
     expect(promoter).toContain("anchor.fileDigests?.[relativePath]");

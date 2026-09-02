@@ -124,7 +124,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/after-pack-mac.mjs":
     "sha256:376f81d437bc6b06876ed4bcbcc7889d698103b9a91b9fc46f96512d0b52901b",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:ec70389de79dd6728d680f16b881824f7c5505f8989283d27cdea70dbabaacc0",
+    "sha256:3d83f70ff026c69a01c503ab9cf71ca178fc9354e1b665fcee35a45c6a82d91b",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
@@ -203,6 +203,9 @@ const FINAL_FILES = Object.freeze([
     `.zerox/verification/conversation-disclosure/CD09-scenarios/${scenarioId}.initial.png`
   ),
   ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+  ".zerox/verification/chat-resilience-local-package.json",
+  ".zerox/verification/chat-resilience-local-package.png",
+  ".zerox/verification/plan-resilience-local-package.json",
   ".zerox/reviews/CD09-code-review.json",
   ".zerox/reviews/CD09-security-review.json",
   ".zerox/reviews/CD09-adversarial-acceptance.md",
@@ -288,7 +291,7 @@ const CANDIDATE_GENERATED_PUBLICATION_FILES = Object.freeze(
 );
 if (
   Object.keys(CONTROL_DIGESTS).length !== 17
-  || FINAL_FILES.length !== 70
+  || FINAL_FILES.length !== 73
   || GENERATED_PUBLICATION_FILES.length !== 55
   || CANDIDATE_GENERATED_PUBLICATION_FILES.length !== 53
 ) {
@@ -356,6 +359,13 @@ if (
     sdkCanonicalPath: EXPECTED_MACOS_SDK.canonicalPath,
     sdkSettingsDigest: EXPECTED_MACOS_SDK.settingsDigest,
   })));
+  process.exit(0);
+}
+if (
+  process.argv.length === 3
+  && process.argv[2] === "--self-test-resilience-package-binding"
+) {
+  verifyResiliencePackageBindingSelfTest();
   process.exit(0);
 }
 
@@ -920,6 +930,23 @@ try {
       ".zerox/verification/conversation-disclosure/CD09-local-package.json",
     )
   ).bytes.toString("utf8"));
+  const [chatResilienceReceipt, planResilienceReceipt] = await Promise.all([
+    captureRepositoryFile(
+      repositoryRealpath,
+      ".zerox/verification/chat-resilience-local-package.json",
+    ),
+    captureRepositoryFile(
+      repositoryRealpath,
+      ".zerox/verification/plan-resilience-local-package.json",
+    ),
+  ]).then((captures) => captures.map((capture) =>
+    JSON.parse(capture.bytes.toString("utf8"))
+  ));
+  assertResiliencePackageBinding(
+    packageReceipt,
+    chatResilienceReceipt,
+    planResilienceReceipt,
+  );
   const packagedSafeFsHelperDigest = packageReceipt.safeFsHelper?.sha256;
   if (
     !/^sha256:[0-9a-f]{64}$/.test(packagedSafeFsHelperDigest ?? "")
@@ -1290,6 +1317,23 @@ async function verifyCompletedOutputs(
   const packageReceipt = JSON.parse(
     packageReceiptCapture.bytes.toString("utf8"),
   );
+  const [chatResilienceReceipt, planResilienceReceipt] = await Promise.all([
+    captureRepositoryFile(
+      targetRepositoryRoot,
+      ".zerox/verification/chat-resilience-local-package.json",
+    ),
+    captureRepositoryFile(
+      targetRepositoryRoot,
+      ".zerox/verification/plan-resilience-local-package.json",
+    ),
+  ]).then((captures) => captures.map((capture) =>
+    JSON.parse(capture.bytes.toString("utf8"))
+  ));
+  assertResiliencePackageBinding(
+    packageReceipt,
+    chatResilienceReceipt,
+    planResilienceReceipt,
+  );
   const publishedApp = await computeTreeManifest(path.join(
     targetRepositoryRoot,
     "release-local/mac-arm64/Zerox Agent.app",
@@ -1593,6 +1637,84 @@ function verifySafeFsPackageIdentitySelfTest() {
     safeFsPackageIdentitySelfTest: "passed",
     unsignedReuseRejected,
     receiptDriftRejected,
+  }));
+}
+
+function assertResiliencePackageBinding(packageReceipt, chatReceipt, planReceipt) {
+  const receipts = [
+    ["chat", "chat-resilience-local-package-acceptance", chatReceipt],
+    ["plan", "plan-resilience-local-package-acceptance", planReceipt],
+  ];
+  for (const [label, kind, receipt] of receipts) {
+    if (
+      receipt?.kind !== kind
+      || receipt.status !== "passed"
+      || receipt.accepted !== true
+      || receipt.package?.path !== packageReceipt.appPath
+      || receipt.package?.appAsarSha256 !== packageReceipt.appAsarSha256
+    ) {
+      fail(`${label} resilience evidence does not bind the accepted package`);
+    }
+  }
+}
+
+function verifyResiliencePackageBindingSelfTest() {
+  const packageReceipt = {
+    appPath: "release-local/mac-arm64/Zerox Agent.app",
+    appAsarSha256: `sha256:${"a".repeat(64)}`,
+  };
+  const chatReceipt = {
+    kind: "chat-resilience-local-package-acceptance",
+    status: "passed",
+    accepted: true,
+    package: {
+      path: packageReceipt.appPath,
+      appAsarSha256: packageReceipt.appAsarSha256,
+    },
+  };
+  const planReceipt = {
+    kind: "plan-resilience-local-package-acceptance",
+    status: "passed",
+    accepted: true,
+    package: {
+      path: packageReceipt.appPath,
+      appAsarSha256: packageReceipt.appAsarSha256,
+    },
+  };
+  assertResiliencePackageBinding(packageReceipt, chatReceipt, planReceipt);
+  let chatMismatchRejected = false;
+  let planMismatchRejected = false;
+  try {
+    assertResiliencePackageBinding(packageReceipt, {
+      ...chatReceipt,
+      package: {
+        ...chatReceipt.package,
+        appAsarSha256: `sha256:${"b".repeat(64)}`,
+      },
+    }, planReceipt);
+  } catch (error) {
+    chatMismatchRejected = error?.message
+      === "chat resilience evidence does not bind the accepted package";
+  }
+  try {
+    assertResiliencePackageBinding(packageReceipt, chatReceipt, {
+      ...planReceipt,
+      package: {
+        ...planReceipt.package,
+        appAsarSha256: `sha256:${"c".repeat(64)}`,
+      },
+    });
+  } catch (error) {
+    planMismatchRejected = error?.message
+      === "plan resilience evidence does not bind the accepted package";
+  }
+  if (!chatMismatchRejected || !planMismatchRejected) {
+    fail("resilience package binding self-test did not fail closed");
+  }
+  console.log(JSON.stringify({
+    resiliencePackageBindingSelfTest: "passed",
+    chatMismatchRejected,
+    planMismatchRejected,
   }));
 }
 
