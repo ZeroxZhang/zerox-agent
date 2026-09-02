@@ -463,7 +463,7 @@
       "id": "evidence_user_request",
       "kind": "user",
       "title": "用户需求",
-      "summary": "/Users/zeorx/Library/Mobile\\ Documents/com\\~apple\\~CloudDocs/meta_info/Apple\\ Copy-1.zip，参考和使用这个路径下的设计风格稳健，帮我做一个关于deepseek harness的介绍网页。只需要给我输出一个html即可",
+      "summary": "/tmp/fixtures/reference.zip，参考和使用这个路径下的设计风格稳健，帮我做一个关于deepseek harness的介绍网页。只需要给我输出一个html即可",
       "sourceRef": "fixture://plan-resilience",
       "sourceHashes": []
     },
@@ -594,7 +594,7 @@
             ],
             "dependencies": [],
             "targetRefs": [
-              "/Users/zeorx/Library/Mobile\\ Documents/com\\~apple\\~CloudDocs/meta_info/Apple\\ Copy-1.zip"
+              "/tmp/fixtures/reference.zip"
             ],
             "evidenceRefs": [
               "evidence_user_request"
