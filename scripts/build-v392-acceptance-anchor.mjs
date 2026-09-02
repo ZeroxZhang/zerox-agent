@@ -2148,6 +2148,10 @@ async function runTrustedGitBaselineSelfTest() {
       repositoryRoot,
       ["rev-parse", "HEAD"],
     )).stdout.trim();
+    const reviewedTree = (await git(
+      repositoryRoot,
+      ["rev-parse", "--verify", `${reviewedHead}^{tree}`],
+    )).stdout.trim();
 
     const maliciousProgram = JSON.parse(originalProgramBytes.toString("utf8"));
     maliciousProgram.unreviewedGovernanceField = true;
@@ -2201,6 +2205,10 @@ async function runTrustedGitBaselineSelfTest() {
     } catch {
       inheritedGitRejected = true;
     }
+    await verifyGitIdentity(repositoryRoot, {
+      expectedGitHead: reviewedHead,
+      expectedGitTree: reviewedTree,
+    });
     const baseline = await captureCommittedLifecycleBaseline(
       repositoryRoot,
       reviewedHead,
@@ -4177,7 +4185,7 @@ async function verifyNativeNodeAddon(repositoryRoot) {
 }
 
 async function verifyGitIdentity(repositoryRoot, expected) {
-  const [head, tree] = await Promise.all([
+  const [{ stdout: head }, { stdout: tree }] = await Promise.all([
     runTrustedGit(repositoryRoot, ["rev-parse", "HEAD"]),
     runTrustedGit(repositoryRoot, ["rev-parse", "--verify", "HEAD^{tree}"]),
   ]);
