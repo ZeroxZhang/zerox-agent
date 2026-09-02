@@ -618,6 +618,11 @@ describe("package scripts", () => {
     expect(runner).toContain(
       'forms.push(network ? "(allow network*)" : "(deny network*)")',
     );
+    expect(runner).toContain("loopbackNetwork: true");
+    expect(runner).toContain(
+      '(allow network-inbound (local tcp "localhost:*"))',
+    );
+    expect(runner).toContain("requiresResilienceSandbox(args)");
     expect(runner).toContain("FINAL_FILES.length !== 73");
     expect(runner).toContain(
       '["scripts/run-chat-resilience-local-package.mjs"]',
@@ -631,7 +636,7 @@ describe("package scripts", () => {
     expect(runner).toContain(
       'args[0] === "scripts/run-plan-resilience-local-package.mjs"',
     );
-    expect(runner).toContain("GENERATED_PUBLICATION_FILES.length !== 55");
+    expect(runner).toContain("GENERATED_PUBLICATION_FILES.length !== 58");
     expect(checker).toContain("expectedExternalControlFiles.length !== 17");
     expect(checker).toContain("expectedFinalAnchorFiles.length !== 73");
     expect(runner).toContain("post-commit final file drift");

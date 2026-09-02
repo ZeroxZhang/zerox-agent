@@ -247,6 +247,8 @@ const TRUSTED_SEATBELT_REQUIREMENTS = Object.freeze([
   "electron-sibling-metadata-denied",
   "read-only-write-denied",
   "network-denied",
+  "loopback-network-allowed",
+  "public-network-denied",
   "timeout-termination",
   "host-toolchain-command-success-isolation",
   "host-toolchain-command-failure-isolation",
@@ -282,7 +284,10 @@ const GENERATED_PUBLICATION_FILES = Object.freeze(FINAL_FILES.filter(
       ".zerox/verification/conversation-disclosure/CD08-full-gates.md"
     || relativePath.startsWith(
       ".zerox/verification/conversation-disclosure/CD09-",
-    ),
+    )
+    || relativePath === ".zerox/verification/chat-resilience-local-package.json"
+    || relativePath === ".zerox/verification/chat-resilience-local-package.png"
+    || relativePath === ".zerox/verification/plan-resilience-local-package.json",
 ));
 const CANDIDATE_GENERATED_PUBLICATION_FILES = Object.freeze(
   GENERATED_PUBLICATION_FILES.filter(
@@ -292,8 +297,8 @@ const CANDIDATE_GENERATED_PUBLICATION_FILES = Object.freeze(
 if (
   Object.keys(CONTROL_DIGESTS).length !== 17
   || FINAL_FILES.length !== 73
-  || GENERATED_PUBLICATION_FILES.length !== 55
-  || CANDIDATE_GENERATED_PUBLICATION_FILES.length !== 53
+  || GENERATED_PUBLICATION_FILES.length !== 58
+  || CANDIDATE_GENERATED_PUBLICATION_FILES.length !== 56
 ) {
   fail("v3.9.2 acceptance file roster invariant changed");
 }
@@ -612,6 +617,10 @@ const electronSandboxProfile = path.join(
   outputParent,
   `.v392-electron-sandbox-${process.pid}.sb`,
 );
+const resilienceSandboxProfile = path.join(
+  outputParent,
+  `.v392-resilience-sandbox-${process.pid}.sb`,
+);
 const repositoryCheckSandboxProfile = path.join(
   outputParent,
   `.v392-repository-check-sandbox-${process.pid}.sb`,
@@ -676,6 +685,21 @@ await writePrivateFile(
     writablePrefixes: electronEphemeralPrefixes,
     localSocketPrefixes: electronSocketPrefixes,
     network: false,
+    allowMach: true,
+  })),
+);
+await writePrivateFile(
+  resilienceSandboxProfile,
+  Buffer.from(buildAcceptanceSandboxProfile({
+    readableRoots: sandboxReadableRoots,
+    readableFiles: [pinnedToolchainPolicyPath, pinnedSafeFsHelperPath],
+    readablePrefixes: electronEphemeralPrefixes,
+    metadataRoots: ["/Users"],
+    writableRoots: sandboxWritableRoots,
+    writablePrefixes: electronEphemeralPrefixes,
+    localSocketPrefixes: electronSocketPrefixes,
+    network: false,
+    loopbackNetwork: true,
     allowMach: true,
   })),
 );
@@ -790,6 +814,7 @@ await verifyHostToolchainIsolation({
   profiles: [
     { label: "command", path: commandSandboxProfile },
     { label: "electron", path: electronSandboxProfile },
+    { label: "resilience", path: resilienceSandboxProfile },
   ],
   nodePath,
   cwd: executionRoot,
@@ -1183,6 +1208,7 @@ await Promise.all([
   rm(commandSandboxProfile, { force: true }),
   rm(auditSandboxProfile, { force: true }),
   rm(electronSandboxProfile, { force: true }),
+  rm(resilienceSandboxProfile, { force: true }),
   rm(repositoryCheckSandboxProfile, { force: true }),
   rm(pinnedToolchainPolicyPath, { force: true }),
   rm(pinnedSafeFsHelperPath, { force: true }),
@@ -4473,6 +4499,7 @@ function buildAcceptanceSandboxProfile({
   writablePrefixes = [],
   localSocketPrefixes = [],
   network,
+  loopbackNetwork = false,
   allowMach = false,
 }) {
   const traversalRoots = new Set();
@@ -4557,6 +4584,11 @@ function buildAcceptanceSandboxProfile({
       .join(" ");
     forms.push(`(allow network-bind ${filters})`);
     forms.push(`(allow network-outbound ${filters})`);
+  }
+  if (loopbackNetwork) {
+    forms.push('(allow network-bind (local tcp "localhost:*"))');
+    forms.push('(allow network-inbound (local tcp "localhost:*"))');
+    forms.push('(allow network-outbound (remote tcp "localhost:*"))');
   }
   forms.push(network ? "(allow network*)" : "(deny network*)");
   return `${forms.join("\n")}\n`;
@@ -4784,6 +4816,8 @@ async function run(command, args, cwd, env = process.env) {
       && args[2] === "--omit=dev"
       && args.length === 3
       ? auditSandboxProfile
+      : requiresResilienceSandbox(args)
+        ? resilienceSandboxProfile
       : requiresElectronSandbox(command, args)
         ? electronSandboxProfile
       : isWithin(repositoryRealpath, cwd)
@@ -4959,8 +4993,6 @@ function requiresElectronSandbox(command, args) {
       && args[2] === "smoke:prod"
     )
     || args[0] === "scripts/run-conversation-disclosure-acceptance.mjs"
-    || args[0] === "scripts/run-chat-resilience-local-package.mjs"
-    || args[0] === "scripts/run-plan-resilience-local-package.mjs"
     || command.endsWith(
       `${path.sep}Zerox Agent.app${path.sep}Contents${path.sep}MacOS${
         path.sep
@@ -4969,8 +5001,13 @@ function requiresElectronSandbox(command, args) {
   );
 }
 
+function requiresResilienceSandbox(args) {
+  return args[0] === "scripts/run-chat-resilience-local-package.mjs"
+    || args[0] === "scripts/run-plan-resilience-local-package.mjs";
+}
+
 async function runTrustedSeatbeltRegressionLane(privateRoot) {
-  if (TRUSTED_SEATBELT_REQUIREMENTS.length !== 15) {
+  if (TRUSTED_SEATBELT_REQUIREMENTS.length !== 17) {
     fail("trusted Seatbelt requirement roster changed");
   }
   const testRoot = await realpath(await mkdtemp(
@@ -4990,6 +5027,7 @@ async function runTrustedSeatbeltRegressionLane(privateRoot) {
   const profilePath = path.join(testRoot, "workspace.sb");
   const readOnlyProfilePath = path.join(testRoot, "read-only.sb");
   const electronProfilePath = path.join(testRoot, "electron.sb");
+  const resilienceProfilePath = path.join(testRoot, "resilience.sb");
   const trustedNodePath = await realpath(process.execPath);
   const outsideFile = path.join(outside, "outside.txt");
   const privateBFile = path.join(privateTempB, "private.txt");
@@ -5077,12 +5115,60 @@ async function runTrustedSeatbeltRegressionLane(privateRoot) {
           allowMach: true,
         })),
       ),
+      writePrivateFile(
+        resilienceProfilePath,
+        Buffer.from(buildAcceptanceSandboxProfile({
+          readableRoots: [
+            workspace,
+            privateTempA,
+            runtimeRoot,
+            ...SYSTEM_SANDBOX_READ_ROOTS,
+          ],
+          metadataRoots: [],
+          writableRoots: [workspace, privateTempA],
+          network: false,
+          loopbackNetwork: true,
+        })),
+      ),
     ]);
 
     await runTrustedSandboxCommand(
       profilePath,
       "/bin/sh",
       ["-c", `printf inside > ${shellWord(path.join(workspace, "inside.txt"))}`],
+      workspace,
+      environment,
+    );
+    await runTrustedSandboxCommand(
+      resilienceProfilePath,
+      trustedNodePath,
+      [
+        "-e",
+        "const http=require('node:http');"
+          + "const server=http.createServer((request,response)=>response.end('ok'));"
+          + "server.once('error',()=>process.exit(2));"
+          + "server.listen(0,'127.0.0.1',()=>{"
+          + "const port=server.address().port;"
+          + "http.get('http://127.0.0.1:'+port,response=>{"
+          + "let body='';response.on('data',chunk=>body+=chunk);"
+          + "response.on('end',()=>{server.close();process.exit(body==='ok'?0:3);});"
+          + "}).on('error',()=>{server.close();process.exit(4);});"
+          + "});",
+      ],
+      workspace,
+      environment,
+    );
+    await runTrustedSandboxCommand(
+      resilienceProfilePath,
+      trustedNodePath,
+      [
+        "-e",
+        "const net=require('node:net');"
+          + "const socket=net.connect({host:'1.1.1.1',port:80});"
+          + "socket.on('connect',()=>process.exit(2));"
+          + "socket.on('error',error=>process.exit(error.code==='EPERM'?0:3));"
+          + "setTimeout(()=>process.exit(4),500);",
+      ],
       workspace,
       environment,
     );
