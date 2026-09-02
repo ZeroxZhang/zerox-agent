@@ -32,14 +32,36 @@ export async function computeReviewCandidateManifest(root) {
 }
 
 async function computeGitManifest(root, exclude) {
+  const canonicalRoot = await realpath(root);
+  const gitEnvironment = trustedGitEnvironment();
+  const { stdout: gitDirectoryOutput } = await execFile(
+    "/usr/bin/git",
+    ["--no-replace-objects", "rev-parse", "--absolute-git-dir"],
+    {
+      cwd: canonicalRoot,
+      env: gitEnvironment,
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    },
+  );
+  const gitDirectory = await realpath(gitDirectoryOutput.trim());
   const { stdout } = await execFile(
     "/usr/bin/git",
     [
+      "--no-replace-objects",
+      "--literal-pathspecs",
+      `--git-dir=${gitDirectory}`,
+      `--work-tree=${canonicalRoot}`,
       "-c", "core.fsmonitor=false",
       "-c", "core.untrackedCache=false",
       "ls-files", "--cached", "--others", "--exclude-standard", "-z",
     ],
-    { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+    {
+      cwd: canonicalRoot,
+      env: gitEnvironment,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    },
   );
   const files = stdout
     .split("\0")
@@ -66,6 +88,18 @@ async function computeGitManifest(root, exclude) {
   return {
     digest: `sha256:${hash.digest("hex")}`,
     fileCount,
+  };
+}
+
+function trustedGitEnvironment() {
+  return {
+    HOME: "/var/empty",
+    LANG: "en_US.UTF-8",
+    PATH: "/usr/bin:/bin",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_COUNT: "0",
+    GIT_OPTIONAL_LOCKS: "0",
   };
 }
 

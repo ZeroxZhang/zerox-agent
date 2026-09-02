@@ -1705,34 +1705,16 @@ async function readBoundRegularFile(filePath, errors, label) {
 
 function rejectInheritedGitEnvironment() {
   const inherited = Object.entries(process.env).find(
-    ([key, value]) => isGitAuthorityEnvironmentVariable(key) && value,
+    ([key, value]) => isRejectedGitEnvironmentVariable(key) && value,
   );
   if (inherited) {
     throw new Error(`successor program rejects inherited ${inherited[0]}`);
   }
 }
 
-function isGitAuthorityEnvironmentVariable(name) {
+function isRejectedGitEnvironmentVariable(name) {
   const normalized = name.toUpperCase();
-  return [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_INDEX_FILE",
-    "GIT_INDEX_VERSION",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    "GIT_NAMESPACE",
-    "GIT_SHALLOW_FILE",
-    "GIT_GRAFT_FILE",
-    "GIT_CONFIG_SYSTEM",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_NOSYSTEM",
-    "GIT_EXEC_PATH",
-  ].includes(normalized) || /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/.test(normalized);
+  return normalized.startsWith("GIT_") && normalized !== "GIT_PAGER";
 }
 
 function trustedGitEnvironment() {
@@ -1787,7 +1769,13 @@ async function runSuccessorTrustedGitSelfTest() {
   const repositoryRoot = path.join(testRoot, "repository");
   const hostileRoot = path.join(testRoot, "hostile");
   const originalEnvironment = new Map(
-    ["GIT_DIR", "GIT_OBJECT_DIRECTORY", "GIT_REPLACE_REF_BASE", "GIT_PAGER"].map(
+    [
+      "GIT_DIR",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_REPLACE_REF_BASE",
+      "GIT_CONFIG_PARAMETERS",
+      "GIT_PAGER",
+    ].map(
       (name) => [name, process.env[name]],
     ),
   );
@@ -1837,6 +1825,14 @@ async function runSuccessorTrustedGitSelfTest() {
     } catch {
       benignGitAccepted = false;
     }
+    process.env.GIT_CONFIG_PARAMETERS = "'core.excludesFile=/dev/null'";
+    let configInjectionRejected = false;
+    try {
+      rejectInheritedGitEnvironment();
+    } catch {
+      configInjectionRejected = true;
+    }
+    delete process.env.GIT_CONFIG_PARAMETERS;
     process.env.GIT_DIR = path.join(hostileRoot, ".git");
     process.env.GIT_OBJECT_DIRECTORY = path.join(hostileRoot, "objects");
     process.env.GIT_REPLACE_REF_BASE = "refs/replace/hostile";
@@ -1855,12 +1851,18 @@ async function runSuccessorTrustedGitSelfTest() {
       ["merge-base", "--is-ancestor", reviewedHead, "HEAD"],
       { stdio: "ignore" },
     );
-    if (!benignGitAccepted || !inheritedGitRejected || trustedTree !== reviewedTree) {
+    if (
+      !benignGitAccepted
+      || !configInjectionRejected
+      || !inheritedGitRejected
+      || trustedTree !== reviewedTree
+    ) {
       throw new Error("successor trusted Git self-test accepted injected authority");
     }
     console.log(JSON.stringify({
       successorTrustedGitSelfTest: "passed",
       benignGitAccepted,
+      configInjectionRejected,
       inheritedGitRejected,
       replacementIgnored: true,
     }));

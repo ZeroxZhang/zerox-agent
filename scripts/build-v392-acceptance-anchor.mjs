@@ -124,7 +124,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/after-pack-mac.mjs":
     "sha256:376f81d437bc6b06876ed4bcbcc7889d698103b9a91b9fc46f96512d0b52901b",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:af45620ca2e7ba48fd9d6fa6fc29effb1b044f3878b66eec32d707fdc105f885",
+    "sha256:ec70389de79dd6728d680f16b881824f7c5505f8989283d27cdea70dbabaacc0",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
@@ -148,7 +148,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/package-local-candidate.mjs":
     "sha256:3fb47885a4381139f7c0ef4a65788aa7d99dddbacbd5e13b8ef12fd333faf25d",
   "scripts/local-candidate-source-manifest.mjs":
-    "sha256:62198db25f2246fa45baba16534a4d912437e253d5d135690d3eb940a7ccbc91",
+    "sha256:b1b26ae584c2e8c4489f3be4e7ac9915ac0c070ae59a37545bb780625bfa40a5",
 });
 const CD09_SCENARIO_IDS = Object.freeze(
   Array.from({ length: 19 }, (_, index) => `S${
@@ -2081,7 +2081,13 @@ async function runTrustedGitBaselineSelfTest() {
   const repositoryRoot = path.join(testRoot, "repository");
   const hostileRoot = path.join(testRoot, "hostile");
   const originalEnvironment = new Map(
-    ["GIT_DIR", "GIT_OBJECT_DIRECTORY", "GIT_REPLACE_REF_BASE", "GIT_PAGER"].map(
+    [
+      "GIT_DIR",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_REPLACE_REF_BASE",
+      "GIT_CONFIG_PARAMETERS",
+      "GIT_PAGER",
+    ].map(
       (name) => [name, process.env[name]],
     ),
   );
@@ -2178,6 +2184,14 @@ async function runTrustedGitBaselineSelfTest() {
     } catch {
       benignGitAccepted = false;
     }
+    process.env.GIT_CONFIG_PARAMETERS = "'core.excludesFile=/dev/null'";
+    let configInjectionRejected = false;
+    try {
+      rejectPreloadEnvironment();
+    } catch {
+      configInjectionRejected = true;
+    }
+    delete process.env.GIT_CONFIG_PARAMETERS;
     process.env.GIT_DIR = path.join(hostileRoot, ".git");
     process.env.GIT_OBJECT_DIRECTORY = path.join(hostileRoot, "objects");
     process.env.GIT_REPLACE_REF_BASE = "refs/replace/hostile";
@@ -2193,6 +2207,7 @@ async function runTrustedGitBaselineSelfTest() {
     );
     if (
       !benignGitAccepted
+      || !configInjectionRejected
       || !inheritedGitRejected
       || baseline.get(LIFECYCLE_PUBLICATION_FILES[0]).digest
         !== sha256(originalProgramBytes)
@@ -2204,6 +2219,7 @@ async function runTrustedGitBaselineSelfTest() {
     console.log(JSON.stringify({
       trustedGitBaselineSelfTest: "passed",
       benignGitAccepted,
+      configInjectionRejected,
       inheritedGitRejected,
       replacementIgnored: true,
     }));
@@ -5589,34 +5605,16 @@ function rejectPreloadEnvironment() {
     }
   }
   const inheritedGitVariable = Object.entries(process.env).find(
-    ([key, value]) => isGitAuthorityEnvironmentVariable(key) && value,
+    ([key, value]) => isRejectedGitEnvironmentVariable(key) && value,
   );
   if (inheritedGitVariable) {
     fail(`external acceptance runner rejects inherited ${inheritedGitVariable[0]}`);
   }
 }
 
-function isGitAuthorityEnvironmentVariable(name) {
+function isRejectedGitEnvironmentVariable(name) {
   const normalized = name.toUpperCase();
-  return [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_INDEX_FILE",
-    "GIT_INDEX_VERSION",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    "GIT_NAMESPACE",
-    "GIT_SHALLOW_FILE",
-    "GIT_GRAFT_FILE",
-    "GIT_CONFIG_SYSTEM",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_NOSYSTEM",
-    "GIT_EXEC_PATH",
-  ].includes(normalized) || /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/.test(normalized);
+  return normalized.startsWith("GIT_") && normalized !== "GIT_PAGER";
 }
 
 function isWithin(root, candidate) {
