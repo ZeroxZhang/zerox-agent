@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S16-plan-confirmation",
   "scenarioDigest": "sha256:b629d2c39b858f620076e3b26976ba7261d6f4d04db51565df665f1ff1b3c432",
-  "executionId": "34946fdc-a17b-4a3a-82e9-31dae36345c9",
+  "executionId": "8265d19e-736e-4116-8520-9fbe4fa55895",
   "processEpochs": [
-    "main_23738ad3-340b-4409-9e33-66796e6a07ff"
+    "main_309ac722-e556-4b6b-823f-d6c7fc7fe4a7"
   ],
   "attemptNonces": [
-    "b5569a0b-d02f-42d3-84ec-3d8d1cc768f6"
+    "ad3194c6-702c-4ee8-9a11-6308d3a8f25c"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,12 +29,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "1ec533f6-0033-4ec5-9e77-757a6468c4e7",
+        "12d7a5a4-5884-4cc9-a213-deaff08f3ccb",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_23738ad3-340b-4409-9e33-66796e6a07ff"
+        "process:main_309ac722-e556-4b6b-823f-d6c7fc7fe4a7"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,12 +52,12 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "1ec533f6-0033-4ec5-9e77-757a6468c4e7",
+        "12d7a5a4-5884-4cc9-a213-deaff08f3ccb",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_23738ad3-340b-4409-9e33-66796e6a07ff"
+        "process:main_309ac722-e556-4b6b-823f-d6c7fc7fe4a7"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -75,12 +75,12 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "1ec533f6-0033-4ec5-9e77-757a6468c4e7",
+        "12d7a5a4-5884-4cc9-a213-deaff08f3ccb",
         "cd09-run-S16-plan-confirmation",
         "trajectory-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation",
         "cd09-plan-S16-plan-confirmation-blocked",
-        "process:main_23738ad3-340b-4409-9e33-66796e6a07ff"
+        "process:main_309ac722-e556-4b6b-823f-d6c7fc7fe4a7"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -100,7 +100,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:43e2d06eda831b91f4c049f4d65bb0410ad7d960c7a5cc0d0768d8be01ff0769",
-        "screenshot:sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
+        "screenshot:sha256:75fed75cef1c90009c2655145565959ffe68739f061e94bf7048042c6608a7ae"
       ]
     },
     {
@@ -109,7 +109,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:dd6342067e590b4cc3b680da6e67e0cdf09c28740c71871408663da8edea3aa1",
-        "screenshot:sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
+        "screenshot:sha256:75fed75cef1c90009c2655145565959ffe68739f061e94bf7048042c6608a7ae"
       ]
     },
     {
@@ -118,7 +118,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:cd49bae0bca16954d7b19b5a50e4f5bfecdf98e3579d85678ce0c8b2daf2aa17",
-        "screenshot:sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
+        "screenshot:sha256:75fed75cef1c90009c2655145565959ffe68739f061e94bf7048042c6608a7ae"
       ]
     }
   ],
@@ -595,8 +595,8 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:7cb570ff1fe003117fd63d02fc1e69e8b4ed37e87067d2830da2a6698c37c7ea"
+    "sha256:75fed75cef1c90009c2655145565959ffe68739f061e94bf7048042c6608a7ae"
   ],
   "status": "passed",
-  "digest": "sha256:55d695e700850e1024350a1fd02410f48878ceb1d6ebc8cea4bd71e72b240ed3"
+  "digest": "sha256:5d4e4d6d554acba2490c6238d570d159ee7b560a8f01aa6f2bcf241823aa7bdf"
 }

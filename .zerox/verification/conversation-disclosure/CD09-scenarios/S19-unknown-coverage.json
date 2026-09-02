@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S19-unknown-coverage",
   "scenarioDigest": "sha256:94bc7f1e34826c71a95c5e7b5482b1edfaadf5d3caa8a1487915bb9bdab4cd8b",
-  "executionId": "7e8b8cb0-5830-4179-a443-a25863be8285",
+  "executionId": "16af1c5f-3ce7-473a-87d3-f9715ddff9cb",
   "processEpochs": [
-    "main_08197581-4709-45ca-84ec-a10c7ed39b39"
+    "main_b635b6bb-c3c1-4551-8510-e3ec53a55481"
   ],
   "attemptNonces": [
-    "58360c99-9217-460d-962d-bf82669c4fbc"
+    "5628b0c8-7b05-4541-aa01-707d9b21de0f"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "616e5214-faf6-408c-87c1-18b9c22ea8e8",
+        "eb8d4278-7a98-40d6-8ae2-4b8c2945d065",
         "cd09-run-S19-unknown-coverage",
         "trajectory-S19-unknown-coverage",
-        "process:main_08197581-4709-45ca-84ec-a10c7ed39b39"
+        "process:main_b635b6bb-c3c1-4551-8510-e3ec53a55481"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -49,10 +49,10 @@
       "executor": "production_renderer_dom",
       "ok": true,
       "evidenceIds": [
-        "616e5214-faf6-408c-87c1-18b9c22ea8e8",
+        "eb8d4278-7a98-40d6-8ae2-4b8c2945d065",
         "cd09-run-S19-unknown-coverage",
         "trajectory-S19-unknown-coverage",
-        "process:main_08197581-4709-45ca-84ec-a10c7ed39b39"
+        "process:main_b635b6bb-c3c1-4551-8510-e3ec53a55481"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -70,10 +70,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "616e5214-faf6-408c-87c1-18b9c22ea8e8",
+        "eb8d4278-7a98-40d6-8ae2-4b8c2945d065",
         "cd09-run-S19-unknown-coverage",
         "trajectory-S19-unknown-coverage",
-        "process:main_08197581-4709-45ca-84ec-a10c7ed39b39"
+        "process:main_b635b6bb-c3c1-4551-8510-e3ec53a55481"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -187,27 +187,27 @@
     },
     {
       "ordinal": 15,
-      "channel": "skills:list",
-      "ok": true
-    },
-    {
-      "ordinal": 16,
       "channel": "agentRuns:list",
       "ok": true
     },
     {
-      "ordinal": 17,
+      "ordinal": 16,
       "channel": "agentRuns:listActiveExecutions",
       "ok": true
     },
     {
-      "ordinal": 18,
+      "ordinal": 17,
       "channel": "agentEvalCandidates:list",
       "ok": true
     },
     {
-      "ordinal": 19,
+      "ordinal": 18,
       "channel": "chatSessions:list",
+      "ok": true
+    },
+    {
+      "ordinal": 19,
+      "channel": "skills:list",
       "ok": true
     },
     {
@@ -335,5 +335,5 @@
     "sha256:98dc40aaf376aac2c41d3efb6f776fd8c62f6f544060ceab6bd7cba6fdb4690e"
   ],
   "status": "passed",
-  "digest": "sha256:16fada41ab954d3478d3b6a55f4146551ada65bb6e3feb758eb98ae669c9b962"
+  "digest": "sha256:1c1db85d05acd4734e42ac215615914b36825c137bbbc543f0541337f39ae9a0"
 }

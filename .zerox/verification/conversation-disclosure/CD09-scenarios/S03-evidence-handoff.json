@@ -3,12 +3,12 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S03-evidence-handoff",
   "scenarioDigest": "sha256:8040007dfb92f72b8b2e3a305cf2e705ce8a7ed80e7fd5c0907c06743cad125c",
-  "executionId": "88df842c-cb95-4534-9d59-67c210be3669",
+  "executionId": "9e17117a-14bc-4e09-b5e4-0e19c78248be",
   "processEpochs": [
-    "main_9227c87a-2c8b-4bdf-a0a9-30d69944c6f3"
+    "main_f835abbc-50a2-4dfa-9af4-41a2d0ac2c07"
   ],
   "attemptNonces": [
-    "2a0326b8-d413-4446-8061-fcfd2eac0d35"
+    "42f48f58-4d76-479e-a867-b61ee259ff03"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -29,10 +29,10 @@
       "executor": "production_preload_ipc",
       "ok": true,
       "evidenceIds": [
-        "78e52b08-9043-47f9-bac6-e36d8684c78d",
+        "c37df029-3e6e-4887-8fc6-722bbbc6072f",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_9227c87a-2c8b-4bdf-a0a9-30d69944c6f3"
+        "process:main_f835abbc-50a2-4dfa-9af4-41a2d0ac2c07"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -52,10 +52,10 @@
       "executor": "production_renderer_reload",
       "ok": true,
       "evidenceIds": [
-        "78e52b08-9043-47f9-bac6-e36d8684c78d",
+        "c37df029-3e6e-4887-8fc6-722bbbc6072f",
         "cd09-run-S03-evidence-handoff",
         "trajectory-S03-evidence-handoff",
-        "process:main_9227c87a-2c8b-4bdf-a0a9-30d69944c6f3"
+        "process:main_f835abbc-50a2-4dfa-9af4-41a2d0ac2c07"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -202,12 +202,12 @@
     },
     {
       "ordinal": 21,
-      "channel": "agentRuns:getTrajectoryPage",
+      "channel": "agentRuns:list",
       "ok": true
     },
     {
       "ordinal": 22,
-      "channel": "agentRuns:list",
+      "channel": "agentRuns:getTrajectoryPage",
       "ok": true
     },
     {
@@ -295,5 +295,5 @@
     "sha256:8d75658875c68939df891860d3d2f25d50dea13f3501c882237468906fa6b83b"
   ],
   "status": "passed",
-  "digest": "sha256:30cb44fb922f0bf93248aedb55645dc91ace65e3f1a30f6fa0315e156a45e35b"
+  "digest": "sha256:f56649d17578412a5a29f65c9421ca1f551728c5e89ddd77ab15ba8d0e13be84"
 }

@@ -3,14 +3,14 @@
   "kind": "conversation-disclosure-production-scenario",
   "scenarioId": "S13-legacy-coverage",
   "scenarioDigest": "sha256:1da0ad6ff0d434ad92845f1cea5d528fd01a1737ad0f443d1c45ef43687cf53f",
-  "executionId": "06326b7b-b867-40c3-beb7-5e58e8e2402d",
+  "executionId": "c8717509-40a4-4b6b-afce-d3cbda3114cc",
   "processEpochs": [
-    "main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a",
-    "main_93049f6b-e21d-4761-81ed-9de07bc7dcce"
+    "main_676cde4f-13b6-4049-a050-25eaebd6bedb",
+    "main_aae4d5d3-6790-4564-b91b-0a941cb69304"
   ],
   "attemptNonces": [
-    "70e8feca-3395-4245-abea-c73f2fd3e41e",
-    "cdf5bcd1-f2de-4b56-8f1e-22103daf70f0"
+    "7f495073-e38b-44b7-9571-919d5ae151cc",
+    "e65c001b-fe3c-4fa3-965b-b89da6d8eab6"
   ],
   "productionMain": true,
   "productionPreload": true,
@@ -39,7 +39,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a"
+        "process:main_676cde4f-13b6-4049-a050-25eaebd6bedb"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -70,7 +70,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a"
+        "process:main_676cde4f-13b6-4049-a050-25eaebd6bedb"
       ],
       "observations": {
         "sessionLoaded": true,
@@ -99,7 +99,7 @@
       "executor": "production_restart",
       "ok": true,
       "evidenceIds": [
-        "process:main_17e88ec9-9b63-41f7-9a78-407ba30a8a3a",
+        "process:main_676cde4f-13b6-4049-a050-25eaebd6bedb",
         "cd09-v391-session",
         "cd09-v391-goal",
         "cd09-v391-plan",
@@ -108,7 +108,7 @@
         "goal-ledger:cd09-v391-goal:1",
         "source-cut:v3.9.1@88503895b11c401eb1900d0eaf8026f1cd2ee00e#00d46e1d46f07e7a3bd74f0b2187dab9adeeeb81",
         "fixture:sha256:3972c41db7e07c52dafad51249c0d761dd9c1eaa94f24a6289fbe31bcd1cf967",
-        "process:main_93049f6b-e21d-4761-81ed-9de07bc7dcce",
+        "process:main_aae4d5d3-6790-4564-b91b-0a941cb69304",
         "restart:persisted-authority"
       ],
       "observations": {
@@ -135,7 +135,7 @@
       "ok": true,
       "evidenceIds": [
         "action:0:sha256:47f7e8094c4f6459c08991ff05d2d1bab719cb3962a012e323436b844375cc3a",
-        "screenshot:sha256:744a0f132bca6f8afe2c5c2d1e151f929413a71b9c9e6f121d00884fb60cf17f"
+        "screenshot:sha256:1fd9f54b8bbc87965675177baa98bb0863bb5b87c8e7b70fc0c3a20ad39cde0e"
       ]
     },
     {
@@ -144,7 +144,7 @@
       "ok": true,
       "evidenceIds": [
         "action:1:sha256:e5190b95c94a7751f60cb045425129f4f928df22859c04da66a7893e229603bb",
-        "screenshot:sha256:744a0f132bca6f8afe2c5c2d1e151f929413a71b9c9e6f121d00884fb60cf17f"
+        "screenshot:sha256:1fd9f54b8bbc87965675177baa98bb0863bb5b87c8e7b70fc0c3a20ad39cde0e"
       ]
     },
     {
@@ -153,7 +153,7 @@
       "ok": true,
       "evidenceIds": [
         "action:2:sha256:39b4f836bec74207a7e73bc9157244cca0325ac02175a408695a99f4c75c71d2",
-        "screenshot:sha256:fb4a1441978774da2547a105acf91f3aa0625ffa9f8e71526c51b8d3c697f134"
+        "screenshot:sha256:00e86cf46ec307114754260604830d4c48e36184e6f4facb8e706acd10daa77f"
       ]
     }
   ],
@@ -385,12 +385,12 @@
     },
     {
       "ordinal": 46,
-      "channel": "scheduledTasks:list",
+      "channel": "modelSettings:load",
       "ok": true
     },
     {
       "ordinal": 47,
-      "channel": "modelSettings:load",
+      "channel": "scheduledTasks:list",
       "ok": true
     },
     {
@@ -475,9 +475,9 @@
     }
   ],
   "screenshotDigests": [
-    "sha256:fb4a1441978774da2547a105acf91f3aa0625ffa9f8e71526c51b8d3c697f134",
-    "sha256:744a0f132bca6f8afe2c5c2d1e151f929413a71b9c9e6f121d00884fb60cf17f"
+    "sha256:00e86cf46ec307114754260604830d4c48e36184e6f4facb8e706acd10daa77f",
+    "sha256:1fd9f54b8bbc87965675177baa98bb0863bb5b87c8e7b70fc0c3a20ad39cde0e"
   ],
   "status": "passed",
-  "digest": "sha256:ffea7e6d23bdbee82aba7ce981d9b3e57423da66bd9b59a204c05f4fd3b48d40"
+  "digest": "sha256:9562101ae6918ccc9259653da4201c95e7e67f54120986b2b2ac77dff7536101"
 }
