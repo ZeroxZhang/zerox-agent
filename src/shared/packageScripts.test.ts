@@ -689,7 +689,13 @@ describe("package scripts", () => {
     expect(promoter).toContain(
       'identityAssurance: "caller-promoted-external-anchor-not-signed"',
     );
-    expect(promoter).toContain("source.digest !== anchor.sourceDigest");
+    expect(promoter).toContain(
+      "acceptanceInput.digest !== anchor.sourceDigest",
+    );
+    expect(promoter).toContain(
+      "evidenceValues.localPackage.sourceDigest !== source.digest",
+    );
+    expect(promoter).toContain("sourceDigest: source.digest");
     expect(promoter).toContain("evidenceValues.codeReview.digest");
   });
 

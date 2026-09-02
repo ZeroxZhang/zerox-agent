@@ -18,7 +18,10 @@ import {
   hashCanonicalV13,
   sha256BytesV13,
 } from "./conversation-disclosure-delta-contract-v13.mjs";
-import { computeLocalCandidateSourceManifest } from "./local-candidate-source-manifest.mjs";
+import {
+  computeAcceptanceInputManifest,
+  computeLocalCandidateSourceManifest,
+} from "./local-candidate-source-manifest.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputPath = path.join(
@@ -88,13 +91,16 @@ if (
   throw new Error("caller-pinned v3.9.2 acceptance anchor is invalid");
 }
 
-const source = await computeLocalCandidateSourceManifest(root);
+const acceptanceInput = await computeAcceptanceInputManifest(root);
 if (
-  source.digest !== anchor.sourceDigest
-  || source.fileCount !== anchor.sourceFileCount
+  acceptanceInput.digest !== anchor.sourceDigest
+  || acceptanceInput.fileCount !== anchor.sourceFileCount
 ) {
-  throw new Error("current source does not match the accepted v3.9.2 anchor");
+  throw new Error(
+    "current acceptance input does not match the accepted v3.9.2 anchor",
+  );
 }
+const source = await computeLocalCandidateSourceManifest(root);
 
 const evidence = {};
 const evidenceValues = {};
@@ -111,6 +117,8 @@ if (
   || evidenceValues.securityReview.verdict !== "passed"
   || evidenceValues.realAppAcceptance.status !== "passed"
   || evidenceValues.localPackage.status !== "passed"
+  || evidenceValues.localPackage.sourceDigest !== source.digest
+  || evidenceValues.localPackage.sourceFileCount !== source.fileCount
   || evidenceValues.chatResilience.status !== "passed"
   || evidenceValues.planResilience.status !== "passed"
 ) {
@@ -127,8 +135,8 @@ const attestation = {
   acceptedGitHead: anchor.gitHead,
   acceptedGitTree: anchor.gitTree,
   cd04AnchorDigest: anchor.cd04AnchorDigest,
-  sourceDigest: anchor.sourceDigest,
-  sourceFileCount: anchor.sourceFileCount,
+  sourceDigest: source.digest,
+  sourceFileCount: source.fileCount,
   reviewPins: anchor.reviewPins,
   evidenceDigests: evidence,
   verification: anchor.verification,
