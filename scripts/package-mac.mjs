@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, closeSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openPinnedSafeFsHelperCapability } from "./inspect-safe-fs-helper.mjs";
@@ -123,6 +124,26 @@ if (status === 0) {
   const currentCommit = readFrozenGitCommit();
   if (currentCommit !== frozenCommit) {
     console.error("Git HEAD or working tree changed while packaging; refusing stale artifacts.");
+    status = 1;
+  }
+}
+
+if (status === 0) {
+  // Overlay the caller-reviewed unsigned helper bytes so release packaging
+  // never depends on the host compiler reproducing the pinned digest (CI
+  // runners use a different CommandLineTools/SDK than the acceptance host).
+  const helperPath = resolve(rootDir, `dist-native/darwin-${process.arch}/zerox-safe-fs`);
+  const pinnedHelperPath = resolve(rootDir, `native/zerox-safe-fs-darwin-${process.arch}`);
+  try {
+    const pinnedBytes = readFileSync(pinnedHelperPath);
+    const digest = `sha256:${createHash("sha256").update(pinnedBytes).digest("hex")}`;
+    if (digest !== EXPECTED_SAFE_FS_HELPER_DIGEST) {
+      throw new Error("pinned safe-fs helper digest mismatch");
+    }
+    writeFileSync(helperPath, pinnedBytes);
+    chmodSync(helperPath, 0o755);
+  } catch (error) {
+    console.error(`Failed to stage the caller-reviewed safe-fs helper: ${error instanceof Error ? error.message : String(error)}`);
     status = 1;
   }
 }
