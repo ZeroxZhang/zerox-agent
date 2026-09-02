@@ -1,5 +1,33 @@
 # Zerox Harness Progress
 
+## 2026-09-02 - v3.9.2 released: final CI packaging fix, re-acceptance, and publication
+
+- The sealed-main verify workflow (and the tag release workflow) surfaced two
+  latent CI-only gaps that local acceptance could not see: (1) shallow
+  checkout lacked the accepted Git ancestry (fixed with checkout
+  fetch-depth: 0), and (2) a fresh checkout cannot reproduce the acceptance
+  host's evidence mode layout (fix: "Normalize governance evidence modes"
+  step runs chmod 0644 on .zerox and chmod 0600 on CD03A-round* evidence in
+  both verify.yml and release.yml before harness checks).
+- GitHub Actions runners use a different CommandLineTools/SDK than the
+  acceptance host, so release packaging could not reproduce the pinned
+  unsigned safe-fs helper digest. package-mac.mjs now overlays the
+  caller-reviewed helper bytes from the tracked
+  native/zerox-safe-fs-darwin-arm64 (digest
+  sha256:58b2493f...) after build, keeping the pinned-capability descriptor
+  flow unchanged; fresh independent code and security review passed at
+  0C/0M/0m for the final delta.
+- Authoritative acceptance re-run at commit 8e266e4d passed (external anchor
+  digest sha256:2a77c1e1...); promoted release attestation digest
+  sha256:78e85752cb919b3f85400c5b23a6417d5da0f7bfeb0e9cc34ef118f489d7269e;
+  GitHub secret ZEROX_V392_RELEASE_ATTESTATION_DIGEST updated.
+- main pushed at 34e62f4; sealed-main verify workflow succeeded; v3.9.2 tag
+  recreated on 34e62f4 and pushed; release workflow succeeded; GitHub
+  Release "Zerox Agent v3.9.2" is live (non-draft, non-prerelease) with the
+  six allowlisted assets: latest-mac.yml, latest-mac.yml.sig,
+  Zerox-Agent-3.9.2-arm64.dmg (+blockmap), Zerox-Agent-3.9.2-arm64.zip
+  (+blockmap).
+
 ## 2026-09-02 - v3.9.2 release blocker: post-closure CI gating and re-acceptance
 
 - The v3.9.2 tag release workflow failed because post-closure CI reran the
