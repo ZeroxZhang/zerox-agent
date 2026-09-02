@@ -3,9 +3,9 @@
   "kind": "v3.9.2-adversarial-review-receipt",
   "lane": "security",
   "reviewerAgentId": "/root/v392_security_review_r9",
-  "challenge": "sha256:1b4932f91e94bca621bc7afc53dfa2be7589b75b0310f1a80336f916c9a5f91a",
+  "challenge": "sha256:90f92a3aecde4e57b6dd3e932106c62e38675d5c6e8c0a3e242d9772c8b9741b",
   "identityAssurance": "platform-task-id-not-signed",
-  "reviewedCandidateDigest": "sha256:fc899e1d4ce13bc7a9c7f6eee9967c8410ee2378599b92065b7299c7a4a24c76",
+  "reviewedCandidateDigest": "sha256:5cc6bd244eae004c7cbb3c9d4480f4e9e57d6d0ad6e808b2ae1e7ad18d9a36d3",
   "reviewedCandidateFileCount": 1462,
   "verdict": "passed",
   "findingCounts": {
@@ -13,7 +13,7 @@
     "major": 0,
     "minor": 0
   },
-  "reviewOutput": "Agent run ID: /root/v392_security_review_r9\nChallenge: sha256:1b4932f91e94bca621bc7afc53dfa2be7589b75b0310f1a80336f916c9a5f91a\nLane: security\nCandidate manifest: sha256:fc899e1d4ce13bc7a9c7f6eee9967c8410ee2378599b92065b7299c7a4a24c76\nCandidate file count: 1462\nFINAL_VERDICT: PASS\nFINAL_COUNTS: 0C/0M/0m\n",
-  "reviewOutputDigest": "sha256:61dcd3ef64d766743d23653467c60f70f42161665c7c8fd68edc480e7d8e9ba2",
-  "digest": "sha256:ba8793d9339da9235ebd8708f1d1c9696f5d37736f4d488c99493c8318ca2f06"
+  "reviewOutput": "Agent run ID: /root/v392_security_review_r9\nChallenge: sha256:90f92a3aecde4e57b6dd3e932106c62e38675d5c6e8c0a3e242d9772c8b9741b\nLane: security\nCandidate manifest: sha256:5cc6bd244eae004c7cbb3c9d4480f4e9e57d6d0ad6e808b2ae1e7ad18d9a36d3\nCandidate file count: 1462\nFINAL_VERDICT: PASS\nFINAL_COUNTS: 0C/0M/0m\n",
+  "reviewOutputDigest": "sha256:08b728d9d8720f42fa7a240a92bffddccda9b05df96696ebc16b07ffa41ae8c4",
+  "digest": "sha256:734221d185004e55804cb3e594246f8e15c405f1f7a3e306768f3cc48882f8d9"
 }
