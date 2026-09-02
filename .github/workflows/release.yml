@@ -38,6 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Normalize governance evidence modes
+        run: |
+          find .zerox -type f -exec chmod 0644 {} +
+          chmod 0600 .zerox/verification/conversation-disclosure/CD03A-round*
+
       - name: Verify source tree
         env:
           ZEROX_V392_RELEASE_ATTESTATION_DIGEST: ${{ secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST }}
