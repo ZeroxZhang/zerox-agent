@@ -867,7 +867,8 @@ describe("package scripts", () => {
       "secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST",
     );
     expect(workflow).toContain("ZEROX_RELEASE_MODE: legacy-adhoc");
-    expect(workflow).toContain("npm test -- --maxWorkers=1");
+    expect(workflow).toContain("npm run harness:check");
+    expect(workflow).not.toContain("npm test -- --maxWorkers=1");
     expect(workflow).toContain("npm run stress:runtime");
     expect(workflow).toContain("npm run eval:agent:built");
     expect(workflow).toContain("npm run eval:memory:built");

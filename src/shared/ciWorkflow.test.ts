@@ -72,11 +72,37 @@ describe("GitHub verify workflow", () => {
         cache: "npm",
       },
     });
-    expect(steps.map((step) => step.run).filter(Boolean)).toEqual([
-      "npm ci",
-      "npm run verify",
+    expect(steps[2]?.run).toBe("npm ci");
+    const developmentStep = steps.find(
+      (step) => step.name === "Verify development change",
+    );
+    const sealedMainStep = steps.find(
+      (step) => step.name === "Verify sealed main",
+    );
+    expect(developmentStep).toMatchObject({
+      if: "github.event_name == 'pull_request'",
+      run: "npm run verify",
+    });
+    expect(sealedMainStep).toMatchObject({
+      if: "github.event_name == 'push'",
+      env: {
+        ZEROX_V392_RELEASE_ATTESTATION_DIGEST: "$" + "{{ secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST }}",
+      },
+    });
+    const sealedCommands = (sealedMainStep?.run ?? "")
+      .split(/\r?\n/)
+      .map((command) => command.trim())
+      .filter(Boolean);
+    expect(sealedCommands).toEqual([
       "npm run harness:check",
+      "npm run typecheck:tests",
+      "npm run stress:runtime",
+      "npm run build",
+      "npm run eval:agent:built",
+      "npm run eval:memory:built",
     ]);
+    expect(sealedCommands.join("\n")).not.toContain("npm run verify");
+    expect(sealedCommands.join("\n")).not.toContain("npm test");
   });
 
   it("keeps display-dependent smoke commands out of CI", () => {
@@ -126,21 +152,20 @@ describe("GitHub verify workflow", () => {
     });
     expect(verifyStepIndex).toBeGreaterThanOrEqual(0);
     expect(releaseStepIndex).toBeGreaterThan(verifyStepIndex);
-    expect(
-      steps[verifyStepIndex]?.run
-        ?.trim()
-        .split(/\r?\n/)
-        .map((command) => command.trim()),
-    ).toEqual([
+    const verifyCommands = (steps[verifyStepIndex]?.run ?? "")
+      .split(/\r?\n/)
+      .map((command) => command.trim())
+      .filter((command) => command && !command.startsWith("#"));
+    expect(verifyCommands).toEqual([
+      "npm run harness:check",
       "npm run typecheck:tests",
-      "npm test -- --maxWorkers=1",
       "npm run stress:runtime",
       "npm run build",
       "npm run eval:agent:built",
       "npm run eval:memory:built",
       "npm run smoke:prod:built",
-      "npm run harness:check",
     ]);
+    expect(verifyCommands.join("\n")).not.toContain("npm test");
     expect(signingStep?.env?.UPDATE_SIGNING_PRIVATE_KEY).toBe(
       "${{ secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY }}",
     );

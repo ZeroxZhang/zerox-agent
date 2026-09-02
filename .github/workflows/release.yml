@@ -42,14 +42,13 @@ jobs:
         env:
           ZEROX_V392_RELEASE_ATTESTATION_DIGEST: ${{ secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST }}
         run: |
+          npm run harness:check
           npm run typecheck:tests
-          npm test -- --maxWorkers=1
           npm run stress:runtime
           npm run build
           npm run eval:agent:built
           npm run eval:memory:built
           npm run smoke:prod:built
-          npm run harness:check
 
       - name: Materialize update signing key
         shell: bash

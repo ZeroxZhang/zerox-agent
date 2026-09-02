@@ -15,7 +15,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run verify
-      - run: npm run harness:check
+      - name: Verify development change
+        if: github.event_name == 'pull_request'
+        run: npm run verify
+      - name: Verify sealed main
+        if: github.event_name == 'push'
         env:
           ZEROX_V392_RELEASE_ATTESTATION_DIGEST: ${{ secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST }}
+        run: |
+          npm run harness:check
+          npm run typecheck:tests
+          npm run stress:runtime
+          npm run build
+          npm run eval:agent:built
+          npm run eval:memory:built
