@@ -842,6 +842,18 @@ await run(
 );
 await run(
   nodePath,
+  ["scripts/run-chat-resilience-local-package.mjs"],
+  executionRoot,
+  trustedEnvironment,
+);
+await run(
+  nodePath,
+  ["scripts/run-plan-resilience-local-package.mjs"],
+  executionRoot,
+  trustedEnvironment,
+);
+await run(
+  nodePath,
   ["scripts/probe-native-sqlite.mjs", "--expect-runtime=node"],
   executionRoot,
   trustedEnvironment,
@@ -4947,6 +4959,8 @@ function requiresElectronSandbox(command, args) {
       && args[2] === "smoke:prod"
     )
     || args[0] === "scripts/run-conversation-disclosure-acceptance.mjs"
+    || args[0] === "scripts/run-chat-resilience-local-package.mjs"
+    || args[0] === "scripts/run-plan-resilience-local-package.mjs"
     || command.endsWith(
       `${path.sep}Zerox Agent.app${path.sep}Contents${path.sep}MacOS${
         path.sep
@@ -5590,6 +5604,17 @@ function expectedCommandMutationPrefixes(args, cwd) {
     prefixes.push(
       "release-local",
       ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+    );
+  }
+  if (args[0] === "scripts/run-chat-resilience-local-package.mjs") {
+    prefixes.push(
+      ".zerox/verification/chat-resilience-local-package.json",
+      ".zerox/verification/chat-resilience-local-package.png",
+    );
+  }
+  if (args[0] === "scripts/run-plan-resilience-local-package.mjs") {
+    prefixes.push(
+      ".zerox/verification/plan-resilience-local-package.json",
     );
   }
   return [...new Set(prefixes.map((entry) => path.normalize(entry)))];

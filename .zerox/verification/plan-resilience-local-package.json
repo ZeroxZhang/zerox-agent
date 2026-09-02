@@ -8,7 +8,7 @@
     "appAsarSha256": "sha256:9f2c453f5e9037421491875a3bb6aae06bec0ccb97e3410859c12574c881d547"
   },
   "source": {
-    "planId": "plan_f9419efa-7819-42b9-935f-b0d9632f58a0",
+    "planId": "plan_resilience_fixture",
     "failedReviewRunId": "plan_review_976a7396-2006-4250-9e00-04847d64fc17",
     "completedGenerationRunId": "plan_run_3ff319b4-1067-4200-ad42-30f7a196e8bc",
     "completedRoundRunId": "plan_run_3ff319b4-1067-4200-ad42-30f7a196e8bc"
@@ -18,7 +18,7 @@
     "injectedFailureCount": 1,
     "slowSuccessCount": 1,
     "responseDelayMs": 35000,
-    "elapsedMs": 39818
+    "elapsedMs": 40188
   },
   "resumedPlan": {
     "exitCode": 0,

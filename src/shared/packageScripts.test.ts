@@ -619,6 +619,18 @@ describe("package scripts", () => {
       'forms.push(network ? "(allow network*)" : "(deny network*)")',
     );
     expect(runner).toContain("FINAL_FILES.length !== 73");
+    expect(runner).toContain(
+      '["scripts/run-chat-resilience-local-package.mjs"]',
+    );
+    expect(runner).toContain(
+      '["scripts/run-plan-resilience-local-package.mjs"]',
+    );
+    expect(runner).toContain(
+      'args[0] === "scripts/run-chat-resilience-local-package.mjs"',
+    );
+    expect(runner).toContain(
+      'args[0] === "scripts/run-plan-resilience-local-package.mjs"',
+    );
     expect(runner).toContain("GENERATED_PUBLICATION_FILES.length !== 55");
     expect(checker).toContain("expectedExternalControlFiles.length !== 17");
     expect(checker).toContain("expectedFinalAnchorFiles.length !== 73");

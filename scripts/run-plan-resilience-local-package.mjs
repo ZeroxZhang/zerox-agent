@@ -23,9 +23,10 @@ const packageRoot = path.join(
 );
 const executable = path.join(packageRoot, "Contents/MacOS/Zerox Agent");
 const appAsar = path.join(packageRoot, "Contents/Resources/app.asar");
-const sourceDb = process.env.ZEROX_PLAN_ACCEPTANCE_SOURCE_DB ?? path.join(
-  os.homedir(),
-  "Library/Application Support/Zerox Agent/config/zerox.db",
+const sourceDb = process.env.ZEROX_PLAN_ACCEPTANCE_SOURCE_DB?.trim() || null;
+const sourceFixture = path.join(
+  root,
+  "fixtures/plan-resilience-source.json",
 );
 const explicitPlanId = process.env.ZEROX_PLAN_ACCEPTANCE_PLAN_ID?.trim();
 const receiptPath = path.join(
@@ -40,7 +41,9 @@ const isolatedDb = path.join(userDataDir, "config/zerox.db");
 const provider = await startProviderFixture();
 
 try {
-  const sourcePlan = await readSourcePlan(sourceDb, explicitPlanId);
+  const sourcePlan = sourceDb
+    ? await readSourcePlan(sourceDb, explicitPlanId)
+    : JSON.parse(await readFile(sourceFixture, "utf8"));
   const planId = sourcePlan.id;
   const failedReview = [...(sourcePlan.planningStages ?? [])]
     .reverse()
@@ -62,10 +65,14 @@ try {
 
   await mkdir(path.dirname(isolatedDb), { recursive: true });
   await mkdir(isolatedWorkspace, { recursive: true });
-  await execFileAsync("/usr/bin/sqlite3", [
-    sourceDb,
-    `.backup '${isolatedDb.replaceAll("'", "''")}'`,
-  ]);
+  if (sourceDb) {
+    await execFileAsync("/usr/bin/sqlite3", [
+      sourceDb,
+      `.backup '${isolatedDb.replaceAll("'", "''")}'`,
+    ]);
+  } else {
+    await seedFixtureDatabase(isolatedDb, sourcePlan);
+  }
   await execFileAsync("/usr/bin/sqlite3", [
     isolatedDb,
     `UPDATE plan_records SET payload = json_set(payload, '$.workspaceRoot', ${sqlLiteral(isolatedWorkspace)}) WHERE id = ${sqlLiteral(planId)};`,
@@ -196,6 +203,36 @@ async function readSourcePlan(databasePath, planId) {
     }
   }
   throw new Error("No paused plan with a failed review was found.");
+}
+
+async function seedFixtureDatabase(databasePath, plan) {
+  await execFileAsync("/usr/bin/sqlite3", [databasePath, `
+    CREATE TABLE plan_records (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      status TEXT NOT NULL,
+      action_gate TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO plan_records (
+      id, session_id, mode, status, action_gate, revision,
+      payload, created_at, updated_at
+    ) VALUES (
+      ${sqlLiteral(plan.id)},
+      ${sqlLiteral(plan.sessionId)},
+      ${sqlLiteral(plan.mode)},
+      ${sqlLiteral(plan.status)},
+      ${sqlLiteral(plan.actionGate)},
+      ${Number(plan.revision)},
+      ${sqlLiteral(JSON.stringify(plan))},
+      ${sqlLiteral(plan.createdAt)},
+      ${sqlLiteral(plan.updatedAt)}
+    );
+  `]);
 }
 
 async function readPlan(databasePath, planId) {

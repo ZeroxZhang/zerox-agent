@@ -1,0 +1,766 @@
+{
+  "schemaVersion": 3,
+  "id": "plan_resilience_fixture",
+  "sessionId": "session_resilience_fixture",
+  "workspaceId": "workspace_resilience_fixture",
+  "workspaceRoot": "/tmp/zerox-plan-resilience-workspace",
+  "sourceMessage": "Create one deterministic local acceptance artifact.",
+  "baseSourceMessage": "Create one deterministic local acceptance artifact.",
+  "clarifications": [],
+  "mode": "direct",
+  "autonomyMode": "auto",
+  "status": "paused",
+  "actionGate": "blocked",
+  "revision": 13,
+  "taskProfile": {
+    "domain": "web",
+    "mode": "exploratory",
+    "risk": "read_only",
+    "expectedScale": "small",
+    "needsConfirmation": false,
+    "targetRefs": [],
+    "ambiguity": [],
+    "investigationDepth": "deep"
+  },
+  "planningBrief": {
+    "objective": "创建一个关于 DeepSeek Harness 的介绍网页，采用 Apple Copy-1.zip 中的设计风格",
+    "deliverables": [
+      "单个 HTML 文件"
+    ],
+    "inScope": [
+      "基于参考风格设计页面布局与视觉样式",
+      "编写 DeepSeek Harness 介绍内容",
+      "输出自包含的 HTML 文件"
+    ],
+    "outOfScope": [
+      "多页面网站",
+      "后端功能",
+      "部署服务",
+      "其他格式交付"
+    ],
+    "constraints": [
+      "只输出一个 HTML 文件",
+      "需参考 Apple Copy-1.zip 的设计风格",
+      "保持稳健简洁的设计"
+    ],
+    "assumptions": [
+      "Apple Copy-1.zip 包含可提取的 CSS/HTML 参考素材",
+      "DeepSeek Harness 是 AI 工具链/框架相关主题",
+      "工作区中 deepseek-harness 目录可能包含相关内容参考",
+      "用户接受基于现有素材推断的设计风格",
+      "自动模式决策：深度只读调查仍未获得足以支撑工作区主张的证据；请明确目标或授权可用的数据来源。；执行 Agent 按工作区证据、最小风险和可验证性选择默认方案，并在结果中记录实际选择。"
+    ],
+    "unresolvedQuestions": [],
+    "targetRefs": [],
+    "evidenceRefs": [
+      "evidence_user_request",
+      "evidence_workspace_inventory",
+      "evidence_selected_skill"
+    ],
+    "skillCandidates": []
+  },
+  "planningStages": [
+    {
+      "id": "planning_stage_47c54848-f587-45bd-b530-d292d4ff8582",
+      "kind": "triage",
+      "runId": "plan_triage_3b0d45a3-f5d9-4006-891f-a5aed54c45fe",
+      "status": "completed",
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_workspace_inventory"
+      ],
+      "startedAt": "2026-08-31T14:08:13.483Z",
+      "completedAt": "2026-08-31T14:08:13.483Z"
+    },
+    {
+      "id": "planning_stage_e06601aa-958a-4c57-9246-726b626a836f",
+      "kind": "investigation",
+      "runId": "plan_investigation_a46e3c83-676b-4e2d-9bf2-8a357fd04d73",
+      "status": "completed",
+      "investigationDepth": "quick",
+      "modelBinding": {
+        "profileId": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c",
+        "connectionId": "connection_ce07e6b2-6d47-4c69-b416-a8568e5b3a9c",
+        "providerKind": "dashscope-coding",
+        "modelId": "qwen3.7-plus",
+        "contextWindow": 1000000,
+        "contextWindowSource": {
+          "kind": "public_catalog",
+          "label": "Zerox 公开模型目录",
+          "checkedAt": "2026-07-28"
+        },
+        "revision": 4,
+        "connectionRevision": 1,
+        "profileRevision": 1,
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "pdf": false,
+          "streaming": true,
+          "parallelToolCalls": true
+        },
+        "generation": {
+          "temperature": 0.2,
+          "maxTokens": 8192,
+          "thinkingEnabled": false,
+          "thinkingBudgetTokens": 8192
+        }
+      },
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_workspace_inventory"
+      ],
+      "startedAt": "2026-08-31T14:08:13.660Z",
+      "completedAt": "2026-08-31T14:08:21.883Z",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 14826,
+        "estimated": true
+      }
+    },
+    {
+      "id": "planning_stage_e8844826-e81e-4811-91ae-f9f9785f0c06",
+      "kind": "investigation",
+      "runId": "plan_investigation_9f3789ca-38d5-4517-a89e-6a601b00bf0b",
+      "status": "completed",
+      "investigationDepth": "standard",
+      "modelBinding": {
+        "profileId": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c",
+        "connectionId": "connection_ce07e6b2-6d47-4c69-b416-a8568e5b3a9c",
+        "providerKind": "dashscope-coding",
+        "modelId": "qwen3.7-plus",
+        "contextWindow": 1000000,
+        "contextWindowSource": {
+          "kind": "public_catalog",
+          "label": "Zerox 公开模型目录",
+          "checkedAt": "2026-07-28"
+        },
+        "revision": 4,
+        "connectionRevision": 1,
+        "profileRevision": 1,
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "pdf": false,
+          "streaming": true,
+          "parallelToolCalls": true
+        },
+        "generation": {
+          "temperature": 0.2,
+          "maxTokens": 8192,
+          "thinkingEnabled": false,
+          "thinkingBudgetTokens": 8192
+        }
+      },
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_workspace_inventory"
+      ],
+      "startedAt": "2026-08-31T14:08:21.885Z",
+      "completedAt": "2026-08-31T14:08:29.320Z",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 14849,
+        "estimated": true
+      }
+    },
+    {
+      "id": "planning_stage_8b47c236-ffc2-4bf1-995a-161628333884",
+      "kind": "investigation",
+      "runId": "plan_investigation_0cc79d34-a189-47ca-9834-44031e77bc98",
+      "status": "completed",
+      "investigationDepth": "deep",
+      "modelBinding": {
+        "profileId": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c",
+        "connectionId": "connection_ce07e6b2-6d47-4c69-b416-a8568e5b3a9c",
+        "providerKind": "dashscope-coding",
+        "modelId": "qwen3.7-plus",
+        "contextWindow": 1000000,
+        "contextWindowSource": {
+          "kind": "public_catalog",
+          "label": "Zerox 公开模型目录",
+          "checkedAt": "2026-07-28"
+        },
+        "revision": 4,
+        "connectionRevision": 1,
+        "profileRevision": 1,
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "pdf": false,
+          "streaming": true,
+          "parallelToolCalls": true
+        },
+        "generation": {
+          "temperature": 0.2,
+          "maxTokens": 8192,
+          "thinkingEnabled": false,
+          "thinkingBudgetTokens": 8192
+        }
+      },
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_workspace_inventory"
+      ],
+      "startedAt": "2026-08-31T14:08:29.322Z",
+      "completedAt": "2026-08-31T14:08:38.628Z",
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 14961,
+        "estimated": true
+      }
+    },
+    {
+      "id": "planning_stage_57c74931-f020-42f9-b0cd-a9d79c2deac9",
+      "kind": "skill_route",
+      "runId": "plan_skill_route_992d12c2-5ddd-4c73-a7e2-caefcdf79568",
+      "status": "completed",
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_selected_skill"
+      ],
+      "startedAt": "2026-08-31T14:08:38.631Z",
+      "completedAt": "2026-08-31T14:08:38.631Z"
+    },
+    {
+      "id": "planning_stage_8640bf85-2fbb-4428-9891-07be6e4c7698",
+      "kind": "contract",
+      "runId": "plan_contract_c85ede98-72f3-4aa8-9265-3ee7ebae2b14",
+      "status": "completed",
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_workspace_inventory",
+        "evidence_selected_skill"
+      ],
+      "startedAt": "2026-08-31T14:08:38.631Z",
+      "completedAt": "2026-08-31T14:08:38.631Z"
+    },
+    {
+      "id": "planning_stage_fb03ce98-158b-4ec5-8893-17bbecd4f0eb",
+      "kind": "generation",
+      "runId": "plan_run_3ff319b4-1067-4200-ad42-30f7a196e8bc",
+      "status": "completed",
+      "modelBinding": {
+        "profileId": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c",
+        "connectionId": "connection_ce07e6b2-6d47-4c69-b416-a8568e5b3a9c",
+        "providerKind": "dashscope-coding",
+        "modelId": "qwen3.7-plus",
+        "contextWindow": 1000000,
+        "contextWindowSource": {
+          "kind": "public_catalog",
+          "label": "Zerox 公开模型目录",
+          "checkedAt": "2026-07-28"
+        },
+        "revision": 4,
+        "connectionRevision": 1,
+        "profileRevision": 1,
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "pdf": false,
+          "streaming": true,
+          "parallelToolCalls": true
+        },
+        "generation": {
+          "temperature": 0.2,
+          "maxTokens": 8192,
+          "thinkingEnabled": false,
+          "thinkingBudgetTokens": 8192
+        }
+      },
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_workspace_inventory",
+        "evidence_selected_skill"
+      ],
+      "startedAt": "2026-08-31T14:08:38.635Z",
+      "completedAt": "2026-08-31T14:09:02.492Z",
+      "latencyMs": 23845,
+      "usage": {
+        "inputTokens": 16325,
+        "outputTokens": 1303
+      }
+    },
+    {
+      "id": "planning_stage_aab80146-6bc9-423d-ba8d-e294c3e7d58b",
+      "kind": "review",
+      "runId": "plan_review_976a7396-2006-4250-9e00-04847d64fc17",
+      "status": "failed",
+      "modelBinding": {
+        "profileId": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c",
+        "connectionId": "connection_ce07e6b2-6d47-4c69-b416-a8568e5b3a9c",
+        "providerKind": "dashscope-coding",
+        "modelId": "qwen3.7-plus",
+        "contextWindow": 1000000,
+        "contextWindowSource": {
+          "kind": "public_catalog",
+          "label": "Zerox 公开模型目录",
+          "checkedAt": "2026-07-28"
+        },
+        "revision": 4,
+        "connectionRevision": 1,
+        "profileRevision": 1,
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "pdf": false,
+          "streaming": true,
+          "parallelToolCalls": true
+        },
+        "generation": {
+          "temperature": 0.2,
+          "maxTokens": 8192,
+          "thinkingEnabled": false,
+          "thinkingBudgetTokens": 8192
+        }
+      },
+      "evidenceRefs": [
+        "evidence_user_request",
+        "evidence_workspace_inventory",
+        "evidence_selected_skill"
+      ],
+      "startedAt": "2026-08-31T14:09:02.497Z",
+      "completedAt": "2026-08-31T14:09:43.344Z",
+      "error": "LLM connection timed out after 30000 ms."
+    }
+  ],
+  "taskContract": {
+    "objective": "创建一个关于 DeepSeek Harness 的介绍网页，采用 Apple Copy-1.zip 中的设计风格",
+    "audience": "提出需求并负责确认计划的 Zerox 用户",
+    "deliverables": [
+      "单个 HTML 文件"
+    ],
+    "inScope": [
+      "基于参考风格设计页面布局与视觉样式",
+      "编写 DeepSeek Harness 介绍内容",
+      "输出自包含的 HTML 文件"
+    ],
+    "outOfScope": [
+      "多页面网站",
+      "后端功能",
+      "部署服务",
+      "其他格式交付"
+    ],
+    "constraints": [
+      "只输出一个 HTML 文件",
+      "需参考 Apple Copy-1.zip 的设计风格",
+      "保持稳健简洁的设计"
+    ],
+    "successCriteria": [
+      "交付并验证：单个 HTML 文件"
+    ],
+    "assumptions": [
+      "Apple Copy-1.zip 包含可提取的 CSS/HTML 参考素材",
+      "DeepSeek Harness 是 AI 工具链/框架相关主题",
+      "工作区中 deepseek-harness 目录可能包含相关内容参考",
+      "用户接受基于现有素材推断的设计风格",
+      "自动模式决策：深度只读调查仍未获得足以支撑工作区主张的证据；请明确目标或授权可用的数据来源。；执行 Agent 按工作区证据、最小风险和可验证性选择默认方案，并在结果中记录实际选择。"
+    ],
+    "targetRefs": [],
+    "evidenceRefs": [
+      "evidence_user_request",
+      "evidence_workspace_inventory",
+      "evidence_selected_skill"
+    ]
+  },
+  "purpose": "initial",
+  "goalContractSnapshot": {
+    "schemaVersion": 1,
+    "id": "goal_contract_plan_f9419efa-7819-42b9-935f-b0d9632f58a0",
+    "revision": 1,
+    "source": {
+      "kind": "plan",
+      "ref": "plan_f9419efa-7819-42b9-935f-b0d9632f58a0"
+    },
+    "objective": "创建一个关于 DeepSeek Harness 的介绍网页，采用 Apple Copy-1.zip 中的设计风格",
+    "deliverables": [
+      "单个 HTML 文件"
+    ],
+    "scope": {
+      "in": [
+        "基于参考风格设计页面布局与视觉样式",
+        "编写 DeepSeek Harness 介绍内容",
+        "输出自包含的 HTML 文件"
+      ],
+      "out": [
+        "多页面网站",
+        "后端功能",
+        "部署服务",
+        "其他格式交付"
+      ]
+    },
+    "assumptions": [
+      "Apple Copy-1.zip 包含可提取的 CSS/HTML 参考素材",
+      "DeepSeek Harness 是 AI 工具链/框架相关主题",
+      "工作区中 deepseek-harness 目录可能包含相关内容参考",
+      "用户接受基于现有素材推断的设计风格",
+      "自动模式决策：深度只读调查仍未获得足以支撑工作区主张的证据；请明确目标或授权可用的数据来源。；执行 Agent 按工作区证据、最小风险和可验证性选择默认方案，并在结果中记录实际选择。"
+    ],
+    "constraints": [
+      {
+        "id": "constraint_1",
+        "dimension": "other",
+        "strength": "hard",
+        "description": "只输出一个 HTML 文件"
+      },
+      {
+        "id": "constraint_2",
+        "dimension": "other",
+        "strength": "hard",
+        "description": "需参考 Apple Copy-1.zip 的设计风格"
+      },
+      {
+        "id": "constraint_3",
+        "dimension": "other",
+        "strength": "hard",
+        "description": "保持稳健简洁的设计"
+      }
+    ],
+    "successCriteria": [
+      {
+        "id": "criterion_1",
+        "description": "交付并验证：单个 HTML 文件"
+      }
+    ],
+    "stopPolicy": {
+      "onSuccess": "acceptance_certificate",
+      "onUserCancel": "cancel",
+      "onExternalBlock": "await_input",
+      "onImpossible": "propose_goal_amendment",
+      "onSafetyBlock": "request_confirmation"
+    },
+    "riskPolicy": {
+      "ordinaryOperations": "auto_decide",
+      "highRiskOperations": "request_confirmation",
+      "irreversibleOperations": "request_confirmation"
+    },
+    "createdAt": "2026-08-31T14:08:13.483Z"
+  },
+  "goalContractRef": {
+    "id": "goal_contract_plan_f9419efa-7819-42b9-935f-b0d9632f58a0",
+    "revision": 1,
+    "sha256": "e5f40930b9b7728add54b4766293f0b2951ff3847e4facc109e99ff2f320079e"
+  },
+  "goalPlanVersion": 1,
+  "trigger": {
+    "kind": "initial_request",
+    "summary": "Initial plan requested by the user.",
+    "evidenceRefs": [
+      "evidence_user_request",
+      "evidence_workspace_inventory"
+    ],
+    "at": "2026-08-31T14:08:13.483Z"
+  },
+  "criterionBindings": [],
+  "goalContractIssues": [],
+  "evidence": [
+    {
+      "id": "evidence_user_request",
+      "kind": "user",
+      "title": "用户需求",
+      "summary": "/Users/zeorx/Library/Mobile\\ Documents/com\\~apple\\~CloudDocs/meta_info/Apple\\ Copy-1.zip，参考和使用这个路径下的设计风格稳健，帮我做一个关于deepseek harness的介绍网页。只需要给我输出一个html即可",
+      "sourceRef": "fixture://plan-resilience",
+      "sourceHashes": []
+    },
+    {
+      "id": "evidence_workspace_inventory",
+      "kind": "workspace",
+      "title": "工作区顶层清单",
+      "summary": ".DS_Store\nApple Copy-1.zip\nTHREE\n_components_ref.css\n_website_ref.html\n_zip_extract\nalergy_map\nalergy_map_2\nallergen-map\nallergy_map_3\ncross-border-selection\ncross-border-selection-dist\ndeepseek-harness\necommerce-selection\nsunset-glow-monitor",
+      "sourceRef": "fixture://plan-resilience",
+      "sha256": "03e130e9e41f34e6bd4d79638c2241b292fbc09266dd7a6adce4d4089008528d",
+      "sourceHashes": []
+    },
+    {
+      "id": "evidence_selected_skill",
+      "kind": "skill",
+      "title": "Selected Skill: huashu-design",
+      "summary": "huashu-design: 花叔Design（Huashu-Design）——用HTML做高保真原型、交互Demo、幻灯片、动画、设计变体探索+设计方向顾问+专家评审的一体化设计能力。HTML是工具不是媒介，根据任务embody不同专家（UX设计师/动画师/幻灯片设计师/原型师），避免web design tropes。触发词：做原型、设计Demo、交互原型、HTML演示、动画Demo、设计变体、hi-fi设计、UI mockup、prototype、设计探索、做个HTML页面、做个可视化、app原型、iOS原型、移动应用mockup、导出MP4、导出GIF、60fps视频、设计风格、设计方向、设计哲学、配色方案、视觉风格、推荐风格、选个风格、做个好看的、评审、好不好看、review this design。**主干能力**：Junior Designer工作流（先给假设+reasoning+placeholder再迭代）、反AI slop清单、React+Babel最佳实践、Tweaks变体切换、Speaker Notes演示、Starter Components（幻灯片外壳/变体画布/动画引擎/设备边框）、App原型专属守则（默认从Wikimedia/Met/Unsplash取真图、每台iPhone包AppPhone状态管理器可交互、交付前跑Playwright点击测试）、Playwright验证、HTML动画→MP4/GIF视频导出（25fps基础 + 60fps插帧 + palette优化GIF + 6首场景化BGM + 自动fade）。**需求模糊时的Fallback**：设计方向顾问模式——从5流派×20种设计哲学（Pentagram信息建筑/Field.io运动诗学/Kenya Hara东方极简/Sagmeister实验先锋等）推荐3个差异化方向，展示24个预制showcase（8场景×3风格），并行生成3个视觉Demo让用户选。**交付后可选**：专家级5维度评审（哲学一致性/视觉层级/细节执行/功能性/创新性各打10分+修复清单）。\n\n# 花叔Design · Huashu-Design\n\n你是一位用HTML工作的设计师，不是程序员。用户是你的manager，你产出深思熟虑、做工精良的设计作品。\n\n**HTML是工具，但你的媒介和产出形式会变**——做幻灯片时别像网页，做动画时别像Dashboard，做App原型时别像说明书。**根据任务embody对应领域的专家**：动画师/UX设计师/幻灯片设计师/原型师。\n\n## 使用前提\n\n这个skill专为「用HTML做视觉产出」的场景设计，不是给任何HTML任务用的万能勺。适用场景：\n\n- **交互原型**：高保真产品mockup，用户可以点击、切换、感受流程\n- **设计变体探索**：并排对比多个设计方向，或用Tweaks实时调参\n- **演示幻灯片**：1920×1080的HTML deck，可以当PPT用\n- **动画Demo**：时间轴驱动的motion design，做视频素材或概念演示\n- **信息图/可视化**：精确排版、数据驱动、印刷级质量\n\n不适用场景：生产级Web App、SEO网站、需要后端的动态系统——这些用frontend-design skill。\n\n## 核心原则 #0 · 事实验证先于假设（优先级最高，凌驾所有其他流程）\n\n> **任何涉及具体产品/技术/事件/人物的存在性、发布状态、版本号、规格参数的事实性断言，第一步必须 `WebSearch` 验证，禁止凭训练语料做断言。**\n\n**触发条件（满足任一）**：\n- 用户提到你不熟悉或不确定的具体产品名（如\"大疆 Pocket 4\"、\"Nano Banana Pro\"、\"Gemini 3 Pro\"、某新版 SDK）\n- 涉及 2024 年及之后的发布时间线、版本号、规格参数\n- 你内心冒出\"我记得好像是...\"、\"应该还没发布\"、\"大概在...\"、\"可能不存在\"的句式\n- 用户请求给某个具体产品/公司做设计物料\n\n**硬流程（开工前执行，优先于 clarifying questions）**：\n1. `WebSearch` 产品名 + 最新时间词（\"2026 latest\"、\"launch date\"、\"release\"、\"specs\"）\n2. 读 1-3 条权威结果，确认：**存在性 / 发布状态 / 最新版本号 / 关键规格**\n3. 把事实写进项目的 `product-facts.md`（见工作流 Step 2），不靠记忆\n4. 搜不到或结果模糊 → 问用户，而不是自行假设\n\n**反例**（2026-04-20 真实踩过的坑）：\n- 用户：\"给大疆 Pocket 4 做发布动画\"\n- 我：凭记忆说\"Pocket 4 还没发布，我们做概念 demo\"\n- 真相：Pocket 4 已在 4 天前（2026-04-16）发布，官方 Launch Film + 产品渲染图俱在\n- 后果：基于错误假设做了\"概念剪影\"动画，违背用户期待，返工 1-2 小时\n- **成本对比：WebSearch 10 秒 << 返工 2 小时**\n\n**这条原则优先级高于\"问 clarifying questions\"**——问问题的前提是你对事实已有正确理解。事实错了，问什么都是歪的。\n\n**禁止句式（看到自己要说这些时，立即停下去搜）**：\n- ❌ \"我记得 X 还没发布\"\n- ❌ \"X 目前是 vN 版本\"（未经搜索的断言）\n- ❌ \"X 这个产品可能不存在\"\n- ❌ \"据我所知 X 的规格是...\"\n- ✅ \"我 `WebSearch` 一下 X 最新状态\"\n- ✅ \"搜到的权威来源说 X 是 ...\"\n\n**与\"品牌资产协议\"的关系**：本原则是资产协议的**前提**——先确认产品存在且是什么，再去找它的 logo/产品图/色值。顺序不能反。\n\n---\n\n## 核心哲学（优先级从高到低）\n\n### 1. 从existing context出发，不要凭空画\n\n好的hi-fi设计**一定**是从已有上下文长出来的。先问用户是否有design system/UI kit/codebase/Figma/截图。**凭空做hi-fi是last resort，一定会产出generic的作品**。如果用户说没有，先帮他去找（看项目里有没有，看有没有参考品牌）。\n\n**如果还是没有，或者用户需求表达很模糊**（如\"做个好看的页面\"、\"帮我设计\"、\"不知道要什么风格\"、\"做个XX\"没有具体参考），**不要凭通用直觉硬做**——进入 **设计方向顾问模式**，从 20 种设计哲学里给 3 个差异化方向让用户选。完整流程见下方「设计方向顾问（Fallback 模式）」大节。\n\n#### 1.a 核心资产协议（涉及具体品牌时强制执行）\n\n> **这是 v1 最核心的约束，也是稳定性的生命线。** Agent 是否走通这个协议，直接决定输出质量是 40 分还是 90 分。不要跳过任何一步。\n>\n> **v1.1 重构（2026-04-20）**：从「品牌资产协议」升级为「核心资产协议」。之前的版本过度聚焦色值和字体，漏掉了设计中最基础的 logo / 产品图 / UI 截图。花叔的原话：「除了所谓的品牌色，显然我们应该找到并且用上大疆的 logo，用上 pocket4 的产品图。如果是网站或者 app 等非实体产品的话，logo 至少该是必须的。这可能是比所谓的品牌设计的 spec 更重要的基本逻辑。否则，我们在表达什么呢？」\n\n**触发条件**：任务涉及具体品牌——用户提了产品名/公司名/明确客户（Stripe、Linear、Anthropic、Notion、Lovart、DJI、自家公司等），不论用户是否主动提供了品牌资料。\n\n**前置硬条件**：走协议前必须已通过「#0 事实验证先于假设」确认品牌/产品存在且状态已知。如果你还不确定产品是否已发布/规格/版本，先回去搜。\n\n##### 核心理念：资产 > 规范\n\n**品牌的本质是「它被认出来」**。认出来靠什么？按识别度排序：\n\n| 资产类型 | 识别度贡献 | 必需性 |\n|---|---|---|\n| **Logo** | 最高 · 任何品牌出现 logo 就一眼识别 | **任何品牌都必须有** |\n| **产品图/产品渲染图** | 极高 · 实体产品的\"主角\"就是产品本身 | **实体产品（硬件/包装/消费品）必须有** |\n| **UI 截图/界面素材** | 极高 · 数字产品的\"主角\"是它的界面 | **数字产品（App/网站/SaaS）必须有** |\n| **色值** | 中 · 辅助识别，脱离前三项时经常撞衫 | 辅助 |\n| **字体** | 低 · 需配合前述才能建立识别 | 辅助 |\n| **气质关键词** | 低 · agent 自检用 | 辅助 |\n\n**翻译成执行规则**：\n- 只抽色值 + 字体、不找 logo / 产品图 / UI → **违反本协议**\n- 用 CSS 剪影/SVG 手画替代真实产品图 → **违反本协议**（生成的就是「通用科技动画」，任何品牌都长一样）\n- 找不到资产不告诉用户、也不 AI 生成，硬做 → **违反本协议**\n- 宁可停下问用户要素材，也不要用 generic 填充\n\n##### 5 步硬流程（每步有 fallback，绝不静默跳过）\n\n##### Step 1 · 问（资产清单一次问全）\n\n不要只问「有 brand guidelines 吗？」——太宽泛，用户不知道该给什么。按清单逐项问：\n\n```\n关于 <brand/product>，你手上有以下哪些资料？我按优先级列：\n1. Logo（SVG / 高清 PNG）—— 任何品牌必备\n2. 产品图 / 官方渲染图 —— 实体产品必备（如 DJI Pocket 4 的产品照）\n3. UI 截图 / 界面素材 —— 数字产品必备（如 App 主要页面截图）\n4. 色值清单（HEX / RGB / 品牌色盘）\n5. 字体清单（Display / Body）\n6. Brand guidelines PDF / Figma design system / 品牌官网链接\n\n有的直接发我，没有的我去搜/抓/生成。\n```\n\n##### Step 2 · 搜官方渠道（按资产类型）\n\n| 资产 | 搜索路径 |\n|---|---|\n| **Logo** | `<brand>.com/brand` · `<brand>.com/press` · `<brand>.com/press-kit` · `brand.<brand>.com` · 官网 header 的 inline SVG |\n| **产品图/渲染图** | `<brand>.com/<product>` 产品详情页 hero image + gallery · 官方 YouTube launch film 截帧 · 官方新闻稿附图 |\n| **UI 截图** | App Store / Google Play 产品页截图 · 官网 screenshots section · 产品官方演示视频截帧 |\n| **色值** | 官网 inline CSS / Tailwind config / brand guidelines PDF |\n| **字体** | 官网 `<link rel=\"stylesheet\">` 引用 · Google Fonts 追踪 · brand guidelines |\n\n`WebSearch` 兜底关键词：\n- Logo 找不到 → `<brand> logo download SVG`、`<brand> press kit`\n- 产品图找不到 → `<brand> <product> official renders`、`<brand> <product> product photography`\n- UI 找不到 → `<brand> app screenshots`、`<brand> dashboard UI`\n\n##### Step 3 · 下载资产 · 按类型三条兜底路径\n\n**3.1 Logo（任何品牌必需）**\n\n三条路径按成功率递减：\n1. 独立 SVG/PNG 文件（最理想）：\n   ```bash\n   curl -o assets/<brand>-brand/logo.svg https://<brand>.com/logo.svg\n   curl -o assets/<brand>-brand/logo-white.svg https://<brand>.com/logo-white.svg\n   ```\n2. 官网 HTML 全文提取 inline SVG（80% 场景必用）：\n   ```bash\n   curl -A \"Mozilla/5.0\" -L https://<brand>.com -o assets/<brand>-brand/homepage.html\n   # 然后 grep <svg>...</svg> 提取 logo 节点\n   ```\n3. 官方社交媒体 avatar（最后手段）：GitHub/Twitter/LinkedIn 的公司头像通常是 400×400 或 800×800 透明底 PNG\n\n**3.2 产品图/渲染图（实体产品必需）**\n\n按优先级：\n1. **官方产品页 hero image**（最高优先级）：右键查看图片地址 / curl 获取。分辨率通常 2000px+\n2. **官方 press kit**：`<brand>.com/press` 常有高清产品图下载\n3. **官方 launch video 截帧**：用 `yt-dlp` 下载 YouTube 视频，ffmpeg 抽几帧高清图\n4. **Wikimedia Commons**：公共领域常有\n5. **AI 生成兜底**（nano-banana-pro）：把真实产品图作为参考发给 AI，让它生成符合动画场景的变体。**不要用 CSS/SVG 手画代替**\n\n```bash\n# 示例：下载 DJI 官网产品 hero image\ncurl -A \"Mozilla/5.0\" -L \"<hero-image-url>\" -o assets/<brand>-brand/product-hero.png\n```\n\n**3.3 UI 截图（数字产品必需）**\n\n- App Store / Google Play 的产品截图（注意：可能是 mockup 而非真实 UI，要对比）\n- 官网 screenshots section\n- 产品演示视频截帧\n- 产品官方 Twitter/X 的发布截图（常是最新版本）\n- 用户有账号时，直接截屏真实产品界面\n\n**3.4 · 素材质量门槛「5-10-2-8」原则（铁律）**\n\n> **Logo 的规则不同于其他素材**。Logo 有就必须用（没有就停下问用户）；其他素材（产品图/UI/参考图/配图）遵循「5-10-2-8」质量门槛。\n>\n> 2026-04-20 花叔原话：「我们的原则是搜索 5 轮，找到 10 个素材，选择 2 个好的。每个需要评分 8/10 以上，宁可少一些，也不为了完成任务滥竽充数。」\n\n| 维度 | 标准 | 反模式 |\n|---|---|---|\n| **5 轮搜索** | 多渠道交叉搜（官网 / press kit / 官方社媒 / YouTube 截帧 / Wikimedia / 用户账号截屏），不是一轮抓前 2 个就停 | 第一页结果直接用 |\n| **10 个候选** | 至少凑 10 个备选才开始筛 | 只抓 2 个，没得选 |\n| **选 2 个好的** | 从 10 个里精选 2 个作为最终素材 | 全都用 = 视觉过载 + 品位稀释 |\n| **每个 8/10 分以上** | 不够 8 分**宁可不用**，用诚实 placeholder（灰块+文字标签）或 AI 生成（nano-banana-pro 以官方参考为基底）| 凑数 7 分素材进 brand-spec.md |\n\n**8/10 评分维度**（打分时记录在 `brand-spec.md`）：\n\n1. **分辨率** · ≥2000px（印刷/大屏场景 ≥3000px）\n2. **版权清晰度** · 官方来源 > 公共领域 > 免费素材 > 疑似盗图（疑似盗图直接 0 分）\n3. **与品牌气质契合度** · 和 brand-spec.md 里的「气质关键词」一致\n4. **光线/构图/风格一致性** · 2 个素材放一起不打架\n5. **独立叙事能力** · 能单独表达一个叙事角色（不是装饰）\n\n**为什么这个门槛是铁律**：\n- 花叔的哲学：**宁缺毋滥**。滥竽充数的素材比没有更糟——污染视觉品味、传递「不专业」信号\n- **「一个细节做到 120%，其他做到 80%」的量化版**：8 分是\"其他 80%\" 的底线，真正 hero 素材要 9-10 分\n- 消费者看作品时，每一个视觉元素都在**积分或扣分**。7 分素材 = 扣分项，不如留空\n\n**Logo 例外**（重申）：有就必须用，不适用「5-10-2-8」。因为 logo 不是「多选一」问题，而是「识别度根基」问题——就算 logo 本身只有 6 分，也比没有 logo 强 10 倍。\n\n##### Step 4 · 验证 + 提取（不只是 grep 色值）\n\n| 资产 | 验证动作 |\n|---|---|\n| **Logo** | 文件存在 + SVG/PNG 可打开 + 至少两个版本（深底/浅底用）+ 透明背景 |\n| **产品图** | 至少一张 2000px+ 分辨率 + 去背或干净背景 + 多个角度（主视角、细节、场景） |\n| **UI 截图** | 分辨率真实（1x / 2x）+ 是最新版本（不是旧版）+ 无用户数据污染 |\n| **色值** | `grep -hoE '#[0-9A-Fa-f]{6}' assets/<brand>-brand/*.{svg,html,css} \\| sort \\| uniq -c \\| sort -rn \\| head -20`，过滤黑白灰 |\n\n**警惕示范品牌污染**：产品截图里常有用户 demo 的品牌色（如某工具截图演示喜茶红），那不是该工具的色。**同时出现两种强色时必须区分**。\n\n**品牌多切面**：同一品牌的官网营销色和产品 UI 色经常不同（Lovart 官网暖米+橙，产品 UI 是 Charcoal + Lime）。**两套都是真的**——根据交付场景选合适的切面。\n\n##### Step 5 · 固化为 `brand-spec.md` 文件（模板必须覆盖所有资产）\n\n```markdown\n# <Brand> · Brand Spec\n> 采集日期：YYYY-MM-DD\n> 资产来源：<列出下载来源>\n> 资产完整度：<完整 / 部分 / 推断>\n\n## 🎯 核心资产（一等公民）\n\n### Logo\n- 主版本：`assets/<brand>-brand/logo.svg`\n- 浅底反色版：`assets/<brand>-brand/logo-white.svg`\n- 使用场景：<片头/片尾/角落水印/全局>\n- 禁用变形：<不能拉伸/改色/加描边>\n\n### 产品图（实体产品必填）\n- 主视角：`assets/<brand>-brand/product-hero.png`（2000×1500）\n- 细节图：`assets/<brand>-brand/product-detail-1.png` / `product-detail-2.png`\n- 场景图：`assets/<brand>-brand/product-scene.png`\n- 使用场景：<特写/旋转/对比>\n\n### UI 截图（数字产品必填）\n- 主页：`assets/<brand>-brand/ui-home.png`\n- 核心功能：`assets/<brand>-brand/ui-feature-<name>.png`\n- 使用场景：<产品展示/Dashboard 渐现/对比演示>\n\n## 🎨 辅助资产\n\n### 色板\n- Primary: #XXXXXX  <来源标注>\n- Background: #XXXXXX\n- Ink: #XXXXXX\n- Accent: #XXXXXX\n- 禁用色: <品牌明确不用的色系>\n\n### 字型\n- Display: <font stack>\n- Body: <font stack>\n- Mono（数据 HUD 用）: <font stack>\n\n### 签名细节\n- <哪些细节是「120% 做到」的>\n\n### 禁区\n- <明确不能做的：比如 Lovart 不用蓝色、Stripe 不用低饱和暖色>\n\n### 气质关键词\n- <3-5 个形容词>\n```\n\n**写完 spec 后的执行纪律（硬要求）**：\n- 所有 HTML 必须**引用** `brand-spec.md` 里的资产文件路径，不允许用 CSS 剪影/SVG 手画代替\n- Logo 作为 `<img>` 引用真实文件，不重画\n- 产品图作为 `<img>` 引用真实文件，不用 CSS 剪影代替\n- CSS 变量从 spec 注入：`:root { --brand-primary: ...; }`，HTML 只用 `var(--brand-*)`\n- 这让品牌一致性从「靠自觉」变成「靠结构」——想临时加色要先改 spec\n\n##### 全流程失败的兜底\n\n按资产类型分别处理：\n\n| 缺失 | 处理 |\n|---|---|\n| **Logo 完全找不到** | **停下问用户**，不要硬做（logo 是品牌识别度的根基） |\n| **产品图（实体产品）找不到** | 优先 nano-banana-pro AI 生成（以官方参考图为基底）→ 次选向用户索取 → 最后才是诚实 placeholder（灰块+文字标签，明确标注\"产品图待补\"） |\n| **UI 截图（数字产品）找不到** | 向用户索取自己账号的截屏 → 官方演示视频截帧。不用 mockup 生成器凑 |\n| **色值完全找不到** | 按「设计方向顾问模式」走，向用户推荐 3 个方向并标注 assumption |\n\n**禁止**：找不到资产就静默用 CSS 剪影/通用渐变硬做——这是协议最大的反 pattern。**宁可停下问，也不要凑**。\n\n##### 反例（真实踩过的坑）\n\n- **Kimi 动画**：凭记忆猜「应该是橙色」，实际 Kimi 是 `#1783FF` 蓝色——返工一遍\n- **Lovart 设计**：把产品截图里演示品牌的喜茶红当成 Lovart 自己的色——差点毁整个设计\n- **DJI Pocket 4 发布动画（2026-04-20，触发本协议升级的真实案例）**：走了旧版只抽色值的协议，没下载 DJI logo、没找 Pocket 4 产品图，用 CSS 剪影代替产品——做出来是「通用黑底+橙 accent 的科技动画」，没有大疆识别度。花叔原话：「否则，我们在表达什么呢？」→ 协议升级。\n- 抽完色没写进 brand-spec.md，第三页就忘了主色数值，临场加了个「接近但不是」的 hex——品牌一致性崩溃\n\n##### 协议代价 vs 不做代价\n\n| 场景 | 时间 |\n|---|---|\n| 正确走完协议 | 下载 logo 5 min + 下载 3-5 张产品图/UI 10 min + grep 色值 5 min + 写 spec 10 min = **30 分钟** |\n| 不做协议的代价 | 做出没识别度的通用动画 → 用户返工 1-2 小时，甚至重做 |\n\n**这是稳定性最便宜的投资**。尤其对商单/发布会/重要客户项目，30 分钟的资产协议是保命钱。\n\n### 2. Junior Designer模式：先展示假设，再执行\n\n你是manager的junior designer。**不要一头扎进去闷头做大招**。HTML文件的开头先写下你的assumptions + reasoning + placeholders，**尽早show给用户**。然后：\n- 用户确认方向后，再写React组件填placeholder\n- 再show一次，让用户看进度\n- 最后迭代细节\n\n这个模式的底层逻辑是：**理解错了早改比晚改便宜100倍**。\n\n### 3. 给variations，不给「最终答案」\n\n用户要你设计，不要给一个完美方案——给3+个变体，跨不同维度（视觉/交互/色彩/布局/动画），**从by-the-book到novel逐级递进**。让用户mix and match。\n\n实现方式：\n- 纯视觉对比 → 用`design_canvas.jsx`并排展示\n- 交互流程/多选项 → 做完整原型，把选项做成Tweaks\n\n### 4. Placeholder > 烂实现\n\n没图标就留灰色方块+文字标签，别画烂SVG。没数据就写`<!-- 等用户提供真实数据 -->`，别编造看起来像数据的假数据。**Hi-fi里，一个诚实的placeholder比一个拙劣的真实尝试好10倍**。\n\n### 5. 系统优先，不要填充\n\n**Don't add filler content**。每个元素都必须earn its place。空白是设计问题，用构图解决，不是靠编造内容填满。**One thousand no's for every yes**。尤其警惕：\n- 「data slop」——没用的数字、图标、stats装饰\n- 「iconography slop」——每个标题都配icon\n- 「gradient slop」——所有背景都渐变\n\n### 6. 反AI slop（重要，必读）\n\n#### 6.1 什么是 AI slop？为什么要反？\n\n**AI slop = AI 训练语料里最常见的\"视觉最大公约数\"**。\n紫渐变、emoji 图标、圆角卡片+左 border accent、SVG 画人脸——这些东西之所以是 slop，不是因为它们本身丑，而是因为**它们是 AI 默认模式下的产物，不携带任何品牌信息**。\n\n**规避 slop 的逻辑链**：\n1. 用户请你做设计，是要**他的品牌被认出来**\n2. AI 默认产出 = 训练语料的平均 = 所有品牌混合 = **没有任何品牌被认出来**\n3. 所以 AI 默认产出 = 帮用户把品牌稀释成\"又一个 AI 做的页面\"\n4. 反 slop 不是审美洁癖，是**替用户保护品牌识别度**\n\n这也是为什么 §1.a 品牌资产协议是 v1 最硬的约束——**服从规范是反 slop 的正向方式**（对的事），清单只是反 slop 的反向方式（不做错的事）。\n\n#### 6.2 核心要规避的（带\"为什么\"）\n\n| 元素 | 为什么是 slop | 什么情况可以用 |\n|------|-------------|---------------|\n| 激进紫色渐变 | AI 训练语料里\"科技感\"的万能公式，出现在 SaaS/AI/web3 每一个落地页 | 品牌本身用紫渐变（如 Linear 某些场景）、或任务就是讽刺/展示这类 slop |\n| Emoji 作图标 | 训练语料里每个 bullet 都配 emoji，是\"不够专业就用 emoji 凑\"的病 | 品牌本身用（如 Notion），或产品受众是儿童/轻松场景 |\n| 圆角卡片 + 左彩色 border accent | 2020-2024 Material/Tailwind 时期的烂大街组合，已成视觉噪音 | 用户明确要求、或这个组合在品牌 spec 里被保留 |\n| SVG 画 imagery（人脸/场景/物品）| AI 画的 SVG 人物永远五官错位，比例诡异 | **几乎没有**——有图就用真图（Wikimedia/Unsplash/AI 生成），没图就留诚实 placeholder |\n| **CSS 剪影/SVG 手画代替真实产品图** | 生成的就是「通用科技动画」——黑底+橙 accent+圆角长条，任何实体产品都长一样，品牌识别度归零（DJI Pocket 4 实测 2026-04-20）| **几乎没有**——先走核心资产协议找真实产品图；真没有时用 nano-banana-pro 以官方参考图为基底生成；实在不行标诚实 placeholder 告诉用户\"产品图待补\" |\n| Inter/Roboto/Arial/system fonts 作 display | 太常见，读者看不出这是\"有设计的产品\"还是\"demo 页\" | 品牌 spec 明确用这些字体（Stripe 用 Sohne/Inter 变体，但是经过微调的） |\n| 赛博霓虹 / 深蓝底 `#0D1117` | GitHub dark mode 美学的烂大街复制 | 开发者工具产品且品牌本身走这方向 |\n\n**判断边界**：「品牌本身用」是唯一能合法破例的理由。品牌 spec 里明写了用紫渐变，那就用——此时它不再是 slop，是品牌签名。\n\n#### 6.3 正向做什么（带\"为什么\"）\n\n- ✅ `text-wrap: pretty` + CSS Grid + 高级 CSS：排版细节是 AI 分不清的\"品味税\"，会用这些的 agent 看起来像真设计师\n- ✅ 用 `oklch()` 或 spec 里已有的色，**不凭空发明新颜色**：所有临场发明的色都会让品牌识别度下降\n- ✅ 配图优先 AI 生成（Gemini / Flash / Lovart），HTML 截图仅在精确数据表格时用：AI 生成的图比 SVG 手画准确，比 HTML 截图有质感\n- ✅ 文案用「」引号不用 \"\"：中文排印规范，也是\"有审校过\"的细节信号\n- ✅ 一个细节做到 120%，其他做到 80%：品味 = 在合适的地方足够精致，不是均匀用力\n\n#### 6.4 反例隔离（演示型内容）\n\n当任务本身就要展示反设计（如本任务就是讲\"什么是 AI slop\"、或对比评测），**不要整页堆 slop**，而是用**诚实的 bad-sample 容器**隔离——加虚线边框 + \"反例 · 不要这样做\" 角标，让反例服务于叙事而不是污染页面主调。\n\n这不是硬规则（不做成模板），是原则：**反例要看得出是反例，不是让页面真的变成 slop**。\n\n完整清单见 `references/content-guidelines.md`。\n\n## 设计方向顾问（Fallback 模式）\n\n**什么时候触发**：\n- 用户需求模糊（\"做个好看的\"、\"帮我设计\"、\"这个怎么样\"、\"做个XX\"没有具体参考）\n- 用户明确要\"推荐风格\"、\"给几个方向\"、\"选个哲学\"、\"想看不同风格\"\n- 项目和品牌没有任何 design context（既没有 design system，又找不到参考）\n- 用户主动说\"我也不知道要什么风格\"\n\n**什么时候 skip**：\n- 用户已经给了明确的风格参考（Figma / 截图 / 品牌规范）→ 直接走「核心哲学 #1」主干流程\n- 用户已经说清楚要什么（\"做个 Apple Silicon 风格的发布会动画\"）→ 直接进 Junior Designer 流程\n- 小修小补、明确的工具调用（\"帮我把这段 HTML 变成 PDF\"）→ skip\n\n不确定就用最轻量版：**列出 3 个差异化方向让用户二选一，不展开不生成**——尊重用户节奏。\n\n### 完整流程（8 个 Phase，顺序执行）\n\n**Phase 1 · 深度理解需求**\n提问（一次最多 3 个）：目标受众 / 核心信息 / 情感基调 / 输出格式。需求已清晰则跳过。\n\n**Phase 2 · 顾问式重述**（100-200 字）\n用自己的话重述本质需求、受众、场景、情感基调。以「基于这个理解，我为你准备了 3 个设计方向」结尾。\n\n**Phase 3 · 推荐 3 套设计哲学**（必须差异化）\n\n每个方向必须：\n- **含设计师/机构名**（如「Kenya Hara 式东方极简」，不是只说「极简主义」）\n- 50-100 字解释「为什么这个设计师适合你」\n- 3-4 条标志性视觉特征 + 3-5 个气质关键词 + 可选代表作\n\n**差异化规则**（必守）：3 个方向**必须来自 3 个不同流派**，形成明显视觉反差：\n\n| 流派 | 视觉气质 | 适合作为 |\n|------|---------|---------|\n| 信息建筑派（01-04） | 理性、数据驱动、克制 | 安全/专业选择 |\n| 运动诗学派（05-08） | 动感、沉浸、技术美学 | 大胆/前卫选择 |\n| 极简主义派（09-12） | 秩序、留白、精致 | 安全/高端选择 |\n| 实验先锋派（13-16） | 先锋、生成艺术、视觉冲击 | 大胆/创新选择 |\n| 东方哲学派（17-20） | 温润、诗意、思辨 | 差异化/独特选择 |\n\n❌ **禁止从同一流派推荐 2 个以上** — 差异化不够用户看不出区别。\n\n详细 20 种风格库 + AI 提示词模板 → `references/design-styles.md`。\n\n**Phase 4 · 展示预制 Showcase 画廊**\n\n推荐 3 方向后，**立即检查** `assets/showcases/INDEX.md` 是否有匹配的预制样例（8 场景 × 3 风格 = 24 个样例）：\n\n| 场景 | 目录 |\n|------|------|\n| 公众号封面 | `assets/showcases/cover/` |\n| PPT 数据页 | `assets/showcases/ppt/` |\n| 竖版信息图 | `assets/showcases/infographic/` |\n| 个人主页 / AI 导航 / AI 写作 / SaaS / 开发文档 | `assets/showcases/website-*/` |\n\n匹配话术：「在启动实时 Demo 之前，先看看这 3 个风格在类似场景的效果 →」然后 Read 对应 .png。\n\n场景模板按输出类型组织 → `references/scene-templates.md`。\n\n**Phase 5 · 生成 3 个视觉 Demo**\n\n> 核心理念：**看到比说到更有效。** 别让用户凭文字想象，直接看。\n\n为 3 个方向各生成一个 Demo——**如果当前 agent 支持 subagent 并行**，启动 3 个并行子任务（后台执行）；**不支持就串行生成**（先后做 3 次，同样能用）。两种路径都能工作：\n- 使用**用户真实内容/主题**（不是 Lorem ipsum）\n- HTML 存 `_temp/design-demos/demo-[风格].html`\n- 截图：`npx playwright screenshot file:///path.html out.png --viewport-size=1200,900`\n- 全部完成后一起展示 3 张截图\n\n风格类型路径：\n| 风格最佳路径 | Demo 生成方式 |\n|-------------|--------------|\n| HTML 型 | 生成完整 HTML → 截图 |\n| AI 生成型 | `nano-banana-pro` 用风格 DNA + 内容描述 |\n| 混合型 | HTML 布局 + AI 插画 |\n\n**Phase 6 · 用户选择**：选一个深化 / 混合（\"A 的配色 + C 的布局\"）/ 微调 / 重来 → 回 Phase 3 重新推荐。\n\n**Phase 7 · 生成 AI 提示词**\n结构：`[设计哲学约束] + [内容描述] + [技术参数]`\n- ✅ 用具体特征而非风格名（写「Kenya Hara 的留白感+赤土橙 #C04A1A」，不写「极简」）\n- ✅ 包含颜色 HEX、比例、空间分配、输出规格\n- ❌ 避开审美禁区（见反 AI slop）\n\n**Phase 8 · 选定方向后进入主干**\n方向确认 → 回到「核心哲学」+「工作流程」的 Junior Designer pass。这时已经有明确的 design context，不再是凭空做。\n\n**真实素材优先原则**（涉及用户本人/产品时）：\n1. 先查用户配置的**私有 memory 路径**下的 `personal-asset-index.json`（Claude Code 默认在 `~/.claude/memory/`；其他 agent 按其自身约定）\n2. 首次使用：复制 `assets/personal-asset-index.example.json` 到上述私有路径，填入真实数据\n3. 找不到就直接问用户要，不要编造——真实数据文件不要放在 skill 目录内避免随分发泄露隐私\n\n## App / iOS 原型专属守则\n\n做 iOS/Android/移动 app 原型时（触发：「app 原型」「iOS mockup」「移动应用」「做个 app」），下面四条**覆盖**通用 placeholder 原则——app 原型是 demo 现场，静态摆拍和米白占位卡没有说服力。\n\n### 0. 架构选型（必先决定）\n\n**默认单文件 inline React**——所有 JSX/data/styles 直接写进主 HTML 的 `<script type=\"text/babel\">...</script>` 标签，**不要**用 `<script src=\"components.jsx\">` 外部加载。原因：`file://` 协议下浏览器把外部 JS 当跨 origin 拦截，强制用户起 HTTP server 违反「双击就能开」的原型直觉。引用本地图片必须 base64 内嵌 data URL，别假设有 server。\n\n**拆外部文件只在两种情况**：\n- (a) 单文件 >1000 行难维护 → 拆成 `components.jsx` + `data.js`，同时明确交付说明（`python3 -m http.server` 命令 + 访问 URL）\n- (b) 需要多 subagent 并行写不同屏 → `index.html` + 每屏独立 HTML（`today.html`/`graph.html`...），iframe 聚合，每屏也都是自包含单文件\n\n**选型速查**：\n\n| 场景 | 架构 | 交付方式 |\n|------|------|----------|\n| 单人做 4-6 屏原型（主流） | 单文件 inline | 一个 `.html` 双击开 |\n| 单人做大型 App（>10 屏） | 多 jsx + server | 附启动命令 |\n| 多 agent 并行 | 多 HTML + iframe | `index.html` 聚合，每屏独立可开 |\n\n### 1. 先找真图，不是 placeholder 摆着\n\n默认主动去取真实图片填充，不要画 SVG、不要拿米白卡摆着、不要等用户要求。常用渠道：\n\n| 场景 | 首选渠道 |\n|------|---------|\n| 美术/博物馆/历史内容 | Wikimedia Commons（公共领域）、Met Museum Open Access、Art Institute of Chicago API |\n| 通用生活/摄影 | Unsplash、Pexels（免版权） |\n| 用户本地已有素材 | `~/Downloads`、项目 `_archive/` 或用户配置的素材库 |\n\nWikimedia 下载避坑（本机 curl 走代理 TLS 会炸，Python urllib 直接走得通）：\n\n```python\n# 合规 User-Agent 是硬性要求，否则 429\nUA = 'ProjectName/0.1 (https://github.com/you; you@example.com)'\n# 用 MediaWiki API 查真实 URL\napi = 'https://commons.wikimedia.org/w/api.php'\n# action=query&list=categorymembers 批量拿系列 / prop=imageinfo+iiurlwidth 取指定宽度 thumburl\n```\n\n**只有**当所有渠道都失败 / 版权不清 / 用户明确要求时，才退回诚实 placeholder（仍然不画烂 SVG）。\n\n**真图诚实性测试**（关键）：取图之前先问自己——「如果去掉这张图，信息是否有损？」\n\n| 场景 | 判断 | 动作 |\n|------|------|------|\n| 文章/Essay 列表的封面、Profile 页的风景头图、设置页的装饰 banner | 装饰，与内容无内在关联 | **不要加**。加了就是 AI slop，等同紫色渐变 |\n| 博物馆/人物内容的肖像、产品详情的实物、地图卡片的地点 | 内容本身，有内在关联 | **必须加** |\n| 图谱/可视化背景的极淡纹理 | 氛围，服从内容不抢戏 | 加，但 opacity ≤ 0.08 |\n\n**反例**：给文字 Essay 配 Unsplash「灵感图」、给笔记 App 配 stock photo 模特——都是 AI slop。取真图的许可不等于滥用真图的通行证。\n\n### 2. 交付形态：overview 平铺 / flow demo 单机——先问用户要哪种\n\n多屏 App 原型有两种标准交付形态，**先问用户要哪种**，不要默认挑一种闷头做：\n\n| 形态 | 何时用 | 做法 |\n|------|--------|------|\n| **Overview 平铺**（设计 review 默认）| 用户要看全貌 / 比较布局 / 走查设计一致性 / 多屏并排 | **所有屏并排静态展示**，每屏一台独立 iPhone，内容完整，不需要可点击 |\n| **Flow demo 单机** | 用户要演示一条特定用户流程（如 onboarding、购买链路）| 单台 iPhone，内嵌 `AppPhone` 状态管理器，tab bar / 按钮 / 标注点都能点 |\n\n**路由关键词**：\n- 任务里出现「平铺 / 展示所有页面 / overview / 看一眼 / 比较 / 所有屏」→ 走 **overview**\n- 任务里出现「演示流程 / 用户路径 / 走一遍 / clickable / 可交互 demo」→ 走 **flow demo**\n- 不确定就问。不要默认选 flow demo（它更费工，不是所有任务都需要）\n\n**Overview 平铺的骨架**（每屏独立一台 IosFrame 并排）：\n\n```jsx\n<div style={{display: 'flex', gap: 32, flexWrap: 'wrap', padding: 48, alignItems: 'flex-start'}}>\n  {screens.map(s => (\n    <div key={s.id}>\n      <div style={{fontSize: 13, color: '#666', marginBottom: 8, fontStyle: 'italic'}}>{s.label}</div>\n      <IosFrame>\n        <ScreenComponent data={s} />\n      </IosFrame>\n    </div>\n  ))}\n</div>\n```\n\n**Flow demo 的骨架**（单台 clickable 状态机）：\n\n```jsx\nfunction AppPhone({ initial = 'today' }) {\n  const [screen, setScreen] = React.useState(initial);\n  const [modal, setModal] = React.useState(null);\n  // 根据 screen 渲染不同 ScreenComponent，传入 onEnter/onClose/onTabChange/onOpen props\n}\n```\n\nScreen 组件接 callback props（`onEnter`、`onClose`、`onTabChange`、`onOpen`、`onAnnotation`），不硬编码状态。TabBar、按钮、作品卡加 `cursor: pointer` + hover 反馈。\n\n### 3. 交付前跑真实点击测试\n\n静态截图只能看 layout，交互 bug 要点过才发现。用 Playwright 跑 3 项最小点击测试：进入详情 / 关键标注点 / tab 切换。检查 `pageerror` 为 0 再交付。Playwright 可用 `npx playwright` 调用，或按本机全局安装路径（`npm root -g` + `/playwright`）。\n\n### 4. 品位锚点（pursue list，fallback 首选）\n\n没有 design system 时默认往这些方向走，避免撞 AI slop：\n\n| 维度 | 首选 | 避免 |\n|------|------|------|\n| **字体** | 衬线 display（Newsreader/Source Serif/EB Garamond）+ `-apple-system` body | 全场 SF Pro 或 Inter——太像系统默认，没风格 |\n| **色彩** | 一个有温度的底色 + **单个** accent 贯穿全场（rust 橙/墨绿/深红）| 多色聚类（除非数据真的有 ≥3 个分类维度） |\n| **信息密度·克制型**（默认）| 少一层容器、少一个 border、少一个**装饰性** icon——给内容留气口 | 每条卡片都配无意义的 icon + tag + status dot |\n| **信息密度·高密度型**（例外）| 当产品核心卖点是「智能 / 数据 / 上下文感知」时（AI 工具、Dashboard、Tracker、Copilot、番茄钟、健康监测、记账类），每屏需**至少 3 处可见的产品差异化信息**：非装饰性数据、对话/推理片段、状态推断、上下文关联 | 只放一个按钮一个时钟——AI 的智能感没表达出来，跟普通 App 没区别 |\n| **细节签名** | 留一处「值得截图」的质感：极淡油画底纹 / serif 斜体引语 / 全屏黑底录音波形 | 到处平均用力，结果处处平淡 |\n\n**两条原则同时生效**：\n1. 品位 = 一个细节做到 120%，其它做到 80%——不是所有地方都精致，而是在合适的地方足够精致\n2. 减法是 fallback，不是普适律——产品核心卖点需要信息密度支撑时（AI / 数据 / 上下文感知类），加法优先于克制。详见下文「信息密度分型」\n\n### 5. iOS 设备框必须用 `assets/ios_frame.jsx`——禁止手写 Dynamic Island / status bar\n\n做 iPhone mockup 时**硬性绑定** `assets/ios_frame.jsx`。这是已经对齐过 iPhone 15 Pro 精确规格的标准外壳：bezel、Dynamic Island（124×36、top:12、居中）、status bar（时间/信号/电池、两侧避让岛、vertical center 对齐岛中线）、Home Indicator、content 区 top padding 都处理好了。\n\n**禁止在你的 HTML 里自己写**以下任何一项：\n- `.dynamic-island` / `.island` / `position: absolute; top: 11/12px; width: ~120; 居中的黑圆角矩形`\n- `.status-bar` with 手写的时间/信号/电池图标\n- `.home-indicator` / 底部 home bar\n- iPhone bezel 的圆角外框 + 黑描边 + shadow\n\n自己写 99% 会撞位置 bug——status bar 的时间/电池被岛挤压、或 content top padding 算错导致第一行内容盖在岛下。iPhone 15 Pro 的刘海是**固定 124×36 像素**，留给 status bar 两侧的可用宽度很窄，不是你凭空估的。\n\n**用法（严格三步）**：\n\n```jsx\n// 步骤 1: Read 本 skill 的 assets/ios_frame.jsx（相对本 SKILL.md 的路径）\n// 步骤 2: 把整个 iosFrameStyles 常量 + IosFrame 组件贴进你的 <script type=\"text/babel\">\n// 步骤 3: 你自己的屏组件包在 <IosFrame>...</IosFrame> 里，不碰 island/status bar/home indicator\n<IosFrame time=\"9:41\" battery={85}>\n  <YourScreen />  {/* 内容从 top 54 开始渲染，下边留给 home indicator，你不用管 */}\n</IosFrame>\n```\n\n**例外**：只有用户明确要求「假装是 iPhone 14 非 Pro 的刘海」「做 Android 不是 iOS」「自定义设备形态」时才绕过——此时读对应 `android_frame.jsx` 或修改 `ios_frame.jsx` 的常量，**不要**在项目 HTML 里另起一套 island/status bar。\n\n## 工作流程\n\n### 标准流程（用TaskCreate追踪）\n\n1. **理解需求**：\n   - 🔍 **0. 事实验证（涉及具体产品/技术时必做，优先级最高）**：任务涉及具体产品/技术/事件（DJI Pocket 4、Gemini 3 Pro、Nano Banana Pro、某新 SDK 等）时，**第一个动作**是 `WebSearch` 验证其存在性、发布状态、最新版本、关键规格。把事实写入 `product-facts.md`。详见「核心原则 #0」。**这步做在问 clarifying questions 之前**——事实错了问什么都歪。\n   - 新任务或模糊任务必须问clarifying questions，详见 `references/workflow.md`。一次focused一轮问题通常够，小修小补跳过。\n   - 🛑 **检查点1：问题清单一次性发给用户，等用户批量答完再往下走**。不要边问边做。\n   - 🛑 **幻灯片/PPT 任务额外必问「最终交付格式」**（浏览器演讲 / PDF / 可编辑 PPTX）——**要可编辑 PPTX 就必须从第一行 HTML 开始按 `references/editable-pptx.md` 的 4 条硬约束写**，事后补救会导致 2-3 小时返工。详见 `references/slide-decks.md` 开头「开工前先确认交付格式」一节。\n   - ⚡ **如果用户需求严重模糊（没参考、没明确风格、\"做个好看的\"类）→ 走「设计方向顾问（Fallback 模式）」大节，完成 Phase 1-4 选定方向后，再回到这里 Step 2**。\n2. **探索资源 + 抽核心资产**（不只是抽色值）：读 design system、linked files、上传的截图/代码。**涉及具体品牌时必走 §1.a「核心资产协议」五步**（问→按类型搜→按类型下载 logo/产品图/UI→验证+提取→写 `brand-spec.md` 含所有资产路径）。\n   - 🛑 **检查点2·资产自检**：开工前确认核心资产到位——实体产品要有产品图（不是 CSS 剪影）、数字产品要有 logo+UI 截图、色值从真实 HTML/SVG 抽取。缺了就停下补，不硬做。\n   - 如果用户没给 context 且挖不出资产，先走设计方向顾问 Fallback，再按 `references/design-context.md` 的品位锚点兜底。\n3. **先答四问，再规划系统**：**这一步的前半段比所有 CSS 规则更决定输出**。\n\n   📐 **位置四问**（每个页面/屏幕/镜头开工前必答）：\n   - **叙事角色**：hero / 过渡 / 数据 / 引语 / 结尾？（一页 deck 里每页都不一样）\n   - **观众距离**：10cm 手机 / 1m 笔记本 / 10m 投屏？（决定字号和信息密度）\n   - **视觉温度**：安静 / 兴奋 / 冷静 / 权威 / 温柔 / 悲伤？（决定配色和节奏）\n   - **容量估算**：用纸笔画 3 个 5 秒 thumbnail 算一下内容塞得下吗？（防溢出 / 防挤压）\n\n   四问答完再 vocalize 设计系统（色彩/字型/layout 节奏/component pattern）——**系统要服务于答案，不是先选系统再塞内容**。\n\n   🛑 **检查点2：四问答案 + 系统口头说出来等用户点头，再动手写代码**。方向错了晚改比早改贵 100 倍。\n4. **构建文件夹结构**：`项目名/` 下放主HTML、需要的assets拷贝（不要bulk copy >20个文件）。\n5. **Junior pass**：HTML里写assumptions+placeholders+reasoning comments。\n   🛑 **检查点3：尽早show给用户（哪怕只是灰色方块+标签），等反馈再写组件**。\n6. **Full pass**：填placeholder，做variations，加Tweaks。做到一半再show一次，不要等全做完。\n7. **验证**：用Playwright截图（见 `references/verification.md`），检查控制台错误，发给用户。\n   🛑 **检查点4：交付前自己肉眼过一遍浏览器**。AI写的代码经常有interaction bug。\n8. **总结**：极简，只说caveats和next steps。\n9. **（默认）导出视频 · 必带 SFX + BGM**：动画 HTML 的**默认交付形态是带音频的 MP4**，不是纯画面。无声版本等于半成品——用户潜意识感知「画在动但没声音响应」，廉价感的根源就在这里。流水线：\n   - `scripts/render-video.js` 录 25fps 纯画面 MP4（只是中间产物，**不是成品**）\n   - `scripts/convert-formats.sh` 派生 60fps MP4 + palette 优化 GIF（视平台需要）\n   - `scripts/add-music.sh` 加 BGM（6 首场景化配乐：tech/ad/educational/tutorial + alt 变体）\n   - SFX 按 `references/audio-design-rules.md` 设计 cue 清单（时间轴 + 音效类型），用 `assets/sfx/<category>/*.mp3` 37 个预制资源，按配方 A/B/C/D 选密度（发布 hero ≈ 6个/10s，工具演示 ≈ 0-2个/10s）\n   - **BGM + SFX 双轨制必须同时做**——只做 BGM 是 ⅓ 分完成度；SFX 占高频、BGM 占低频，频段隔离见 audio-design-rules.md 的 ffmpeg 模板\n   - 交付前 `ffprobe -select_streams a` 确认有 audio stream，没有则不是成品\n   - **跳过音频的条件**：用户明确说「不要音频」「纯画面」「我要自己配音」——否则默认带。\n   - 参考完整流程见 `references/video-export.md` + `references/audio-design-rules.md` + `references/sfx-library.md`。\n10. **（可选）专家评审**：用户若提「评审」「好不好看」「review」「打分」，或你对产出有疑问想主动质检，按 `references/critique-guide.md` 走 5 维度评审——哲学一致性 / 视觉层级 / 细节执行 / 功能性 / 创新性各 0-10 分，输出总评 + Keep（做得好的）+ Fix（严重程度 ⚠️致命 / ⚡重要 / 💡优化）+ Quick Wins（5 分钟能做的前 3 件事）。评审设计不评设计师。\n\n**检查点原则**：碰到🛑就停下，明确告诉用户\"我做了X，下一步打算Y，你确认吗？\"然后真的**等**。不要说完自己就开始做。\n\n### 问问题的要点\n\n必问（用`references/workflow.md`里的模板）：\n- design system/UI kit/codebase有吗？没有的话先去找\n- 想要几种variations？在哪些维度上变？\n- 关心flow、copy、还是visuals？\n- 希望Tweak什么？\n\n## 异常处理\n\n流程假设用户配合、环境正常。实操常遇以下异常，预定义fallback：\n\n| 场景 | 触发条件 | 处理动作 |\n|------|---------|---------|\n| 需求模糊到无法着手 | 用户只给一句模糊描述（如\"做个好看的页面\"） | 主动列3个可能方向让用户选（如\"落地页 / Dashboard / 产品详情页\"），而不是直接问10个问题 |\n| 用户拒绝回答问题清单 | 用户说\"不要问了，直接做\" | 尊重节奏，用best judgment做1个主方案+1个差异明显的变体，交付时**明确标注assumption**，方便用户定位要改哪里 |\n| Design context矛盾 | 用户给的参考图和品牌规范打架 | 停下，指出具体矛盾（\"截图里字体是衬线，规范说用sans\"），让用户选一个 |\n| Starter component加载失败 | 控制台404/integrity mismatch | 先查`references/react-setup.md`常见报错表；还不行降级纯HTML+CSS不用React，保证产出可用 |\n| 时间紧迫要快交付 | 用户说\"30分钟内要\" | 跳过Junior pass直接Full pass，只做1个方案，交付时**明确标注\"未经early validation\"**，提醒用户质量可能打折 |\n| SKILL.md体积超限 | 新写HTML>1000行 | 按`references/react-setup.md`的拆分策略拆",
+      "sha256": "825d44588b11408639bf9c17ba6c38b5ffa1a1785d818e0f648abd2b4095937b",
+      "sourceRef": "fixture://plan-resilience",
+      "sourceHashes": []
+    }
+  ],
+  "requestedModelAssignments": {
+    "direct": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c"
+  },
+  "frozenModelAssignments": {
+    "direct": {
+      "profileId": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c",
+      "connectionId": "connection_ce07e6b2-6d47-4c69-b416-a8568e5b3a9c",
+      "providerKind": "dashscope-coding",
+      "modelId": "qwen3.7-plus",
+      "contextWindow": 1000000,
+      "contextWindowSource": {
+        "kind": "public_catalog",
+        "label": "Zerox 公开模型目录",
+        "checkedAt": "2026-07-28"
+      },
+      "revision": 4,
+      "connectionRevision": 1,
+      "profileRevision": 1,
+      "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+      "capabilities": {
+        "tools": true,
+        "vision": true,
+        "pdf": false,
+        "streaming": true,
+        "parallelToolCalls": true
+      },
+      "generation": {
+        "temperature": 0.2,
+        "maxTokens": 8192,
+        "thinkingEnabled": false,
+        "thinkingBudgetTokens": 8192
+      }
+    }
+  },
+  "rounds": [
+    {
+      "id": "plan_round_7c4dc1d2-a76c-4f70-8f3f-9f2b69013d59",
+      "kind": "direct",
+      "role": "direct",
+      "ordinal": 1,
+      "runId": "plan_run_3ff319b4-1067-4200-ad42-30f7a196e8bc",
+      "modelBinding": {
+        "profileId": "profile_c48f099f-a7d2-42df-99bb-ef43d1cd650c",
+        "connectionId": "connection_ce07e6b2-6d47-4c69-b416-a8568e5b3a9c",
+        "providerKind": "dashscope-coding",
+        "modelId": "qwen3.7-plus",
+        "contextWindow": 1000000,
+        "contextWindowSource": {
+          "kind": "public_catalog",
+          "label": "Zerox 公开模型目录",
+          "checkedAt": "2026-07-28"
+        },
+        "revision": 4,
+        "connectionRevision": 1,
+        "profileRevision": 1,
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "pdf": false,
+          "streaming": true,
+          "parallelToolCalls": true
+        },
+        "generation": {
+          "temperature": 0.2,
+          "maxTokens": 8192,
+          "thinkingEnabled": false,
+          "thinkingBudgetTokens": 8192
+        }
+      },
+      "status": "completed",
+      "publicInputRefs": [],
+      "startedAt": "2026-08-31T14:08:38.635Z",
+      "output": {
+        "title": "DeepSeek Harness 介绍页 (Apple Style)",
+        "summary": "基于 Apple Copy-1.zip 设计风格，创建 DeepSeek Harness 单页 HTML 介绍。",
+        "objective": "创建一个关于 DeepSeek Harness 的介绍网页，采用 Apple Copy-1.zip 中的设计风格",
+        "scope": {
+          "in": [
+            "基于参考风格设计页面布局与视觉样式",
+            "编写 DeepSeek Harness 介绍内容",
+            "输出自包含的 HTML 文件"
+          ],
+          "out": [
+            "多页面网站",
+            "后端功能",
+            "部署服务",
+            "其他格式交付"
+          ]
+        },
+        "assumptions": [
+          "Apple Copy-1.zip 包含可提取的 CSS/HTML 参考素材",
+          "DeepSeek Harness 是 AI 工具链/框架相关主题",
+          "工作区中 deepseek-harness 目录可能包含相关内容参考",
+          "用户接受基于现有素材推断的设计风格",
+          "自动模式决策：深度只读调查仍未获得足以支撑工作区主张的证据；请明确目标或授权可用的数据来源。；执行 Agent 按工作区证据、最小风险和可验证性选择默认方案，并在结果中记录实际选择。"
+        ],
+        "milestones": [
+          {
+            "id": "milestone_1",
+            "title": "提取 Apple 设计风格",
+            "description": "解压 Apple Copy-1.zip 并分析其视觉特征（字体、配色、布局）。",
+            "acceptanceCriteria": [
+              "成功解压 zip 文件",
+              "识别出核心设计元素（如 San Francisco 字体栈、极简留白、圆角卡片）"
+            ],
+            "dependencies": [],
+            "targetRefs": [
+              "/Users/zeorx/Library/Mobile\\ Documents/com\\~apple\\~CloudDocs/meta_info/Apple\\ Copy-1.zip"
+            ],
+            "evidenceRefs": [
+              "evidence_user_request"
+            ],
+            "actions": [
+              "unzip Apple Copy-1.zip to a temporary directory",
+              "inspect extracted HTML/CSS files for design patterns"
+            ],
+            "toolNames": [
+              "file_stat"
+            ],
+            "acceptanceChecks": [
+              {
+                "id": "milestone_1_check_1",
+                "kind": "file_exists",
+                "description": "Verify zip extraction produced reference files.",
+                "params": {
+                  "path": "/tmp/apple_copy_ref/index.html"
+                },
+                "requiresEvidence": false
+              }
+            ]
+          },
+          {
+            "id": "milestone_2",
+            "title": "生成 DeepSeek Harness HTML",
+            "description": "使用 huashu-design skill 生成符合 Apple 风格的单页 HTML。",
+            "acceptanceCriteria": [
+              "HTML 文件包含 DeepSeek Harness 介绍内容",
+              "视觉风格模仿 Apple 设计语言",
+              "文件为单个自包含 HTML"
+            ],
+            "dependencies": [
+              "milestone_1"
+            ],
+            "targetRefs": [],
+            "evidenceRefs": [
+              "evidence_selected_skill"
+            ],
+            "actions": [
+              "invoke huashu-design skill with content_topic='DeepSeek Harness', design_reference='Apple style from milestone 1', output_format='single HTML file'"
+            ],
+            "toolNames": [],
+            "acceptanceChecks": [
+              {
+                "id": "milestone_2_check_1",
+                "kind": "model_review",
+                "description": "Review generated HTML for Apple-style aesthetics and content accuracy.",
+                "params": {
+                  "condition": "HTML reflects Apple design principles and introduces DeepSeek Harness",
+                  "evidenceRefs": [
+                    "evidence_selected_skill"
+                  ]
+                },
+                "requiresEvidence": true
+              }
+            ]
+          },
+          {
+            "id": "milestone_3",
+            "title": "验证交付物",
+            "description": "确认最终 HTML 文件存在且符合约束。",
+            "acceptanceCriteria": [
+              "交付并验证：单个 HTML 文件"
+            ],
+            "dependencies": [
+              "milestone_2"
+            ],
+            "targetRefs": [],
+            "evidenceRefs": [],
+            "actions": [
+              "check existence of the final HTML file"
+            ],
+            "toolNames": [
+              "file_stat"
+            ],
+            "acceptanceChecks": [
+              {
+                "id": "milestone_3_check_1",
+                "kind": "file_exists",
+                "description": "Verify the final single HTML file exists.",
+                "params": {
+                  "path": "./deepseek-harness-intro.html"
+                },
+                "requiresEvidence": false
+              }
+            ]
+          }
+        ],
+        "dependencies": [],
+        "risks": [
+          {
+            "id": "risk_1",
+            "severity": "medium",
+            "description": "Apple Copy-1.zip might not contain usable design references.",
+            "mitigation": "Fallback to standard Apple Human Interface Guidelines knowledge base.",
+            "status": "open"
+          }
+        ],
+        "acceptanceCriteria": [
+          "交付并验证：单个 HTML 文件"
+        ],
+        "acceptanceChecks": [
+          {
+            "id": "plan_check_1",
+            "kind": "model_review",
+            "description": "基于真实调查证据复核整体语义交付。",
+            "params": {
+              "condition": "整体完成标准",
+              "evidenceRefs": [
+                "evidence_user_request"
+              ]
+            },
+            "requiresEvidence": true
+          }
+        ],
+        "goalContractIssues": [],
+        "claimLedger": [
+          {
+            "id": "claim_1",
+            "claim": "huashu-design is the optimal skill for high-fidelity HTML prototyping with specific style constraints.",
+            "evidenceRefs": [
+              "evidence_selected_skill"
+            ],
+            "counterexamples": [],
+            "conditions": [
+              "Skill is available in the environment"
+            ],
+            "confidence": 0.9,
+            "status": "verified"
+          }
+        ],
+        "unresolvedQuestions": [],
+        "minorityOpinion": [],
+        "actionGate": "ready",
+        "gateReason": "Plan aligns with GoalContract and leverages recommended skill.",
+        "markdown": ""
+      },
+      "completedAt": "2026-08-31T14:09:02.484Z",
+      "latencyMs": 23845,
+      "usage": {
+        "inputTokens": 16325,
+        "outputTokens": 1303
+      }
+    }
+  ],
+  "createdAt": "2026-08-31T14:08:13.483Z",
+  "updatedAt": "2026-08-31T14:09:43.347Z",
+  "skillDecision": {
+    "source": "none",
+    "reason": "Deterministic local acceptance fixture.",
+    "evidenceRefs": [],
+    "alternatives": [],
+    "permissions": {
+      "fileRead": [],
+      "fileWrite": [],
+      "shellCommands": [],
+      "webSearch": false,
+      "webFetchDomains": [],
+      "memoryRead": false,
+      "memoryWrite": false
+    },
+    "inputValues": {},
+    "inputEvidenceRefs": {},
+    "missingInputFields": [],
+    "invalidInputFields": []
+  },
+  "selectedSkillInputValues": {}
+}
