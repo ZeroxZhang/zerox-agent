@@ -63,7 +63,7 @@ describe("GitHub verify workflow", () => {
         branches: ["main"],
       },
     });
-    expect(workflow.jobs?.verify?.["runs-on"]).toBe("ubuntu-latest");
+    expect(workflow.jobs?.verify?.["runs-on"]).toBe("macos-14");
     expect(steps).toContainEqual({
       uses: "actions/checkout@v4",
       with: { "fetch-depth": 0 },
