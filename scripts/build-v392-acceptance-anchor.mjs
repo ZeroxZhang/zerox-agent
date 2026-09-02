@@ -318,6 +318,13 @@ if (
 }
 if (
   process.argv.length === 3
+  && process.argv[2] === "--self-test-lifecycle-publication"
+) {
+  await runLifecyclePublicationSelfTest();
+  process.exit(0);
+}
+if (
+  process.argv.length === 3
   && process.argv[2] === "--self-test-safe-fs-package-identity"
 ) {
   verifySafeFsPackageIdentitySelfTest();
@@ -685,34 +692,22 @@ const repositoryWatcher = watch(
     }
   },
 );
-let executionWatcherGeneration = 0;
-const startExecutionWatcher = () => {
-  const generation = ++executionWatcherGeneration;
-  return watch(
-    executionRoot,
-    { recursive: true },
-    (_eventType, filename) => {
-      // macOS can deliver an fs.watch event after the mutation window that
-      // produced it has closed. A retired watcher must therefore be fenced by
-      // generation, otherwise the intentional lifecycle publication below can
-      // be misclassified as a later source mutation. The replacement watcher
-      // starts from the already captured and verified completed lifecycle, so
-      // every event it observes remains fail-closed.
-      if (generation !== executionWatcherGeneration) return;
-      const relativePath = normalizeWatchRelativePath(filename);
-      if (
-        !relativePath
-        || !isAllowedExecutionMutation(
-          relativePath,
-          allowedExecutionMutationPrefixes,
-        )
-      ) {
-        executionMutation ??= relativePath || "<unknown-event>";
-      }
-    },
-  );
-};
-let executionWatcher = startExecutionWatcher();
+const executionWatcher = watch(
+  executionRoot,
+  { recursive: true },
+  (_eventType, filename) => {
+    const relativePath = normalizeWatchRelativePath(filename);
+    if (
+      !relativePath
+      || !isAllowedExecutionMutation(
+        relativePath,
+        allowedExecutionMutationPrefixes,
+      )
+    ) {
+      executionMutation ??= relativePath || "<unknown-event>";
+    }
+  },
+);
 
 const trustedEnvironment = {
   HOME: execution.home,
@@ -809,24 +804,12 @@ await run(
   executionRoot,
   trustedEnvironment,
 );
-allowedExecutionMutationPrefixes = LIFECYCLE_PUBLICATION_FILES;
-try {
-  await completeExecutionLifecycle(executionRoot);
-  await settleMutationWatchers();
-} finally {
-  allowedExecutionMutationPrefixes = Object.freeze([]);
-}
+const lifecyclePublicationOverrides =
+  await buildCompletedLifecycleOutputs(executionRoot);
+await settleMutationWatchers();
 if (executionMutation) {
-  fail(`private execution source mutated during lifecycle closure: ${executionMutation}`);
+  fail(`private execution source mutated before lifecycle publication: ${executionMutation}`);
 }
-// Retire the watcher that observed the sanctioned lifecycle writes. Its event
-// queue may still contain delayed notifications even after the completed bytes
-// have been verified. A new generation closes that race without permanently
-// allowlisting the lifecycle files: any subsequent write is observed by the
-// replacement watcher with an empty mutation allowance.
-const lifecycleExecutionWatcher = executionWatcher;
-executionWatcher = startExecutionWatcher();
-lifecycleExecutionWatcher.close();
 const appPath = path.join(
   executionRoot,
   "release-local/mac-arm64/Zerox Agent.app",
@@ -867,6 +850,7 @@ try {
     options.output,
     options.expectedSourceDigest,
     selfCapture.digest,
+    lifecyclePublicationOverrides,
   );
   const publishedAppPath = path.join(
     repositoryRealpath,
@@ -1657,7 +1641,7 @@ async function settleMutationWatchers() {
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
-async function completeExecutionLifecycle(repositoryRoot) {
+async function buildCompletedLifecycleOutputs(repositoryRoot) {
   const programPath = path.join(
     repositoryRoot,
     ".zerox/conversation-disclosure-program.json",
@@ -1694,36 +1678,137 @@ async function completeExecutionLifecycle(repositoryRoot) {
   cd09.state = "completed";
   featureList.updatedAt = completedAt;
   p113.status = "done";
-  await Promise.all([
-    writeExecutionLifecycleFile(
-      programPath,
-      programCapture.metadata.mode & 0o777,
-      program,
-    ),
-    writeExecutionLifecycleFile(
-      featureListPath,
-      featureListCapture.metadata.mode & 0o777,
-      featureList,
-    ),
+  // Lifecycle completion is a publication output, not a candidate execution
+  // mutation. Keep the reviewed private execution tree byte-stable and hold
+  // the deterministic successor bytes in the external runner's memory until
+  // the transactional publisher installs them. This removes both delayed
+  // fs.watch false positives and watcher-handoff gaps while leaving every
+  // execution-tree mutation fail-closed.
+  return new Map([
+    [
+      LIFECYCLE_PUBLICATION_FILES[0],
+      completedLifecycleCapture(program, programCapture.metadata),
+    ],
+    [
+      LIFECYCLE_PUBLICATION_FILES[1],
+      completedLifecycleCapture(featureList, featureListCapture.metadata),
+    ],
   ]);
 }
 
-async function writeExecutionLifecycleFile(filePath, mode, value) {
+function completedLifecycleCapture(value, sourceMetadata) {
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
-  const handle = await open(
-    filePath,
-    constants.O_WRONLY | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0),
+  return {
+    bytes,
+    digest: sha256(bytes),
+    metadata: sourceMetadata,
+  };
+}
+
+async function runLifecyclePublicationSelfTest() {
+  const testRoot = await realpath(await mkdtemp(
+    path.join(
+      process.env.TMPDIR ?? "/private/tmp",
+      "zerox-v392-lifecycle-publication-",
+    ),
+  ));
+  const programPath = path.join(
+    testRoot,
+    ".zerox/conversation-disclosure-program.json",
   );
+  const featureListPath = path.join(testRoot, ".zerox/feature_list.json");
   try {
-    await handle.writeFile(bytes);
-    await handle.sync();
+    await mkdir(path.dirname(programPath), { recursive: true });
+    await Promise.all([
+      writePrivateFile(programPath, Buffer.from(`${JSON.stringify({
+        status: "active",
+        activeFeatureId: "P113-v3.9.2-disclosure-adversarial-acceptance",
+        nextFeatureId: "P113-v3.9.2-disclosure-adversarial-acceptance",
+        updatedAt: "before",
+        workstreams: [{
+          id: "CD09",
+          state: "in_progress",
+          featureId: "P113-v3.9.2-disclosure-adversarial-acceptance",
+        }],
+      }, null, 2)}\n`)),
+      writePrivateFile(featureListPath, Buffer.from(`${JSON.stringify({
+        updatedAt: "before",
+        features: [{
+          id: "P113-v3.9.2-disclosure-adversarial-acceptance",
+          status: "in_progress",
+        }],
+      }, null, 2)}\n`)),
+    ]);
+    await Promise.all([
+      chmod(programPath, 0o644),
+      chmod(featureListPath, 0o644),
+    ]);
+    const before = await Promise.all([
+      captureRegularFile(programPath, "self-test active program"),
+      captureRegularFile(featureListPath, "self-test active feature list"),
+    ]);
+    const overrides = await buildCompletedLifecycleOutputs(testRoot);
+    const after = await Promise.all([
+      captureRegularFile(programPath, "self-test unchanged program"),
+      captureRegularFile(featureListPath, "self-test unchanged feature list"),
+    ]);
+    for (let index = 0; index < before.length; index += 1) {
+      if (
+        before[index].digest !== after[index].digest
+        || before[index].metadata.dev !== after[index].metadata.dev
+        || before[index].metadata.ino !== after[index].metadata.ino
+        || before[index].metadata.mtimeMs !== after[index].metadata.mtimeMs
+        || before[index].metadata.ctimeMs !== after[index].metadata.ctimeMs
+      ) {
+        fail("lifecycle publication mutated the private execution source");
+      }
+    }
+    validateLifecyclePublicationOverrides(overrides);
+    const completedProgram = JSON.parse(
+      overrides.get(LIFECYCLE_PUBLICATION_FILES[0]).bytes.toString("utf8"),
+    );
+    const completedFeatureList = JSON.parse(
+      overrides.get(LIFECYCLE_PUBLICATION_FILES[1]).bytes.toString("utf8"),
+    );
+    if (
+      completedProgram.status !== "completed"
+      || completedProgram.activeFeatureId !== null
+      || completedProgram.nextFeatureId !== null
+      || completedProgram.workstreams[0].state !== "completed"
+      || completedFeatureList.features[0].status !== "done"
+    ) {
+      fail("lifecycle publication did not create the exact completed state");
+    }
+    console.log(JSON.stringify({
+      lifecyclePublicationSelfTest: "passed",
+      privateExecutionUnchanged: true,
+      publicationOverrideCount: overrides.size,
+    }));
   } finally {
-    await handle.close();
+    await rm(testRoot, { recursive: true, force: true });
   }
-  await chmod(filePath, mode);
-  const capture = await captureRegularFile(filePath, "completed lifecycle file");
-  if (capture.digest !== sha256(bytes)) {
-    fail("completed lifecycle file failed post-write verification");
+}
+
+function validateLifecyclePublicationOverrides(overrides) {
+  if (!(overrides instanceof Map)) {
+    fail("lifecycle publication overrides must be a Map");
+  }
+  const keys = [...overrides.keys()].sort();
+  if (
+    JSON.stringify(keys)
+      !== JSON.stringify([...LIFECYCLE_PUBLICATION_FILES].sort())
+  ) {
+    fail("lifecycle publication overrides do not match the exact roster");
+  }
+  for (const relativePath of LIFECYCLE_PUBLICATION_FILES) {
+    const capture = overrides.get(relativePath);
+    if (
+      !Buffer.isBuffer(capture?.bytes)
+      || capture.digest !== sha256(capture.bytes)
+      || !Number.isInteger(capture?.metadata?.mode)
+    ) {
+      fail(`lifecycle publication override is invalid: ${relativePath}`);
+    }
   }
 }
 
@@ -1907,7 +1992,9 @@ async function publishGeneratedOutputs(
   outputPath,
   sourceDigest,
   runnerDigest,
+  publicationOverrides,
 ) {
+  validateLifecyclePublicationOverrides(publicationOverrides);
   const transactionId = randomUUID();
   const stagedRelease = path.join(
     repositoryRoot,
@@ -1944,7 +2031,8 @@ async function publishGeneratedOutputs(
     ) {
       const relativePath = GENERATED_PUBLICATION_FILES[index];
       const destination = path.join(repositoryRoot, relativePath);
-      const next = await captureRepositoryFile(executionRoot, relativePath);
+      const next = publicationOverrides.get(relativePath)
+        ?? await captureRepositoryFile(executionRoot, relativePath);
       const previous = await captureOptionalRegularFile(
         destination,
         `existing generated output ${relativePath}`,
