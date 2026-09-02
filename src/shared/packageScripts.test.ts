@@ -12,11 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 // @ts-expect-error TypeScript does not synthesize declarations for this local mjs module.
-import {
-  computeAcceptanceInputManifest,
-  computeLocalCandidateSourceManifest,
-  computeTreeManifest,
-} from "../../scripts/local-candidate-source-manifest.mjs";
+import { computeAcceptanceInputManifest, computeLocalCandidateSourceManifest, computeTreeManifest } from "../../scripts/local-candidate-source-manifest.mjs";
 import {
   parseJsonConfigFileContent,
   readConfigFile,
