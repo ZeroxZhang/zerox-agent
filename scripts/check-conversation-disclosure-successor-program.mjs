@@ -1,8 +1,17 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { constants, existsSync } from "node:fs";
-import { lstat, open, readFile, realpath } from "node:fs/promises";
+import { constants, existsSync, realpathSync } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractFile, listPackage } from "@electron/asar";
@@ -430,6 +439,7 @@ const acceptanceArtifactPaths = new Map([
 ]);
 
 export async function checkConversationDisclosureSuccessorProgram(options = {}) {
+  rejectInheritedGitEnvironment();
   const errors = [];
   const anchorPath = options.deltaAnchor
     ?? process.env.ZEROX_CD04_DELTA_ANCHOR;
@@ -595,15 +605,14 @@ async function validateReleaseAttestation(
   let acceptedTree = null;
   let acceptedIsAncestor = false;
   try {
-    acceptedTree = execFileSync(
-      "/usr/bin/git",
+    acceptedTree = runTrustedGitSync(
+      canonicalRoot,
       ["rev-parse", "--verify", `${attestation.acceptedGitHead}^{tree}`],
-      { cwd: canonicalRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).trim();
-    execFileSync(
-      "/usr/bin/git",
+    runTrustedGitSync(
+      canonicalRoot,
       ["merge-base", "--is-ancestor", attestation.acceptedGitHead, "HEAD"],
-      { cwd: canonicalRoot, stdio: "ignore" },
+      { stdio: "ignore" },
     );
     acceptedIsAncestor = true;
   } catch {
@@ -819,14 +828,10 @@ async function validateFinalAcceptanceAnchor(options, canonicalRoot, errors) {
     ),
     computeAcceptanceInputManifest(root),
   ]);
-  const gitHead = execFileSync("/usr/bin/git", ["rev-parse", "HEAD"], {
-    cwd: root,
-    encoding: "utf8",
-  }).trim();
-  const gitTree = execFileSync(
-    "/usr/bin/git",
+  const gitHead = runTrustedGitSync(root, ["rev-parse", "HEAD"]).trim();
+  const gitTree = runTrustedGitSync(
+    root,
     ["rev-parse", "--verify", "HEAD^{tree}"],
-    { cwd: root, encoding: "utf8" },
   ).trim();
   const anchor = capture?.value;
   const anchorKeys = Object.keys(anchor ?? {}).sort();
@@ -1698,8 +1703,151 @@ async function readBoundRegularFile(filePath, errors, label) {
   }
 }
 
+function rejectInheritedGitEnvironment() {
+  const inherited = Object.entries(process.env).find(
+    ([key, value]) => key.toUpperCase().startsWith("GIT_") && value,
+  );
+  if (inherited) {
+    throw new Error(`successor program rejects inherited ${inherited[0]}`);
+  }
+}
+
+function trustedGitEnvironment() {
+  return {
+    HOME: "/var/empty",
+    LANG: "en_US.UTF-8",
+    PATH: "/usr/bin:/bin",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_COUNT: "0",
+    GIT_OPTIONAL_LOCKS: "0",
+  };
+}
+
+function runTrustedGitSync(repositoryRoot, args, options = {}) {
+  const canonicalRoot = realpathSync(repositoryRoot);
+  const gitDirectory = realpathSync(execFileSync(
+    "/usr/bin/git",
+    ["--no-replace-objects", "rev-parse", "--absolute-git-dir"],
+    {
+      cwd: canonicalRoot,
+      env: trustedGitEnvironment(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  ).trim());
+  return execFileSync(
+    "/usr/bin/git",
+    [
+      "--no-replace-objects",
+      "--literal-pathspecs",
+      `--git-dir=${gitDirectory}`,
+      `--work-tree=${canonicalRoot}`,
+      ...args,
+    ],
+    {
+      cwd: canonicalRoot,
+      env: trustedGitEnvironment(),
+      encoding: options.encoding ?? "utf8",
+      stdio: options.stdio ?? ["ignore", "pipe", "ignore"],
+    },
+  );
+}
+
+async function runSuccessorTrustedGitSelfTest() {
+  const testRoot = await realpath(await mkdtemp(
+    path.join(
+      process.env.TMPDIR ?? "/private/tmp",
+      "zerox-successor-trusted-git-",
+    ),
+  ));
+  const repositoryRoot = path.join(testRoot, "repository");
+  const hostileRoot = path.join(testRoot, "hostile");
+  const originalEnvironment = new Map(
+    ["GIT_DIR", "GIT_OBJECT_DIRECTORY", "GIT_REPLACE_REF_BASE"].map(
+      (name) => [name, process.env[name]],
+    ),
+  );
+  const git = (cwd, args) => execFileSync(
+    "/usr/bin/git",
+    ["--no-replace-objects", ...args],
+    {
+      cwd,
+      env: trustedGitEnvironment(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
+  try {
+    await Promise.all([
+      mkdir(repositoryRoot, { recursive: true }),
+      mkdir(hostileRoot, { recursive: true }),
+    ]);
+    git(repositoryRoot, ["init", "-q"]);
+    await writeFile(path.join(repositoryRoot, "value.txt"), "reviewed\n");
+    git(repositoryRoot, ["add", "--all"]);
+    git(repositoryRoot, [
+      "-c", "user.name=Zerox Acceptance",
+      "-c", "user.email=acceptance@invalid.local",
+      "commit", "-q", "-m", "reviewed",
+    ]);
+    const reviewedHead = git(repositoryRoot, ["rev-parse", "HEAD"]).trim();
+    const reviewedTree = git(
+      repositoryRoot,
+      ["rev-parse", "--verify", `${reviewedHead}^{tree}`],
+    ).trim();
+    await writeFile(path.join(repositoryRoot, "value.txt"), "replacement\n");
+    git(repositoryRoot, ["add", "--all"]);
+    git(repositoryRoot, [
+      "-c", "user.name=Zerox Acceptance",
+      "-c", "user.email=acceptance@invalid.local",
+      "commit", "-q", "-m", "replacement",
+    ]);
+    const replacementHead = git(repositoryRoot, ["rev-parse", "HEAD"]).trim();
+    git(repositoryRoot, ["checkout", "-q", reviewedHead]);
+    git(repositoryRoot, ["replace", reviewedHead, replacementHead]);
+    git(hostileRoot, ["init", "-q"]);
+    process.env.GIT_DIR = path.join(hostileRoot, ".git");
+    process.env.GIT_OBJECT_DIRECTORY = path.join(hostileRoot, "objects");
+    process.env.GIT_REPLACE_REF_BASE = "refs/replace/hostile";
+    let inheritedGitRejected = false;
+    try {
+      rejectInheritedGitEnvironment();
+    } catch {
+      inheritedGitRejected = true;
+    }
+    const trustedTree = runTrustedGitSync(
+      repositoryRoot,
+      ["rev-parse", "--verify", `${reviewedHead}^{tree}`],
+    ).trim();
+    runTrustedGitSync(
+      repositoryRoot,
+      ["merge-base", "--is-ancestor", reviewedHead, "HEAD"],
+      { stdio: "ignore" },
+    );
+    if (!inheritedGitRejected || trustedTree !== reviewedTree) {
+      throw new Error("successor trusted Git self-test accepted injected authority");
+    }
+    console.log(JSON.stringify({
+      successorTrustedGitSelfTest: "passed",
+      inheritedGitRejected,
+      replacementIgnored: true,
+    }));
+  } finally {
+    for (const [name, value] of originalEnvironment) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(testRoot, { recursive: true, force: true });
+  }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const receipt = await checkConversationDisclosureSuccessorProgram();
-  console.log("Conversation disclosure successor program check passed.");
-  console.log(JSON.stringify(receipt));
+  if (process.argv[2] === "--self-test-trusted-git") {
+    await runSuccessorTrustedGitSelfTest();
+  } else {
+    const receipt = await checkConversationDisclosureSuccessorProgram();
+    console.log("Conversation disclosure successor program check passed.");
+    console.log(JSON.stringify(receipt));
+  }
 }

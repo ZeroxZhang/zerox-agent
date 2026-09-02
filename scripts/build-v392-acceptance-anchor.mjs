@@ -124,7 +124,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/after-pack-mac.mjs":
     "sha256:376f81d437bc6b06876ed4bcbcc7889d698103b9a91b9fc46f96512d0b52901b",
   "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:da444ddce27133cd13158199740d85c61d1c25b887b91002460eca30b91d6d9e",
+    "sha256:9ac189c57c868853ff3bcb19a50c0fc401675a56aea94399601fb0d43d6a887f",
   "scripts/check-harness-state.mjs":
     "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
   "scripts/run-conversation-disclosure-acceptance.mjs":
@@ -579,10 +579,16 @@ const execution = await materializeExecutionSnapshot(
 );
 const executionRoot = execution.repository;
 const executionNpmCliPath = execution.npmCli;
+await mkdir(path.join(executionRoot, ".zerox/plans"), { recursive: true });
 const executionLifecycleBaseline = await captureExecutionLifecycleBaseline(
   executionRoot,
   committedLifecycleBaseline,
 );
+const executionAuthorityDirectoryBaseline =
+  await captureCanonicalDirectoryIdentity(
+    path.join(executionRoot, ".zerox"),
+    "private execution authority directory",
+  );
 const nativeCachePath = path.join(executionRoot, GENERATED_NATIVE_CACHE_PATH);
 const commandSandboxProfile = path.join(
   outputParent,
@@ -1811,9 +1817,45 @@ async function captureExecutionLifecycleBaseline(
   ));
 }
 
+async function captureCanonicalDirectoryIdentity(directoryPath, label) {
+  const handle = await open(
+    directoryPath,
+    constants.O_RDONLY
+      | (constants.O_DIRECTORY ?? 0)
+      | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const before = await handle.stat();
+    const [after, leaf, canonicalPath] = await Promise.all([
+      handle.stat(),
+      lstat(directoryPath),
+      realpath(directoryPath),
+    ]);
+    if (
+      !before.isDirectory()
+      || !after.isDirectory()
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.mtimeMs !== before.mtimeMs
+      || after.ctimeMs !== before.ctimeMs
+      || !leaf.isDirectory()
+      || leaf.isSymbolicLink()
+      || leaf.dev !== before.dev
+      || leaf.ino !== before.ino
+      || canonicalPath !== directoryPath
+    ) {
+      fail(`${label} identity changed while reading`);
+    }
+    return { metadata: after, canonicalPath };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function verifyExecutionLifecycleBaseline(
   targetRoot = executionRoot,
   baseline = executionLifecycleBaseline,
+  authorityDirectoryBaseline = executionAuthorityDirectoryBaseline,
 ) {
   for (const relativePath of LIFECYCLE_PUBLICATION_FILES) {
     const expected = baseline.get(relativePath);
@@ -1833,6 +1875,23 @@ async function verifyExecutionLifecycleBaseline(
     ) {
       fail(`private execution lifecycle drifted: ${relativePath}`);
     }
+  }
+  const currentDirectory = await captureCanonicalDirectoryIdentity(
+    path.join(targetRoot, ".zerox"),
+    "private execution authority directory",
+  );
+  const expectedDirectory = authorityDirectoryBaseline.metadata;
+  if (
+    currentDirectory.metadata.dev !== expectedDirectory.dev
+    || currentDirectory.metadata.ino !== expectedDirectory.ino
+    || currentDirectory.metadata.nlink !== expectedDirectory.nlink
+    || currentDirectory.metadata.size !== expectedDirectory.size
+    || currentDirectory.metadata.mtimeMs !== expectedDirectory.mtimeMs
+    || currentDirectory.metadata.ctimeMs !== expectedDirectory.ctimeMs
+    || (currentDirectory.metadata.mode & 0o777)
+      !== (expectedDirectory.mode & 0o777)
+  ) {
+    fail("private execution authority directory drifted");
   }
 }
 
@@ -1882,6 +1941,11 @@ async function runLifecyclePublicationSelfTest() {
       [LIFECYCLE_PUBLICATION_FILES[0], before[0]],
       [LIFECYCLE_PUBLICATION_FILES[1], before[1]],
     ]);
+    const authorityDirectoryBaseline =
+      await captureCanonicalDirectoryIdentity(
+        path.join(testRoot, ".zerox"),
+        "self-test authority directory",
+      );
     const overrides = buildCompletedLifecycleOutputs(baseline);
     const after = await Promise.all([
       captureRegularFile(programPath, "self-test unchanged program"),
@@ -1918,10 +1982,36 @@ async function runLifecyclePublicationSelfTest() {
       CANDIDATE_GENERATED_PUBLICATION_FILES.includes(relativePath))) {
       fail("candidate generated-output allowance includes lifecycle authority");
     }
+    const heldAuthorityDirectory = path.join(testRoot, "held-authority");
+    const decoyAuthorityDirectory = path.join(testRoot, "decoy-authority");
+    await rename(path.join(testRoot, ".zerox"), heldAuthorityDirectory);
+    await mkdir(path.join(testRoot, ".zerox"));
+    await rename(path.join(testRoot, ".zerox"), decoyAuthorityDirectory);
+    await rename(heldAuthorityDirectory, path.join(testRoot, ".zerox"));
+    let directorySwapRejected = false;
+    try {
+      await verifyExecutionLifecycleBaseline(
+        testRoot,
+        baseline,
+        authorityDirectoryBaseline,
+      );
+    } catch {
+      directorySwapRejected = true;
+    }
+    await rm(decoyAuthorityDirectory, { recursive: true, force: true });
+    const postSwapAuthorityDirectoryBaseline =
+      await captureCanonicalDirectoryIdentity(
+        path.join(testRoot, ".zerox"),
+        "self-test post-swap authority directory",
+      );
     await chmod(featureListPath, 0o777);
     let modeTamperRejected = false;
     try {
-      await verifyExecutionLifecycleBaseline(testRoot, baseline);
+      await verifyExecutionLifecycleBaseline(
+        testRoot,
+        baseline,
+        postSwapAuthorityDirectoryBaseline,
+      );
     } catch {
       modeTamperRejected = true;
     }
@@ -1953,11 +2043,19 @@ async function runLifecyclePublicationSelfTest() {
     }
     let contentTamperRejected = false;
     try {
-      await verifyExecutionLifecycleBaseline(testRoot, postModeBaseline);
+      await verifyExecutionLifecycleBaseline(
+        testRoot,
+        postModeBaseline,
+        postSwapAuthorityDirectoryBaseline,
+      );
     } catch {
       contentTamperRejected = true;
     }
-    if (!contentTamperRejected || !modeTamperRejected) {
+    if (
+      !contentTamperRejected
+      || !modeTamperRejected
+      || !directorySwapRejected
+    ) {
       fail("lifecycle publication did not reject candidate lifecycle drift");
     }
     console.log(JSON.stringify({
@@ -1966,6 +2064,7 @@ async function runLifecyclePublicationSelfTest() {
       publicationOverrideCount: overrides.size,
       contentTamperRejected,
       modeTamperRejected,
+      directorySwapRejected,
     }));
   } finally {
     await rm(testRoot, { recursive: true, force: true });
