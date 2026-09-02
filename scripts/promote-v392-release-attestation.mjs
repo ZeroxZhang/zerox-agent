@@ -6,7 +6,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   realpath,
   rename,
   rm,
@@ -56,15 +55,13 @@ const evidencePaths = Object.freeze({
 const options = parseOptions(process.argv.slice(2));
 const anchor = await readJson(options.anchorPath);
 const canonicalRoot = await realpath(root);
-const gitHead = execFileSync("/usr/bin/git", ["rev-parse", "HEAD"], {
-  cwd: canonicalRoot,
-  encoding: "utf8",
-}).trim();
-const gitTree = execFileSync(
-  "/usr/bin/git",
-  ["rev-parse", "--verify", "HEAD^{tree}"],
-  { cwd: canonicalRoot, encoding: "utf8" },
-).trim();
+const gitDirectory = await realpath(runTrustedGit([
+  "--no-replace-objects",
+  "rev-parse",
+  "--absolute-git-dir",
+]).trim());
+const gitHead = readTrustedGitIdentity("HEAD");
+const gitTree = readTrustedGitIdentity("HEAD^{tree}");
 const anchorDigestInput = Object.fromEntries(
   Object.entries(anchor).filter(([key]) => key !== "digest"),
 );
@@ -105,9 +102,18 @@ const source = await computeLocalCandidateSourceManifest(root);
 const evidence = {};
 const evidenceValues = {};
 for (const [name, relativePath] of Object.entries(evidencePaths)) {
-  const bytes = await readFile(path.join(root, relativePath));
+  const bytes = await readBoundRepositoryFile(relativePath);
   evidence[name] = sha256BytesV13(bytes);
   evidenceValues[name] = JSON.parse(bytes.toString("utf8"));
+  const anchorDigest = anchor.fileDigests?.[relativePath];
+  if (
+    anchorDigest !== undefined
+      ? anchorDigest !== evidence[name]
+        || anchor.fileModes?.[relativePath] !== 0o644
+      : !["chatResilience", "planResilience"].includes(name)
+  ) {
+    throw new Error("accepted v3.9.2 evidence bytes drifted from the anchor");
+  }
 }
 if (
   evidenceValues.codeReview.digest !== anchor.reviewPins?.code?.receiptDigest
@@ -123,6 +129,20 @@ if (
   || evidenceValues.planResilience.status !== "passed"
 ) {
   throw new Error("accepted v3.9.2 evidence set is incomplete or drifted");
+}
+const [finalAcceptanceInput, finalSource] = await Promise.all([
+  computeAcceptanceInputManifest(root),
+  computeLocalCandidateSourceManifest(root),
+]);
+if (
+  finalAcceptanceInput.digest !== acceptanceInput.digest
+  || finalAcceptanceInput.fileCount !== acceptanceInput.fileCount
+  || finalSource.digest !== source.digest
+  || finalSource.fileCount !== source.fileCount
+  || readTrustedGitIdentity("HEAD") !== gitHead
+  || readTrustedGitIdentity("HEAD^{tree}") !== gitTree
+) {
+  throw new Error("v3.9.2 source or Git identity changed during promotion");
 }
 
 const attestation = {
@@ -213,6 +233,73 @@ async function readJson(filePath) {
   } finally {
     await handle.close();
   }
+}
+
+async function readBoundRepositoryFile(relativePath) {
+  const filePath = path.join(root, relativePath);
+  const [canonicalPath, leaf] = await Promise.all([
+    realpath(filePath),
+    lstat(filePath),
+  ]);
+  if (
+    canonicalPath !== filePath
+    || !leaf.isFile()
+    || leaf.isSymbolicLink()
+  ) {
+    throw new Error(`release evidence path is unsafe: ${relativePath}`);
+  }
+  const handle = await open(
+    filePath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const before = await handle.stat();
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (
+      !before.isFile()
+      || before.nlink !== 1
+      || before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs
+      || before.ctimeMs !== after.ctimeMs
+      || (before.mode & 0o777) !== 0o644
+    ) {
+      throw new Error(`release evidence path is unsafe: ${relativePath}`);
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+function readTrustedGitIdentity(revision) {
+  return runTrustedGit([
+    "--no-replace-objects",
+    "--literal-pathspecs",
+    `--git-dir=${gitDirectory}`,
+    `--work-tree=${canonicalRoot}`,
+    "-c", "core.fsmonitor=false",
+    "-c", "core.untrackedCache=false",
+    "rev-parse", "--verify", revision,
+  ]).trim();
+}
+
+function runTrustedGit(args) {
+  return execFileSync("/usr/bin/git", args, {
+    cwd: canonicalRoot,
+    env: {
+      HOME: "/var/empty",
+      LANG: "en_US.UTF-8",
+      PATH: "/usr/bin:/bin",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_COUNT: "0",
+      GIT_OPTIONAL_LOCKS: "0",
+    },
+    encoding: "utf8",
+  });
 }
 
 function validReviewPins(reviewPins) {

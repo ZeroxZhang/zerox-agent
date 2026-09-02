@@ -696,6 +696,13 @@ describe("package scripts", () => {
       "evidenceValues.localPackage.sourceDigest !== source.digest",
     );
     expect(promoter).toContain("sourceDigest: source.digest");
+    expect(promoter).toContain("anchor.fileDigests?.[relativePath]");
+    expect(promoter).toContain("await readBoundRepositoryFile(relativePath)");
+    expect(promoter).toContain('GIT_CONFIG_GLOBAL: "/dev/null"');
+    expect(promoter).toContain('"--no-replace-objects"');
+    expect(promoter).toContain(
+      'throw new Error("v3.9.2 source or Git identity changed during promotion")',
+    );
     expect(promoter).toContain("evidenceValues.codeReview.digest");
   });
 
