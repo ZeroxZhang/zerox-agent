@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -11,7 +12,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 // @ts-expect-error TypeScript does not synthesize declarations for this local mjs module.
-import { computeLocalCandidateSourceManifest, computeTreeManifest } from "../../scripts/local-candidate-source-manifest.mjs";
+import {
+  computeAcceptanceInputManifest,
+  computeLocalCandidateSourceManifest,
+  computeTreeManifest,
+} from "../../scripts/local-candidate-source-manifest.mjs";
 import {
   parseJsonConfigFileContent,
   readConfigFile,
@@ -334,6 +339,36 @@ describe("package scripts", () => {
       .resolves.toMatchObject({
         digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       });
+  });
+
+  it("keeps generated resilience receipts outside the immutable acceptance source", async () => {
+    const fixtureRoot = realpathSync(
+      mkdtempSync(path.join(tmpdir(), "zerox-source-manifest-")),
+    );
+    try {
+      execFileSync("/usr/bin/git", ["init", "-q", fixtureRoot]);
+      writeFileSync(path.join(fixtureRoot, "source.txt"), "stable source\n");
+      const verificationRoot = path.join(fixtureRoot, ".zerox", "verification");
+      mkdirSync(verificationRoot, { recursive: true });
+      const generatedReceipts = [
+        "chat-resilience-local-package.json",
+        "chat-resilience-local-package.png",
+        "plan-resilience-local-package.json",
+      ];
+      for (const name of generatedReceipts) {
+        writeFileSync(path.join(verificationRoot, name), "first run\n");
+      }
+      const before = await computeAcceptanceInputManifest(fixtureRoot);
+      for (const name of generatedReceipts) {
+        writeFileSync(path.join(verificationRoot, name), "second run\n");
+      }
+      const after = await computeAcceptanceInputManifest(fixtureRoot);
+
+      expect(after).toEqual(before);
+      expect(after.fileCount).toBe(1);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it("requires final acceptance to run from a caller-pinned external copy", () => {

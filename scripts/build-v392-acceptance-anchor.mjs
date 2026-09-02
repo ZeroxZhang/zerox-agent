@@ -148,7 +148,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/package-local-candidate.mjs":
     "sha256:3fb47885a4381139f7c0ef4a65788aa7d99dddbacbd5e13b8ef12fd333faf25d",
   "scripts/local-candidate-source-manifest.mjs":
-    "sha256:b1b26ae584c2e8c4489f3be4e7ac9915ac0c070ae59a37545bb780625bfa40a5",
+    "sha256:3a83c582986fe673648172c09d02458fbaf3a0befadf6d61bc0ad8678e107528",
 });
 const CD09_SCENARIO_IDS = Object.freeze(
   Array.from({ length: 19 }, (_, index) => `S${

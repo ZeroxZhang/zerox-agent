@@ -243,6 +243,9 @@ function isAcceptanceInputExcluded(relativePath) {
   if (
     relativePath === ".zerox/conversation-disclosure-program.json"
     || relativePath === ".zerox/feature_list.json"
+    || relativePath === ".zerox/verification/chat-resilience-local-package.json"
+    || relativePath === ".zerox/verification/chat-resilience-local-package.png"
+    || relativePath === ".zerox/verification/plan-resilience-local-package.json"
   ) {
     return true;
   }
