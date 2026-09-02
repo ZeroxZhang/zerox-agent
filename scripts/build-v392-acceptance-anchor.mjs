@@ -280,10 +280,16 @@ const GENERATED_PUBLICATION_FILES = Object.freeze(FINAL_FILES.filter(
       ".zerox/verification/conversation-disclosure/CD09-",
     ),
 ));
+const CANDIDATE_GENERATED_PUBLICATION_FILES = Object.freeze(
+  GENERATED_PUBLICATION_FILES.filter(
+    (relativePath) => !LIFECYCLE_PUBLICATION_FILES.includes(relativePath),
+  ),
+);
 if (
   Object.keys(CONTROL_DIGESTS).length !== 17
   || FINAL_FILES.length !== 70
   || GENERATED_PUBLICATION_FILES.length !== 55
+  || CANDIDATE_GENERATED_PUBLICATION_FILES.length !== 53
 ) {
   fail("v3.9.2 acceptance file roster invariant changed");
 }
@@ -545,6 +551,14 @@ await verifyControlSet(repositoryRealpath);
 await verifyToolchain(repositoryRealpath);
 await verifyNativeNodeAddon(repositoryRealpath);
 await verifySourceManifest(repositoryRealpath, options);
+const committedLifecycleBaseline = await captureCommittedLifecycleBaseline(
+  repositoryRealpath,
+  options.expectedGitHead,
+);
+await verifyLifecycleFilesAgainstCommittedBaseline(
+  repositoryRealpath,
+  committedLifecycleBaseline,
+);
 const execution = await materializeExecutionSnapshot(
   repositoryRealpath,
   outputParent,
@@ -557,6 +571,10 @@ const execution = await materializeExecutionSnapshot(
 );
 const executionRoot = execution.repository;
 const executionNpmCliPath = execution.npmCli;
+const executionLifecycleBaseline = await captureExecutionLifecycleBaseline(
+  executionRoot,
+  committedLifecycleBaseline,
+);
 const nativeCachePath = path.join(executionRoot, GENERATED_NATIVE_CACHE_PATH);
 const commandSandboxProfile = path.join(
   outputParent,
@@ -805,7 +823,7 @@ await run(
   trustedEnvironment,
 );
 const lifecyclePublicationOverrides =
-  await buildCompletedLifecycleOutputs(executionRoot);
+  buildCompletedLifecycleOutputs(committedLifecycleBaseline);
 await settleMutationWatchers();
 if (executionMutation) {
   fail(`private execution source mutated before lifecycle publication: ${executionMutation}`);
@@ -1641,19 +1659,14 @@ async function settleMutationWatchers() {
   await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
-async function buildCompletedLifecycleOutputs(repositoryRoot) {
-  const programPath = path.join(
-    repositoryRoot,
-    ".zerox/conversation-disclosure-program.json",
+function buildCompletedLifecycleOutputs(committedBaseline) {
+  validateLifecyclePublicationOverrides(committedBaseline);
+  const programCapture = committedBaseline.get(
+    LIFECYCLE_PUBLICATION_FILES[0],
   );
-  const featureListPath = path.join(
-    repositoryRoot,
-    ".zerox/feature_list.json",
+  const featureListCapture = committedBaseline.get(
+    LIFECYCLE_PUBLICATION_FILES[1],
   );
-  const [programCapture, featureListCapture] = await Promise.all([
-    captureRegularFile(programPath, "active disclosure program"),
-    captureRegularFile(featureListPath, "active Feature list"),
-  ]);
   const program = JSON.parse(programCapture.bytes.toString("utf8"));
   const featureList = JSON.parse(featureListCapture.bytes.toString("utf8"));
   const cd09 = program.workstreams?.find((entry) => entry.id === "CD09");
@@ -1705,6 +1718,109 @@ function completedLifecycleCapture(value, sourceMetadata) {
   };
 }
 
+async function captureCommittedLifecycleBaseline(repositoryRoot, gitHead) {
+  const captures = new Map();
+  for (const relativePath of LIFECYCLE_PUBLICATION_FILES) {
+    const [{ stdout: treeOutput }, { stdout: bytes }] = await Promise.all([
+      execFile(
+        "/usr/bin/git",
+        ["ls-tree", "-z", gitHead, "--", relativePath],
+        {
+          cwd: repositoryRoot,
+          encoding: null,
+          maxBuffer: 1024 * 1024,
+        },
+      ),
+      execFile(
+        "/usr/bin/git",
+        ["show", `${gitHead}:${relativePath}`],
+        {
+          cwd: repositoryRoot,
+          encoding: null,
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      ),
+    ]);
+    const treeEntry = Buffer.from(treeOutput).toString("utf8");
+    const match = /^100644 blob [0-9a-f]{40}\t([^\0]+)\0$/.exec(treeEntry);
+    if (match?.[1] !== relativePath) {
+      fail(`committed lifecycle file is not a regular 0644 blob: ${relativePath}`);
+    }
+    const content = Buffer.from(bytes);
+    captures.set(relativePath, {
+      bytes: content,
+      digest: sha256(content),
+      metadata: { mode: 0o644 },
+    });
+  }
+  validateLifecyclePublicationOverrides(captures);
+  return captures;
+}
+
+async function verifyLifecycleFilesAgainstCommittedBaseline(
+  repositoryRoot,
+  committedBaseline,
+) {
+  validateLifecyclePublicationOverrides(committedBaseline);
+  for (const relativePath of LIFECYCLE_PUBLICATION_FILES) {
+    const current = await captureRegularFile(
+      path.join(repositoryRoot, relativePath),
+      `lifecycle file ${relativePath}`,
+    );
+    const expected = committedBaseline.get(relativePath);
+    if (
+      current.digest !== expected.digest
+      || (current.metadata.mode & 0o777) !== (expected.metadata.mode & 0o777)
+    ) {
+      fail(`lifecycle file differs from reviewed Git bytes: ${relativePath}`);
+    }
+  }
+}
+
+async function captureExecutionLifecycleBaseline(
+  executionRoot,
+  committedBaseline,
+) {
+  await verifyLifecycleFilesAgainstCommittedBaseline(
+    executionRoot,
+    committedBaseline,
+  );
+  return new Map(await Promise.all(
+    LIFECYCLE_PUBLICATION_FILES.map(async (relativePath) => [
+      relativePath,
+      await captureRegularFile(
+        path.join(executionRoot, relativePath),
+        `private execution lifecycle file ${relativePath}`,
+      ),
+    ]),
+  ));
+}
+
+async function verifyExecutionLifecycleBaseline(
+  targetRoot = executionRoot,
+  baseline = executionLifecycleBaseline,
+) {
+  for (const relativePath of LIFECYCLE_PUBLICATION_FILES) {
+    const expected = baseline.get(relativePath);
+    const current = await captureRegularFile(
+      path.join(targetRoot, relativePath),
+      `private execution lifecycle file ${relativePath}`,
+    );
+    if (
+      current.digest !== expected.digest
+      || current.metadata.dev !== expected.metadata.dev
+      || current.metadata.ino !== expected.metadata.ino
+      || current.metadata.nlink !== expected.metadata.nlink
+      || current.metadata.size !== expected.metadata.size
+      || current.metadata.mtimeMs !== expected.metadata.mtimeMs
+      || current.metadata.ctimeMs !== expected.metadata.ctimeMs
+      || (current.metadata.mode & 0o777) !== (expected.metadata.mode & 0o777)
+    ) {
+      fail(`private execution lifecycle drifted: ${relativePath}`);
+    }
+  }
+}
+
 async function runLifecyclePublicationSelfTest() {
   const testRoot = await realpath(await mkdtemp(
     path.join(
@@ -1747,7 +1863,11 @@ async function runLifecyclePublicationSelfTest() {
       captureRegularFile(programPath, "self-test active program"),
       captureRegularFile(featureListPath, "self-test active feature list"),
     ]);
-    const overrides = await buildCompletedLifecycleOutputs(testRoot);
+    const baseline = new Map([
+      [LIFECYCLE_PUBLICATION_FILES[0], before[0]],
+      [LIFECYCLE_PUBLICATION_FILES[1], before[1]],
+    ]);
+    const overrides = buildCompletedLifecycleOutputs(baseline);
     const after = await Promise.all([
       captureRegularFile(programPath, "self-test unchanged program"),
       captureRegularFile(featureListPath, "self-test unchanged feature list"),
@@ -1779,10 +1899,58 @@ async function runLifecyclePublicationSelfTest() {
     ) {
       fail("lifecycle publication did not create the exact completed state");
     }
+    if (LIFECYCLE_PUBLICATION_FILES.some((relativePath) =>
+      CANDIDATE_GENERATED_PUBLICATION_FILES.includes(relativePath))) {
+      fail("candidate generated-output allowance includes lifecycle authority");
+    }
+    await chmod(featureListPath, 0o777);
+    let modeTamperRejected = false;
+    try {
+      await verifyExecutionLifecycleBaseline(testRoot, baseline);
+    } catch {
+      modeTamperRejected = true;
+    }
+    await chmod(featureListPath, 0o644);
+    const postModeBaseline = new Map(await Promise.all(
+      LIFECYCLE_PUBLICATION_FILES.map(async (relativePath) => [
+        relativePath,
+        await captureRegularFile(
+          path.join(testRoot, relativePath),
+          `self-test post-mode lifecycle file ${relativePath}`,
+        ),
+      ]),
+    ));
+    const tamperedProgram = {
+      ...JSON.parse(before[0].bytes.toString("utf8")),
+      unreviewedGovernanceField: true,
+    };
+    const tamperHandle = await open(
+      programPath,
+      constants.O_WRONLY | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0),
+    );
+    try {
+      await tamperHandle.writeFile(
+        Buffer.from(`${JSON.stringify(tamperedProgram, null, 2)}\n`),
+      );
+      await tamperHandle.sync();
+    } finally {
+      await tamperHandle.close();
+    }
+    let contentTamperRejected = false;
+    try {
+      await verifyExecutionLifecycleBaseline(testRoot, postModeBaseline);
+    } catch {
+      contentTamperRejected = true;
+    }
+    if (!contentTamperRejected || !modeTamperRejected) {
+      fail("lifecycle publication did not reject candidate lifecycle drift");
+    }
     console.log(JSON.stringify({
       lifecyclePublicationSelfTest: "passed",
       privateExecutionUnchanged: true,
       publicationOverrideCount: overrides.size,
+      contentTamperRejected,
+      modeTamperRejected,
     }));
   } finally {
     await rm(testRoot, { recursive: true, force: true });
@@ -1806,6 +1974,7 @@ function validateLifecyclePublicationOverrides(overrides) {
       !Buffer.isBuffer(capture?.bytes)
       || capture.digest !== sha256(capture.bytes)
       || !Number.isInteger(capture?.metadata?.mode)
+      || (capture.metadata.mode & 0o777) !== 0o644
     ) {
       fail(`lifecycle publication override is invalid: ${relativePath}`);
     }
@@ -4593,6 +4762,7 @@ async function verifyCommandIdentity(command, args, cwd) {
     isWithin(executionRoot, cwd) ? executionRoot : repositoryRealpath,
   );
   if (isWithin(executionRoot, cwd)) {
+    await verifyExecutionLifecycleBaseline();
     await verifyGeneratedNativeCache();
     await verifySourceManifest(executionRoot, options);
     await verifyToolchain(executionRoot);
@@ -4859,7 +5029,7 @@ function expectedCommandMutationPrefixes(args, cwd) {
     );
   }
   if (args[0] === "scripts/run-conversation-disclosure-acceptance.mjs") {
-    prefixes.push(...GENERATED_PUBLICATION_FILES);
+    prefixes.push(...CANDIDATE_GENERATED_PUBLICATION_FILES);
     // Real-app scenarios exercise the PlanStore, which atomically writes
     // (.tmp + rename) transient plan state under .zerox/plans. That directory
     // is git-ignored ephemeral runtime scratch (excluded from the source
