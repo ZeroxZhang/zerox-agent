@@ -685,22 +685,34 @@ const repositoryWatcher = watch(
     }
   },
 );
-const executionWatcher = watch(
-  executionRoot,
-  { recursive: true },
-  (_eventType, filename) => {
-    const relativePath = normalizeWatchRelativePath(filename);
-    if (
-      !relativePath
-      || !isAllowedExecutionMutation(
-        relativePath,
-        allowedExecutionMutationPrefixes,
-      )
-    ) {
-      executionMutation ??= relativePath || "<unknown-event>";
-    }
-  },
-);
+let executionWatcherGeneration = 0;
+const startExecutionWatcher = () => {
+  const generation = ++executionWatcherGeneration;
+  return watch(
+    executionRoot,
+    { recursive: true },
+    (_eventType, filename) => {
+      // macOS can deliver an fs.watch event after the mutation window that
+      // produced it has closed. A retired watcher must therefore be fenced by
+      // generation, otherwise the intentional lifecycle publication below can
+      // be misclassified as a later source mutation. The replacement watcher
+      // starts from the already captured and verified completed lifecycle, so
+      // every event it observes remains fail-closed.
+      if (generation !== executionWatcherGeneration) return;
+      const relativePath = normalizeWatchRelativePath(filename);
+      if (
+        !relativePath
+        || !isAllowedExecutionMutation(
+          relativePath,
+          allowedExecutionMutationPrefixes,
+        )
+      ) {
+        executionMutation ??= relativePath || "<unknown-event>";
+      }
+    },
+  );
+};
+let executionWatcher = startExecutionWatcher();
 
 const trustedEnvironment = {
   HOME: execution.home,
@@ -807,6 +819,14 @@ try {
 if (executionMutation) {
   fail(`private execution source mutated during lifecycle closure: ${executionMutation}`);
 }
+// Retire the watcher that observed the sanctioned lifecycle writes. Its event
+// queue may still contain delayed notifications even after the completed bytes
+// have been verified. A new generation closes that race without permanently
+// allowlisting the lifecycle files: any subsequent write is observed by the
+// replacement watcher with an empty mutation allowance.
+const lifecycleExecutionWatcher = executionWatcher;
+executionWatcher = startExecutionWatcher();
+lifecycleExecutionWatcher.close();
 const appPath = path.join(
   executionRoot,
   "release-local/mac-arm64/Zerox Agent.app",
