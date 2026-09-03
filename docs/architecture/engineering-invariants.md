@@ -1,90 +1,85 @@
-# Engineering Invariants (2026-09-03)
+# Engineering Invariants (2026-09-03, post-optimization)
 
-This file records hard constraints discovered empirically while working on this
-repository. Treat it as the first thing to read before deleting, moving,
-renaming, or re-formatting **any tracked file**, and before judging test or
-governance failures as "environment noise".
+Hard constraints discovered empirically while working on this repository.
+Read before deleting, moving, renaming, or re-formatting any tracked file,
+and before judging test or governance failures as environment noise.
 
-> Validation note: every claim below was reproduced locally on 2026-09-03 at
-> HEAD `9c6b500` / follow-up commits. Where a claim says "breaks X", reverting
-> the change made X pass again.
+> Rewritten on 2026-09-03 after the governance slimming plan (Phases 0-4):
+> the conversation-disclosure successor machinery (round archives,
+> orchestrators v1-v13, their checkers and state tests) was frozen under
+> archive/disclosure-history/ (tag archive/disclosure-history-v3.9.2) and
+> nothing in the live tree reads it. Every pin in this file was re-verified
+> at HEAD 61062e0 on Node 22.23.2.
 
-## 1. Root-level process artifacts are pinned by active governance
+## 1. Toolchain and native ABI
 
-The following tracked files must stay present **at their exact root paths**:
+- Pin Node 22: `.nvmrc` = 22, `engines.node` = ">=22.0.0 <23". CI
+  (verify.yml, release.yml) uses setup-node 22. Local development must use
+  Node 22 too (nvm use 22).
+- better-sqlite3 is ABI-bound to the Node used for `npm ci`; switching
+  Node versions without reinstalling produces hundreds of spurious native
+  failures - run `npm rebuild better-sqlite3` after a Node switch and do
+  not diagnose ABI noise as code regressions.
+- `npm run native:build` compiles the unsigned zerox-safe-fs helper
+  (native/macos/zerox-safe-fs.c) whose digest is pinned at packaging time
+  by scripts/build-v392-acceptance-anchor.mjs CONTROL_DIGESTS.
 
-- `findings.md`, `progress.md`, `task_plan.md` — they are listed in the frozen
-  successor-program closed world as `postReviewMutablePaths` (content may
-  change after review; **existence may not**). Deleting them made 6
-  `conversationDisclosureProgram.test.ts` cases fail with `ENOENT` (observed).
-  Archiving them into `docs/...` also breaks the CD09 local-package source
-  manifest (new paths leave the manifest's planning-path exclusion).
-- `HANDOFF-v3.9.2-conversation-disclosure*.md` (rounds 5-12, main doc,
-  release blocker) — read at runtime as CD03A completion artifacts by
-  `scripts/check-conversation-disclosure-successor-program.mjs`; moving or
-  deleting them adds 9 new program-check errors (observed).
-- `.superpowers/**` (21 tracked files) — included in the CD09 source-manifest
-  digest (`scripts/local-candidate-source-manifest.mjs` hashes every tracked
-  file plus untracked non-ignored files); removal flips
-  `CD09 local package source manifest is stale` (observed).
+## 2. Test entry and determinism
 
-Rule of thumb: **do not delete or move tracked files without running the
-follow-up checks below.** Even "clearly dead" files may be manifest-pinned.
+- `npm test` = `npm run native:build && vitest run`. It runs the live tree
+  only: no repository copies, no historical state rewinding, no fixture
+  restoration. Historical governance tests live inert under
+  archive/disclosure-history/tests/.
+- Local suite must be green on Node 22 (macOS). A small set of Seatbelt and
+  storage round-trip tests are environment-sensitive by design; they run
+  for real on the macos-14 CI runner. Do not use failure-set-equivalence
+  acceptance - it was abolished with the v13 orchestrator.
+- `npm run test:watch` (plain vitest) and `npm test` now share the same
+  semantics; watch regressions are real regressions.
 
-## 2. Tracked-file change protocol
+## 3. Governance surface
 
-Before removing/moving/formatting any tracked path:
+- Live governance files: `.zerox/feature_list.json` (feature ledger),
+  `.zerox/progress.md` (change evidence), AGENTS.md, init.sh, and the four
+  program records runtime-convergence / kernel-migration /
+  storage-convergence / release under `.zerox/`. `npm run harness:check`
+  verifies these product contracts plus the four program checkers and runs
+  green locally without secrets. `npm run program:check` is the same set.
+- `archive/` holds frozen records (disclosure archaeology, root process
+  docs, CD decisions). Files there are reference material: move, never
+  edit. Do not re-add archived paths to checkers or tests.
+- `.tmp_*` is gitignored scratch space; use it for reports and probes.
 
-1. `grep -rn '<path>' src scripts .zerox --include=*.ts --include=*.mjs --include=*.json`
-   (tests, checkers, evidence JSONs may reference it).
-2. Run the digest/root-sensitive suites locally:
-   - `npx vitest run --run src/shared/conversationDisclosureProgram.test.ts` (66 cases)
-   - `node scripts/check-conversation-disclosure-successor-program.mjs`
-   - Compare npm-test failure sets before/after (see §4) — never rely on a
-     single green/red run alone.
-3. If a program check needs caller-pinned identities (Node/npm pins,
-   `ZEROX_*_DIGEST` env) and you are not on the acceptance host, treat the
-   check as "cannot run locally" rather than "failing because of my change":
-   use the failure-set-equivalence method instead.
+## 4. CI gates
 
-## 3. .gitignore drift traps
+- PRs run `npm run verify` (typecheck:tests + npm test + build + offline
+  evals). Sealed-main pushes and tag releases additionally run the full
+  npm test suite (harness:check, npm test, typecheck:tests, stress:runtime,
+  build, offline evals, smoke:prod on release) - locked by
+  src/shared/ciWorkflow.test.ts, which asserts the exact command lists.
+- verify.yml runs on macos-14 because native/main tests are darwin-only.
+- The v3.9.2 release attestation digest secret is no longer consumed by
+  the local harness (the successor check was archived); it remains for
+  the external acceptance lane documented in .zerox/release-runbook.md.
 
-- 122 tracked files still match ignore rules (checked 2026-09-03):
-  `.superpowers/` (21, tracked by design) and `docs/design` (48),
-  `docs/superpowers` (49). `docs/architecture` was drifted too until
-  `.gitignore` gained `!docs/architecture/` on 2026-09-03 — new files under
-  `docs/architecture` are now tracked normally.
-- Consequence: `git add docs/design/...` **silently ignores new files** there.
-  Tracked files in those directories keep working (ignore rules do not apply
-  to already-tracked files), but do not "un-ignore" the directories casually:
-  the whitelist exists to keep new iteration junk out of git.
-- `.tmp_*` is ignored: use it for scratch/report files that must not pollute
-  `git status`.
+## 5. Layering and hygiene
 
-## 4. Local test baseline (macOS, Node 24 nvm)
+- tsconfig include allowlists enforce shared/main/preload/renderer
+  layering (main+preload+shared in tsconfig.electron.json; renderer+shared
+  in tsconfig.renderer.json); tests compile under tsconfig.tests.json.
+  Shared code must not import main/renderer (enforced by include sets; a
+  lint boundary is planned - see Phase 7 of the optimization plan).
+- Decision literals in tool authorization carry a machine-readable kind
+  (shared/toolPermissions.ts ToolAuthorizationDecision.kind); consent
+  gates branch on kind, never on reason-text regexes. Keep it that way.
+- Tracked files matching .gitignore: measured 0 at HEAD 61062e0 (method:
+  git ls-files | while read f; do git check-ignore -q "$f"; done). If the
+  count rises above 0, fix the .gitignore whitelist instead of force-adding.
 
-- `npm test` on a Node 24 local install has a known pre-existing failure set
-  (~19 unique cases) caused by the environment (Seatbelt
-  `process_sandbox_unavailable` family, storage round-trips), not by code.
-- CI and acceptance run Node 22 (see `.nvmrc`, `engines`). Native modules
-  (`better-sqlite3`) are ABI-bound to the Node used for `npm ci`; running
-  `npm test` under a different Node without reinstalling produces hundreds of
-  spurious failures — do not diagnose those as code regressions.
-- Acceptance method for a change: capture `npm test` failing-test sets before
-  and after; the change is clean if the sets are equal (or strictly smaller),
-  and any targeted suite affected by the change passes.
+## 6. Verified local baselines (2026-09-03)
 
-## 5. Governance vs. development gates
-
-- `npm run program:check` / `npm run harness:check` require acceptance-host
-  caller pins at completed-program state (observed baseline of 7 env-bound
-  complaints at HEAD `9c6b500`). They are authoritative on the acceptance
-  host / CI with secrets, not on a plain laptop.
-- CI runs `npm test` only on pull requests; direct `main` pushes run a
-  reduced gate (kept in sync with this file's date — verify current
-  `.github/workflows/verify.yml`).
-
-## 6. Toolchain
-
-- Pin Node 22: `.nvmrc` = `22`, `engines.node` = `>=22.0.0 <23`.
-  CI (`verify.yml`, `release.yml`) uses `setup-node 22`.
+- npm test (Node 22.23.2): 319 passed | 1 skipped (320 files),
+  3814 passed | 6 skipped - green.
+- npm run harness:check / program:check: exit 0, no secrets.
+- Typechecks: tsconfig.electron / renderer / tests all clean.
+- scripts/*.mjs: 41 files; .zerox/: 54 files.
