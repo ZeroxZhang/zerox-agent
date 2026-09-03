@@ -1,5 +1,16 @@
 # Zerox Harness Progress
 
+
+## 2026-09-03 - Phase 1/2: 考古归档 + 测试闸门（完成）
+
+- Phase 1 考古归档：117 个历史测试（V2-V12 谱系 + closure 状态用例）、142 个披露编排器脚本（v1-v13）、182+ 轮次证据、2 个 program 记录 → archive/disclosure-history/{tests,scripts,evidence,program}/；tag archive/disclosure-history-v3.9.2。
+- npm test 改为纯 vitest（npm run native:build && vitest run），无整仓副本、无历史重放。
+- check-harness-state.mjs 重写为产品契约检查（移除 successor/delta-contract 依赖）；release checker 与 acceptance anchor 花名册改指归档路径；CONTROL_DIGESTS 17→11（删除 6 个归档 pin）。
+- 元测试去钉：packageScripts.test.ts 删除编排器时代 package.json pin 用例、断言改指归档冻结记录；releaseProgram.test.ts 对齐 v3.9.2 已发布现实（P113 done、program 记录保持 v3.9.1 闭包）。
+- Phase 2 测试闸门：verify.yml / release.yml sealed 步骤加入 npm test；ciWorkflow.test.ts 两处列表同步、not.toContain(npm test) 锁删除。
+- Evidence: npm test 全量 319 passed | 1 skipped (320 files)，3810 passed | 6 skipped；npm run harness:check exit=0（本地无 secret）；元测试 26/26。
+- 体量：scripts/ 183→41；.zerox/ 296→73；测试文件 437→320。
+- Commits: 6275774（归档+门禁）、ee99c5f（锚花名册改指+元测试对齐）。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
