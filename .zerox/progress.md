@@ -58,6 +58,12 @@
 - chatService.ts 5178 → 718 行（≤1500 ✓）；外部表面保持（respondSkillInput/sendMessage + 类型再导出）；productionKernelBoundary 元测试改指 kernelTurn.ts。Commit 3d530d1。
 - Evidence：npm test 319 passed | 1 skipped（3815/3821）；tests/renderer/electron tsc 全净；eslint 0。
 - 剩余：legacyTurn.ts 3057 行需二分（≤1500 精神）；container.ts 6382 行工厂闭包按域拆分（chat/goal/plan/disclosure/agents 簇，同 rt 模式）。
+
+## 2026-09-03 - Round 15: container 首簇拆分（chat/session）
+
+- container/chatSessions.ts（401 行）：goal→chat 摘要同步、会话 CRUD/transcript 操作整簇外移（createChatSessionsRuntime(rt)，仅线程化 3 个存取器）；metadata 辅助调用点加文档化 cast。Commit 4287132。
+- container.ts 6382 → 6041。npm test 319 passed（3815/3821）；tests tsc 净。
+- 计划 Round 16-19：goal/plan/disclosure/agents 簇逐块外移；legacyTurn 3057 行单函数无法机械二分（记为债务，eslint max-lines 例外并 backlog）。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
