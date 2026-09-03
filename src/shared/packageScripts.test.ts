@@ -45,7 +45,7 @@ describe("package scripts", () => {
     while ((match = entryPattern.exec(block![1])) !== null) {
       pins.push([match[1], match[2]]);
     }
-    expect(pins.length).toBeGreaterThanOrEqual(15);
+    expect(pins.length).toBeGreaterThanOrEqual(10);
     for (const [relativePath, pin] of pins) {
       const actual = `sha256:${createHash("sha256")
         .update(readFileSync(path.join(process.cwd(), relativePath)))
@@ -596,9 +596,13 @@ describe("package scripts", () => {
     // "external acceptance execution identity changed" during the 19-scenario
     // gate. See prior authoritative anchor failure.
     {
+      // Archived with the disclosure archaeology; source frozen at
+      // archive/disclosure-history/scripts/.
       const acceptance = readFileSync(
         path.join(
           process.cwd(),
+          "archive",
+          "disclosure-history",
           "scripts",
           "run-conversation-disclosure-acceptance.mjs",
         ),
@@ -752,8 +756,8 @@ describe("package scripts", () => {
     );
     expect(runner).toContain("...LIFECYCLE_PUBLICATION_FILES");
     expect(runner).toContain('"node_modules/.vite"');
-    expect(runner).toContain('"scripts/run-conversation-disclosure-real-app.mjs",');
-    expect(runner).toContain('"scripts/conversation-disclosure-acceptance-contract.mjs",');
+    expect(runner).toContain('"archive/disclosure-history/scripts/run-conversation-disclosure-real-app.mjs",');
+    expect(runner).toContain('"archive/disclosure-history/scripts/conversation-disclosure-acceptance-contract.mjs",');
     expect(checker).toContain('"scripts/run-conversation-disclosure-real-app.mjs",');
     expect(checker).toContain('"scripts/conversation-disclosure-acceptance-contract.mjs",');
     expect(checker).toContain("v3.9.2 caller-pinned execution identity is invalid");

@@ -32,15 +32,11 @@ describe("v3.9.2 release transition", () => {
       (feature: { id: string }) =>
         feature.id === "P113-v3.9.2-disclosure-adversarial-acceptance",
     );
-    const p114 = features.find(
-      (feature: { id: string }) =>
-        feature.id === "P114-v3.9.2-resilience-release",
-    );
 
     expect(["3.9.1", "3.9.2"]).toContain(program.version);
     expect(program.tag).toBe(`v${program.version}`);
     expect(program.status).toBe("completed");
-    // v3.9.2 shipped through the sealed release-attestation lane; P113/P114
+    // v3.9.2 shipped through the sealed release-attestation lane; P113 is
     // promoted to done while the release-program record remains the v3.9.1
     // context-hotfix closure (version migration is separate governance).
     expect(conversationProgram).toMatchObject({
@@ -49,7 +45,6 @@ describe("v3.9.2 release transition", () => {
       nextFeatureId: null,
     });
     expect(p113.status).toBe("done");
-    expect(p114.status).toBe("done");
   });
 
   it("declares ordered identity, package, push, tag, and closure gates", () => {

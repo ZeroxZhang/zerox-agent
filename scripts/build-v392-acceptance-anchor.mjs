@@ -48,12 +48,12 @@ const IMMUTABLE_COMMITTED_WHITESPACE_ALLOWLIST = Object.freeze({
     blob: "ce87fce7d172ea7041411c793338eb7982292ba0",
     diagnostics: Object.freeze(["25: new blank line at EOF."]),
   }),
-  ".zerox/verification/conversation-disclosure/CD04-package-scripts-test.target.ts":
+  "archive/disclosure-history/evidence/CD04-package-scripts-test.target.ts":
     Object.freeze({
       blob: "1861c7a4b59c7347303171ba9b80f6b8b38ec1d7",
       diagnostics: Object.freeze(["1065: new blank line at EOF."]),
     }),
-  "src/shared/conversationDisclosureProgramGovernanceV3.test.ts": Object.freeze({
+  "archive/disclosure-history/tests/conversationDisclosureProgramGovernanceV3.test.ts": Object.freeze({
     blob: "250f1bdafcd4bb99f0065dcbb1912f93c9d9b1f2",
     diagnostics: Object.freeze(["525: new blank line at EOF."]),
   }),
@@ -164,33 +164,33 @@ const CD09_SCENARIO_IDS = Object.freeze(
   ][index]}`),
 );
 const FINAL_FILES = Object.freeze([
-  ".zerox/conversation-disclosure-program.json",
+  "archive/disclosure-history/program/conversation-disclosure-program.json",
   ".zerox/feature_list.json",
-  ".zerox/verification/conversation-disclosure/CD05-chat-browser.json",
-  ".zerox/verification/conversation-disclosure/CD05-chat-browser-compact.png",
-  ".zerox/verification/conversation-disclosure/CD05-chat-browser-expanded.png",
-  ".zerox/verification/conversation-disclosure/CD05-chat-browser-narrow.png",
-  ".zerox/verification/conversation-disclosure/CD06-cross-surface-browser.json",
-  ".zerox/verification/conversation-disclosure/CD06-cross-surface-desktop.png",
-  ".zerox/verification/conversation-disclosure/CD06-cross-surface-narrow.png",
-  ".zerox/verification/conversation-disclosure/CD07-inspector-browser.json",
-  ".zerox/verification/conversation-disclosure/CD07-inspector-desktop.png",
-  ".zerox/verification/conversation-disclosure/CD08-hardening.json",
-  ".zerox/verification/conversation-disclosure/CD08-full-gates.md",
-  ".zerox/verification/conversation-disclosure/CD04-performance-baseline.json",
-  ".zerox/verification/conversation-disclosure/CD04-shadow-parity.json",
-  ".zerox/verification/conversation-disclosure/CD09-real-app-acceptance.json",
+  "archive/disclosure-history/evidence/CD05-chat-browser.json",
+  "archive/disclosure-history/evidence/CD05-chat-browser-compact.png",
+  "archive/disclosure-history/evidence/CD05-chat-browser-expanded.png",
+  "archive/disclosure-history/evidence/CD05-chat-browser-narrow.png",
+  "archive/disclosure-history/evidence/CD06-cross-surface-browser.json",
+  "archive/disclosure-history/evidence/CD06-cross-surface-desktop.png",
+  "archive/disclosure-history/evidence/CD06-cross-surface-narrow.png",
+  "archive/disclosure-history/evidence/CD07-inspector-browser.json",
+  "archive/disclosure-history/evidence/CD07-inspector-desktop.png",
+  "archive/disclosure-history/evidence/CD08-hardening.json",
+  "archive/disclosure-history/evidence/CD08-full-gates.md",
+  "archive/disclosure-history/evidence/CD04-performance-baseline.json",
+  "archive/disclosure-history/evidence/CD04-shadow-parity.json",
+  "archive/disclosure-history/evidence/CD09-real-app-acceptance.json",
   ...CD09_SCENARIO_IDS.flatMap((scenarioId) => [
-    `.zerox/verification/conversation-disclosure/CD09-scenarios/${scenarioId}.json`,
-    `.zerox/verification/conversation-disclosure/CD09-scenarios/${scenarioId}.png`,
+    `archive/disclosure-history/evidence/CD09-scenarios/${scenarioId}.json`,
+    `archive/disclosure-history/evidence/CD09-scenarios/${scenarioId}.png`,
   ]),
   ...[
     "S13-legacy-coverage",
     "S17-cancel-interruption",
   ].map((scenarioId) =>
-    `.zerox/verification/conversation-disclosure/CD09-scenarios/${scenarioId}.initial.png`
+    `archive/disclosure-history/evidence/CD09-scenarios/${scenarioId}.initial.png`
   ),
-  ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+  "archive/disclosure-history/evidence/CD09-local-package.json",
   ".zerox/verification/chat-resilience-local-package.json",
   ".zerox/verification/chat-resilience-local-package.png",
   ".zerox/verification/plan-resilience-local-package.json",
@@ -199,17 +199,17 @@ const FINAL_FILES = Object.freeze([
   ".zerox/reviews/CD09-adversarial-acceptance.md",
   "package.json",
   "package-lock.json",
-  "scripts/check-conversation-disclosure-successor-program.mjs",
+  "archive/disclosure-history/scripts/check-conversation-disclosure-successor-program.mjs",
   "scripts/check-harness-state.mjs",
-  "scripts/run-conversation-disclosure-acceptance.mjs",
-  "scripts/run-conversation-disclosure-real-app.mjs",
-  "scripts/conversation-disclosure-acceptance-contract.mjs",
+  "archive/disclosure-history/scripts/run-conversation-disclosure-acceptance.mjs",
+  "archive/disclosure-history/scripts/run-conversation-disclosure-real-app.mjs",
+  "archive/disclosure-history/scripts/conversation-disclosure-acceptance-contract.mjs",
   "scripts/package-local-candidate.mjs",
   "scripts/local-candidate-source-manifest.mjs",
   "scripts/build-v392-acceptance-anchor.mjs",
 ]);
 const LIFECYCLE_PUBLICATION_FILES = Object.freeze([
-  ".zerox/conversation-disclosure-program.json",
+  "archive/disclosure-history/program/conversation-disclosure-program.json",
   ".zerox/feature_list.json",
 ]);
 const SYSTEM_SANDBOX_READ_ROOTS = Object.freeze([
@@ -258,20 +258,20 @@ const GENERATED_PUBLICATION_FILES = Object.freeze(FINAL_FILES.filter(
   (relativePath) =>
     LIFECYCLE_PUBLICATION_FILES.includes(relativePath)
     || relativePath.startsWith(
-      ".zerox/verification/conversation-disclosure/CD05-",
+      "archive/disclosure-history/evidence/CD05-",
     )
     || relativePath.startsWith(
-      ".zerox/verification/conversation-disclosure/CD06-",
+      "archive/disclosure-history/evidence/CD06-",
     )
     || relativePath.startsWith(
-      ".zerox/verification/conversation-disclosure/CD07-",
+      "archive/disclosure-history/evidence/CD07-",
     )
     || relativePath ===
-      ".zerox/verification/conversation-disclosure/CD08-hardening.json"
+      "archive/disclosure-history/evidence/CD08-hardening.json"
     || relativePath ===
-      ".zerox/verification/conversation-disclosure/CD08-full-gates.md"
+      "archive/disclosure-history/evidence/CD08-full-gates.md"
     || relativePath.startsWith(
-      ".zerox/verification/conversation-disclosure/CD09-",
+      "archive/disclosure-history/evidence/CD09-",
     )
     || relativePath === ".zerox/verification/chat-resilience-local-package.json"
     || relativePath === ".zerox/verification/chat-resilience-local-package.png"
@@ -283,7 +283,7 @@ const CANDIDATE_GENERATED_PUBLICATION_FILES = Object.freeze(
   ),
 );
 if (
-  Object.keys(CONTROL_DIGESTS).length !== 17
+  Object.keys(CONTROL_DIGESTS).length !== 11
   || FINAL_FILES.length !== 73
   || GENERATED_PUBLICATION_FILES.length !== 58
   || CANDIDATE_GENERATED_PUBLICATION_FILES.length !== 56
@@ -824,7 +824,7 @@ await run(nodePath, [executionNpmCliPath, "ls", "--all"], executionRoot, trusted
 await verifyWhitespace(executionRoot, trustedEnvironment);
 await run(
   nodePath,
-  ["scripts/run-conversation-disclosure-acceptance.mjs"],
+  ["archive/disclosure-history/scripts/run-conversation-disclosure-acceptance.mjs"],
   executionRoot,
   trustedEnvironment,
 );
@@ -952,7 +952,7 @@ try {
   const packageReceipt = JSON.parse((
     await captureRepositoryFile(
       repositoryRealpath,
-      ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+      "archive/disclosure-history/evidence/CD09-local-package.json",
     )
   ).bytes.toString("utf8"));
   const [chatResilienceReceipt, planResilienceReceipt] = await Promise.all([
@@ -1092,7 +1092,7 @@ try {
   await writeRepositoryCheckSandbox(temporaryOutput);
   await run(
     nodePath,
-    ["scripts/check-conversation-disclosure-successor-program.mjs"],
+    ["archive/disclosure-history/scripts/check-conversation-disclosure-successor-program.mjs"],
     repositoryRealpath,
     anchorEnvironment,
   );
@@ -1125,7 +1125,7 @@ try {
   await writeRepositoryCheckSandbox(options.output);
   await run(
     nodePath,
-    ["scripts/check-conversation-disclosure-successor-program.mjs"],
+    ["archive/disclosure-history/scripts/check-conversation-disclosure-successor-program.mjs"],
     repositoryRealpath,
     publishedEnvironment,
   );
@@ -1338,7 +1338,7 @@ async function verifyCompletedOutputs(
   }
   const packageReceiptCapture = await captureRepositoryFile(
     targetRepositoryRoot,
-    ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+    "archive/disclosure-history/evidence/CD09-local-package.json",
   );
   const packageReceipt = JSON.parse(
     packageReceiptCapture.bytes.toString("utf8"),
@@ -2052,7 +2052,7 @@ async function runLifecyclePublicationSelfTest() {
   ));
   const programPath = path.join(
     testRoot,
-    ".zerox/conversation-disclosure-program.json",
+    "archive/disclosure-history/program/conversation-disclosure-program.json",
   );
   const featureListPath = path.join(testRoot, ".zerox/feature_list.json");
   try {
@@ -4980,7 +4980,7 @@ function requiresElectronSandbox(command, args) {
       && args[1] === "run"
       && args[2] === "smoke:prod"
     )
-    || args[0] === "scripts/run-conversation-disclosure-acceptance.mjs"
+    || args[0] === "archive/disclosure-history/scripts/run-conversation-disclosure-acceptance.mjs"
     || command.endsWith(
       `${path.sep}Zerox Agent.app${path.sep}Contents${path.sep}MacOS${
         path.sep
@@ -5543,12 +5543,12 @@ function isAcceptanceInputExcluded(relativePath) {
     return true;
   }
   if (!relativePath.startsWith(
-    ".zerox/verification/conversation-disclosure/",
+    "archive/disclosure-history/evidence/",
   )) {
     return false;
   }
   if (relativePath.startsWith(
-    ".zerox/verification/conversation-disclosure/CD09-scenarios/",
+    "archive/disclosure-history/evidence/CD09-scenarios/",
   )) {
     return true;
   }
@@ -5613,7 +5613,7 @@ function isAllowedExecutionMutation(relativePath, allowedPrefixes) {
     relativePath === prefix
     || relativePath.startsWith(`${prefix}${path.sep}`)
     // A directory-level event on an ancestor of an allowed generated file
-    // (e.g. creating ".zerox/verification/conversation-disclosure/CD09-scenarios"
+    // (e.g. creating "archive/disclosure-history/evidence/CD09-scenarios"
     // before writing its children) is an expected side effect of producing
     // that allowed output, so treat allowed-prefix ancestors as allowed too.
     || prefix.startsWith(`${relativePath}${path.sep}`),
@@ -5662,7 +5662,7 @@ function expectedCommandMutationPrefixes(args, cwd) {
   if (
     joined.includes("\0run\0verify")
     || joined.includes("\0run\0smoke:prod")
-    || args[0] === "scripts/run-conversation-disclosure-acceptance.mjs"
+    || args[0] === "archive/disclosure-history/scripts/run-conversation-disclosure-acceptance.mjs"
     || args[0] === "scripts/package-local-candidate.mjs"
   ) {
     prefixes.push(...GENERATED_BUILD_DIRECTORIES, "node_modules/.vite");
@@ -5673,7 +5673,7 @@ function expectedCommandMutationPrefixes(args, cwd) {
       GENERATED_NATIVE_CACHE_PATH,
     );
   }
-  if (args[0] === "scripts/run-conversation-disclosure-acceptance.mjs") {
+  if (args[0] === "archive/disclosure-history/scripts/run-conversation-disclosure-acceptance.mjs") {
     prefixes.push(...CANDIDATE_GENERATED_PUBLICATION_FILES);
     // Real-app scenarios exercise the PlanStore, which atomically writes
     // (.tmp + rename) transient plan state under .zerox/plans. That directory
@@ -5684,7 +5684,7 @@ function expectedCommandMutationPrefixes(args, cwd) {
   if (args[0] === "scripts/package-local-candidate.mjs") {
     prefixes.push(
       "release-local",
-      ".zerox/verification/conversation-disclosure/CD09-local-package.json",
+      "archive/disclosure-history/evidence/CD09-local-package.json",
     );
   }
   if (args[0] === "scripts/run-chat-resilience-local-package.mjs") {
@@ -5705,7 +5705,7 @@ function commandMutatesNativeAddon(args, cwd) {
   if (!isWithin(executionRoot, cwd)) return false;
   const joined = args.join("\0");
   return joined.includes("\0run\0smoke:prod")
-    || args[0] === "scripts/run-conversation-disclosure-acceptance.mjs"
+    || args[0] === "archive/disclosure-history/scripts/run-conversation-disclosure-acceptance.mjs"
     || args[0] === "scripts/package-local-candidate.mjs";
 }
 
