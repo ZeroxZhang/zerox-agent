@@ -475,6 +475,8 @@ export function createAppContainer(options: {
     options?: ToolUserApprovalRequestOptions,
   ) => Promise<ToolUserApprovalResult>;
   setGoalActive?: (goalId: string, active: boolean) => void;
+  /** Advanced consent switch getter (default OFF): policy_deny auto-lift. */
+  policyDenyOverrideEnabled?: () => boolean;
   conversationCausalStore?: ConversationCausalStore;
   acceptanceValidators?: AcceptanceValidator[];
   chatClientOverride?: ChatClient & StreamingChatClient;
@@ -1311,6 +1313,9 @@ export function createAppContainer(options: {
         auditLog: toolAuditLog(),
         permissionRules: () => kernelPermissionRules,
         requestUserApproval: options.requestToolApproval,
+        ...(options.policyDenyOverrideEnabled
+          ? { policyDenyOverrideEnabled: options.policyDenyOverrideEnabled }
+          : {}),
       }),
     );
   }

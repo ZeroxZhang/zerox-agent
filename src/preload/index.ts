@@ -310,6 +310,10 @@ const buildingAgent = {
     enabled: boolean,
   ): Promise<ToolApprovalModeState> =>
     ipcRenderer.invoke("toolApproval:setGoalModeEnabled", enabled),
+  setPolicyDenyOverrideEnabled: (
+    enabled: boolean,
+  ): Promise<{ ok: boolean; enabled: boolean }> =>
+    ipcRenderer.invoke("toolApproval:setPolicyDenyOverrideEnabled", enabled),
   resolveToolApproval: (input: ResolveToolApprovalInput): Promise<boolean> =>
     ipcRenderer.invoke("toolApproval:resolve", input),
   getPendingToolApprovals: (): Promise<ToolApprovalRequestPayload[]> =>

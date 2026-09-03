@@ -145,6 +145,8 @@ const toolApprovalCoordinator = createToolApprovalCoordinator({
 const container = createAppContainer({
   requestToolApproval: toolApprovalCoordinator.requestUserApproval,
   setGoalActive: toolApprovalCoordinator.setGoalActive,
+  policyDenyOverrideEnabled:
+    toolApprovalCoordinator.getPolicyDenyOverrideEnabled,
   conversationCausalStore,
   ...(disclosureAcceptanceMode.enabled
     ? {
@@ -1140,6 +1142,14 @@ function registerToolApprovalIpcHandlers() {
         "toolApproval:setGoalModeEnabled",
         () => toolApprovalCoordinator.setGoalModeEnabled(Boolean(enabled)),
       );
+    },
+  );
+  ipcMain.handle(
+    "toolApproval:setPolicyDenyOverrideEnabled",
+    (event, enabled: boolean) => {
+      assertTrustedRendererIpcEvent(event);
+      toolApprovalCoordinator.setPolicyDenyOverrideEnabled(Boolean(enabled));
+      return { ok: true, enabled: Boolean(enabled) };
     },
   );
   ipcMain.handle(

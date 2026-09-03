@@ -270,7 +270,11 @@ function canonicalRunContext() {
 function deniedAuthorization() {
   return {
     ok: true as const,
-    decision: { allowed: false as const, reason: "Denied by kernel rule." },
+    decision: {
+      allowed: false as const,
+      kind: "policy_deny" as const,
+      reason: "Denied by kernel rule.",
+    },
     auditEvent: {} as never,
   };
 }

@@ -156,6 +156,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "file_read 路径不在已授权可读目录内。",
+      kind: "policy_deny",
     });
   });
 
@@ -182,6 +183,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "tool_result_read 引用无效。",
+      kind: "invalid_request",
     });
   });
 
@@ -205,6 +207,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "文件路径位于已授权目录内。",
     });
     expect(
@@ -217,6 +220,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "文件路径位于已授权目录内。",
     });
     expect(
@@ -227,6 +231,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "chrome_bookmarks_read Chrome 书签目录不在已授权可读目录内。",
+      kind: "policy_deny",
     });
   });
 
@@ -246,6 +251,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "file_list 路径不在已授权可读目录内。",
+      kind: "policy_deny",
     });
   });
 
@@ -265,6 +271,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "文件路径位于已授权目录内。",
     });
     expect(
@@ -274,6 +281,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "文件路径位于已授权目录内。",
     });
     expect(
@@ -285,6 +293,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "文件路径位于已授权目录内。",
     });
     expect(
@@ -294,6 +303,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "文件路径位于已授权目录内。",
     });
     expect(
@@ -304,6 +314,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "file_apply_moves 根目录不在已授权可写目录内。",
+      kind: "policy_deny",
     });
     expect(
       authorizeToolCall(organizerPolicy, {
@@ -312,6 +323,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "文件路径位于已授权目录内。",
     });
   });
@@ -341,6 +353,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "file_write 路径不在已授权可写目录内。",
+      kind: "policy_deny",
     });
   });
 
@@ -360,6 +373,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "这个任务未允许 web_search。",
+      kind: "policy_deny",
     });
   });
 
@@ -379,6 +393,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "web_fetch URL 域名不在允许列表内。",
+      kind: "policy_deny",
     });
   });
 
@@ -412,6 +427,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "markdown_report_write 路径不在已授权可写目录内。",
+      kind: "policy_deny",
     });
 
     expect(
@@ -421,6 +437,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "citation_coverage_check 仅检查已提供的引用结构。",
     });
   });
@@ -441,6 +458,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "shell_exec command 不匹配已授权模板。",
+      kind: "policy_deny",
     });
   });
 
@@ -455,6 +473,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "路径在已授权范围内。",
     });
     expect(
@@ -471,6 +490,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "git_diff workspaceRoot 不在已授权可读目录内。",
+      kind: "policy_deny",
     });
   });
 
@@ -499,6 +519,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "test_run command 不匹配已授权测试模板。",
+      kind: "policy_deny",
     });
   });
 
@@ -513,6 +534,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "shell_exec command 包含被阻止的 shell 控制符。",
+      kind: "policy_deny",
     });
   });
 
@@ -552,6 +574,7 @@ describe("tool authorization", () => {
       ).toMatchObject({
         allowed: false,
         reason: "shell_exec command 包含被阻止的 shell 控制符。",
+        kind: "policy_deny",
       });
     },
   );
@@ -593,6 +616,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "这个任务未允许读取本地记忆。",
+      kind: "policy_deny",
     });
   });
 
@@ -605,6 +629,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "工具 skill_load 尚未配置授权规则。",
+      kind: "policy_deny",
     });
 
     expect(
@@ -624,6 +649,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "skill_load 请求的技能 onepager 不在本次运行授权技能内。",
+      kind: "policy_deny",
     });
 
     expect(
@@ -643,6 +669,7 @@ describe("tool authorization", () => {
       ),
     ).toMatchObject({
       allowed: true,
+      kind: "allowed",
       reason: "skill_load 已绑定到本次运行授权技能 onepager。",
     });
 
@@ -683,6 +710,7 @@ describe("tool authorization", () => {
     ).toMatchObject({
       allowed: false,
       reason: "skill_resource_list 请求的技能 other-skill 不在本次运行授权技能内。",
+      kind: "policy_deny",
     });
   });
 
@@ -703,6 +731,7 @@ describe("tool authorization", () => {
       ),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "动态工具 organize_preview 已由任务显式允许。",
     });
   });
@@ -724,6 +753,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason:
         "动态工具 remote_source_lookup 来自已允许来源 mcp:research-writer:source-fetcher。",
     });
@@ -737,6 +767,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "工具 remote_source_lookup 尚未配置授权规则。",
+      kind: "policy_deny",
     });
   });
 
@@ -770,6 +801,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+      kind: "sandbox_deny",
     });
   });
 
@@ -801,6 +833,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "file_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
+      kind: "sandbox_deny",
     });
   });
 
@@ -882,6 +915,7 @@ describe("tool authorization", () => {
       ),
     ).toEqual({
       allowed: false,
+      kind: "sandbox_deny",
       reason:
         "test_run 被运行沙箱阻止：workspaceRoot 不在工作区或额外可读目录内。",
     });
@@ -912,6 +946,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "test_run 被运行沙箱阻止：命令执行已禁用。",
+      kind: "sandbox_deny",
     });
   });
 
@@ -952,6 +987,7 @@ describe("tool authorization", () => {
       ),
     ).toEqual({
       allowed: false,
+      kind: "sandbox_deny",
       reason:
         "markdown_report_write 被运行沙箱阻止：路径不在工作区或额外可写目录内。",
     });
@@ -1149,6 +1185,7 @@ describe("tool authorization", () => {
       ),
     ).toEqual({
       allowed: false,
+      kind: "sandbox_deny",
       reason:
         "shell_exec 被运行沙箱阻止：路径 ../outside/secret.txt 不在工作区或额外可读目录内。",
     });
@@ -1222,6 +1259,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: true,
+      kind: "allowed",
       reason: "read_code 仅编排会再次授权的只读工具。",
     });
     expect(
@@ -1239,6 +1277,7 @@ describe("tool authorization", () => {
       }),
     ).toEqual({
       allowed: false,
+      kind: "sandbox_deny",
       reason: "read_code 仅允许内建只读 Worker 来源。",
     });
   });
@@ -1304,6 +1343,7 @@ describe("tool authorization", () => {
       ),
     ).toMatchObject({
       allowed: false,
+      kind: "sandbox_deny",
       reason: expect.stringContaining("test_run 被运行沙箱阻止：网络访问已禁用"),
     });
   });
@@ -1398,6 +1438,7 @@ describe("tool authorization", () => {
       ),
     ).toEqual({
       allowed: false,
+      kind: "sandbox_deny",
       reason:
         "shell_exec 被运行沙箱阻止：路径 /etc/passwd 不在工作区或额外可读目录内。",
     });
@@ -1438,6 +1479,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: "shell_exec command 包含被阻止的 shell 控制符。",
+      kind: "policy_deny",
     });
   });
 
@@ -1482,6 +1524,7 @@ describe("tool authorization", () => {
     ).toEqual({
       allowed: false,
       reason: `shell_exec 被运行沙箱阻止：路径 ${target} 不在工作区或额外可读目录内。`,
+      kind: "sandbox_deny",
     });
   });
 });

@@ -62,6 +62,7 @@ describe("tool authorization service", () => {
       ok: true,
       decision: {
         allowed: true,
+        kind: "allowed",
         reason: "文件路径位于已授权目录内。",
       },
       auditEvent: {
@@ -73,6 +74,7 @@ describe("tool authorization service", () => {
         },
         decision: {
           allowed: true,
+          kind: "allowed",
           reason: "文件路径位于已授权目录内。",
         },
         createdAt: "2026-06-05T08:01:00.000Z",
@@ -375,6 +377,7 @@ describe("tool authorization service", () => {
         taskId: "task_prompt",
         taskName: "Write outside policy",
         deniedReason: "file_write 路径不在已授权可写目录内。",
+        decisionKind: "policy_deny",
         request: {
           toolName: "file_write",
           args: { path: "/Users/demo/Desktop/report.md", content: "done" },
@@ -385,6 +388,7 @@ describe("tool authorization service", () => {
       ok: true,
       decision: {
         allowed: true,
+        kind: "allowed",
         reason: "用户已在弹窗中授权本次 file_write。",
       },
     });
@@ -392,13 +396,14 @@ describe("tool authorization service", () => {
       expect.objectContaining({
         decision: {
           allowed: true,
+          kind: "allowed",
           reason: "用户已在弹窗中授权本次 file_write。",
         },
       }),
     ]);
   });
 
-  it("auto-approves eligible policy denials for scheduled tasks without opening user approval", async () => {
+  it("keeps policy denials denied for scheduled auto tasks by default (strict consent)", async () => {
     const approvalRequests: unknown[] = [];
     const lifecycleEvents: string[] = [];
     const taskStore = createScheduledTaskStore({
@@ -456,13 +461,84 @@ describe("tool authorization service", () => {
     expect(result).toMatchObject({
       ok: true,
       decision: {
-        allowed: true,
-        reason: "自动任务全自动模式已放行 web_search。原始策略：这个任务未允许 web_search。",
+        allowed: false,
+        kind: "policy_deny",
+        reason: "这个任务未允许 web_search。",
       },
       auditEvent: {
         id: "audit_daily_auto",
         decision: {
+          allowed: false,
+          kind: "policy_deny",
+          reason: "这个任务未允许 web_search。",
+        },
+      },
+    });
+  });
+
+  it("auto-approves eligible policy denials for scheduled auto tasks only with the advanced switch ON", async () => {
+    const approvalRequests: unknown[] = [];
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_daily_override",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_daily_override",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      policyDenyOverrideEnabled: () => true,
+      requestUserApproval: async (request) => {
+        approvalRequests.push(request);
+        return {
+          approved: false,
+          reason: "should not ask",
+        };
+      },
+    });
+    await taskStore.create({
+      name: "Daily weather",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: { request: "每天汇报天气" },
+      permissions: {
+        files: { read: [], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    const result = await service.authorize(
+      "task_daily_override",
+      {
+        toolName: "web_search",
+        args: { query: "上海天气" },
+      },
+      {
+        onApprovalRequested: async () => {
+          throw new Error("should not open approval");
+        },
+      },
+    );
+
+    expect(approvalRequests).toEqual([]);
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: true,
+        kind: "allowed",
+        reason: "自动任务全自动模式已放行 web_search。原始策略：这个任务未允许 web_search。",
+      },
+      auditEvent: {
+        id: "audit_daily_override",
+        decision: {
           allowed: true,
+          kind: "allowed",
           reason: "自动任务全自动模式已放行 web_search。原始策略：这个任务未允许 web_search。",
         },
       },
@@ -885,8 +961,108 @@ describe("tool authorization service", () => {
       ),
     ).toEqual({
       allowed: false,
+      kind: "sandbox_deny",
       reason:
         "shell_exec 被运行沙箱阻止：路径 /Users/demo/project 不在工作区或额外可读目录内。",
+    });
+  });
+
+  it("hard-denies macOS-sensitive shell commands even with the advanced switch ON", async () => {
+    const approvalRequests: unknown[] = [];
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_hard_deny",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_hard_deny",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      policyDenyOverrideEnabled: () => true,
+      requestUserApproval: async (request) => {
+        approvalRequests.push(request);
+        return { approved: true, reason: "must not be asked" };
+      },
+    });
+    await taskStore.create({
+      name: "Automation attempt",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: {},
+      permissions: {
+        files: { read: ["/Users/demo"], write: [] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: ["osascript {{script}}"] },
+      },
+    });
+
+    const result = await service.authorize("task_hard_deny", {
+      toolName: "shell_exec",
+      args: { command: "osascript -e 'beep'" },
+    });
+
+    expect(approvalRequests).toEqual([]);
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        kind: "hard_deny",
+        reason: expect.stringContaining("osascript"),
+      },
+    });
+  });
+
+  it("never auto-approves invalid requests even with the advanced switch ON", async () => {
+    const approvalRequests: unknown[] = [];
+    const taskStore = createScheduledTaskStore({
+      configDir,
+      createId: () => "task_invalid",
+      now: () => new Date("2026-06-05T08:00:00.000Z"),
+    });
+    const auditLog = createToolAuditLog({
+      configDir,
+      createId: () => "audit_invalid",
+      now: () => new Date("2026-06-05T08:01:00.000Z"),
+    });
+    const service = createToolAuthorizationService({
+      taskStore,
+      auditLog,
+      policyDenyOverrideEnabled: () => true,
+      requestUserApproval: async (request) => {
+        approvalRequests.push(request);
+        return { approved: true, reason: "must not be asked" };
+      },
+    });
+    await taskStore.create({
+      name: "Malformed writer",
+      skillName: "",
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00" },
+      input: {},
+      permissions: {
+        files: { read: ["/Users/demo"], write: ["/Users/demo/Downloads"] },
+        web: { search: false, fetchDomains: [] },
+        shell: { commands: [] },
+      },
+    });
+
+    const result = await service.authorize("task_invalid", {
+      toolName: "file_write",
+      args: { content: "no path given" },
+    });
+
+    expect(approvalRequests).toEqual([]);
+    expect(result).toMatchObject({
+      ok: true,
+      decision: {
+        allowed: false,
+        kind: "invalid_request",
+      },
     });
   });
 

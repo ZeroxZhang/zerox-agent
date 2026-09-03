@@ -22,6 +22,7 @@ import type {
   ToolUserApprovalRequest,
   ToolUserApprovalResult,
 } from "./toolAuthorizationService";
+import type { ToolAuthorizationDecisionKind } from "../shared/toolPermissions";
 import type { ConversationCausalStore } from "./conversationCausalStore";
 
 export type ToolApprovalCoordinator = ReturnType<typeof createToolApprovalCoordinator>;
@@ -59,6 +60,7 @@ export function createToolApprovalCoordinator(options: {
   const pending = new Map<string, PendingApproval>();
   let standaloneAutoApprovalEnabled = false;
   let goalModePreferenceEnabled = false;
+  let policyDenyOverrideEnabled = false;
   const activeGoalIds = new Set<string>();
 
   function getAutoApprovalState(): ToolApprovalModeState {
@@ -91,6 +93,7 @@ export function createToolApprovalCoordinator(options: {
     if (state.autoApprovalEnabled) {
       for (const [id, entry] of [...pending]) {
         if (entry.request.risk.requiresConfirmation) continue;
+        if (!canAutoApproveDecision(entry.request.decisionKind)) continue;
         if (!shouldAutoApproveTask(entry.request.taskId)) continue;
         void settlePending(id, {
           approved: true,
@@ -99,7 +102,7 @@ export function createToolApprovalCoordinator(options: {
         }, {
           decisionId: `auto:${id}`,
           outcome: "approved",
-          reasonCode: "auto_approved",
+          reasonCode: autoApproveReasonCode(entry.request.decisionKind),
         });
       }
     }
@@ -176,7 +179,11 @@ export function createToolApprovalCoordinator(options: {
       });
     }
 
-    if (shouldAutoApproveTask(request.taskId) && !payload.risk.requiresConfirmation) {
+    if (
+      shouldAutoApproveTask(request.taskId) &&
+      !payload.risk.requiresConfirmation &&
+      canAutoApproveDecision(payload.decisionKind)
+    ) {
       return settleWithoutWaiter(payload, {
         approved: true,
         reason: `自动授权已放行本次 ${toolName}。`,
@@ -184,7 +191,7 @@ export function createToolApprovalCoordinator(options: {
       }, {
         decisionId: `auto:${payload.id}`,
         outcome: "approved",
-        reasonCode: "auto_approved",
+        reasonCode: autoApproveReasonCode(payload.decisionKind),
       });
     }
 
@@ -227,6 +234,37 @@ export function createToolApprovalCoordinator(options: {
     pending.set(payload.id, entry);
     safeSend("toolApproval:request", payload);
     return resultPromise;
+  }
+
+  /**
+   * Default-strict automatic consent: auto paths approve only
+   * approval_required / allowed / unclassified requests; policy_deny requires
+   * the advanced autoOverridePolicyDeny switch; sandbox_deny, invalid_request
+   * and hard_deny are never auto-approved.
+   */
+  function canAutoApproveDecision(
+    kind: ToolAuthorizationDecisionKind | undefined,
+  ): boolean {
+    if (!kind) return true;
+    if (kind === "policy_deny") return policyDenyOverrideEnabled;
+    if (kind === "approval_required" || kind === "allowed") return true;
+    return false;
+  }
+
+  function autoApproveReasonCode(
+    kind: ToolAuthorizationDecisionKind | undefined,
+  ): string {
+    return kind === "policy_deny"
+      ? "policy_deny_override"
+      : "auto_approved";
+  }
+
+  function setPolicyDenyOverrideEnabled(enabled: boolean): void {
+    policyDenyOverrideEnabled = enabled;
+  }
+
+  function getPolicyDenyOverrideEnabled(): boolean {
+    return policyDenyOverrideEnabled;
   }
 
   function shouldAutoApproveTask(taskId: string): boolean {
@@ -420,6 +458,9 @@ export function createToolApprovalCoordinator(options: {
         ...(request.request.source ? { source: request.request.source } : {}),
       },
       deniedReason: sanitizeToolApprovalIntentLabel(request.deniedReason),
+      ...(request.decisionKind
+        ? { decisionKind: request.decisionKind }
+        : {}),
       argsSummary,
       risk: {
         ...risk,
@@ -532,6 +573,8 @@ export function createToolApprovalCoordinator(options: {
     setAutoApprovalEnabled,
     setGoalModeEnabled,
     setGoalActive,
+    setPolicyDenyOverrideEnabled,
+    getPolicyDenyOverrideEnabled,
     requestUserApproval,
     resolveApproval,
     rejectAllPending,

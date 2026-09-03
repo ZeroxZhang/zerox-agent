@@ -341,6 +341,8 @@ export function AgentChatPanel({
   });
   const { autoApprovalEnabled, goalModeEnabled, autoApprovalLocked } =
     toolApprovalMode;
+  const [policyDenyOverrideEnabled, setPolicyDenyOverrideEnabled] =
+    useState(false);
   const [planModeDecisionOpen, setPlanModeDecisionOpen] = useState(false);
   const [goalPlanMode, setGoalPlanMode] = useState<PlanMode>("direct");
   const [planModelAssignments, setPlanModelAssignments] = useState<PlanModelAssignments>({});
@@ -2521,6 +2523,16 @@ export function AgentChatPanel({
     }
   }
 
+  async function handleSetPolicyDenyOverrideEnabled(enabled: boolean) {
+    setPolicyDenyOverrideEnabled(enabled);
+    try {
+      await window.buildingAgent?.setPolicyDenyOverrideEnabled(enabled);
+    } catch {
+      // Session-local switch; main rejects on trusted-frame failure only.
+      setPolicyDenyOverrideEnabled(!enabled);
+    }
+  }
+
   async function handleSetAutoApprovalEnabled(enabled: boolean) {
     const previousState = toolApprovalMode;
     setToolApprovalMode({
@@ -4260,6 +4272,27 @@ export function AgentChatPanel({
                     ? "普通文件、Shell、网络、安装、构建和测试操作会自动放行；极高危操作仍需确认。"
                     : "当前计划保持只读；极高危操作仍需单独确认。"}
                 </span>
+                <label className="policy-deny-override-toggle">
+                  <input
+                    aria-label="允许自动放行策略拒绝（危险）"
+                    checked={policyDenyOverrideEnabled}
+                    onChange={(event) => {
+                      void handleSetPolicyDenyOverrideEnabled(
+                        event.currentTarget.checked,
+                      );
+                    }}
+                    type="checkbox"
+                  />
+                  <span>允许自动放行策略拒绝（危险）</span>
+                  <span
+                    aria-hidden="true"
+                    className="composer-risk-tooltip"
+                    role="tooltip"
+                  >
+                    开启后，自动任务与目标模式可越过权限策略执行原本被拒绝的调用；
+                    沙箱阻断、硬性拒绝（macOS 敏感命令）与极高危操作仍不受影响。默认关闭。
+                  </span>
+                </label>
               </div>
             ) : null}
           </div>

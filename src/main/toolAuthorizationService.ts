@@ -2,7 +2,10 @@ import path from "node:path";
 import os from "node:os";
 import type { ScheduledTaskStore } from "./taskStore";
 import type { ToolAuditLog } from "./toolAuditLog";
-import { evaluatePermission } from "./kernel/permissionEngine";
+import {
+  evaluatePermission,
+  isCommandDenyListed,
+} from "./kernel/permissionEngine";
 import {
   classifyToolApprovalRisk,
   type ToolApprovalCausalRef,
@@ -12,6 +15,8 @@ import {
   authorizeToolCallWithinRunContext,
   type AuthorizeTaskToolCallResult,
   type TaskPermissionPolicy,
+  type ToolAuthorizationDecision,
+  type ToolAuthorizationDecisionKind,
   type ToolCallRequest,
 } from "../shared/toolPermissions";
 import { analyzeShell, type ShellPlan } from "./tools/shell/shellAnalyzer";
@@ -50,6 +55,8 @@ export type ToolUserApprovalRequest = {
   risk?: ToolApprovalRisk;
   causalRef?: ToolApprovalCausalRef;
   approvalId?: string;
+  /** Machine-readable denial classification that produced this request. */
+  decisionKind?: ToolAuthorizationDecisionKind;
 };
 
 export type ToolUserApprovalResult = {
@@ -75,6 +82,12 @@ export function createToolAuthorizationService(options: {
     request: ToolUserApprovalRequest,
     options?: ToolUserApprovalRequestOptions,
   ) => Promise<ToolUserApprovalResult>;
+  /**
+   * Advanced consent switch (default OFF): when ON, automatic tasks and goal
+   * runs may auto-approve policy_deny calls. Never affects sandbox_deny,
+   * invalid_request, hard_deny, or extreme-risk confirmations.
+   */
+  policyDenyOverrideEnabled?: () => boolean;
 }): ToolAuthorizationService {
   const homeDir = options.homeDir ?? os.homedir();
 
@@ -109,8 +122,9 @@ export function createToolAuthorizationService(options: {
       if (runContext?.runMode === "plan") {
         const planDecision = authorizePlanModeTool(request);
         if (!planDecision.allowed) {
-          const decision = {
+          const decision: ToolAuthorizationDecision = {
             allowed: false,
+            kind: "policy_deny",
             reason: planDecision.reason,
           };
           const auditEvent = await options.auditLog.append({
@@ -144,6 +158,33 @@ export function createToolAuthorizationService(options: {
           ? analyzeShell(String(request.args.command ?? ""), { cwd: commandCwd })
           : undefined;
 
+      // Hard-deny layer: macOS-sensitive automation commands are never
+      // executable through the agent shell, regardless of rules, approval
+      // dialogs, or the advanced consent switch.
+      if (isCommandTool) {
+        const deniedCommand = isCommandDenyListed(
+          String(request.args.command ?? ""),
+        );
+        if (deniedCommand) {
+          const hardDecision: ToolAuthorizationDecision = {
+            allowed: false,
+            kind: "hard_deny",
+            reason:
+              `硬性拒绝：${deniedCommand} 属于 macOS 敏感命令（可能绕过安全控制或自动化系统交互），禁止执行。`,
+          };
+          const auditEvent = await options.auditLog.append({
+            taskId: subject.id,
+            request,
+            decision: hardDecision,
+          });
+          return {
+            ok: true,
+            decision: hardDecision,
+            auditEvent,
+          };
+        }
+      }
+
       const ruleEvaluation = evaluatePermission(
         request,
         resolvePermissionRules(options.permissionRules),
@@ -171,7 +212,7 @@ export function createToolAuthorizationService(options: {
       );
       if (decision.allowed && ruleEvaluation.action === "allow") {
         decision = {
-          allowed: true,
+          ...decision,
           reason: `${formatRuleDecisionReason(ruleEvaluation)} ${decision.reason}`,
         };
       }
@@ -191,10 +232,15 @@ export function createToolAuthorizationService(options: {
         !decision.allowed &&
         task &&
         !risk.requiresConfirmation &&
-        shouldAutoApproveScheduledTask(task, request, decision.reason)
+        shouldAutoApproveScheduledTask(task, request, decision.reason) &&
+        canAutoOverrideDecision(
+          decision.kind,
+          options.policyDenyOverrideEnabled?.() ?? false,
+        )
       ) {
         decision = {
           allowed: true,
+          kind: "allowed",
           reason: `自动任务全自动模式已放行 ${request.toolName}。原始策略：${decision.reason}`,
         };
       }
@@ -211,6 +257,7 @@ export function createToolAuthorizationService(options: {
           deniedReason: risk.requiresConfirmation
             ? risk.reason
             : decision.reason,
+          decisionKind: decision.kind,
           risk,
           ...(authorizeOptions?.approvalContext
             ? { causalRef: authorizeOptions.approvalContext }
@@ -234,12 +281,14 @@ export function createToolAuthorizationService(options: {
         decision = approval.approved
           ? {
               allowed: true,
+              kind: "allowed",
               reason:
                 approval.reason ??
                 `用户已在弹窗中授权本次操作。原始风险：${decision.reason}`,
             }
           : {
               allowed: false,
+              kind: "policy_deny",
               reason:
                 approval.reason ??
                 `用户拒绝授权本次操作。原始风险：${decision.reason}`,
@@ -252,6 +301,7 @@ export function createToolAuthorizationService(options: {
       ) {
         decision = {
           allowed: false,
+          kind: "policy_deny",
           reason: `极高危操作需要用户确认：${risk.reason}`,
         };
       }
@@ -310,11 +360,27 @@ function resolvePermissionRules(
 
 function evaluateRuleDecision(
   evaluation: ReturnType<typeof evaluatePermission>,
-) {
+): ToolAuthorizationDecision {
   return {
     allowed: false,
+    kind: "policy_deny",
     reason: formatRuleDecisionReason(evaluation),
   };
+}
+
+/**
+ * Default-strict automatic consent: unattended paths (scheduled auto tasks,
+ * goal runs) may auto-approve only approval_required calls, or policy_deny
+ * calls when the advanced autoOverridePolicyDeny switch is ON. sandbox_deny,
+ * invalid_request and hard_deny are never auto-lifted.
+ */
+function canAutoOverrideDecision(
+  kind: ToolAuthorizationDecisionKind | undefined,
+  policyDenyOverrideEnabled: boolean,
+): boolean {
+  if (kind === "approval_required") return true;
+  if (kind === "policy_deny") return policyDenyOverrideEnabled;
+  return false;
 }
 
 function formatRuleDecisionReason(

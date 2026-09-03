@@ -72,6 +72,10 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
         reason: truncateAuditString(
           redactCredentialString(input.decision.reason),
         ),
+        // Historical or adapter-sourced rows may lack a classification.
+        kind: input.decision.kind ?? (
+          input.decision.allowed ? "allowed" : "policy_deny"
+        ),
       },
       id: createId(),
       createdAt: now().toISOString(),
@@ -151,6 +155,7 @@ export function createToolAuditLog(options: ToolAuditLogOptions): ToolAuditLog {
         decision: {
           allowed: true,
           reason: "Authorization receipt was consumed for one dispatch.",
+          kind: "allowed",
         },
       }),
       id: `audit_dispatch_${createConversationRequestFingerprint({

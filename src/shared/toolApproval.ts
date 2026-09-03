@@ -1,4 +1,7 @@
-import type { ToolCallRequest } from "./toolPermissions";
+import type {
+  ToolAuthorizationDecisionKind,
+  ToolCallRequest,
+} from "./toolPermissions";
 import type { ToolApprovalCausalRef } from "./conversationCausalSpine";
 export type { ToolApprovalCausalRef } from "./conversationCausalSpine";
 import {
@@ -28,6 +31,8 @@ export type ToolApprovalRequestPayload = {
   risk: ToolApprovalRisk;
   createdAt: string;
   causalRef?: ToolApprovalCausalRef;
+  /** Denial classification that produced this request (auto gates branch on it). */
+  decisionKind?: ToolAuthorizationDecisionKind;
 };
 
 export type ToolApprovalDecisionPayload = {

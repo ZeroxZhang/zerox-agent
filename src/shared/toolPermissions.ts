@@ -76,9 +76,39 @@ export type ToolCallRequest = {
   args: Record<string, unknown>;
 };
 
+export type ToolAuthorizationDecisionKind =
+  | "allowed"
+  | "approval_required"
+  | "policy_deny"
+  | "sandbox_deny"
+  | "invalid_request"
+  | "hard_deny";
+
+/**
+ * Machine-readable classification of an authorization outcome. Interactive
+ * and automatic consent paths branch on kind, never on reason-text regexes:
+ * - policy_deny: permission-policy denial (user may still grant
+ *   interactively; automatic approval may lift it only when the advanced
+ *   autoOverridePolicyDeny switch is ON);
+ * - sandbox_deny: run-sandbox structural block (network/read-only/workspace
+ *   containment) - never auto-lifted, not offered for interactive grant;
+ * - invalid_request: malformed call - never auto-lifted, no interactive grant;
+ * - hard_deny: macOS-sensitive command - never lifted, never offered;
+ * - approval_required: reserved for calls that are safe by policy but need a
+ *   consent decision (future ask-mode paths).
+ */
 export type ToolAuthorizationDecision = {
   allowed: boolean;
   reason: string;
+  /**
+   * Machine-readable classification. Every production path in
+   * ToolAuthorizationService sets it explicitly; test doubles and historical
+   * audit rows may omit it. Consent gates treat an absent kind exactly like
+   * the legacy unclassified behavior (see canAutoOverrideDecision /
+   * coordinator canAutoApproveDecision) - production strictness is guarded by
+   * the kind-matrix tests, not by the type alone.
+   */
+  kind?: ToolAuthorizationDecisionKind;
 };
 
 export type ToolAuditEventInput = {
@@ -302,7 +332,7 @@ export function authorizeToolCall(
     case "tool_result_read":
       return isSafeToolResultRef(String(request.args.ref ?? ""))
         ? allow("允许读取本次运行的工具结果引用。")
-        : deny("tool_result_read 引用无效。");
+        : deny("tool_result_read 引用无效。", "invalid_request");
     case "file_write":
       return authorizeFilePath(
         String(request.args.path ?? ""),
@@ -380,7 +410,7 @@ export function authorizeToolCall(
     case "read_code":
       return request.source === "built-in"
         ? allow("read_code 仅编排会再次授权的只读工具。")
-        : deny("read_code 仅允许内建只读 Worker 来源。");
+        : deny("read_code 仅允许内建只读 Worker 来源。", "sandbox_deny");
     case "markdown_report_write":
       return authorizeFilePath(
         String(request.args.path ?? ""),
@@ -439,7 +469,7 @@ export function authorizeToolCallWithinRunContext(
   }
 
   if (runContext.sandbox.network === "none" && request.toolName.startsWith("web_")) {
-    return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`);
+    return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`, "sandbox_deny");
   }
 
   if (
@@ -447,7 +477,7 @@ export function authorizeToolCallWithinRunContext(
     runContext.sandbox.network === "none" &&
     opts?.shellPlan?.networkAccess
   ) {
-    return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`);
+    return deny(`${request.toolName} 被运行沙箱阻止：网络访问已禁用。`, "sandbox_deny");
   }
 
   if (
@@ -455,7 +485,7 @@ export function authorizeToolCallWithinRunContext(
     request.source &&
     request.source !== "built-in"
   ) {
-    return deny(`${request.toolName} 被运行沙箱阻止：动态工具网络访问已禁用。`);
+    return deny(`${request.toolName} 被运行沙箱阻止：动态工具网络访问已禁用。`, "sandbox_deny");
   }
 
   if (
@@ -466,14 +496,14 @@ export function authorizeToolCallWithinRunContext(
       request.toolName === "chrome_bookmarks_read") &&
     runContext.sandbox.mode === "read_only"
   ) {
-    return deny(`${request.toolName} 被运行沙箱阻止：当前运行是只读沙箱。`);
+    return deny(`${request.toolName} 被运行沙箱阻止：当前运行是只读沙箱。`, "sandbox_deny");
   }
 
   if (
     request.toolName === "shell_exec" &&
     runContext.sandbox.mode === "read_only"
   ) {
-    return deny("shell_exec 被运行沙箱阻止：当前运行是只读沙箱。");
+    return deny("shell_exec 被运行沙箱阻止：当前运行是只读沙箱。", "sandbox_deny");
   }
 
   if (
@@ -484,6 +514,7 @@ export function authorizeToolCallWithinRunContext(
   ) {
     return deny(
       `${request.toolName} 被运行沙箱阻止：无法证明嵌套解释器命令位于工作区内。`,
+      "sandbox_deny",
     );
   }
 
@@ -498,7 +529,7 @@ export function authorizeToolCallWithinRunContext(
     (request.toolName === "shell_exec" || request.toolName === "test_run") &&
     runContext.sandbox.shell === "disabled"
   ) {
-    return deny(`${request.toolName} 被运行沙箱阻止：命令执行已禁用。`);
+    return deny(`${request.toolName} 被运行沙箱阻止：命令执行已禁用。`, "sandbox_deny");
   }
 
   if (
@@ -522,6 +553,7 @@ export function authorizeToolCallWithinRunContext(
     if (outsidePath) {
       return deny(
         `${request.toolName} 被运行沙箱阻止：路径 ${outsidePath} 不在工作区或额外可读目录内。`,
+        "sandbox_deny",
       );
     }
   }
@@ -536,7 +568,7 @@ function authorizeFilePath(
   locationEnv?: LocationResourceEnvironment,
 ): ToolAuthorizationDecision {
   if (!requestedPath) {
-    return deny("文件工具调用缺少 path。");
+    return deny("文件工具调用缺少 path。", "invalid_request");
   }
 
   const env = normalizeLocationEnvironment(locationEnv);
@@ -556,7 +588,7 @@ function authorizeWorkspaceRoot(
   locationEnv?: LocationResourceEnvironment,
 ): ToolAuthorizationDecision {
   if (!workspaceRoot) {
-    return deny("原生工具调用缺少 workspaceRoot。");
+    return deny("原生工具调用缺少 workspaceRoot。", "invalid_request");
   }
 
   const env = normalizeLocationEnvironment(locationEnv);
@@ -577,7 +609,7 @@ function authorizeOrganizerPaths(
 ): ToolAuthorizationDecision {
   const root = getOrganizerRoot(args);
   if (!root) {
-    return deny("文件工具调用缺少 path。");
+    return deny("文件工具调用缺少 path。", "invalid_request");
   }
 
   const paths = getOrganizerRequestPaths(args);
@@ -679,6 +711,7 @@ function authorizeWorkspaceFileRequest(
   const pathLabel = isNativeWorkspaceRootTool ? "workspaceRoot " : "路径";
   return deny(
     `${request.toolName} 被运行沙箱阻止：${pathLabel}不在工作区或额外可${access === "read" ? "读" : "写"}目录内。`,
+    "sandbox_deny",
   );
 }
 
@@ -1018,11 +1051,14 @@ function unique(values: string[]): string[] {
 }
 
 function allow(reason: string): ToolAuthorizationDecision {
-  return { allowed: true, reason };
+  return { allowed: true, reason, kind: "allowed" };
 }
 
-function deny(reason: string): ToolAuthorizationDecision {
-  return { allowed: false, reason };
+function deny(
+  reason: string,
+  kind: ToolAuthorizationDecisionKind = "policy_deny",
+): ToolAuthorizationDecision {
+  return { allowed: false, reason, kind };
 }
 
 function escapeRegExp(value: string): string {

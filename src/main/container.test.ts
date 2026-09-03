@@ -2811,7 +2811,46 @@ describe("app container goal drafts", () => {
     });
   });
 
-  it("allows ordinary git worktree creation when auto approval is enabled", async () => {
+  it("keeps ordinary git worktree creation pending under strict consent until the user approves", async () => {
+    const coordinator = createToolApprovalCoordinator({
+      store: createConversationCausalStore({ configDir: tempDir }),
+      processEpoch: "process:container-test",
+      sendToRenderers() {},
+      createId: () => "approval_strict_worktree",
+      now: () => "2026-06-21T00:00:00.000Z",
+    });
+    coordinator.setAutoApprovalEnabled(true);
+    const container = createAppContainer({
+      requestToolApproval: coordinator.requestUserApproval,
+    });
+    const repositoryRoot = path.join(tempDir, "untrusted-repo");
+    await createSeedGitRepository(repositoryRoot);
+
+    const worktreePromise = container.requestGitWorktreeAgentWorkspace({
+      name: "Strict-consent worktree",
+      repositoryRoot,
+      branch: "codex/strict-consent-worktree",
+    });
+
+    // Default strict consent: an unconfigured workspace tool is a policy_deny
+    // and is NOT auto-approved by auto mode; it waits for explicit approval.
+    let pending: ReturnType<typeof coordinator.pendingSnapshot> = [];
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      pending = coordinator.pendingSnapshot();
+      if (pending.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(pending.length).toBeGreaterThan(0);
+    await expect(
+      coordinator.resolveApproval({
+        id: pending[0].id,
+        approved: true,
+      }),
+    ).resolves.toBe(true);
+    await expect(worktreePromise).resolves.toBeDefined();
+  });
+
+  it("auto-approves ordinary git worktree creation only with the policy-deny override switch ON", async () => {
     const coordinator = createToolApprovalCoordinator({
       store: createConversationCausalStore({ configDir: tempDir }),
       processEpoch: "process:container-test",
@@ -2820,8 +2859,11 @@ describe("app container goal drafts", () => {
       now: () => "2026-06-21T00:00:00.000Z",
     });
     coordinator.setAutoApprovalEnabled(true);
+    coordinator.setPolicyDenyOverrideEnabled(true);
     const container = createAppContainer({
       requestToolApproval: coordinator.requestUserApproval,
+      policyDenyOverrideEnabled:
+        coordinator.getPolicyDenyOverrideEnabled,
     });
     const repositoryRoot = path.join(tempDir, "untrusted-repo");
     await createSeedGitRepository(repositoryRoot);
