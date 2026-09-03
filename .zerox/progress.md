@@ -15021,3 +15021,24 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `sha256:78dc7a10fa8bafced0003a628ab8deab75fbe3cd61d02cee4d10461c91244633`
   and
   `sha256:ba8793d9339da9235ebd8708f1d1c9696f5d37736f4d488c99493c8318ca2f06`.
+## Phase 6 finalize: stores + goal-ops extraction from container factory
+
+- Files: `src/main/container.ts` 2781 -> 1491 lines (<=1500); new
+  `src/main/container/stores.ts` (1426) owns the lazy store registry,
+  store accessors, agent tool executor, model/profile/client runtimes and
+  their module-local `lazy` helper; new `src/main/container/goalOps.ts`
+  (304) owns goal draft/confirm/discard/operation wrappers, tool-result
+  ref reads, and memory/agent eval runners. Runtimes receive narrow `rt`
+  objects (`StoresRuntime` / `GoalOpsRuntime`); disclosure, planOps,
+  taskRuns, and chatSessions runtime wiring is unchanged; shutdown drain
+  now flushes module-owned stores through destructured accessors instead
+  of the container lazy registry.
+- Boundary tests updated to the new code owner:
+  `src/shared/productionKernelBoundary.test.ts` and
+  `src/shared/chatStorageBoundary.test.ts` now read container.ts plus
+  container/stores.ts.
+- Evidence: `npx tsc -p tsconfig.electron.json --noEmit` exit 0;
+  `npx eslint` clean on the three container files; `npm test` (Node 22):
+  319 files passed, 3815 tests passed, 6 skipped;
+  `src/main/container.test.ts` 96/96; `npm run harness:check` product
+  contract and all program checkers passed. Commit `57342b9`.
