@@ -1,5 +1,37 @@
 # Zerox Harness Progress
 
+## 2026-09-03 - Engineering hardening: toolchain pin, invariants, CI dedupe, layering fix
+
+- Architecture/engineering review (three read-only surveys: source metrics,
+  engineering infrastructure, .zerox governance; report kept in
+  `.tmp_arch-review-2026-09-03.md`, gitignored).
+- `chore 0c08acc` pins the toolchain: `.nvmrc` = 22 plus
+  `engines.node ">=22.0.0 <23"` (CI/acceptance run Node 22; local Node 24
+  produced environment-only test noise and native-ABI confusion), and rebinds
+  the acceptance-anchor `CONTROL_DIGESTS` for package.json / package-lock.json
+  per the packageScripts.test regression lock.
+- `docs 235bc21` codifies empirically validated repository invariants in
+  `docs/architecture/engineering-invariants.md` (root process docs, HANDOFF
+  completion artifacts and .superpowers are digest-pinned; .gitignore drift;
+  Node 22/24 ABI trap; local failure-set-equivalence test method) and updates
+  AGENTS.md fast-start to detect completed programs instead of the stale
+  release-program.json; `.gitignore` now whitelists `docs/architecture`.
+- `ci 4957ea7` extracts the duplicated .zerox chmod normalization from
+  verify.yml/release.yml into the `normalize-evidence` composite action. npm
+  test was deliberately NOT added to sealed-main/release gates: the
+  ciWorkflow.test regression lock codifies deterministic sealed gates without
+  npm test (full suite stays on pull requests) - documented in invariants §5.
+- `refactor bd4591c` removes the only product-code shared -> main import:
+  ToolDefinition moves to `src/shared/toolDefinition.ts`, re-exported by
+  main/openAiCompatibleClient; the tsconfig-enforced layering is now
+  import-clean.
+- Evidence: electron/renderer/tests tsconfigs all typecheck clean; strict test
+  type coverage 437/437; targeted suites pass (conversationDisclosureProgram
+  66/66, agentProtocol+program 83/83, ciWorkflow+packageScripts 24/24); full
+  `npm test` on Node 24 yields 14 unique failures, a strict subset of the
+  pre-change environment baseline (19, Seatbelt family) - zero new failures.
+
+
 ## 2026-09-02 - v3.9.3-line CI-platform hardening (merged to main)
 
 - Fixed the 4th latent CI gap: the PR verify gate ran npm run verify on ubuntu
