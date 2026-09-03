@@ -11,6 +11,15 @@
 - Evidence: npm test 全量 319 passed | 1 skipped (320 files)，3810 passed | 6 skipped；npm run harness:check exit=0（本地无 secret）；元测试 26/26。
 - 体量：scripts/ 183→41；.zerox/ 296→73；测试文件 437→320。
 - Commits: 6275774（归档+门禁）、ee99c5f（锚花名册改指+元测试对齐）。
+
+## 2026-09-03 - Phase 4: 同意模型修复（完成主体）
+
+- 结构化 deny kind：ToolAuthorizationDecision 增加 kind（allowed/approval_required/policy_deny/sandbox_deny/invalid_request/hard_deny）；toolPermissions.ts 全部生产 deny 站点按语义分类；授权路径按 kind 分支，不再用中文正则判别（删除 toolAuthorizationService 的 /缺少|必填|必须是有效/ 判别在自动放行中的角色）。
+- 默认严格：定时自动任务与 goal 模式不再自动放行 policy_deny；新增高级开关 autoOverridePolicyDeny（默认关、会话级、IPC toolApproval:setPolicyDenyOverrideEnabled、composer 风险区危险复选框），开启后恢复 policy_deny 自动放行（仅自动路径）。
+- sandbox_deny/invalid_request/hard_deny 永不被自动放行、不提供交互授权；macOS 敏感命令黑名单复活为 hard_deny 预检（ToolAuthorizationService 顶部，规则评估前；无弹窗、高级开关也不豁免）。
+- 协调器双自动放行点（publishModeState/requestUserApproval）与服务的语义一致，覆盖记录 reasonCode policy_deny_override；审计事件携带 kind（历史行按 allowed 回填）。
+- 测试：kind 矩阵（严格默认拒绝 / 开关开启放行 / hard_deny 豁免 / invalid_request 永不）；容器 worktree 严格 vs 覆盖双用例；toolPermissions 53/53、service 21/21、container 96/96；全量 3814 passed / 0 failed；三工程 tsc 全净。
+- Commit: e7bf173。剩余：skill 执行移出主进程（验收 ⑤ 末项）。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
