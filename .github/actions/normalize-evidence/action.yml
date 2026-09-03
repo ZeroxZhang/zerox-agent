@@ -1,0 +1,12 @@
+name: Normalize governance evidence modes
+description: >-
+  Make .zerox evidence file modes deterministic (0644, with 0600 on
+  CD03A round permission files) so digest computations are host-independent.
+runs:
+  using: composite
+  steps:
+    - name: Normalize governance evidence modes
+      shell: bash
+      run: |
+        find .zerox -type f -exec chmod 0644 {} +
+        chmod 0600 .zerox/verification/conversation-disclosure/CD03A-round*

@@ -39,9 +39,7 @@ jobs:
         run: npm ci
 
       - name: Normalize governance evidence modes
-        run: |
-          find .zerox -type f -exec chmod 0644 {} +
-          chmod 0600 .zerox/verification/conversation-disclosure/CD03A-round*
+        uses: ./.github/actions/normalize-evidence
 
       - name: Verify source tree
         env:
