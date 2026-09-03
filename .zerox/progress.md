@@ -51,6 +51,13 @@
 
 - 工厂内部测绘完成（guided 生态/executeMessageInternal/kernelTurn/respond 等当前行号）；手工逐片依赖分析成本过高。
 - 启动两个配方式闭包切片代理：b1548e8d（chatService guided-input 生态 → chatService/guidedInput.ts，rt 接口方案）、96c474dc（container chat/session 簇 → container/chatSessions.ts）；指令含逐字复制函数体、首 12 次工具调用内落盘、tsc+单测守门。耐心窗口 ≥2 轮。
+
+## 2026-09-03 - Round 14: chatService 工厂闭包拆分完成（验收④核心达成）
+
+- createChatService 从单一闭包拆为三个运行时组合：guidedInput.ts（引导输入生态，Round 13）、kernelTurn.ts（executeMessageWithKernel + sendMessageInternal，673 行）、legacyTurn.ts（executeMessageInternal，3057 行）；rt 接口线程化全部闭包依赖（state 映射按引用、options、回调、TDZ 规避的惰性委托）。
+- chatService.ts 5178 → 718 行（≤1500 ✓）；外部表面保持（respondSkillInput/sendMessage + 类型再导出）；productionKernelBoundary 元测试改指 kernelTurn.ts。Commit 3d530d1。
+- Evidence：npm test 319 passed | 1 skipped（3815/3821）；tests/renderer/electron tsc 全净；eslint 0。
+- 剩余：legacyTurn.ts 3057 行需二分（≤1500 精神）；container.ts 6382 行工厂闭包按域拆分（chat/goal/plan/disclosure/agents 簇，同 rt 模式）。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
