@@ -15042,3 +15042,21 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   319 files passed, 3815 tests passed, 6 skipped;
   `src/main/container.test.ts` 96/96; `npm run harness:check` product
   contract and all program checkers passed. Commit `57342b9`.
+## 字面口径 ④ 收口进度（2026-09-03 深夜轮次）
+
+- planOps.ts 1756 → 104 行（复合），三个域子模块：planAdoptionRuntime
+  (1015)、planReplansRuntime (426)、planAmendmentsRuntime (408)；
+  tsc/eslint 干净，container.test.ts 96/96，commit 75b365f。
+- legacyTurn.ts 切分启动：勘察文档 .zerox/legacyTurn-split-plan.md
+  (commit 1e205a0)；切片 (a) persistAssistantReply →
+  chatService/legacyPersistStage.ts（rt getter 模式），调用点 9 处改接；
+  legacyTurn.ts 3057 → 2944 行；tsc/eslint 干净、chatService.test.ts
+  176/176，commit 2fb6e62。
+- 下一片（计划 (b)）：171-351 helper 簇（invalidate/interrupt/
+  compensate/persistChatStatusEvent，182 行）自由变量面已扫描：
+  options/sessionId/requestId/currentCausalAttempt/publicationAuthority/
+  internalOptions/pendingContinuations 约 7 个闭包引用，适合同款 rt 外移；
+  之后按文档顺序 stage-settle / stage-agent-run / stage-simple-chat。
+- 17 个存量 >1500 产品文件（planDebateOrchestrator 3278、
+  agentToolExecutor 2831、conversationDisclosureAcceptanceDriver 4178
+  等）按用户口径登记为范围外 backlog，不在本迭代拆分。
