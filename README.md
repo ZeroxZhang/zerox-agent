@@ -778,6 +778,18 @@ npm run release:publish -- "/absolute/path/to/release-notes.md"
 - [Plan Debate user-path acceptance](docs/design/zerox-agent-3-8-0-debate-user-path-acceptance.md)
 - [v3.8.1 model and conversation UX](docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md)
 
+## Development and testing
+
+- Toolchain: Node 22 pinned (.nvmrc, engines). After switching Node versions
+  run `npm rebuild better-sqlite3`.
+- Test gate: `npm test` runs the full live-tree suite through plain vitest
+  (no historical state rewinding). `npm run test:watch` for watch mode - both
+  share the same semantics.
+- Governance gates: `npm run harness:check` and `npm run program:check` run
+  green locally without secrets.
+- Lint: `npm run lint` (eslint flat config: layer boundaries + type hygiene).
+- Full pre-push check: `npm run verify`.
+
 ## License
 
 ISC
