@@ -29,6 +29,14 @@
 - release-runbook 重写：attestation 通道冻结说明、本地全量门禁流程、无 CD03A 0600 特例、sealed 列表锁定说明。Commit cb997b2。
 - 死代码清理（验收⑦部分）：agentOrchestrator.ts + 其测试删除（零生产引用）；drizzle-orm 卸载（零 import）；锚 CONTROL_DIGESTS 刷新。Commit 7865636。
 - Evidence：npm test 318 passed | 1 skipped（3813/3819）exit 0；harness:check exit 0；meta 26/26；体量 scripts 41 / .zerox 54。
+
+## 2026-09-03 - Round 6: IPC 注册表 + eslint 门禁 + chatService 首切片
+
+- IPC 频道单一注册表（验收⑦完成）：src/shared/ipcChannels.ts 为唯一权威注册表（IPC_CHANNELS 5 + ALL_IPC_CHANNELS 113），守护测试扫描 main/preload 全部注册/调用/推送字面量，任何未注册频道即红；118 项唯一性 + 确定性键名。Commit e9011ab。
+- eslint 门禁（Phase 7 完成）：eslint.config.mjs（type 卫生 ban-ts-comment/no-explicit-any + 分层 no-restricted-imports 与 tsconfig include 对齐、测试豁免 + legacy 噪音 off-list）；npm run lint --max-warnings 0 全绿；清理 5 处失效 disable 指令。Commit aa0dbde。
+- chatService 拆分启动（验收④进行中）：streamingStatus.ts（createChatStatusEmitter + 模型流管道，字节级一致提取）+ kernelSettlement.ts（settlement ids/指纹 + kernel 状态助手），8743→8275 行；createRequiredChatEventFingerprint 从 chatService.ts 再导出保持外部导入面。Commit aa0dbde。
+- eslint 安装后锚 CONTROL_DIGESTS 刷新（package.json/package-lock.json）。
+- Evidence：npm test 319 passed | 1 skipped（3815/3821）exit 0；eslint 0 问题；三工程 tsc 全净。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
