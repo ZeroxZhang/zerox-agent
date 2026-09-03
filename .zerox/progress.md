@@ -20,6 +20,15 @@
 - 协调器双自动放行点（publishModeState/requestUserApproval）与服务的语义一致，覆盖记录 reasonCode policy_deny_override；审计事件携带 kind（历史行按 allowed 回填）。
 - 测试：kind 矩阵（严格默认拒绝 / 开关开启放行 / hard_deny 豁免 / invalid_request 永不）；容器 worktree 严格 vs 覆盖双用例；toolPermissions 53/53、service 21/21、container 96/96；全量 3814 passed / 0 failed；三工程 tsc 全净。
 - Commit: e7bf173。剩余：skill 执行移出主进程（验收 ⑤ 末项）。
+
+## 2026-09-03 - Phase 3 收尾 + Phase 4 末项 + Phase 7 部分（完成）
+
+- skill 执行移出主进程（验收⑤末项）：executeSkill script 模式不再在主进程 import()；与 skill tool 统一走受限 detached node -e worker（IPC + 允许清单 env + 10 分钟硬超时 SIGTERM→SIGKILL + abort 传播 + 日志回传）；包含性校验仍在父进程先做。Commit 93fc70a；skill 相关套件 15/15。
+- 根目录过程文档归档：HANDOFF 全族 10 份 + release blocker + findings/task_plan/progress（root）共 13 份 → archive/disclosure-history/root-docs/（已无运行时读取者）。Commit 61062e0。
+- engineering-invariants.md 整体重写为优化后现实（Node22/ABI、vitest 活树确定性、治理面、含 npm test 的 sealed 门禁、kind 约定、hygiene 实测 0 匹配、已验证本地基线）。Commit cb997b2。
+- release-runbook 重写：attestation 通道冻结说明、本地全量门禁流程、无 CD03A 0600 特例、sealed 列表锁定说明。Commit cb997b2。
+- 死代码清理（验收⑦部分）：agentOrchestrator.ts + 其测试删除（零生产引用）；drizzle-orm 卸载（零 import）；锚 CONTROL_DIGESTS 刷新。Commit 7865636。
+- Evidence：npm test 318 passed | 1 skipped（3813/3819）exit 0；harness:check exit 0；meta 26/26；体量 scripts 41 / .zerox 54。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
