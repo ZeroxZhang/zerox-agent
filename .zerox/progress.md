@@ -37,6 +37,20 @@
 - chatService 拆分启动（验收④进行中）：streamingStatus.ts（createChatStatusEmitter + 模型流管道，字节级一致提取）+ kernelSettlement.ts（settlement ids/指纹 + kernel 状态助手），8743→8275 行；createRequiredChatEventFingerprint 从 chatService.ts 再导出保持外部导入面。Commit aa0dbde。
 - eslint 安装后锚 CONTROL_DIGESTS 刷新（package.json/package-lock.json）。
 - Evidence：npm test 319 passed | 1 skipped（3815/3821）exit 0；eslint 0 问题；三工程 tsc 全净。
+
+## 2026-09-03 - Round 8-10: 亲自执行工厂外部模块提取（Phase 6）
+
+- 判定：文件改动子代理在 2+ 轮内无落盘（多次中断），改为全部亲自执行。
+- chatService 大块提取：文件级纯函数 5107-EOF（~3.2k 行，逐函数显式 options 参数、零闭包引用）→ chatService/modulesettlement.ts / moduleruntime.ts / modulemessages.ts；tsc 驱动修引用（含 export 标记、跨目录相对路径、动态 import 类型深度）；外部导入面保持（5 个再导出名）。Commit 0a700c3。
+- container 尾部提取：6356-EOF（568 行）→ container/helpers.ts；同样管线修复。Commit ad3c3c2。
+- 现状：chatService.ts 8275→5178；container.ts 6922→6355；模块文件均 <1500（max 1435）。
+- Evidence：npm test 319 passed | 1 skipped（3815/3821）；electron/renderer/tests tsc 全净；eslint 0。
+- 剩余（验收④）：两个工厂闭包体（chatService ~5.1k、container ~5.8k）按域切片外移（上下文对象方案），目标各 ≤1500。
+
+## 2026-09-03 - Round 11-12: 闭包切片代理执行中
+
+- 工厂内部测绘完成（guided 生态/executeMessageInternal/kernelTurn/respond 等当前行号）；手工逐片依赖分析成本过高。
+- 启动两个配方式闭包切片代理：b1548e8d（chatService guided-input 生态 → chatService/guidedInput.ts，rt 接口方案）、96c474dc（container chat/session 簇 → container/chatSessions.ts）；指令含逐字复制函数体、首 12 次工具调用内落盘、tsc+单测守门。耐心窗口 ≥2 轮。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
