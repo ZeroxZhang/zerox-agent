@@ -6,7 +6,8 @@ const root = process.cwd();
 
 describe("production Kernel boundary", () => {
   it("cuts over Scheduled Task, Chat, and Goal execution", () => {
-    const container = read("src/main/container.ts");
+    const container = read("src/main/container.ts")
+      + read("src/main/container/stores.ts");
     const runtime = read("src/main/agentRuntimeEngine.ts");
     const goal = read("src/main/goalRuntimeEngine.ts");
     const chat = read("src/main/chatService.ts");

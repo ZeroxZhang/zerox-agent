@@ -6,7 +6,8 @@ const root = process.cwd();
 
 describe("production Chat storage boundary", () => {
   it("uses SQLite Chat storage independently of the legacy global default", () => {
-    const container = read("src/main/container.ts");
+    const container = read("src/main/container.ts")
+      + read("src/main/container/stores.ts");
 
     expect(container).toContain('backend: "sqlite"');
     expect(container).toContain("storage: sqlite");

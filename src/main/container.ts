@@ -1,5 +1,7 @@
+import { createStoresRuntime } from "./container/stores";
 import { createTaskRunRuntime } from "./container/taskRuns";
 import { createPlanOpsRuntime } from "./container/planOps";
+import { createGoalOpsRuntime } from "./container/goalOps";
 import { createDisclosureRuntime } from "./container/disclosure";
 import { createChatSessionsRuntime } from "./container/chatSessions";
 import { prepareInterruptedGoalForResume } from "./container/helpers";
@@ -544,6 +546,46 @@ export function createAppContainer(options: {
     return storageBackend() === "json" ? null : storage();
   }
 
+  const kernelRulesHolder = { value: [] as PermissionRule[] };
+  let runtimeShuttingDown = false;
+  let mcpInitializationPromise: Promise<void> | null = null;
+  let mcpInitializationTail: Promise<void> = Promise.resolve();
+
+
+  const stores = createStoresRuntime({
+    configDir,
+    skillsDir,
+    appMeta,
+    options,
+    storage,
+    storageBackend,
+    activeSqliteStorage,
+    kernelRules: kernelRulesHolder,
+    scheduledTaskStore,
+    toolAuditLog,
+    modelConnectionService,
+    agentValidationStore,
+    modelSettingsStore: () => modelSettingsStore,
+    createToolExecutor,
+    processSandboxProvider,
+    taskRuns: () => taskRuns,
+    planOps: () => planOps,
+    emitGoalProgressEvent,
+    disclosure: { loadConversationDisclosureReadSet: (...a: Parameters<typeof disclosure.loadConversationDisclosureReadSet>) => disclosure.loadConversationDisclosureReadSet(...a), authorizeConversationEvidenceTarget: (...a: Parameters<typeof disclosure.authorizeConversationEvidenceTarget>) => disclosure.authorizeConversationEvidenceTarget(...a), resolveConversationEvidence: (...a: Parameters<typeof disclosure.resolveConversationEvidence>) => disclosure.resolveConversationEvidence(...a) },
+  } as unknown as Parameters<typeof createStoresRuntime>[0]);
+  const { toolAuthorizationService, kernelEventBus, productionKernelDriver, chatProductionKernelDriver, goalProductionKernelDriver, agentRunStore, agentExecutionStore, agentTrajectoryStore, agentGoalStore, agentWorkspaceStore, workspaceRunStore, conversationCausalStore, conversationDisclosureMaterializer, conversationEvidenceResolver, agentWorkspaceService, requestGitWorktreeAgentWorkspace, multiAgentSessionStore, planStore, planArtifactWriter, planDebateOrchestrator, memoryProfileStore, toolResultOffloadStore, agentLearningStore, agentEvalCandidateStore, promotedAgentEvalFixtureStore, chatSessionStore, memoryStore, historyIndexStore, agentLearningService, agentEvalCandidateService, multiAgentCoordinator, taskSchedulerService, getModelProfile, toRuntimeModelProfile, resolveGoalModelSettings, getGoalModelProfile, goalChatClient, getGoalProvider, chatClient, getProvider, modelRouter, shellAnalyzer, toolWorker, checkpointRepository, memoryRepository, compactionStrategy, runRepository, actorRuntime, checkpointWriterOrchestrator, workflowRuntime, sessionRepository, selfImprovementService, agentBootstrapService, agentRunnerService, agentGoalValidatorRegistry, agentGoalAcceptance, agentGoalController, goalChatService, agentGoalTranslator, goalDraftService, getAvailableToolNames, dedupeStrings, chatService, memoryIngestionService } = stores;
+  const goalOps = createGoalOpsRuntime({
+    runtimeShuttingDown: () => runtimeShuttingDown,
+    trackRuntimeInvocation,
+    planOps: () => planOps,
+    goalDraftService,
+    agentGoalStore,
+    agentTrajectoryStore,
+    toolResultOffloadStore,
+    memoryStore,
+    promotedAgentEvalFixtureStore,
+  } as unknown as Parameters<typeof createGoalOpsRuntime>[0]);
+  const { createGoalDraft, confirmGoalDraft, discardGoalDraft, runGoalOperation, readToolResultRef, runMemoryEvals, runAgentQualityEvals } = goalOps;
   async function runProductionStorageSmoke() {
     const requestedBackend = resolveStorageBackend();
     const resolvedBackend = storageBackend();
@@ -1032,1115 +1074,19 @@ export function createAppContainer(options: {
     );
   }
 
-  function toolAuthorizationService() {
-    return lazy("toolAuthorizationService", () =>
-      createToolAuthorizationService({
-        taskStore: scheduledTaskStore(),
-        auditLog: toolAuditLog(),
-        permissionRules: () => kernelPermissionRules,
-        requestUserApproval: options.requestToolApproval,
-        ...(options.policyDenyOverrideEnabled
-          ? { policyDenyOverrideEnabled: options.policyDenyOverrideEnabled }
-          : {}),
-      }),
-    );
-  }
-
-  function kernelEventBus() {
-    return lazy("kernelEventBus", () => new KernelEventBus());
-  }
-
-  function productionKernelDriver(
-    mode: "scheduled_task" | "chat" | "goal" = "scheduled_task",
-  ) {
-    if (!productionKernelCovers(
-      readFeatureFlags().ZEROX_PRODUCTION_KERNEL,
-      mode,
-    )) {
-      return undefined;
-    }
-    return lazy("productionKernelDriver", () =>
-      createProductionKernelDriver({
-        bus: kernelEventBus(),
-      }),
-    );
-  }
-
-  function chatProductionKernelDriver() {
-    return productionKernelDriver("chat");
-  }
-
-  function goalProductionKernelDriver() {
-    return productionKernelDriver("goal");
-  }
-
   function setKernelPermissionRules(rules: PermissionRule[]): {
     ok: true;
     count: number;
   } {
-    kernelPermissionRules = [...rules];
-    return { ok: true, count: kernelPermissionRules.length };
+    kernelRulesHolder.value = [...rules];
+    return { ok: true, count: kernelRulesHolder.value.length };
   }
-
-  function agentRunStore() {
-    return lazy("agentRunStore", () =>
-      createAgentRunStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
-    );
-  }
-
-  function agentExecutionStore() {
-    return lazy("agentExecutionStore", () =>
-      createAgentExecutionStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-      }),
-    );
-  }
-
-  function agentTrajectoryStore() {
-    return lazy("agentTrajectoryStore", () =>
-      createAgentTrajectoryStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
-    );
-  }
-
-  function agentGoalStore() {
-    return lazy("agentGoalStore", () =>
-      createAgentGoalStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-      }),
-    );
-  }
-
-  function agentWorkspaceStore() {
-    return lazy("agentWorkspaceStore", () =>
-      createAgentWorkspaceStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-      }),
-    );
-  }
-
-  function workspaceRunStore() {
-    return lazy("workspaceRunStore", () => createWorkspaceRunStore({ configDir }));
-  }
-
-  function conversationCausalStore() {
-    return options.conversationCausalStore
-      ?? lazy("conversationCausalStore", () =>
-        createConversationCausalStore({ configDir }),
-      );
-  }
-
-  function conversationDisclosureMaterializer() {
-    return lazy("conversationDisclosureMaterializer", () =>
-      createConversationDisclosureMaterializer({
-        load: disclosure.loadConversationDisclosureReadSet,
-      }));
-  }
-
-  function conversationEvidenceResolver() {
-    return lazy("conversationEvidenceResolver", () =>
-      createConversationEvidenceResolver({
-        getCurrentSnapshot: async (scope) =>
-          (await conversationDisclosureMaterializer().refresh(scope)).snapshot,
-        canResolve: disclosure.authorizeConversationEvidenceTarget,
-        backend: {
-          resolve: disclosure.resolveConversationEvidence,
-        },
-      }));
-  }
-
-  function agentWorkspaceService() {
-    return lazy("agentWorkspaceService", () =>
-      createAgentWorkspaceService({
-        workspaceStore: agentWorkspaceStore(),
-        workspaceRoot: path.join(app.getPath("userData"), "workspaces"),
-        consumeToolAuthorizationReceipt: (input) =>
-          toolAuditLog().consumeAuthorizationReceipt(input),
-      }),
-    );
-  }
-
-  async function requestGitWorktreeAgentWorkspace(
-    input: CreateGitWorktreeWorkspaceInput,
-  ) {
-    const canonicalInput = {
-      name: input.name,
-      repositoryRoot: path.resolve(input.repositoryRoot),
-      branch: input.branch,
-    };
-    let createdWorkspace: Awaited<
-      ReturnType<AgentWorkspaceService["createGitWorktreeWorkspace"]>
-    > | null = null;
-    const worktreeRuntime = createToolRuntime({
-      authorizationService: toolAuthorizationService(),
-      toolExecutor: {
-        async execute(request, executionOptions) {
-          const receipt = executionOptions?.authorizationReceipt;
-          if (!receipt) {
-            return {
-              ok: false as const,
-              error: "Git worktree dispatch is missing its authorization receipt.",
-            };
-          }
-          createdWorkspace = await agentWorkspaceService().createGitWorktreeWorkspace({
-            name: String(request.args.name ?? ""),
-            repositoryRoot: String(request.args.repositoryRoot ?? ""),
-            branch: String(request.args.branch ?? ""),
-            approval: {
-              kind: "tool_authorization_receipt",
-              auditEventId: receipt.auditEventId,
-            },
-          });
-          return {
-            ok: true as const,
-            result: { workspaceId: createdWorkspace.id },
-          };
-        },
-      },
-    });
-    const outcome = await worktreeRuntime.execute({
-      taskId: "agent_workspaces",
-      request: {
-        toolName: "git_worktree_add",
-        args: {
-          name: canonicalInput.name,
-          repositoryRoot: canonicalInput.repositoryRoot,
-          branch: canonicalInput.branch,
-        },
-      },
-      authorizationOptions: {
-        runtimeTask: {
-          name: "Create Git worktree workspace",
-          permissions: getDefaultTaskPermissionPolicy(),
-          policyLabel: "Git worktree creation authority",
-        },
-      },
-    });
-
-    if (!outcome.result.ok) {
-      throw new Error(outcome.result.error);
-    }
-    if (!createdWorkspace) {
-      throw new Error("Git worktree dispatch completed without a workspace result.");
-    }
-    return createdWorkspace;
-  }
-
-  function multiAgentSessionStore() {
-    return lazy("multiAgentSessionStore", () =>
-      createMultiAgentSessionStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-      }),
-    );
-  }
-
-  function planStore() {
-    return lazy("planStore", () =>
-      createPlanStore({
-        configDir,
-        ...(activeSqliteStorage()
-          ? { storage: activeSqliteStorage()! }
-          : {}),
-      }),
-    );
-  }
-
-  function planArtifactWriter() {
-    return lazy("planArtifactWriter", () => createPlanArtifactWriter());
-  }
-
-  function planDebateOrchestrator() {
-    return lazy("planDebateOrchestrator", () =>
-      createPlanDebateOrchestrator({
-        planStore: planStore(),
-        artifactWriter: planArtifactWriter(),
-        modelRouter: modelRouter(),
-        investigator: createPlanInvestigatorService({
-          toolExecutor: createToolExecutor(),
-          toolAuthorizationService: toolAuthorizationService(),
-          discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
-        }),
-        discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
-        availableToolNames: () =>
-          createToolExecutor()
-            .getRegistry()
-            .getDefinitions()
-            .map((definition) => definition.function.name),
-        availableAcceptanceKinds: () =>
-          agentGoalValidatorRegistry().listKinds(),
-        enableDirectReview: true,
-        processSandbox: processSandboxProvider(),
-      }),
-    );
-  }
-
-  function memoryProfileStore() {
-    return lazy("memoryProfileStore", () =>
-      createMemoryProfileStore({ configDir, backend: storageBackend(), storage: activeSqliteStorage() ?? undefined }),
-    );
-  }
-
-  function toolResultOffloadStore() {
-    return lazy("toolResultOffloadStore", () => createToolResultOffloadStore({ configDir }));
-  }
-
-  function agentLearningStore() {
-    return lazy("agentLearningStore", () =>
-      createAgentLearningStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-      }),
-    );
-  }
-
-  function agentEvalCandidateStore() {
-    return lazy("agentEvalCandidateStore", () =>
-      createAgentEvalCandidateStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-      }),
-    );
-  }
-
-  function promotedAgentEvalFixtureStore() {
-    return lazy("promotedAgentEvalFixtureStore", () =>
-      createPromotedAgentEvalFixtureStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-      }),
-    );
-  }
-
-  function chatSessionStore() {
-    return lazy("chatSessionStore", () => {
-      const sqlite = storage();
-      if (sqlite) {
-        return createChatSessionStore({
-          configDir,
-          backend: "sqlite",
-          storage: sqlite,
-        });
-      }
-      // SQLite open failure is the only runtime degradation path. The legacy
-      // JSON store remains available without pretending parity succeeded.
-      return createChatSessionStore({ configDir, backend: "json" });
-    });
-  }
-
-  function memoryStore() {
-    return lazy("memoryStore", () =>
-      createMemoryStore({
-        configDir,
-        backend: storageBackend(),
-        storage: activeSqliteStorage() ?? undefined,
-        embeddingService: createModelProfileEmbeddingService({
-          modelSettingsStore,
-        }),
-      }),
-    );
-  }
-
-  function historyIndexStore() {
-    return lazy("historyIndexStore", () =>
-      createHistoryIndexStore({
-        filePath: path.join(configDir, "raw-history.jsonl"),
-      }),
-    );
-  }
-
-  function agentLearningService() {
-    return lazy("agentLearningService", () =>
-      createAgentLearningService({
-        learningStore: agentLearningStore(),
-        memoryStore: memoryStore(),
-      }),
-    );
-  }
-
-  function agentEvalCandidateService() {
-    return lazy("agentEvalCandidateService", () =>
-      createAgentEvalCandidateService({
-        runStore: agentRunStore(),
-        trajectoryStore: agentTrajectoryStore(),
-        candidateStore: agentEvalCandidateStore(),
-        promotedFixtureStore: promotedAgentEvalFixtureStore(),
-      }),
-    );
-  }
-
-  function multiAgentCoordinator() {
-    return lazy("multiAgentCoordinator", () =>
-      createMultiAgentCoordinator({
-        sessionStore: multiAgentSessionStore(),
-        trajectoryStore: agentTrajectoryStore(),
-      }),
-    );
-  }
-
-  function taskSchedulerService() {
-    return lazy("taskSchedulerService", () =>
-      createTaskSchedulerService({
-        taskStore: scheduledTaskStore(),
-        runScheduledTask: (taskId: string) => taskRuns.runAgentTask(taskId),
-        async listActiveTaskIds() {
-          return new Set(
-            (await agentExecutionStore().listActive()).map(
-              (checkpoint) => checkpoint.taskId,
-            ),
-          );
-        },
-      }),
-    );
-  }
-
-  async function getModelProfile() {
-    if (options.modelProfileOverride) {
-      return structuredClone(options.modelProfileOverride);
-    }
-    const resolved = await modelSettingsStore.resolveProfile();
-    return toRuntimeModelProfile(resolved);
-  }
-
-  function toRuntimeModelProfile(
-    resolved: Awaited<ReturnType<ModelSettingsStore["resolveProfile"]>>,
-  ) {
-    const apiKey =
-      resolved.secrets.apiKey ??
-      resolved.secrets.bedrockApiKey ??
-      resolved.secrets.vertexApiKey ??
-      "";
-    const baseUrl = resolveProviderBaseUrl(
-      resolved.binding.providerKind,
-      resolved.connectionValues,
-    );
-
-    return {
-      baseUrl: baseUrl ?? "",
-      apiKey,
-      model: resolved.binding.modelId,
-      providerId: resolved.binding.providerKind,
-      profile: resolved.binding.profileId,
-      temperature: resolved.binding.generation.temperature,
-      maxTokens: resolved.binding.generation.maxTokens,
-      ...(resolved.binding.contextWindow
-        ? { contextWindow: resolved.binding.contextWindow }
-        : {}),
-      ...(resolved.binding.contextWindowSource
-        ? { contextWindowSource: { ...resolved.binding.contextWindowSource } }
-        : {}),
-      thinking: resolved.binding.generation.thinkingEnabled
-        ? {
-            type: "enabled" as const,
-            budgetTokens:
-              resolved.binding.generation.thinkingBudgetTokens,
-          }
-        : { type: "disabled" as const },
-      modelCapabilities: { ...resolved.binding.capabilities },
-    };
-  }
-
-  async function resolveGoalModelSettings(goal: Goal) {
-    const binding = await resolveGoalExecutionModelBinding(
-      goal,
-      (planId) => planStore().get(planId),
-    );
-    return binding
-      ? modelSettingsStore.resolveBinding(binding)
-      : modelSettingsStore.resolveProfile();
-  }
-
-  async function getGoalModelProfile(goal: Goal) {
-    if (options.modelProfileOverride) {
-      return structuredClone(options.modelProfileOverride);
-    }
-    return toRuntimeModelProfile(await resolveGoalModelSettings(goal));
-  }
-
-  function goalChatClient(goal: Goal) {
-    if (options.chatClientOverride) return options.chatClientOverride;
-    return createSettingsBackedChatClient({
-      loadSettings: () => modelSettingsStore.load(),
-      getApiKey: () => modelSettingsStore.getApiKey(),
-      resolveProfile: () => resolveGoalModelSettings(goal),
-      fallback: createOpenAiCompatibleClient(),
-    });
-  }
-
-  async function getGoalProvider(goal: Goal) {
-    const resolved = await resolveGoalModelSettings(goal);
-    const apiKey =
-      resolved.secrets.apiKey ??
-      resolved.secrets.bedrockApiKey ??
-      resolved.secrets.vertexApiKey ??
-      "";
-    return createProvider({
-      providerKind: resolved.binding.providerKind,
-      apiKey,
-      chatModel: resolved.binding.modelId,
-      baseUrl: resolveProviderBaseUrl(
-        resolved.binding.providerKind,
-        resolved.connectionValues,
-      ),
-      connectionValues: resolved.connectionValues,
-      secrets: resolved.secrets,
-      thinkingEnabled: resolved.binding.generation.thinkingEnabled,
-      thinkingBudgetTokens:
-        resolved.binding.generation.thinkingBudgetTokens,
-    });
-  }
-
-  // P3 provider abstraction. Returns the LLMProvider for the current model
-  // settings (dispatched by `providerId`, default `openai-compatible`). P5
-  // (checkpoint-writer fork agent) and P8 (streaming/max-mode) consume this.
-  // Existing ChatClient consumers are unchanged (gradual migration via the
-  // ProviderChatClient adapter — zero regression).
-  function chatClient() {
-    if (options.chatClientOverride) return options.chatClientOverride;
-    // Settings-backed: openai-compatible (default) routes to the raw client
-    // (byte-identical to legacy); anthropic/gemini route to a native provider.
-    return lazy("chatClient", () =>
-      createSettingsBackedChatClient({
-        loadSettings: () => modelSettingsStore.load(),
-        getApiKey: () => modelSettingsStore.getApiKey(),
-        resolveProfile: () => modelSettingsStore.resolveProfile(),
-        fallback: createOpenAiCompatibleClient(),
-      }),
-    );
-  }
-
-  async function getProvider() {
-    const resolved = await modelSettingsStore.resolveProfile();
-    const apiKey =
-      resolved.secrets.apiKey ??
-      resolved.secrets.bedrockApiKey ??
-      resolved.secrets.vertexApiKey ??
-      "";
-    return createProvider({
-      providerKind: resolved.binding.providerKind,
-      apiKey,
-      chatModel: resolved.binding.modelId,
-      baseUrl: resolveProviderBaseUrl(
-        resolved.binding.providerKind,
-        resolved.connectionValues,
-      ),
-      connectionValues: resolved.connectionValues,
-      secrets: resolved.secrets,
-      thinkingEnabled: resolved.binding.generation.thinkingEnabled,
-      thinkingBudgetTokens:
-        resolved.binding.generation.thinkingBudgetTokens,
-    });
-  }
-
-  function modelRouter() {
-    return lazy("modelRouter", () =>
-      createModelRouter({
-        modelSettingsStore,
-        fallback: createOpenAiCompatibleClient(),
-      }),
-    );
-  }
-
-  // P4 shell analyzer + tool worker. Exposed for P5 (checkpoint-writer fork
-  // agent) and P6 (actor isolation) to consume. ZEROX_TOOL_WORKER controls the
-  // isolation mode while keeping explicit in-process mode available for
-  // development and focused tests.
-  function shellAnalyzer() {
-    return { analyze: analyzeShell };
-  }
-
-  function toolWorker() {
-    return lazy("toolWorker", () => {
-      const opts = getToolWorkerOptions();
-      return createToolWorker({ mode: opts.worker });
-    });
-  }
-
-  // P2 context rebuild. Repositories + compaction strategy selector are exposed
-  // for the runtime loops to consume (activation cutover lands with P5, when
-  // markdown checkpoints exist; default `auto` degrades to summarize = current
-  // behavior, so wiring is zero-regression).
-  function checkpointRepository() {
-    return lazy("checkpointRepository", () => {
-      const s = activeSqliteStorage();
-      return s ? createCheckpointRepository(s) : null;
-    });
-  }
-
-  function memoryRepository() {
-    return lazy("memoryRepository", () => {
-      const s = activeSqliteStorage();
-      return s ? createMemoryRepository(s) : null;
-    });
-  }
-
-  function compactionStrategy() {
-    return lazy("compactionStrategy", () => {
-      const flag = resolveCompactionFlag();
-      const orchestrator = checkpointWriterOrchestrator();
-      return selectCompactionStrategy(flag, {
-        contextManager: createContextManager(),
-        ...(checkpointRepository() ? { checkpointRepository: checkpointRepository()! } : {}),
-        ...(memoryRepository() ? { memoryRepository: memoryRepository()! } : {}),
-        // P5: trigger the fork-agent checkpoint writer before a rebuild so a
-        // fresh markdown checkpoint exists. Adapter converts ChatMessage[] →
-        // NormalizedMessage[] for the orchestrator.
-        ...(orchestrator
-          ? {
-              checkpointWriter: {
-                async maybeWriteCheckpoint(input: { parentRunId: string; parentMessages: import("./openAiCompatibleClient").ChatMessage[] }) {
-                  return orchestrator.maybeWriteCheckpoint({
-                    parentRunId: input.parentRunId,
-                    parentMessages: toNormalized(input.parentMessages),
-                  });
-                },
-              },
-            }
-          : {}),
-      });
-    });
-  }
-
-  // P5 actor runtime + checkpoint-writer orchestrator. Exposed for P6 (actor
-  // model extends this v0) and P8 (max-mode replay via actor). The fork-agent
-  // writer is wired but not yet triggered from the runtime loops (activation
-  // cutover is incremental; default flag `p5-fork` is honored when triggered).
-  function runRepository() {
-    return lazy("runRepository", () => {
-      const s = activeSqliteStorage();
-      return s ? createRunRepository(s) : null;
-    });
-  }
-
-  function actorRuntime() {
-    return lazy("actorRuntime", () =>
-      createActorRuntime({
-        ...(activeSqliteStorage() ? { storage: activeSqliteStorage()! } : {}),
-        deps: {
-          runActor: async (input, forkContext, cancel) => {
-            const s = activeSqliteStorage();
-            if (!s) return { status: "error", summary: "no storage", filesTouched: [] };
-            return runCheckpointWriterActor(input, forkContext, cancel, {
-              runRepository: createRunRepository(s),
-              checkpointRepository: createCheckpointRepository(s),
-            });
-          },
-        },
-      }),
-    );
-  }
-
-  function checkpointWriterOrchestrator() {
-    return lazy("checkpointWriterOrchestrator", () => {
-      const s = activeSqliteStorage();
-      if (!s) return null;
-      return createCheckpointWriterOrchestrator({
-        storage: s,
-        runRepository: createRunRepository(s),
-        checkpointRepository: createCheckpointRepository(s),
-      });
-    });
-  }
-
-  // P6 workflow runtime. The built-in workflow is retained for explicit
-  // experiments, but network host hooks fail closed until they share the normal
-  // permission and outbound-policy path. The tool is therefore not registered.
-  function workflowRuntime() {
-    return lazy("workflowRuntime", () => {
-      if (readFeatureFlags().ZEROX_WORKFLOW_RUNTIME !== "on") {
-        throw new Error(
-          "Workflow runtime is disabled until permissioned network hooks are configured.",
-        );
-      }
-      const spawnActor = createWorkflowActorHostHook(actorRuntime());
-      const rt = createWorkflowRuntime({
-        spawnActor,
-        async webfetch() {
-          throw new Error("Workflow webfetch is unavailable until permission wiring is configured.");
-        },
-        async websearch() {
-          throw new Error("Workflow websearch is unavailable until permission wiring is configured.");
-        },
-      });
-      registerDeepResearchWorkflow(rt.register.bind(rt));
-      return rt;
-    });
-  }
-
-  // P7: self-improvement scheduler (dream + distill). Default OFF
-  // (ZEROX_SELF_IMPROVEMENT=off) — background LLM cost; users opt in. Wired
-  // alongside the memory-maintenance timer; runNow() supports /dream /distill.
-  function sessionRepository() {
-    return lazy("sessionRepository", () => {
-      const s = activeSqliteStorage();
-      return s ? createSessionRepository(s) : null;
-    });
-  }
-
-  function selfImprovementService() {
-    return lazy("selfImprovementService", () => {
-      const flags = readFeatureFlags();
-      if (
-        flags.ZEROX_SELF_IMPROVEMENT !== "on" ||
-        flags.ZEROX_WORKFLOW_RUNTIME !== "on"
-      ) {
-        return null;
-      }
-      const s = activeSqliteStorage();
-      if (!s) return null;
-      return createSelfImprovementService({
-        storage: s,
-        memoryRepository: createMemoryRepository(s),
-        runRepository: createRunRepository(s),
-        trajectoryRepository: createTrajectoryRepository(s),
-        sessionRepository: createSessionRepository(s),
-        workflowRuntime: workflowRuntime(),
-        skillsDir,
-      });
-    });
-  }
-
-  function agentBootstrapService() {
-    return lazy("agentBootstrapService", () =>
-      createAgentBootstrapService({
-        modelSettingsStore,
-        taskStore: scheduledTaskStore(),
-        discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
-        testModelConnection: () => modelConnectionService().testConnection(),
-        runScheduledTask: (taskId: string) =>
-          taskRuns.runAgentTask(taskId, { writeChatTranscript: false }),
-        validationStore: agentValidationStore(),
-      }),
-    );
-  }
-
-  function agentRunnerService() {
-    return lazy("agentRunnerService", () => {
-      const maxModeActorRuntime = activeSqliteStorage() ? actorRuntime() : undefined;
-      return createAgentRunnerService({
-        taskStore: scheduledTaskStore(),
-        runStore: agentRunStore(),
-        resolveSkill: async (skillName: string) => {
-          const result = await discoverSkills({ skillsDir, forceRefresh: true });
-          return (
-            result.skills.find((skill) => skill.manifest.name === skillName) ?? null
-          );
-        },
-        chatClient: chatClient(),
-        getModelProfile,
-        toolAuthorizationService: toolAuthorizationService(),
-        toolExecutor: createToolExecutor(),
-        executionStore: agentExecutionStore(),
-        workspaceService: agentWorkspaceService(),
-        trajectoryStore: agentTrajectoryStore(),
-        learningStore: agentLearningStore(),
-        memoryStore: memoryStore(),
-        toolResultOffloadStore: toolResultOffloadStore(),
-        compactionStrategy: compactionStrategy(),
-        // P8: max-mode (best-of-N) — opt-in via ZEROX_MAX_MODE. runStep
-        // resolves the provider lazily on first call (getProvider is async).
-        maxMode: {
-          async runStep(req, opts) {
-            const provider = await getProvider();
-            return createMaxMode(provider).runStep(req, opts);
-          },
-        },
-        ...(maxModeActorRuntime
-          ? { actorRuntimeForMaxMode: maxModeActorRuntime }
-          : {}),
-        runAgentLoop,
-        ...(productionKernelDriver()
-          ? {
-              productionKernelDriver:
-                productionKernelDriver()!,
-            }
-          : {}),
-      });
-    });
-  }
-
-  function agentGoalValidatorRegistry() {
-    return lazy("agentGoalValidatorRegistry", () =>
-      createAgentGoalValidatorRegistry({
-        validators: [
-          ...createBuiltinGoalAcceptanceValidators(),
-          ...(options.acceptanceValidators ?? []),
-        ],
-      }),
-    );
-  }
-
-  function agentGoalAcceptance() {
-    return lazy("agentGoalAcceptance", () =>
-      createAgentGoalAcceptance({ registry: agentGoalValidatorRegistry() }),
-    );
-  }
-
-  function agentGoalController() {
-    return lazy("agentGoalController", () => {
-      const toolExecutor = createToolExecutor();
-      let sequence = 0;
-      const nextGoalTrajectorySequence = () => {
-        sequence += 1;
-        return sequence;
-      };
-
-      return createAgentGoalController({
-        goalStore: agentGoalStore(),
-        runtimeEngine: createGoalRuntimeEngine({
-          workspaceService: agentWorkspaceService(),
-          chatClient: chatClient(),
-          getChatClient: goalChatClient,
-          getModelProfile: getGoalModelProfile,
-          toolExecutor,
-          toolAuthorizationService: toolAuthorizationService(),
-          runStore: agentRunStore(),
-          trajectoryStore: agentTrajectoryStore(),
-          toolResultOffloadStore: toolResultOffloadStore(),
-          goalContext: createAgentGoalContext({
-            trajectoryStore: {
-              append(runId, event, appendOptions) {
-                const store = agentTrajectoryStore();
-                return store.appendNext
-                  ? store.appendNext(runId, event, appendOptions)
-                  : store.append(runId, event, appendOptions);
-              },
-            },
-            createId: () => `goal_context_${randomUUID()}`,
-            now: () => new Date().toISOString(),
-          }),
-          createId: () => `goal_run_${randomUUID()}`,
-          nextSequence: nextGoalTrajectorySequence,
-          now: () => new Date().toISOString(),
-          onProgress: emitGoalProgressEvent,
-          ...(goalProductionKernelDriver()
-            ? {
-                productionKernelDriver:
-                  goalProductionKernelDriver()!,
-              }
-            : {}),
-          maxMode: {
-            async runStep(req, opts) {
-              const provider = await getProvider();
-              return createMaxMode(provider).runStep(req, opts);
-            },
-          },
-          getMaxMode: async (goal) =>
-            createMaxMode(await getGoalProvider(goal)),
-          resolveSelectedSkill: async (goal) => {
-            const skillAuthority = verifySelectedSkillAuthority({
-              selectedSkill: goal.selectedSkill,
-              discoveredSkills: (
-                await discoverSkills({ skillsDir, forceRefresh: true })
-              ).skills,
-            });
-            if (!skillAuthority.ok) {
-              throw new Error(
-                skillAuthority.reason === "missing"
-                  ? "Goal 绑定的 Skill 已不存在，请重新规划。"
-                  : "Goal 绑定的 Skill 快照已漂移，请重新规划。",
-              );
-            }
-            if (skillAuthority.selectedSkill) {
-              const runContext = await agentWorkspaceService().resolveRunContext({
-                workspaceId: goal.workspaceId,
-                ...(goal.chatSessionId
-                  ? { sessionId: goal.chatSessionId }
-                  : {}),
-              });
-              const inputResolution = resolveSkillInput({
-                skill: skillAuthority.selectedSkill,
-                values: goal.selectedSkillInputValues,
-                runContext,
-              });
-              if (inputResolution.status !== "complete") {
-                throw new Error(
-                  "Goal 绑定的 Skill 输入缺失或已失效，请重新规划。",
-                );
-              }
-            }
-            return skillAuthority.selectedSkill;
-          },
-          onEvent(event) {
-            for (const window of BrowserWindow.getAllWindows()) {
-              if (!window.isDestroyed()) {
-                window.webContents.send("goal:milestoneRunEvent", event);
-              }
-            }
-          },
-        }),
-        acceptance: agentGoalAcceptance(),
-        onProgress: emitGoalProgressEvent,
-        onActiveGoalChange: options.setGoalActive,
-        planner: {
-          async replan(goal, reason) {
-            return createAgentGoalPlanner({
-              chatClient: goalChatClient(goal),
-              modelProfile: await getGoalModelProfile(goal),
-            }).replan(goal, reason);
-          },
-        },
-        trajectoryStore: agentTrajectoryStore(),
-        createAcceptanceContext: async (goal, milestone, runResult) => {
-          const modelProfile = acceptanceContextNeedsModel(goal, milestone)
-            ? await getGoalModelProfile(goal)
-            : undefined;
-          const runContext = applyGoalOutputRootsToRunContext(
-            await agentWorkspaceService().resolveRunContext({
-              workspaceId: goal.workspaceId,
-              ...(goal.chatSessionId ? { sessionId: goal.chatSessionId } : {}),
-            }),
-            goal,
-          );
-          const acceptedMilestones = goal.milestones
-            .filter(
-              (candidate) =>
-                candidate.state === "accepted" || candidate.state === "skipped",
-            )
-            .map((candidate) => ({
-              id: candidate.id,
-              description: candidate.description,
-              state: candidate.state,
-              summary:
-                candidate.lastAcceptanceSummary ?? candidate.lastRunSummary ?? null,
-              runIds: candidate.runIds,
-            }));
-          const currentMilestone = milestone
-            ? {
-                id: milestone.id,
-                description: milestone.description,
-                state: milestone.state,
-                status: milestone.lastRunStatus ?? null,
-                summary: milestone.lastRunSummary ?? null,
-                acceptanceSummary: milestone.lastAcceptanceSummary ?? null,
-                runIds: milestone.runIds,
-              }
-            : null;
-          return {
-            runId: milestone?.runIds.at(-1) ?? goal.id,
-            goalId: goal.id,
-            ...(milestone ? { milestoneId: milestone.id } : {}),
-            workspacePath: runContext.workspaceRoot,
-            extraReadRoots: runContext.sandbox.extraReadRoots,
-            extraWriteRoots: runContext.sandbox.extraWriteRoots,
-            toolExecutor: createAuthorizedGoalAcceptanceToolExecutor({
-              taskId: `goal_acceptance:${goal.id}:${milestone?.id ?? "final"}`,
-              goal,
-              runContext,
-              toolExecutor,
-              toolAuthorizationService: toolAuthorizationService(),
-            }),
-            trajectoryStore: {
-              append(runId, event, appendOptions) {
-                const store = agentTrajectoryStore();
-                return store.appendNext
-                  ? store.appendNext(runId, event, appendOptions)
-                  : store.append(runId, event, appendOptions);
-              },
-            },
-            ...(modelProfile
-              ? {
-                  chatClient: goalChatClient(goal),
-                  modelProfile,
-                }
-              : {}),
-            transcriptMessages:
-              runResult?.transcriptMessages ??
-              goal.runtimeCheckpoint?.transcriptMessages,
-            artifacts: {
-              goalEvidence: {
-                condition: goal.description,
-                status: goal.status,
-                currentMilestone,
-                acceptedMilestones,
-                progress: {
-                  acceptedCount: acceptedMilestones.length,
-                  totalCount: goal.milestones.length,
-                  allMilestonesAccepted:
-                    goal.milestones.length > 0 &&
-                    acceptedMilestones.length === goal.milestones.length,
-                },
-              },
-              milestoneProgress: {
-                hasRun: Boolean(
-                  milestone?.runIds.length &&
-                    (milestone.lastRunStatus ?? "succeeded") === "succeeded",
-                ),
-                runCount: milestone?.runIds.length ?? 0,
-                status: milestone?.lastRunStatus ?? null,
-                summary: milestone?.lastRunSummary ?? null,
-              },
-              goalProgress: {
-                acceptedCount: goal.milestones.filter(
-                  (candidate) =>
-                    candidate.state === "accepted" || candidate.state === "skipped",
-                ).length,
-                totalCount: goal.milestones.length,
-                allMilestonesAccepted:
-                  goal.milestones.length > 0 &&
-                  goal.milestones.every(
-                    (candidate) =>
-                      candidate.state === "accepted" || candidate.state === "skipped",
-                  ),
-              },
-            },
-          };
-        },
-        createId: () => `goal_event_${randomUUID()}`,
-        nextSequence: nextGoalTrajectorySequence,
-        now: () => new Date().toISOString(),
-      });
-    });
-  }
-
-  function goalChatService() {
-    return lazy("goalChatService", () =>
-      createGoalChatService({
-        controller: agentGoalController(),
-        goalStore: agentGoalStore(),
-        planner: {
-          async plan(description, planOptions) {
-            const availableTools = dedupeStrings([
-              ...planOptions.availableTools,
-              ...getAvailableToolNames(),
-            ]);
-            return createAgentGoalPlanner({
-              chatClient: chatClient(),
-              modelProfile: await getModelProfile(),
-            }).plan(description, {
-              ...planOptions,
-              availableTools,
-            });
-          },
-          async replan(goal, reason) {
-            return createAgentGoalPlanner({
-              chatClient: chatClient(),
-              modelProfile: await getModelProfile(),
-            }).replan(goal, reason);
-          },
-        },
-        getAvailableTools: getAvailableToolNames,
-        onProgress: emitGoalProgressEvent,
-        onDiagnostic(event) {
-          console.warn(`[goal:${event.phase}] ${event.message}`, event.error);
-        },
-      }),
-    );
-  }
-
-  function agentGoalTranslator() {
-    return lazy("agentGoalTranslator", () =>
-      createAgentGoalTranslator({
-        chatClient: chatClient(),
-        getModelProfile,
-        onDiagnostic(event) {
-          console.warn(`[goal:translation] ${event.message}`, event.error);
-        },
-      }),
-    );
-  }
-
-  function goalDraftService() {
-    return lazy("goalDraftService", () =>
-      createGoalDraftService({
-        translator: agentGoalTranslator(),
-      }),
-    );
-  }
-
-  function getAvailableToolNames(): string[] {
-    return createToolExecutor()
-      .getRegistry()
-      .getDefinitions()
-      .map((definition) => definition.function.name);
-  }
-
-  function dedupeStrings(values: string[]): string[] {
-    return [...new Set(values)];
-  }
-
-  function chatService() {
-    return lazy("chatService", () =>
-      createChatService({
-        chatClient: chatClient(),
-        getModelProfile,
-        memoryStore: memoryStore(),
-        memoryProfileStore: memoryProfileStore(),
-        chatSessionStore: chatSessionStore(),
-        goalService: goalChatService(),
-        goalDraftService: goalDraftService(),
-        planService: planDebateOrchestrator(),
-        proposeGoalAmendment: planOps.proposeGoalObjectiveAmendment,
-        runtimeReplanGoal: planOps.createRuntimeGoalPlan,
-        taskStore: scheduledTaskStore(),
-        runScheduledTask: (taskId: string, taskRunOptions) =>
-          taskRuns.runAgentTask(taskId, {
-            ...taskRunOptions,
-            writeChatTranscript: false,
-          }),
-        discoverSkills: () => discoverSkills({ skillsDir, forceRefresh: true }),
-        workspaceService: agentWorkspaceService(),
-        toolExecutor: createToolExecutor(),
-        toolAuthorizationService: toolAuthorizationService(),
-        trajectoryStore: agentTrajectoryStore(),
-        workspaceRunStore: workspaceRunStore(),
-        conversationCausalStore: conversationCausalStore(),
-        historyIndexStore: historyIndexStore(),
-        toolResultOffloadStore: toolResultOffloadStore(),
-        compactionStrategy: compactionStrategy(),
-        ...(chatProductionKernelDriver()
-          ? {
-              productionKernelDriver:
-                chatProductionKernelDriver()!,
-            }
-          : {}),
-        maxMode: {
-          async runStep(req, opts) {
-            const provider = await getProvider();
-            return createMaxMode(provider).runStep(req, opts);
-          },
-        },
-      }),
-    );
-  }
-
-  function memoryIngestionService() {
-    return lazy("memoryIngestionService", () =>
-      createMemoryIngestionService({
-        configDir,
-        historyIndexStore: historyIndexStore(),
-        memoryStore: memoryStore(),
-        chatSessionStore: chatSessionStore(),
-        chatClient: chatClient(),
-        getModelProfile,
-      }),
-    );
-  }
-
-  let runtimeShuttingDown = false;
-  let mcpInitializationPromise: Promise<void> | null = null;
-  let mcpInitializationTail: Promise<void> = Promise.resolve();
   const initializedMcpServers = new Set<string>();
   const activeMcpClients: McpClient[] = [];
   const activeTaskRunControllers = new Map<string, AbortController>();
   const activeTaskRunCompletions = new Map<string, Promise<void>>();
   const activeRuntimeInvocationCompletions = new Set<Promise<unknown>>();
   const executionReservations = new Set<string>();
-  const goalOperationStates = new Map<string, {
-    epoch: number;
-    pending: number;
-    tail: Promise<void>;
-  }>();
-
   function trackRuntimeInvocation<T>(operation: () => Promise<T>): Promise<T> {
     const invocation = operation();
     activeRuntimeInvocationCompletions.add(invocation);
@@ -2282,257 +1228,6 @@ export function createAppContainer(options: {
   }
 
 
-  function createGoalDraft(input: {
-    description: string;
-    successCriteria: string[];
-    /** @deprecated Ignored. Kept for IPC compatibility. */
-    budget?: GoalBudget;
-    reviewPolicy: GoalReviewPolicy;
-  }): Goal {
-    const now = new Date().toISOString();
-    const goalCondition = input.description.trim() || "Goal must be accepted with evidence.";
-    const criteria = input.successCriteria
-      .filter((description) => description.trim())
-      .map((description, index): SuccessCriterion => ({
-        id: `criterion_${index + 1}`,
-        description: description.trim(),
-        acceptanceChecks: [
-          {
-            id: `criterion_${index + 1}_review`,
-            kind: "model_review",
-            description: "Evidence-backed review is required.",
-            params: {
-              condition: description.trim(),
-              evidenceRefs: ["artifact:goalEvidence"],
-            },
-            requiresEvidence: true,
-          },
-        ],
-      }));
-
-    return upgradeGoalAcceptanceProtocol({
-      id: `goal_${randomUUID()}`,
-      description: input.description.trim(),
-      successCriteria: criteria.length
-        ? criteria
-        : [
-            {
-              id: "criterion_1",
-              description: "Goal must be accepted with evidence.",
-              acceptanceChecks: [
-                {
-                  id: "criterion_1_review",
-                  kind: "model_review",
-                  description: "Evidence-backed review is required.",
-                  params: {
-                    condition: goalCondition,
-                    evidenceRefs: ["artifact:goalEvidence"],
-                  },
-                  requiresEvidence: true,
-                },
-              ],
-            },
-          ],
-      milestones: [],
-      status: "planning",
-      executionUsage: {
-        iterations: 0,
-        toolCalls: 0,
-        wallClockMs: 0,
-        tokens: 0,
-        replans: 0,
-      },
-      reviewPolicy: input.reviewPolicy,
-      planVersion: 1,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  function confirmGoalDraft(
-    draftId: string,
-    edit?: GoalDraftEdit,
-  ): Promise<GoalDraftConfirmResult> {
-    if (runtimeShuttingDown) {
-      return Promise.resolve({ ok: false, message: "应用正在退出，未启动目标。" });
-    }
-    return trackRuntimeInvocation(() => planOps.confirmGoalDraftAccepted(draftId, edit));
-  }
-
-  function discardGoalDraft(draftId: string): GoalDraftDiscardResult {
-    return goalDraftService().discard(draftId);
-  }
-
-  function runGoalOperation(
-    goalId: string,
-    operation: () => Promise<ChatSessionGoalSummary>,
-    options?: { preempt?: boolean },
-  ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
-    if (runtimeShuttingDown) {
-      return Promise.resolve({ ok: false, message: "应用正在退出，未启动目标操作。" });
-    }
-    const state = goalOperationStates.get(goalId) ?? {
-      epoch: 0,
-      pending: 0,
-      tail: Promise.resolve(),
-    };
-    if (!goalOperationStates.has(goalId)) {
-      goalOperationStates.set(goalId, state);
-    }
-    state.pending += 1;
-    if (options?.preempt) {
-      // A preempting cancel runs immediately, invalidates older queued work,
-      // and becomes the barrier that every later mutation must await.
-      state.epoch += 1;
-      const invocation = trackRuntimeInvocation(() =>
-        runGoalOperationAccepted(operation),
-      );
-      const tail = invocation.then(
-        () => undefined,
-        () => undefined,
-      );
-      state.tail = tail;
-      finishGoalOperationState(goalId, state, tail);
-      return invocation;
-    }
-
-    const operationEpoch = state.epoch;
-    const previous = state.tail;
-    const invocation = trackRuntimeInvocation(async () => {
-      await previous.catch(() => undefined);
-      if (runtimeShuttingDown) {
-        return { ok: false, message: "应用正在退出，目标操作已取消。" };
-      }
-      if (operationEpoch !== state.epoch) {
-        return { ok: false, message: "目标操作已被更高优先级的取消请求取代。" };
-      }
-      return runGoalOperationAccepted(operation);
-    });
-    const tail = invocation.then(
-      () => undefined,
-      () => undefined,
-    );
-    state.tail = tail;
-    finishGoalOperationState(goalId, state, tail);
-    return invocation;
-  }
-
-  function finishGoalOperationState(
-    goalId: string,
-    state: { epoch: number; pending: number; tail: Promise<void> },
-    completion: Promise<void>,
-  ): void {
-    void completion.finally(() => {
-      state.pending -= 1;
-      if (
-        state.pending === 0 &&
-        goalOperationStates.get(goalId) === state
-      ) {
-        goalOperationStates.delete(goalId);
-      }
-    });
-  }
-
-  async function runGoalOperationAccepted(
-    operation: () => Promise<ChatSessionGoalSummary>,
-  ): Promise<{ ok: boolean; goal?: Goal; message?: string }> {
-    try {
-      const summary = await operation();
-      const goal = await agentGoalStore().get(summary.id);
-      if (!goal) {
-        return { ok: false, message: "目标不存在。" };
-      }
-
-      return { ok: true, goal };
-    } catch (error) {
-      return {
-        ok: false,
-        message: error instanceof Error ? error.message : "无法更新目标状态。",
-      };
-    }
-  }
-
-  async function readToolResultRef(
-    ref: string,
-    options?: ReadToolResultRefOptions & Pick<ToolResultOffloadReadScope, "capability">,
-  ): Promise<ReadToolResultRefResult> {
-    if (!isSafeToolResultRef(ref)) {
-      return {
-        ok: false,
-        message: "工具结果引用无效。",
-      };
-    }
-
-    let readScope: ToolResultOffloadReadScope | undefined = options;
-    if (options?.trajectoryEventId) {
-      if (!options.runId) {
-        return { ok: false, message: "工具结果引用缺少受信轨迹归属。" };
-      }
-      const event = (await agentTrajectoryStore().list(options.runId)).find(
-        (candidate) => candidate.id === options.trajectoryEventId,
-      );
-      if (
-        !event
-        || event.runId !== options.runId
-        || extractToolResultRef(event.payload) !== ref
-      ) {
-        return { ok: false, message: "工具结果引用与轨迹证据不匹配。" };
-      }
-      readScope = {
-        capability: issueToolResultRefReadCapability({
-          ref,
-          issuedByRunId: event.runId,
-        }),
-      };
-    }
-
-    const content = await toolResultOffloadStore().read(ref, readScope);
-    if (!content) {
-      return {
-        ok: false,
-        message: "没有找到这个工具结果引用。",
-      };
-    }
-
-    return {
-      ok: true,
-      ref,
-      content,
-      summary: summarizeToolResultContent(content),
-    };
-  }
-
-  async function runMemoryEvals(): Promise<
-    | { ok: true; report: MemoryEvalReport }
-    | { ok: false; message: string }
-  > {
-    try {
-      const records = await memoryStore().list({
-        kind: "all",
-        includeArchived: false,
-        limit: 500,
-      });
-      return {
-        ok: true,
-        report: evaluateMemory(records, createDefaultMemoryEvalCases(records)),
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        message:
-          error instanceof Error ? error.message : "无法评估记忆检索质量。",
-      };
-    }
-  }
-
-  async function runAgentQualityEvals(): Promise<AgentEvalReport> {
-    return runAgentEvals(
-      createCombinedAgentEvalFixtures(
-        createAgentEvalFixtures(),
-        await promotedAgentEvalFixtureStore().list(),
-      ),
-    );
-  }
 
   const lazyStore = new Map<string, unknown>();
 
@@ -2550,7 +1245,7 @@ export function createAppContainer(options: {
         controller.abort("application_shutdown");
       }
     }
-    const goalService = lazyStore.get("goalChatService") as
+    const goalService = goalChatService() as
       | GoalChatService
       | undefined;
     const goalClose = goalService?.shutdown() ?? Promise.resolve();
@@ -2558,13 +1253,13 @@ export function createAppContainer(options: {
     const initialMcpCloses = activeMcpClients
       .splice(0)
       .map((client) => client.disconnect());
-    (lazyStore.get("selfImprovementService") as
+    (selfImprovementService() as
       | ReturnType<typeof createSelfImprovementService>
       | undefined)?.stop();
-    const workerClose = (lazyStore.get("toolWorker") as
+    const workerClose = (toolWorker() as
       | ReturnType<typeof createToolWorker>
       | undefined)?.close() ?? Promise.resolve();
-    const actorClose = (lazyStore.get("actorRuntime") as
+    const actorClose = (actorRuntime() as
       | ReturnType<typeof createActorRuntime>
       | undefined)?.shutdown?.() ?? Promise.resolve();
     const drainResults = await Promise.allSettled([
@@ -2583,27 +1278,27 @@ export function createAppContainer(options: {
     const lateMcpResults = await Promise.allSettled(lateMcpCloses);
     const flushResults = await Promise.allSettled([
       goalProgressDeliveryQueue,
-      (lazyStore.get("agentRunStore") as AgentRunStore | undefined)
+      (agentRunStore() as AgentRunStore | undefined)
         ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("agentExecutionStore") as AgentExecutionStore | undefined)
+      (agentExecutionStore() as AgentExecutionStore | undefined)
         ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("agentTrajectoryStore") as AgentTrajectoryStore | undefined)
+      (agentTrajectoryStore() as AgentTrajectoryStore | undefined)
         ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("agentGoalStore") as AgentGoalStore | undefined)
+      (agentGoalStore() as AgentGoalStore | undefined)
         ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("agentWorkspaceStore") as
+      (agentWorkspaceStore() as
         | ReturnType<typeof createAgentWorkspaceStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("multiAgentSessionStore") as
+      (multiAgentSessionStore() as
         | ReturnType<typeof createMultiAgentSessionStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("agentLearningStore") as
+      (agentLearningStore() as
         | ReturnType<typeof createAgentLearningStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("agentEvalCandidateStore") as
+      (agentEvalCandidateStore() as
         | ReturnType<typeof createAgentEvalCandidateStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("promotedAgentEvalFixtureStore") as
+      (promotedAgentEvalFixtureStore() as
         | ReturnType<typeof createPromotedAgentEvalFixtureStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
       (lazyStore.get("scheduledTaskStore") as
@@ -2612,17 +1307,17 @@ export function createAppContainer(options: {
       (lazyStore.get("agentValidationStore") as
         | ReturnType<typeof createAgentValidationStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("memoryProfileStore") as
+      (memoryProfileStore() as
         | ReturnType<typeof createMemoryProfileStore>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("memoryStore") as MemoryStore | undefined)
+      (memoryStore() as MemoryStore | undefined)
         ?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
       (lazyStore.get("toolAuditLog") as
         | ReturnType<typeof createToolAuditLog>
         | undefined)?.flushShadowWrites({ close: true }) ?? Promise.resolve(),
-      (lazyStore.get("chatSessionStore") as ChatSessionStore | undefined)
+      (chatSessionStore() as ChatSessionStore | undefined)
         ?.flush() ?? Promise.resolve(),
-      (lazyStore.get("conversationDisclosureMaterializer") as
+      (conversationDisclosureMaterializer() as
         | ConversationDisclosureMaterializer
         | undefined)?.close() ?? Promise.resolve(),
     ]);
@@ -2779,3 +1474,18 @@ export {
 
 
 
+
+
+export type AppContainerOptions = {
+  requestToolApproval: (
+    request: ToolUserApprovalRequest,
+    options?: ToolUserApprovalRequestOptions,
+  ) => Promise<ToolUserApprovalResult>;
+  setGoalActive?: (goalId: string, active: boolean) => void;
+  /** Advanced consent switch getter (default OFF): policy_deny auto-lift. */
+  policyDenyOverrideEnabled?: () => boolean;
+  conversationCausalStore?: ConversationCausalStore;
+  acceptanceValidators?: AcceptanceValidator[];
+  chatClientOverride?: ChatClient & StreamingChatClient;
+  modelProfileOverride?: AgentModelProfile;
+};
