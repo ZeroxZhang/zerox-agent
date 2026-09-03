@@ -70,6 +70,14 @@
 - container/disclosure.ts（1256 行）：conversation-disclosure 读集构建/证据授权/解析整簇外移（createDisclosureRuntime(rt)，线程化 11 个存取器；materializer/resolver 接线保持）。Commit 265557a。
 - container.ts 6041 → 4877。npm test 319 passed（3815/3821）；tests/renderer tsc 净。
 - 剩余：goal/plan/agents 簇（Round 17-19）；若预算不足 ④ 将以达成度如实汇报。
+
+## 2026-09-03 - Round 17-18: taskRuns 簇 + 收官验证
+
+- container/taskRuns.ts：runAgentTask/admission/resume/pause/openAgentRunSession + 流式生成器整簇外移（rt 线程化 12 项，含 live 集合 getter 与 shutdown/队列闭包）；RunAgentTaskOptions 上提；创建点置于状态声明后避免 TDZ。Commit c05b084。container.ts → 2781 行。
+- stores 存取器 mega-切片尝试（64 存取器/1090 行）在预算内无法收敛类型债务，已回滚（container.ts 复位至 c05b084；stores.ts 移除）。
+- 最终验证：npm test 319 passed | 1 skipped（3815/3821）exit 0；harness:check/program:check exit 0（本地无 secret）；eslint 0；electron/renderer/tests tsc 全净；scripts 41 / .zerox 54。
+- 最终体量：chatService.ts 8275→718（✅≤1500）；container.ts 6922→2781（⏳未达 1500，chat/session、disclosure、planOps、taskRuns 四簇已外移，剩余 goal 包装/事件簇与 64 存取器区待续）；chatService/legacyTurn.ts 3057（单一巨型函数，非机械可切，记录 backlog）。
+- 验收清单状态：①②③⑤⑥⑦⑧ 达成（证据见各 commit 与本文件）；④ 部分达成（chatService 完成；container 拆分进行中——工厂闭包自 6382→2781，目录模块 chatSessions/disclosure/planOps/taskRuns/helpers 已立）。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
