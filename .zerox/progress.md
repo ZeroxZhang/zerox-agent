@@ -78,6 +78,12 @@
 - 最终验证：npm test 319 passed | 1 skipped（3815/3821）exit 0；harness:check/program:check exit 0（本地无 secret）；eslint 0；electron/renderer/tests tsc 全净；scripts 41 / .zerox 54。
 - 最终体量：chatService.ts 8275→718（✅≤1500）；container.ts 6922→2781（⏳未达 1500，chat/session、disclosure、planOps、taskRuns 四簇已外移，剩余 goal 包装/事件簇与 64 存取器区待续）；chatService/legacyTurn.ts 3057（单一巨型函数，非机械可切，记录 backlog）。
 - 验收清单状态：①②③⑤⑥⑦⑧ 达成（证据见各 commit 与本文件）；④ 部分达成（chatService 完成；container 拆分进行中——工厂闭包自 6382→2781，目录模块 chatSessions/disclosure/planOps/taskRuns/helpers 已立）。
+
+## 2026-09-03 - Round 18-19: stores mega-slice 二次尝试与回滚（终局）
+
+- 二次尝试将 64 存取器/1090 行外移至 container/stores.ts：吸取教训采用整头 155 imports + rt 增长环；类型收敛仍需多轮（rt 未知类型级联、options/disclosure 注入等），超出剩余预算，已回滚保持仓库全绿（container.ts 复位 c05b084）。
+- 终局全量验证（HEAD c05b084 + 证据提交）：npm test 319 passed | 1 skipped（3815/3821）exit 0；harness:check/program:check exit 0；eslint 0；tsc 三工程净。
+- 验收终态：①-③、⑤-⑧ 达成；④ 部分达成：chatService.ts 718 行（✅），container.ts 6922→2781 行（✅拆分推进，⏳未达≤1500；chatSessions/disclosure/planOps/taskRuns/helpers 五模块已立；剩余 64 存取器区 + goal 包装簇为明确 backlog，预计 1-2 个专注日可完成）。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
