@@ -46,6 +46,7 @@ jobs:
           ZEROX_V392_RELEASE_ATTESTATION_DIGEST: ${{ secrets.ZEROX_V392_RELEASE_ATTESTATION_DIGEST }}
         run: |
           npm run harness:check
+          npm test
           npm run typecheck:tests
           npm run stress:runtime
           npm run build

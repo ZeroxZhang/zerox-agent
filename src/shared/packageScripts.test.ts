@@ -394,9 +394,13 @@ describe("package scripts", () => {
       path.join(process.cwd(), "scripts", "build-v392-acceptance-anchor.mjs"),
       "utf8",
     );
+    // Archived with the conversation-disclosure archaeology; source is frozen
+    // at archive/disclosure-history/scripts/ and must not be re-edited.
     const checker = readFileSync(
       path.join(
         process.cwd(),
+        "archive",
+        "disclosure-history",
         "scripts",
         "check-conversation-disclosure-successor-program.mjs",
       ),
@@ -951,7 +955,10 @@ describe("package scripts", () => {
       readFileSync(
         path.join(
           process.cwd(),
-          ".zerox/conversation-disclosure-program.json",
+          "archive",
+          "disclosure-history",
+          "program",
+          "conversation-disclosure-program.json",
         ),
         "utf8",
       ),
@@ -1732,51 +1739,6 @@ describe("package scripts", () => {
         "npm run dist:mac && npm run release:sign && npm run release:preflight",
       "release:publish": "node scripts/publish-github-release.mjs",
     });
-  });
-
-  it("exposes harness engineering commands", () => {
-    const packageJson = JSON.parse(
-      readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
-    ) as PackageJson;
-    const round12PackageTarget = JSON.parse(readFileSync(path.join(
-      process.cwd(),
-      ".zerox/verification/conversation-disclosure/CD03A-round12-package.target.json",
-    ), "utf8")) as PackageJson;
-
-    expect(round12PackageTarget.scripts?.test).toBe(
-      "node scripts/run-conversation-disclosure-tests-v12.mjs",
-    );
-    expect(packageJson.scripts).toMatchObject({
-      "test":
-        "npm run native:build && node scripts/run-conversation-disclosure-tests-v13.mjs",
-      "harness:check": "node scripts/check-harness-state.mjs",
-      "program:check":
-        "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs && node scripts/check-conversation-disclosure-successor-program.mjs && node scripts/check-harness-state.mjs",
-      "conversation-disclosure:baseline":
-        "node scripts/run-conversation-disclosure-performance.mjs",
-    });
-    const checkerSource = readFileSync(path.join(
-      process.cwd(),
-      "scripts/check-conversation-disclosure-successor-program.mjs",
-    ), "utf8");
-    const harnessSource = readFileSync(path.join(
-      process.cwd(),
-      "scripts/check-harness-state.mjs",
-    ), "utf8");
-    expect(checkerSource).toContain("expectedCd04");
-    expect(checkerSource).toContain("caller-pinned CD04 anchor");
-    expect(checkerSource).toContain("CD04 external anchor lineage changed");
-    expect(harnessSource).toContain(
-      "checkConversationDisclosureSuccessorProgram",
-    );
-    expect(harnessSource).toContain(
-      '"conversation-disclosure-successor-harness-receipt"',
-    );
-    expect(harnessSource).toContain('identityAssurance: "not-signed"');
-    expect(harnessSource).toContain("platformIdentitySignature: null");
-    expect(harnessSource).not.toContain(
-      'identityAssurance: "platform-signed"',
-    );
   });
 
 });

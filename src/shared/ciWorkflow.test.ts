@@ -98,6 +98,7 @@ describe("GitHub verify workflow", () => {
       .filter(Boolean);
     expect(sealedCommands).toEqual([
       "npm run harness:check",
+      "npm test",
       "npm run typecheck:tests",
       "npm run stress:runtime",
       "npm run build",
@@ -105,7 +106,6 @@ describe("GitHub verify workflow", () => {
       "npm run eval:memory:built",
     ]);
     expect(sealedCommands.join("\n")).not.toContain("npm run verify");
-    expect(sealedCommands.join("\n")).not.toContain("npm test");
   });
 
   it("keeps display-dependent smoke commands out of CI", () => {
@@ -161,6 +161,7 @@ describe("GitHub verify workflow", () => {
       .filter((command) => command && !command.startsWith("#"));
     expect(verifyCommands).toEqual([
       "npm run harness:check",
+      "npm test",
       "npm run typecheck:tests",
       "npm run stress:runtime",
       "npm run build",
@@ -168,7 +169,6 @@ describe("GitHub verify workflow", () => {
       "npm run eval:memory:built",
       "npm run smoke:prod:built",
     ]);
-    expect(verifyCommands.join("\n")).not.toContain("npm test");
     expect(signingStep?.env?.UPDATE_SIGNING_PRIVATE_KEY).toBe(
       "${{ secrets.ZEROX_UPDATE_SIGNING_PRIVATE_KEY }}",
     );

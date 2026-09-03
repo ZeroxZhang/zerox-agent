@@ -1,5 +1,15 @@
 # Zerox Harness Progress
 
+## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
+
+- 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
+- 工具链：本地切换 Node 22.23.2（nvm），rebuild better-sqlite3 ABI（Node 22 下验证读写通过）；.nvmrc 22 不变。
+- 基线 tag：v3.9.2-pre-opt（annotated）。
+- 清单基线：scripts/*.mjs = 183 文件；.zerox/ = 296 文件；历史 V2-V12 披露测试 = 108 文件（清单存 .tmp_ph0/，gitignored）。
+- npm run harness:check（Node 22）：runtime/kernel/storage/release 4 个 program checker 通过；conversation-disclosure successor check 按预期本地失败（8 条 caller-pinned env 报错，exit=1）——Phase 3 处理对象。
+- npm test 基线（Node 22，v13 编排器活树段）：329 文件 1 failed | 327 passed | 1 skipped；4037/4044 通过。唯一失败：src/shared/releaseProgram.test.ts（v3.9.2 发布后状态测试过期：期望 in_progress，实际 done）。编排器在活树失败后中止，历史轮次未执行。Node 24 已知失败集（~19 Seatbelt 例）经 Node 22 切换后本地消除。
+- Evidence: git tag v3.9.2-pre-opt；.tmp_ph0/harness-check.out（exit=1 于 successor check）；.tmp_ph0/npm-test-baseline.log（exit=1，唯一失败 releaseProgram.test.ts）。
+
 ## 2026-09-03 - Engineering hardening: toolchain pin, invariants, CI dedupe, layering fix
 
 - Architecture/engineering review (three read-only surveys: source metrics,

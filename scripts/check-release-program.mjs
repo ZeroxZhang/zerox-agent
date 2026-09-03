@@ -5,8 +5,10 @@ const root = process.cwd();
 const manifest = await readJson(".zerox/release-program.json");
 const featureList = await readJson(".zerox/feature_list.json");
 const packageJson = await readJson("package.json");
+// The disclosure program closed with v3.9.2 and is archived; read the
+// frozen record from the archive.
 const conversationProgram = await readJson(
-  ".zerox/conversation-disclosure-program.json",
+  "archive/disclosure-history/program/conversation-disclosure-program.json",
 );
 const errors = [];
 
@@ -175,7 +177,7 @@ async function validateV392() {
   let attestation;
   try {
     attestation = await readJson(
-      ".zerox/verification/conversation-disclosure/CD09-release-attestation.json",
+      "archive/disclosure-history/evidence/CD09-release-attestation.json",
     );
   } catch {
     errors.push("v3.9.2 release attestation is missing");

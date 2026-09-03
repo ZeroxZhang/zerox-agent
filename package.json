@@ -26,7 +26,7 @@
     "eval:memory": "npm run build && node scripts/run-memory-evals.mjs",
     "eval:memory:built": "node scripts/run-memory-evals.mjs",
     "harness:check": "node scripts/check-harness-state.mjs",
-    "program:check": "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs && node scripts/check-conversation-disclosure-successor-program.mjs && node scripts/check-harness-state.mjs",
+    "program:check": "node scripts/check-runtime-convergence-program.mjs && node scripts/check-kernel-migration-program.mjs && node scripts/check-storage-convergence-program.mjs && node scripts/check-release-program.mjs && node scripts/check-harness-state.mjs",
     "harness:score": "npm run build && node scripts/run-harness-score.mjs",
     "harness:score:built": "node scripts/run-harness-score.mjs",
     "episode:export": "npm run build && node scripts/export-agent-episode.mjs",
@@ -40,11 +40,10 @@
     "release:mac": "npm run dist:mac && npm run release:sign && npm run release:preflight",
     "release:publish": "node scripts/publish-github-release.mjs",
     "clean": "rm -rf dist dist-electron dist-native",
-    "test": "npm run native:build && node scripts/run-conversation-disclosure-tests-v13.mjs",
+    "test": "npm run native:build && vitest run",
     "test:watch": "vitest",
     "typecheck:tests": "tsc -p tsconfig.tests.json && node scripts/check-test-type-coverage.mjs",
-    "stress:runtime": "ZEROX_RUNTIME_STRESS=1 vitest run --run src/main/runtimeStress.test.ts --maxWorkers=1",
-    "conversation-disclosure:baseline": "node scripts/run-conversation-disclosure-performance.mjs"
+    "stress:runtime": "ZEROX_RUNTIME_STRESS=1 vitest run --run src/main/runtimeStress.test.ts --maxWorkers=1"
   },
   "keywords": [],
   "author": "",

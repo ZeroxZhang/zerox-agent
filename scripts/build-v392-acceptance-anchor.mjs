@@ -116,33 +116,21 @@ const EXPECTED_GENERATED_NATIVE_CACHE = Object.freeze({
 });
 const CONTROL_DIGESTS = Object.freeze({
   "package.json":
-    "sha256:4168e02fc1f8785738dd4a1068ae1453a2769303dc6f079662f08902dc6efb09",
+    "sha256:72cc468b8bfe6d43a054258f22933e7abec1aae93fd5ce825319b18b92535e30",
   "package-lock.json":
     "sha256:1a436fdfea03e465ffdbe5e446332a17b834807d9ec9da4060d4c90c810e50a8",
   "electron-builder.yml":
     "sha256:f6b3347462c9a1a0eb21dd6853f7ff8bcfecea7f85008e9d13a968e05b98d973",
   "scripts/after-pack-mac.mjs":
     "sha256:376f81d437bc6b06876ed4bcbcc7889d698103b9a91b9fc46f96512d0b52901b",
-  "scripts/check-conversation-disclosure-successor-program.mjs":
-    "sha256:3d83f70ff026c69a01c503ab9cf71ca178fc9354e1b665fcee35a45c6a82d91b",
   "scripts/check-harness-state.mjs":
-    "sha256:38637c82f9c7cccff3594130ab1a00937310d4a2c46dc4b5f4978c9415b4f92f",
-  "scripts/run-conversation-disclosure-acceptance.mjs":
-    "sha256:79c2e3034d86ca44d8cb15f3d6817edce0a36d77aaf4a4ac5e2e47a40dd5a02b",
-  "scripts/run-conversation-disclosure-real-app.mjs":
-    "sha256:8f8570d53afa1bb6489c6d50466a1944d02dc68eed0d11b5b279e6ae95e87ef8",
-  "scripts/conversation-disclosure-acceptance-contract.mjs":
-    "sha256:a4e57f3b768e95690bb116deb5b98887d4afbb6475d111ebf595a18d76cd4d45",
+    "sha256:e7885179ca0602358eacf295662b6183466ccb4701f8f70b7503bad5fe0f9ad2",
   "scripts/capture-cd05-chat-browser.mjs":
     "sha256:e6e66bb1c3329b6db2f01e238a0ced4f1cf0e0e833aff1cddaefb17ac48e2c54",
   "scripts/capture-cd06-cross-surface-browser.mjs":
     "sha256:7871f8b90963b1643abaf405cf700993ba59a90f52db735df4be7511cf94b97a",
   "scripts/capture-cd07-inspector-browser.mjs":
     "sha256:09fa1da1a04bc0df023673054ecbb22ca2aa1eafb93244304c31b53633bb0f9d",
-  "scripts/run-conversation-disclosure-hardening.mjs":
-    "sha256:437dcbd9d45b30f984b9cc56e467fd644ba9015fe4e74eb6731fd9aec565a82f",
-  "scripts/run-conversation-disclosure-performance.mjs":
-    "sha256:cdb63c468c0307ae0ff0b87d93ffede86d7df63ffe73fb7a75560c4197740652",
   "scripts/probe-native-sqlite.mjs":
     "sha256:41925fe9c348540d46abb43f275ffbf40ea86139304a27e33da465b4f220f34b",
   "scripts/package-local-candidate.mjs":
