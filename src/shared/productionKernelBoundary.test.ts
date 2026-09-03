@@ -10,6 +10,7 @@ describe("production Kernel boundary", () => {
     const runtime = read("src/main/agentRuntimeEngine.ts");
     const goal = read("src/main/goalRuntimeEngine.ts");
     const chat = read("src/main/chatService.ts");
+    const chatKernel = read("src/main/chatService/kernelTurn.ts");
     const chatAdapter = read("src/main/kernel/chatKernelSegment.ts");
     const goalAdapter = read("src/main/kernel/goalKernelSegment.ts");
     const scope = read("src/main/kernel/productionKernelScope.ts");
@@ -34,7 +35,7 @@ describe("production Kernel boundary", () => {
     expect(goal).toContain("productionKernelDriver?: ProductionKernelDriver");
     expect(goal).toContain("runGoalKernelSegment({");
     expect(chat).toContain("productionKernelDriver?: ProductionKernelDriver");
-    expect(chat).toContain("runChatKernelSegment<SendChatMessageResult>");
+    expect(chatKernel).toContain("runChatKernelSegment<SendChatMessageResult>");
     expect(container).toContain('productionKernelDriver("chat")');
     expect(container).toContain('productionKernelDriver("goal")');
     expect(scope).toContain('scope === "scheduled_chat"');
