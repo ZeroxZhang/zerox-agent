@@ -780,15 +780,10 @@ npm run release:publish -- "/absolute/path/to/release-notes.md"
 
 ## Development and testing
 
-- Toolchain: Node 22 pinned (.nvmrc, engines). After switching Node versions
-  run `npm rebuild better-sqlite3`.
-- Test gate: `npm test` runs the full live-tree suite through plain vitest
-  (no historical state rewinding). `npm run test:watch` for watch mode - both
-  share the same semantics.
-- Governance gates: `npm run harness:check` and `npm run program:check` run
-  green locally without secrets.
-- Lint: `npm run lint` (eslint flat config: layer boundaries + type hygiene).
-- Full pre-push check: `npm run verify`.
+- Node 22 pinned; after switching Node versions run `npm rebuild better-sqlite3`.
+- `npm test`: full live-tree vitest suite (no state rewinding); `npm run test:watch` shares the same semantics.
+- `npm run harness:check` / `program:check`: green locally without secrets.
+- `npm run lint`: eslint layer boundaries + type hygiene. Full check: `npm run verify`.
 
 ## License
 
