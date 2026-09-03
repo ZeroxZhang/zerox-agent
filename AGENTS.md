@@ -8,13 +8,16 @@ Zerox Agent is a local-first desktop control plane for permissioned, observable,
 
 1. Run `./init.sh`.
 2. Read `.zerox/feature_list.json`.
-3. Read the active program manifest. For the current iteration this is
-   `.zerox/release-program.json`.
-4. Pick exactly one unfinished feature.
-5. Before editing, inspect the files named by that feature.
-6. After editing, run the feature verification command plus
+3. Read the program manifests under `.zerox/` (`*-program.json`) and pick the
+   active one; when all programs are `completed` and every feature is `done`,
+   there is no unfinished feature to pick — treat the next change as a new
+   engineering/feature iteration instead.
+4. Before editing, inspect the files named by that feature; before deleting or
+   moving **any tracked file**, read
+   `docs/architecture/engineering-invariants.md`.
+5. After editing, run the feature verification command plus
    `npm run harness:check`.
-7. Update `.zerox/progress.md` with evidence.
+6. Update `.zerox/progress.md` with evidence.
 
 ## Core Commands
 

@@ -19,6 +19,7 @@ docs/reviews/*
 !docs/reviews/zerox-vs-deepseek-harness-2026-08-14.md
 !docs/reviews/zerox-agent-3-3-0-ui-audit.md
 !docs/reviews/zerox-agent-3-3-0-ui-acceptance.md
+!docs/architecture/
 !docs/product/
 docs/product/*
 !docs/product/zerox-agent-product-intro.jpg
