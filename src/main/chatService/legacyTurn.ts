@@ -1,4 +1,5 @@
 import { toRelatedMemory } from "./modulemessages";
+import { createLegacyPersistStage } from "./legacyPersistStage";
 import { estimateChatTurnUsage } from "./modulemessages";
 import { recordSessionTokenUsage } from "./modulemessages";
 import { modelServiceNoticeFromError } from "../../shared/modelServiceNotice";
@@ -909,131 +910,17 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
         };
       }
 
-      async function persistAssistantReply(input: {
-        content: string;
-        relatedMemoryIds?: string[];
-        executedRunId?: string;
-        goalId?: string;
-        goalEventRef?: string;
-        terminalType?: "completed" | "failed" | "canceled";
-        settlementStatus?: ChatTurnSettlementStatus;
-      }): Promise<string | null> {
-        const settlementStatus = input.settlementStatus ?? "succeeded";
-        const safeContent = redactCredentialString(input.content);
-        const finalizedOutput = finalizeAssistantOutput(safeContent);
-        const assistantMessage = await appendAssistantMessage({
-          chatSessionStore: options.chatSessionStore,
-          sessionId,
-          requestId,
-          turnId: causalTurnId,
-          causalAttempt: currentCausalAttempt,
-          causalAttemptId: createConversationCausalAttemptId({
-            requestId,
-            turnId: causalTurnId,
-            attempt: currentCausalAttempt,
-          }),
-          content: safeContent,
-          turnSettlementStatus: settlementStatus,
-          outputParts: finalizedOutput.outputParts,
-          ...(input.relatedMemoryIds?.length
-            ? { relatedMemoryIds: input.relatedMemoryIds }
-            : {}),
-          ...(input.executedRunId ? { executedRunId: input.executedRunId } : {}),
-          ...(input.goalId ? { goalId: input.goalId } : {}),
-          ...(input.goalEventRef ? { goalEventRef: input.goalEventRef } : {}),
-        });
-        const assistantMessageId = assistantMessage?.id ?? null;
-        await emitStatus.drainPersistence();
-        const assistantRequiresAcceptance = settlementStatus !== "failed"
-          && settlementStatus !== "canceled";
-        if (
-          assistantMessage
-          && assistantRequiresAcceptance
-          && options.conversationCausalStore
-        ) {
-          const persistedMessage = {
-            id: assistantMessage.id,
-            role: assistantMessage.role,
-            requestId,
-            turnId: causalTurnId,
-            content: assistantMessage.content,
-            turnSettlementStatus: assistantMessage.turnSettlementStatus,
-          };
-          const prepared = await options.conversationCausalStore
-            .prepareAssistantAcceptance({
-              requestId,
-              attempt: currentCausalAttempt,
-              persistedMessage,
-              ...(workspaceRunRecorder && settlementStatus === "succeeded"
-                ? { workspaceRunId: workspaceRunRecorder.workspaceRunId }
-                : {}),
-            });
-          if (
-            prepared.disposition !== "applied"
-            && prepared.disposition !== "duplicate"
-          ) {
-            throw new Error("Durable assistant message conflicts with causal receipt.");
-          }
-          const acceptance = prepared.value?.attempts.find((attempt) =>
-            attempt.attempt === currentCausalAttempt,
-          )?.assistantAcceptance;
-          if (!acceptance) {
-            throw new Error("Durable assistant acceptance was not prepared.");
-          }
-          let workspaceEventId: string | undefined;
-          if (workspaceRunRecorder && settlementStatus === "succeeded") {
-            let finalized;
-            try {
-              finalized = await workspaceRunRecorder.finalizeAccepted(acceptance);
-            } catch (error) {
-              await options.conversationCausalStore.addRefs({
-                requestId,
-                refs: [{ kind: "workspace_run", id: workspaceRunRecorder.workspaceRunId }],
-                coverage: {
-                  state: "degraded",
-                  reasonCodes: ["workspace_terminal_settlement_failed"],
-                },
-              }).catch(() => undefined);
-              throw error instanceof SecretSafeFailureError
-                ? error
-                : new SecretSafeFailureError("WORKSPACE_SETTLEMENT_FAILED", error);
-            }
-            workspaceEventId = finalized.eventId;
-            if (finalized.disposition === "recovery_required") {
-              throw new AssistantAcceptanceRecoveryRequiredError(
-                createAssistantAcceptanceRecoveryResult(),
-              );
-            }
-          }
-          const committed = await commitPreparedAssistantAcceptance({
-            conversationCausalStore: options.conversationCausalStore,
-            requestId,
-            attempt: currentCausalAttempt,
-            acceptance,
-            workspaceEventId,
-          });
-          if (committed === "recovery_required") {
-            throw new AssistantAcceptanceRecoveryRequiredError(
-              createAssistantAcceptanceRecoveryResult(),
-            );
-          }
-        } else if (workspaceRunRecorder && settlementStatus === "succeeded") {
-          await workspaceRunRecorder.finalizeAccepted();
-        }
-        if (assistantMessage && assistantRequiresAcceptance) {
-          emitStatus.sendAttemptControl({
-            operation: "accepted",
-            attempt: Math.max(1, currentCausalAttempt),
-          });
-        }
-        emitStatus.setAssistantMessageId(assistantMessageId);
-        await emitTerminalStreamEvent({
-          type: input.terminalType ?? "completed",
-          message: input.content,
-          ...(assistantMessageId ? { finalMessageId: assistantMessageId } : {}),
-        });
-        return assistantMessageId;
-      }
+      const persistStage = createLegacyPersistStage({
+        options,
+        sessionId: () => sessionId,
+        causalTurnId: () => causalTurnId,
+        requestId,
+        currentCausalAttempt: () => currentCausalAttempt,
+        workspaceRunRecorder: () => workspaceRunRecorder,
+        finalizeAssistantOutput,
+        emitStatus,
+        emitTerminalStreamEvent,
+      } as unknown as Parameters<typeof createLegacyPersistStage>[0]);
 
       const workspaceResolution = internalOptions.preResolvedRunContext
         ? { ok: true as const, runContext: internalOptions.preResolvedRunContext }
@@ -1311,7 +1198,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
               message: "旧 Skill 输入已作废，当前会话保持只读规划",
               toolCallsExecuted: 0,
             });
-            await persistAssistantReply({
+            await persistStage.persistAssistantReply({
               content: reply,
               goalEventRef: `plan-invalidated-skill-input:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
               settlementStatus: "paused",
@@ -1368,7 +1255,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
               message: "目标修订提案等待明确批准",
               toolCallsExecuted: 0,
             });
-            await persistAssistantReply({
+            await persistStage.persistAssistantReply({
               content: reply,
               goalEventRef: `goal-amendment:${amendment.proposal.id}`,
               settlementStatus: "paused",
@@ -1408,7 +1295,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
               message: "计划仍处于只读状态，请先处理计划恢复入口",
               toolCallsExecuted: 0,
             });
-            await persistAssistantReply({
+            await persistStage.persistAssistantReply({
               content: reply,
               goalEventRef: `plan-locked:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
               settlementStatus: "paused",
@@ -1490,7 +1377,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
           } else {
             emitStatus.send(planContinuationEvent);
           }
-          await persistAssistantReply({
+          await persistStage.persistAssistantReply({
             content: reply,
             goalEventRef: `plan-input:${plan.id}:${plan.revision}`,
             settlementStatus:
@@ -1696,7 +1583,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
         originMessageId: userMessageId,
         sessionId,
         requestId,
-        persistAssistantReply,
+        persistAssistantReply: persistStage.persistAssistantReply,
         emitStatus,
         now: options.now,
         signal: runtimeOptions.signal,
@@ -1728,7 +1615,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
             return taskCreationResult.result;
           }
 
-          const assistantMessageId = await persistAssistantReply({
+          const assistantMessageId = await persistStage.persistAssistantReply({
             content: taskCreationResult.result.reply,
           });
           const memoryId = await writeSessionMemory({
@@ -1890,7 +1777,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
                 message: taskRunResult.result.message,
                 toolCallsExecuted: 0,
               });
-              await persistAssistantReply({
+              await persistStage.persistAssistantReply({
                 content: taskRunResult.result.message,
                 executedRunId: failedRun.id,
                 settlementStatus:
@@ -1914,7 +1801,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
               toolCallsExecuted: 0,
             });
           }
-          const assistantMessageId = await persistAssistantReply({
+          const assistantMessageId = await persistStage.persistAssistantReply({
             content: taskRunResult.result.reply,
             executedRunId,
             settlementStatus:
@@ -2976,7 +2863,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       }
 
       reply = redactCredentialString(reply);
-      const assistantMessageId = await persistAssistantReply({
+      const assistantMessageId = await persistStage.persistAssistantReply({
         content: reply,
         relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
         settlementStatus:
