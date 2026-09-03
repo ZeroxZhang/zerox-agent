@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../main/openAiCompatibleClient";
+import type { ToolDefinition } from "./toolDefinition";
 import type { AgentToolName } from "./toolPermissions";
 import type { ExecutionPlan, ExecutionStep, AgentPhase } from "./agentRuns";
 import { redactCredentials } from "./credentialRedaction";

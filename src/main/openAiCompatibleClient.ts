@@ -10,6 +10,9 @@ import {
   type ModelServiceNotice,
 } from "../shared/modelServiceNotice";
 import { MODEL_RESPONSE_MAX_BODY_BYTES } from "../shared/limits";
+import type { ToolDefinition } from "../shared/toolDefinition";
+
+export type { ToolDefinition };
 
 export type ChatImageContent = {
   mediaType: string;
@@ -23,15 +26,6 @@ export type ChatMessage = {
   tool_call_id?: string;
   name?: string;
   images?: ChatImageContent[];
-};
-
-export type ToolDefinition = {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
 };
 
 export type ToolCall = {
