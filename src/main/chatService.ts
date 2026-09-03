@@ -25,7 +25,6 @@ import {
   type ChatKernelSettlement,
 } from "./kernel/chatKernelSegment";
 import {
-  normalizeChatTaskStatusEventForPersistence,
   type AppendChatMessageResult,
   type ChatSessionStore,
 } from "./chatSessionStore";
@@ -59,7 +58,6 @@ import type {
   ChatClient,
   ChatCompletionResponse,
   ChatMessage,
-  StreamEvent as ModelStreamEvent,
 } from "./openAiCompatibleClient";
 import type { ScheduledTaskStore } from "./taskStore";
 import type {
@@ -67,7 +65,6 @@ import type {
   ToolAuthorizationService,
 } from "./toolAuthorizationService";
 import {
-  sanitizeSkillUserInputRequest,
   type ChatAgentStatus,
   type ChatAttachmentInput,
   type ChatAttachmentMetadata,
@@ -138,7 +135,6 @@ import {
   type ChatOutputPart,
 } from "../shared/chatOutput";
 import {
-  redactCredentials,
   redactCredentialString,
   stringifyRedactedCredentials,
 } from "../shared/credentialRedaction";
@@ -178,6 +174,20 @@ import {
   SecretSafeFailureError,
   toSecretSafeFailure,
 } from "../shared/secretSafeFailure";
+import {
+  createChatStatusEmitter,
+  emitModelStreamEvent,
+  getNowMs,
+  normalizeAgentLoopMaxTurns,
+} from "./chatService/streamingStatus";
+import {
+  createChatKernelRunId,
+  createRequiredChatEventFingerprint,
+  createRequiredSettlementId,
+  toChatKernelStatus,
+  toRequiredSettlementTarget,
+} from "./chatService/kernelSettlement";
+export { createRequiredChatEventFingerprint } from "./chatService/kernelSettlement";
 
 export type ChatService = {
   sendMessage(
@@ -5092,484 +5102,6 @@ export function createChatService(options: {
     },
     sendMessage: sendMessageInternal,
   };
-}
-
-const defaultChatAgentLoopMaxTurns = 48;
-
-function normalizeAgentLoopMaxTurns(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return defaultChatAgentLoopMaxTurns;
-  }
-
-  return Math.max(1, Math.floor(value));
-}
-
-function createChatStatusEmitter(options: {
-  sessionId: string;
-  requestId: string;
-  startedAtMs: number;
-  initialSequence?: number;
-  now?: () => Date;
-  getDomainStateAvailable?: () => boolean;
-  onStatusEvent?: (event: ChatTaskStatusEvent) => void;
-  onStreamEvent?: (event: ChatStreamEvent) => void;
-  onPersistEvent?: (event: ChatTaskStatusEvent) => void | Promise<void>;
-  onRequiredPersistEvent?: (event: ChatTaskStatusEvent) => Promise<void>;
-}) {
-  let sessionId = options.sessionId;
-  let assistantMessageId: string | undefined;
-  let sequence = Math.max(0, options.initialSequence ?? 0);
-  let currentAttempt = 1;
-  let attemptControlSequence = 0;
-  const turnId = `turn-${options.requestId}`;
-  const bufferedTextEvents: Array<{
-    type: "answer_delta" | "thinking_delta";
-    text: string;
-  }> = [];
-  let persistenceQueue: Promise<void> = Promise.resolve();
-
-  function enqueuePersistence(statusEvent: ChatTaskStatusEvent): Promise<void> {
-    const operation = persistenceQueue.then(async () => {
-      await options.onPersistEvent?.(statusEvent);
-    });
-    persistenceQueue = operation.catch(() => undefined);
-    return operation;
-  }
-
-  function createStreamBase(createdAt: string) {
-    return {
-      sessionId,
-      requestId: options.requestId,
-      sequence: ++sequence,
-      turnId,
-      ...(assistantMessageId ? { assistantMessageId } : {}),
-      attempt: currentAttempt,
-      createdAt,
-      domainStateAvailable: options.getDomainStateAvailable?.() === true,
-    };
-  }
-
-  function createStatusEvent(
-    event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
-  ): ChatTaskStatusEvent {
-    const safeEvent = redactCredentials(event) as typeof event;
-    if (safeEvent.inputRequest) {
-      safeEvent.inputRequest = sanitizeSkillUserInputRequest(
-        safeEvent.inputRequest,
-      );
-    }
-    if (safeEvent.pendingSkillInput?.inputRequest) {
-      safeEvent.pendingSkillInput.inputRequest = sanitizeSkillUserInputRequest(
-        safeEvent.pendingSkillInput.inputRequest,
-      );
-    }
-    const nowMs = getNowMs(options.now);
-    const createdAt = new Date(nowMs).toISOString();
-    const streamBase = createStreamBase(createdAt);
-    return {
-      ...safeEvent,
-      ...streamBase,
-      domainStateAvailable:
-        safeEvent.domainStateAvailable === false
-          ? false
-          : streamBase.domainStateAvailable,
-      elapsedMs: Math.max(0, nowMs - options.startedAtMs),
-    };
-  }
-
-  function publishStatusEvent(
-    statusEvent: ChatTaskStatusEvent,
-    optionsOverride: { persist: boolean },
-  ) {
-    if (optionsOverride.persist) {
-      void enqueuePersistence(statusEvent).catch(() => undefined);
-    }
-    try {
-      options.onStatusEvent?.(statusEvent);
-    } catch {
-      // Renderer observers are best-effort.
-    }
-    try {
-      options.onStreamEvent?.({
-        type: "status",
-        status: statusEvent,
-        sessionId: statusEvent.sessionId,
-        requestId: statusEvent.requestId ?? options.requestId,
-        sequence:
-          statusEvent.sequence ?? createStreamBase(statusEvent.createdAt).sequence,
-        turnId: statusEvent.turnId ?? turnId,
-        ...(assistantMessageId ? { assistantMessageId } : {}),
-        createdAt: statusEvent.createdAt,
-        domainStateAvailable: statusEvent.domainStateAvailable === true,
-      });
-    } catch {
-      // Renderer observers are best-effort.
-    }
-  }
-
-  function flushBufferedTextEvents() {
-    const pending = bufferedTextEvents.splice(0);
-    const orderedTypes = [
-      ...new Set(pending.map((event) => event.type)),
-    ];
-    for (const type of orderedTypes) {
-      const text = redactCredentialString(
-        pending
-          .filter((event) => event.type === type)
-          .map((event) => event.text)
-          .join(""),
-      );
-      if (!text) {
-        continue;
-      }
-      const nowMs = getNowMs(options.now);
-      try {
-        options.onStreamEvent?.({
-          type,
-          text,
-          ...createStreamBase(new Date(nowMs).toISOString()),
-        });
-      } catch {
-        // Renderer observers are best-effort.
-      }
-    }
-  }
-
-  return {
-    getSequence() {
-      return sequence;
-    },
-    setSessionId(nextSessionId: string) {
-      sessionId = nextSessionId;
-    },
-    send(event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">) {
-      if (
-        event.state === "paused"
-        || event.state === "waiting_for_input"
-        || (
-          event.state === "tool_invocation"
-          && event.invocationStatus === "waiting_approval"
-        )
-      ) {
-        throw new Error(`Status ${event.state} requires durable publication.`);
-      }
-      publishStatusEvent(createStatusEvent(event), { persist: true });
-    },
-    sendPublishedOnly(
-      event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
-    ) {
-      publishStatusEvent(createStatusEvent(event), { persist: false });
-    },
-    sendAttemptControl(event: {
-      operation: "begin" | "supersede" | "reset" | "accepted";
-      attempt: number;
-      supersedesAttempt?: number;
-    }) {
-      flushBufferedTextEvents();
-      currentAttempt = event.attempt;
-      const nowMs = getNowMs(options.now);
-      try {
-        options.onStreamEvent?.({
-          type: "attempt_control",
-          operation: event.operation,
-          controlSequence: ++attemptControlSequence,
-          ...(event.supersedesAttempt
-            ? { supersedesAttempt: event.supersedesAttempt }
-            : {}),
-          ...createStreamBase(new Date(nowMs).toISOString()),
-        });
-      } catch {
-        // Renderer observers are best-effort.
-      }
-    },
-    async sendWaitingForInput(
-      inputRequest: SkillUserInputRequest,
-      message: string,
-      pendingSkillInput: SkillPendingInputState,
-    ) {
-      const publicInputRequest = sanitizeSkillUserInputRequest(inputRequest);
-      const statusEvent = createStatusEvent({
-        state: "waiting_for_input",
-        message,
-        selectedSkillName: publicInputRequest.skillName,
-        inputRequest: publicInputRequest,
-        pendingSkillInput,
-      });
-      if (!options.onRequiredPersistEvent) {
-        throw new Error("Chat activity persistence is unavailable.");
-      }
-      await persistenceQueue;
-      await options.onRequiredPersistEvent(statusEvent);
-      if (statusEvent.pendingSkillInput?.settlementId) {
-        pendingSkillInput.settlementId = statusEvent.pendingSkillInput.settlementId;
-      }
-      publishStatusEvent(
-        {
-          ...statusEvent,
-          pendingSkillInput: statusEvent.pendingSkillInput
-            ? { ...statusEvent.pendingSkillInput, attachmentPayloads: undefined }
-            : undefined,
-        },
-        { persist: false },
-      );
-      const nowMs = getNowMs(options.now);
-      try {
-        options.onStreamEvent?.({
-          type: "waiting_for_input",
-          inputRequest: publicInputRequest,
-          ...createStreamBase(new Date(nowMs).toISOString()),
-        });
-      } catch {
-        // Renderer observers are best-effort.
-      }
-    },
-    async sendRequired(
-      event: Omit<ChatTaskStatusEvent, "sessionId" | "createdAt" | "elapsedMs">,
-    ) {
-      const statusEvent = createStatusEvent(event);
-      if (!options.onRequiredPersistEvent) {
-        await enqueuePersistence(statusEvent);
-        publishStatusEvent(statusEvent, { persist: false });
-        return;
-      }
-      await persistenceQueue;
-      await options.onRequiredPersistEvent(statusEvent);
-      publishStatusEvent(statusEvent, { persist: false });
-    },
-    setAssistantMessageId(nextAssistantMessageId: string | null | undefined) {
-      assistantMessageId = nextAssistantMessageId ?? undefined;
-    },
-    async drainPersistence() {
-      await persistenceQueue;
-    },
-    sendStreamEvent(event: ChatModelStreamEventInput) {
-      if (event.type === "answer_delta") {
-        const previous = bufferedTextEvents.at(-1);
-        if (previous?.type === event.type) previous.text += event.text;
-        else bufferedTextEvents.push({ ...event });
-        return;
-      }
-      if (event.type === "thinking_delta") {
-        const previous = bufferedTextEvents.at(-1);
-        if (previous?.type === event.type) previous.text += event.text;
-        else bufferedTextEvents.push({ ...event });
-        return;
-      }
-      const nowMs = getNowMs(options.now);
-      try {
-        const clonedEvent = cloneChatModelStreamEventInput(event);
-        const safeEvent = event.type === "output_part"
-          ? clonedEvent
-          : redactCredentials(clonedEvent) as ChatModelStreamEventInput;
-        options.onStreamEvent?.({
-          ...safeEvent,
-          ...createStreamBase(new Date(nowMs).toISOString()),
-          ...(safeEvent.domainStateAvailable === false
-            ? { domainStateAvailable: false as const }
-            : {}),
-        });
-      } catch {
-        // Renderer observers are best-effort.
-      }
-    },
-    sendTerminalEvent(event: {
-      type: "completed" | "failed" | "canceled";
-      message?: string;
-      finalMessageId?: string;
-      domainStateAvailable?: false;
-    }) {
-      flushBufferedTextEvents();
-      if (event.finalMessageId) {
-        assistantMessageId = event.finalMessageId;
-      }
-      const nowMs = getNowMs(options.now);
-      try {
-        const safeEvent = redactCredentials(event) as typeof event;
-        options.onStreamEvent?.({
-          ...safeEvent,
-          ...createStreamBase(new Date(nowMs).toISOString()),
-          ...(safeEvent.domainStateAvailable === false
-            ? { domainStateAvailable: false as const }
-            : {}),
-        });
-      } catch {
-        // Renderer observers are best-effort.
-      }
-    },
-  };
-}
-
-type ChatModelStreamEventInput = { domainStateAvailable?: false } & (
-  | { type: "answer_delta"; text: string }
-  | { type: "thinking_delta"; text: string }
-  | { type: "output_part"; part: ChatOutputPart }
-  | {
-      type: "tool_call_preview";
-      toolCallId: string;
-      toolName?: string;
-      argumentsDelta?: string;
-    }
-);
-
-function cloneChatModelStreamEventInput(
-  event: ChatModelStreamEventInput,
-): ChatModelStreamEventInput {
-  if (event.type !== "output_part") {
-    return event;
-  }
-
-  return {
-    ...event,
-    part: structuredClone(event.part),
-  };
-}
-
-function emitModelStreamEvent(
-  emitter: ReturnType<typeof createChatStatusEmitter>,
-  outputAssembler: ReturnType<typeof createChatOutputAssembler>,
-  event: ModelStreamEvent,
-) {
-  if (event.type === "content_delta") {
-    emitter.sendStreamEvent({ type: "answer_delta", text: event.text });
-    outputAssembler.appendText(event.text);
-    return;
-  }
-
-  if (event.type === "reasoning_delta") {
-    emitter.sendStreamEvent({ type: "thinking_delta", text: event.text });
-    return;
-  }
-
-  if (event.type === "tool_call_delta") {
-    const index = normalizeToolCallPreviewIndex(event.index);
-    const toolCallId = event.id || (index !== undefined ? `index:${index}` : "");
-    emitter.sendStreamEvent({
-      type: "tool_call_preview",
-      toolCallId,
-      ...(index !== undefined ? { index } : {}),
-      ...(event.name ? { toolName: event.name } : {}),
-      // Raw streaming argument chunks are not independently redactable: a
-      // credential key/value can straddle chunk boundaries. The accompanying
-      // output_part is assembled and sanitized before renderer publication.
-    });
-    emitter.sendStreamEvent({
-      type: "output_part",
-      part: outputAssembler.appendToolCall({
-        toolCallId,
-        ...(event.name ? { toolName: event.name } : {}),
-        ...(event.arguments ? { argumentsText: event.arguments } : {}),
-      }),
-    });
-  }
-}
-
-function normalizeToolCallPreviewIndex(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return undefined;
-  }
-  return Math.max(0, Math.floor(value));
-}
-
-function getNowMs(now: (() => Date) | undefined): number {
-  return now ? now().getTime() : Date.now();
-}
-
-function toRequiredSettlementTarget(
-  event: ChatTaskStatusEvent,
-):
-  | "waiting_for_input"
-  | "waiting_for_approval"
-  | "checkpoint_boundary"
-  | "paused"
-  | "failed"
-  | "canceled"
-  | null {
-  if (event.state === "waiting_for_input") return "waiting_for_input";
-  if (
-    event.state === "tool_invocation"
-    && event.invocationStatus === "waiting_approval"
-  ) {
-    return "waiting_for_approval";
-  }
-  if (event.state === "checkpoint_boundary") return "checkpoint_boundary";
-  if (event.state === "paused") return "paused";
-  if (event.state === "failed") return "failed";
-  if (event.state === "canceled") return "canceled";
-  return null;
-}
-
-function createRequiredSettlementId(input: {
-  requestId: string;
-  attempt: number;
-  sourceSequence: number;
-  targetState: string;
-}): string {
-  return `required_settlement_${createConversationRequestFingerprint({
-    schemaVersion: 1,
-    ...input,
-  })}`;
-}
-
-export function createRequiredChatEventFingerprint(
-  event: ChatTaskStatusEvent,
-): string {
-  const persistedEvent = normalizeChatTaskStatusEventForPersistence(event);
-  const pendingSkillInput = persistedEvent.pendingSkillInput
-    ? {
-        ...persistedEvent.pendingSkillInput,
-        ...(persistedEvent.pendingSkillInput.attachmentPayloads
-          ? {
-              attachmentPayloads: persistedEvent.pendingSkillInput.attachmentPayloads.map(
-                ({ dataBase64, ...metadata }) => ({
-                  ...metadata,
-                  dataFingerprint: createConversationRequestFingerprint(dataBase64),
-                }),
-              ),
-            }
-          : {}),
-      }
-    : undefined;
-  return createConversationRequestFingerprint({
-    schemaVersion: 2,
-    event: {
-      ...persistedEvent,
-      ...(pendingSkillInput ? { pendingSkillInput } : {}),
-    },
-  });
-}
-
-function createChatKernelRunId(requestId: string): string {
-  return `chat_kernel_${createConversationRequestFingerprint({
-    schemaVersion: 1,
-    requestId,
-    invocationId: randomUUID(),
-  })}`;
-}
-
-function toChatKernelStatus(
-  result: SendChatMessageResult,
-  terminal: Extract<
-    ChatStreamEvent,
-    { type: "completed" | "failed" | "canceled" }
-  > | undefined,
-  statusEvent: ChatTaskStatusEvent | undefined,
-): ChatKernelSettlement<unknown>["status"] {
-  if (terminal?.type === "canceled") return "canceled";
-  if (terminal?.type === "failed") return "failed";
-  if (result.turnSettlementStatus === "unknown") return "paused";
-  if (!result.ok) {
-    if (statusEvent?.state === "waiting_for_input" || statusEvent?.state === "paused") {
-      return "paused";
-    }
-    if (statusEvent?.state === "canceled") return "canceled";
-    if (statusEvent?.state === "failed") return "failed";
-    return result.code === "CANCELED" ? "canceled" : "failed";
-  }
-  if (result.turnSettlementStatus === "paused") return "paused";
-  if (result.turnSettlementStatus === "failed") return "failed";
-  if (result.agentStatus?.state === "paused") return "paused";
-  if (result.agentStatus?.state === "failed") return "failed";
-  return "succeeded";
 }
 
 function inferApprovalRiskLevel(input: {

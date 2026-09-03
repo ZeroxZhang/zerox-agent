@@ -506,7 +506,6 @@ export function createAppContainer(options: {
         // the schema is ready before any store write.
         return createStorageImpl({ dbPath: path.join(configDir, "zerox.db") });
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.error(
           `[storage] could not open SQLite authority (${String(error)}).`,
         );

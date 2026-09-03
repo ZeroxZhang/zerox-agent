@@ -136,7 +136,6 @@ export function createStorageImpl(opts: CreateStorageOptions): Storage {
     try {
       // Synchronous mkdir to keep createStorageImpl synchronous (contract §1.3
       // Storage is created before any async migrate()).
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       require("node:fs").mkdirSync(parent, { recursive: true });
     } catch {
       // Ignore; better-sqlite3 will surface a clearer error if truly missing.

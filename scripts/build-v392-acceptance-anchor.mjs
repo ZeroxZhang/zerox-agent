@@ -116,9 +116,9 @@ const EXPECTED_GENERATED_NATIVE_CACHE = Object.freeze({
 });
 const CONTROL_DIGESTS = Object.freeze({
   "package.json":
-    "sha256:32f1c3af6529d8e4b510c47dc7f041773f9b2d7ab0c621b75c3c35b46360fed5",
+    "sha256:9c79e6deaa1658b428725628d0ee905cb8634321a1cbd35d2612fb386421b3ba",
   "package-lock.json":
-    "sha256:be1061d01bf0b6fe518c69d30e398386d1e8095b95b60deb56e5b9f403af23b3",
+    "sha256:af9b511b059aea01bad371438da6bf22e09143dfdbd71162b1eb1ea2ab0abbf6",
   "electron-builder.yml":
     "sha256:f6b3347462c9a1a0eb21dd6853f7ff8bcfecea7f85008e9d13a968e05b98d973",
   "scripts/after-pack-mac.mjs":

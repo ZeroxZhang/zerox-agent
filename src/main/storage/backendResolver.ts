@@ -23,7 +23,6 @@ function resolveFromEnv(env: NodeJS.ProcessEnv): { backend: StorageBackend; warn
 export function resolveStorageBackend(env: NodeJS.ProcessEnv = process.env): StorageBackend {
   const { backend, warned } = resolveFromEnv(env);
   if (warned) {
-    // eslint-disable-next-line no-console
     console.warn(
       `ZEROX_STORAGE_BACKEND="${env.ZEROX_STORAGE_BACKEND}" is invalid; falling back to "${backend}". Valid values: json | sqlite | dual.`,
     );

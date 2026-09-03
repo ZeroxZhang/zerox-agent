@@ -69,7 +69,6 @@ export function createSelfImprovementService(
       trajectoryRepository: deps.trajectoryRepository,
       sessionRepository: deps.sessionRepository,
     }).catch((error) => {
-      // eslint-disable-next-line no-console
       console.warn("[self-improvement] dream failed:", String(error));
       return { findingsConsidered: 0, memoriesWritten: 0, memoriesArchived: 0, candidatesQueued: 0 };
     });
@@ -86,7 +85,6 @@ export function createSelfImprovementService(
       workflowRuntime: deps.workflowRuntime,
       skillsDir: deps.skillsDir,
     }).catch((error) => {
-      // eslint-disable-next-line no-console
       console.warn("[self-improvement] distill failed:", String(error));
       return { clustersConsidered: 0, skillsPackaged: 0, candidatesQueued: 0, packagedSkillIds: [] };
     });
