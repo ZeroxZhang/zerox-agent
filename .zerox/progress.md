@@ -64,6 +64,12 @@
 - container/chatSessions.ts（401 行）：goal→chat 摘要同步、会话 CRUD/transcript 操作整簇外移（createChatSessionsRuntime(rt)，仅线程化 3 个存取器）；metadata 辅助调用点加文档化 cast。Commit 4287132。
 - container.ts 6382 → 6041。npm test 319 passed（3815/3821）；tests tsc 净。
 - 计划 Round 16-19：goal/plan/disclosure/agents 簇逐块外移；legacyTurn 3057 行单函数无法机械二分（记为债务，eslint max-lines 例外并 backlog）。
+
+## 2026-09-03 - Round 16: container disclosure 簇拆分
+
+- container/disclosure.ts（1256 行）：conversation-disclosure 读集构建/证据授权/解析整簇外移（createDisclosureRuntime(rt)，线程化 11 个存取器；materializer/resolver 接线保持）。Commit 265557a。
+- container.ts 6041 → 4877。npm test 319 passed（3815/3821）；tests/renderer tsc 净。
+- 剩余：goal/plan/agents 簇（Round 17-19）；若预算不足 ④ 将以达成度如实汇报。
 ## 2026-09-03 - Phase 0: 基线冻结（优化计划开工）
 
 - 通过锐评形成 8 阶段优化计划（考古归档/测试闸门/治理瘦身/同意模型/Kernel 真迁移/工厂拆分/linter+死代码/收尾）；用户确认：历史仓库内归档 + tag、同意模型默认严格 + 高级开关、范围仅代码/治理/测试。
