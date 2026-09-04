@@ -1,0 +1,13 @@
+name: toolchain-probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: probe digest
+        run: |
+          shasum -a 256 /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/SDKSettings.json
+          node scripts/build-safe-fs-helper.mjs
+          shasum -a 256 dist-native/darwin-arm64/zerox-safe-fs
