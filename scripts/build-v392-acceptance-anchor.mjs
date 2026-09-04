@@ -83,7 +83,7 @@ const EXPECTED_MACOS_SDK = Object.freeze({
   digest: "sha256:3f7ce329454a71cfa9ca9a481b530a5fc8dbb1d4c0fea2fc0f50a6cecec6cfb1",
   entryCount: 49730,
   settingsDigest:
-    "sha256:f77fa0f917f92e2765fb66a384b9ce1979b9359770fc14ba60b74326a8e8de6f",
+    "sha256:2fa5c0ce1bbcd261b132b572b1a9eece3b5905b04640a44deae1a6a8812928fb",
 });
 const EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST =
   "sha256:302f899cdbc241230e7f66ef586a686acc108d5b667a301195fd579bd6cb7af9";
