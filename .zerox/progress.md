@@ -15071,4 +15071,17 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   settle-flow 区，约 490-911 段 ~420 行）、settle 主流程、agent-run
   分支（~750）与 simple-chat 分支（~460）。flown 区与闭包状态
   （requestClaim/witnessedAttempt/persistedMessage/options.*）交织，
-  按 .zerox/legacyTurn-split-plan.md 顺序逐片推进、逐片验证。
+  按 .zerox/legacyTurn-split-plan.md 顺序逐片推进、逐片验证。## 字面口径 ④ 收口进度（续 2）
+
+- 切片 (c)：finalizeAssistantOutput/emitOutputPart/ensureCausalAttempt/
+  emitTerminalStreamEvent/settleClaimOwnedFailure（147 行）→
+  chatService/legacyTurnEmitStage.ts；rt 含 terminalStreamEventSent 与
+  currentCausalAttempt 的 getter/setter 对（setter 闭包直写 driver 外层
+  变量，语义一致）。legacyTurn.ts 2779 → 2656 行；tsc/eslint 干净、
+  chatService.test.ts 176/176。commit c7bfc7b。
+- 累计：legacyTurn.ts 3057 → 2656（已外移 persist 124 + settleSupport
+  182 + emitStage 147 ≈ 453 行 + 相应 wiring）。
+- 剩余主战场：顺序主流程（~2000+ 行，无嵌套函数）按锚点分为：
+  workspace/message 段、planService 段、continuation/skill/goalRoute
+  段、agent-run 分支（~750，最大）、simple-chat+尾段（~450）。
+  每段为 ctx 化 stage 函数外移，逐段验证推进。
