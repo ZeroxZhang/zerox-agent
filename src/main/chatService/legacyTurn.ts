@@ -1,4 +1,5 @@
 import { toRelatedMemory } from "./modulemessages";
+import { createLegacySettleSupportStage } from "./legacySettleSupportStage";
 import { createLegacyPersistStage } from "./legacyPersistStage";
 import { estimateChatTurnUsage } from "./modulemessages";
 import { recordSessionTokenUsage } from "./modulemessages";
@@ -169,188 +170,22 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       const publicationAuthority =
         internalOptions.publicationAuthority ?? createChatPublicationAuthority();
 
-      function invalidatePublicationAuthority(reasonCode: string): void {
-        publicationAuthority.invalidate(reasonCode);
-        internalOptions.onDomainStateUnavailable?.();
-      }
-
-      async function interruptRequiredSettlementAttempt(): Promise<void> {
-        pendingContinuations.delete(sessionId);
-        if (!options.conversationCausalStore || currentCausalAttempt < 1) return;
-        try {
-          const settled = await options.conversationCausalStore.settleAttempt({
-            requestId,
-            attempt: currentCausalAttempt,
-            state: "interrupted",
-          });
-          if (
-            settled.disposition !== "applied"
-            && settled.disposition !== "duplicate"
-          ) {
-            await options.conversationCausalStore.addRefs({
-              requestId,
-              refs: [],
-              coverage: {
-                state: "degraded",
-                reasonCodes: ["required_settlement_attempt_interrupt_conflict"],
-              },
-            }).catch(() => undefined);
-          }
-        } catch {
-          await options.conversationCausalStore.addRefs({
-            requestId,
-            refs: [],
-            coverage: {
-              state: "degraded",
-              reasonCodes: ["required_settlement_attempt_interrupt_failed"],
-            },
-          }).catch(() => undefined);
-        }
-      }
-
-      async function compensateRequiredSettlementFailure(
-        event: ChatTaskStatusEvent,
-      ): Promise<boolean> {
-        const {
-          payload: _payload,
-          inputRequest: _inputRequest,
-          pendingSkillInput,
-          maxTurns: _maxTurns,
-          ...safeEvent
-        } = event;
-        const failureEvent: ChatTaskStatusEvent = {
-          ...safeEvent,
-          ...(event.settlementId
-            ? { settlementId: `${event.settlementId}:tombstone` }
-            : {}),
-          state: "failed",
-          message: "Required conversation settlement failed.",
-          ...(pendingSkillInput
-            ? {
-                pendingSkillInput: {
-                  ...pendingSkillInput,
-                  status: "failed",
-                  attachmentPayloads: undefined,
-                },
-              }
-            : {}),
-        };
-        const [chatCompensation, workspaceCompensation] = await Promise.allSettled([
-          persistRequiredChatActivityEvent(options.chatSessionStore, failureEvent),
-          workspaceRunRecorder
-            ? workspaceRunRecorder.appendStatusEvent(failureEvent)
-            : Promise.resolve(null),
-        ]);
-        const reasonCodes = ["required_conversation_settlement_failed"];
-        if (chatCompensation.status === "rejected") {
-          reasonCodes.push("required_chat_failure_compensation_failed");
-          invalidatePublicationAuthority("required_chat_failure_compensation_failed");
-        }
-        if (workspaceCompensation.status === "rejected") {
-          reasonCodes.push("required_workspace_failure_compensation_failed");
-        }
-        const recorded = workspaceCompensation.status === "fulfilled"
-          ? workspaceCompensation.value
-          : null;
-        await options.conversationCausalStore?.addRefs({
-          requestId,
-          refs: [
-            ...(workspaceRunRecorder
-              ? [{ kind: "workspace_run" as const, id: workspaceRunRecorder.workspaceRunId }]
-              : []),
-            ...(recorded?.eventId && workspaceRunRecorder
-              ? [{
-                  kind: "workspace_event" as const,
-                  runId: workspaceRunRecorder.workspaceRunId,
-                  eventId: recorded.eventId,
-                }]
-              : []),
-          ],
-          coverage: { state: "degraded", reasonCodes },
-        }).catch(() => undefined);
-        await interruptRequiredSettlementAttempt();
-        return chatCompensation.status === "fulfilled";
-      }
-
-      async function persistChatStatusEvent(
-        event: ChatTaskStatusEvent,
-        requiredChat: boolean,
-      ): Promise<void> {
-        if (!requiredChat) {
-          if (options.chatSessionStore?.appendActivityEvent) {
-            try {
-              await options.chatSessionStore.appendActivityEvent(event.sessionId, event);
-            } catch {
-              await options.conversationCausalStore?.addRefs({
-                requestId,
-                refs: [],
-                coverage: {
-                  state: "degraded",
-                  reasonCodes: ["chat_activity_write_failed"],
-                },
-              }).catch(() => undefined);
-            }
-          }
-          if (!workspaceRunRecorder) {
-            await options.conversationCausalStore?.addRefs({
-              requestId,
-              refs: [],
-              coverage: {
-                state: "partial",
-                reasonCodes: ["workspace_run_unavailable"],
-              },
-            }).catch(() => undefined);
-            return;
-          }
-          try {
-            const recorded = await workspaceRunRecorder.appendStatusEvent(event);
-            await options.conversationCausalStore?.addRefs({
-              requestId,
-              refs: [
-                { kind: "workspace_run", id: workspaceRunRecorder.workspaceRunId },
-                ...(recorded.eventId
-                  ? [{
-                      kind: "workspace_event" as const,
-                      runId: workspaceRunRecorder.workspaceRunId,
-                      eventId: recorded.eventId,
-                    }]
-                  : []),
-              ],
-            }).catch(() => undefined);
-          } catch {
-            await options.conversationCausalStore?.addRefs({
-              requestId,
-              refs: [{ kind: "workspace_run", id: workspaceRunRecorder.workspaceRunId }],
-              coverage: {
-                state: "degraded",
-                reasonCodes: ["workspace_run_write_failed"],
-              },
-            }).catch(() => undefined);
-          }
-          return;
-        }
-        try {
-          await persistRequiredConversationSettlement({
-            requestId,
-            attempt: currentCausalAttempt,
-            event,
-            chatSessionStore: options.chatSessionStore,
-            conversationCausalStore: options.conversationCausalStore,
-            workspaceRunRecorder,
-            workspaceUnavailableReasonCode: "workspace_run_unavailable",
-          });
-        } catch (error) {
-          const failureStatusPersisted =
-            await compensateRequiredSettlementFailure(event);
-          throw new RequiredConversationSettlementError(
-            failureStatusPersisted,
-            error,
-            error instanceof RequiredConversationSettlementError
-              ? error.failureCode
-              : "CROSS_DOMAIN_SETTLEMENT_FAILED",
-          );
-        }
-      }
+      const settleSupport = createLegacySettleSupportStage({
+        options,
+        sessionId: () => sessionId,
+        requestId,
+        currentCausalAttempt: () => currentCausalAttempt,
+        publicationAuthority,
+        internalOptions,
+        pendingContinuations,
+        workspaceRunRecorder: () => workspaceRunRecorder,
+      } as unknown as Parameters<typeof createLegacySettleSupportStage>[0]);
+      const {
+        invalidatePublicationAuthority,
+        interruptRequiredSettlementAttempt,
+        compensateRequiredSettlementFailure,
+        persistChatStatusEvent,
+      } = settleSupport;
       const chatTimeZone = options.systemTimeZone ?? getSystemTimeZone();
       // Anchor date to turn start, interpreted in the user's system timezone.
       const chatDate = formatDateInTimeZone(new Date(startedAtMs), chatTimeZone);
