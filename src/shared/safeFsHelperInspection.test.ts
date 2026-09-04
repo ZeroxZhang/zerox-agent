@@ -264,7 +264,20 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       resolveXcrun,
     })).toThrowError("SDKROOT differs from the caller-reviewed SDK path");
 
-    const build = (environment: NodeJS.ProcessEnv) => execFileSync(
+    const build = (environment: NodeJS.ProcessEnv) => {
+      const probePath = path.join(
+        executionRoot,
+        "dist-native/darwin-" + process.arch + "/zerox-safe-fs",
+      );
+      const probeOut = () => {
+        try {
+          const out = execFileSync("shasum", [probePath], { encoding: "utf8" });
+          return out.trim();
+        } catch {
+          return null;
+        }
+      };
+      const result = execFileSync(
       process.execPath,
       [copiedBuildScript],
       {
@@ -272,6 +285,11 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
         env: { ...process.env, ...environment },
         stdio: "pipe",
       },
+      );
+      const sha = probeOut();
+      if (sha) console.log("GOOD_HELPER_SHA " + sha);
+      return result;
+    };
     );
     build({
       CC: EXPECTED_SAFE_FS_COMPILER.configuredPath,
