@@ -5,18 +5,18 @@ import path from "node:path";
 export const EXPECTED_SAFE_FS_COMPILER = Object.freeze({
   configuredPath: "/Library/Developer/CommandLineTools/usr/bin/clang",
   canonicalPath: "/Library/Developer/CommandLineTools/usr/bin/clang",
-  digest: "sha256:f30550eab15fdf5ab8c0dc54c52679711241e5d4b636b027e18c09fef531775d",
+  digest: "sha256:60468f3efd513d53f6ce581ec8d00595855ebf5a31a496d685b91c104aee1ca0",
 });
 
 export const EXPECTED_SAFE_FS_SDK = Object.freeze({
   configuredPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
-  canonicalPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk",
+  canonicalPath: "/Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk",
   settingsDigest:
-    "sha256:f8d005f09381389167f9e0aeaa169bc9e7dff162ef22ca2fd8e98df7ff1acafe",
+    "sha256:f77fa0f917f92e2765fb66a384b9ce1979b9359770fc14ba60b74326a8e8de6f",
 });
 
 export const EXPECTED_SAFE_FS_HELPER_DIGEST =
-  "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6";
+  "sha256:302f899cdbc241230e7f66ef586a686acc108d5b667a301195fd579bd6cb7af9";
 
 export const SAFE_FS_TOOLCHAIN_POLICY_NAME =
   ".v392-pinned-safe-fs-toolchain.json";
