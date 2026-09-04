@@ -15098,4 +15098,15 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   对每一行形如 `NAME,` 的候选按栈顶判定：'{' → 简写键化
   `NAME: rt.NAME(),`；'(' → 位置实参保留 `rt.NAME()`；键位置 `NAME:`
   不替换。生成器骨架保留在 .tmp_ph0/pf_*.py；已回滚保持树绿
-  （legacyTurn.ts 2462 = a614c70 状态），下一轮用上下文扫描器重做。
+  （legacyTurn.ts 2462 = a614c70 状态），下一轮用上下文扫描器重做。## legacyTurn 切片 e（agent-run）完成 + 收尾测量
+
+- 切片 e：agent-run 分支（751 行）→ chatService/legacyAgentRunStage.ts
+  （sentinel 阶段；上下文感知转换器：括号栈判定简写/实参、setter 语句
+  包装、owner 属性、不可变值捕获）。legacyTurn.ts 2462 → 1771。
+  tsc/eslint 干净、chatService.test.ts 176/176。commit df873ef。
+- 收尾测量：fallback else 块 1513-1677（163 行，赋值 reply×2/agentStatus
+  ×2/accumulatedUsage×1，helper: emitStatus×7/emitTerminal×2/
+  emitOutputPart×2，2 个 return，无 mapped 局部声明）；persist 尾段
+  1693-1765（73 行）+ 汇合段 1678-1692（15 行）。按相同管线抽
+  fallback + 尾段后预计 → ~1550-1560，再配 profile/消息段小切即 ≤1500。
+- 生成器参数化骨架保留于 .tmp_ph0/pf_*.py。
