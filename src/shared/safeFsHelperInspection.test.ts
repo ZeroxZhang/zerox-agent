@@ -280,6 +280,13 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
           const probePath = path.join(executionRoot, "dist-native/darwin-" + process.arch + "/zerox-safe-fs");
           const probeOut = execFileSync("shasum", [probePath], { encoding: "utf8" });
           console.log("DEBUG_HELPER_SHA " + probeOut.trim());
+          try {
+            const dbgPolicy = JSON.parse(readFileSync(policyPath, "utf8"));
+            console.log("DBG_POLICY_DIGEST " + dbgPolicy.safeFsHelperDigest);
+            console.log("DBG_EXPECTED_DIGEST " + EXPECTED_SAFE_FS_HELPER_DIGEST);
+            const dbgInspect = inspectSafeFsHelper(probePath);
+            console.log("DBG_INSPECT_SHA " + dbgInspect.sha256);
+          } catch { /* ignore */ }
         } catch {
           // ignore probe failure
         }
