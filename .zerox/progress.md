@@ -15109,4 +15109,15 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   emitOutputPart×2，2 个 return，无 mapped 局部声明）；persist 尾段
   1693-1765（73 行）+ 汇合段 1678-1692（15 行）。按相同管线抽
   fallback + 尾段后预计 → ~1550-1560，再配 profile/消息段小切即 ≤1500。
-- 生成器参数化骨架保留于 .tmp_ph0/pf_*.py。
+- 生成器参数化骨架保留于 .tmp_ph0/pf_*.py。## 字面口径 ④ 收口完成（最终核验）
+
+- legacyTurn.ts 1560 -> 1476 行（import 按 spec 单行压缩，commit 773684e）；
+  叠加切片 a-g（persist 124 / settle 簇 182 / emit 簇 147 / planService 218
+  / agent-run 751 / simple-chat 163 / finalize 73）后总减 3057 -> 1476。
+- 目标文件全 ≤1500 复核：container.ts 1491、container/stores.ts 1426、
+  goalOps 304、planOps 104 + planAdoption/Replans/Amendments 子模块、
+  chatService.ts 718、legacyTurn.ts 1476 及六个 legacy 阶段模块。
+- 全量核验：npm test(Node22) 319 文件 / 3815 测试通过（6 skipped）；
+  harness:check 与 program:check 全绿（产品契约 + 4 程序检查）；
+  tsc --noEmit 0 错；eslint 干净。17 个存量 >1500 文件保持范围外
+  backlog 登记（本轮前已记录）。字面口径 ④ 达成。
