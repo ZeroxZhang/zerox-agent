@@ -1,4 +1,5 @@
 import { toRelatedMemory } from "./modulemessages";
+import { createLegacyPlanInputStage, legacyPlanInputContinue } from "./legacyPlanInputStage";
 import { createLegacyTurnEmitStage } from "./legacyTurnEmitStage";
 import { createLegacySettleSupportStage } from "./legacySettleSupportStage";
 import { createLegacyPersistStage } from "./legacyPersistStage";
@@ -634,6 +635,25 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
         emitTerminalStreamEvent,
       } as unknown as Parameters<typeof createLegacyPersistStage>[0]);
 
+      const legacyPlanInputStage = createLegacyPlanInputStage({
+        options,
+        sessionId: () => sessionId,
+        requestId,
+        activeGoal: () => activeGoal,
+        chatRunContext: () => chatRunContext,
+        userMessage,
+        modelUserMessage,
+        preexistingInputRoutingPlan,
+        input,
+        runtimeOptions,
+        createId,
+        internalOptions,
+        planService: options.planService,
+        emitStatus,
+        persistStage,
+        emitTerminalStreamEvent,
+      } as unknown as Parameters<typeof createLegacyPlanInputStage>[0]);
+
       const workspaceResolution = internalOptions.preResolvedRunContext
         ? { ok: true as const, runContext: internalOptions.preResolvedRunContext }
         : await resolveChatWorkspace({
@@ -898,223 +918,9 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       });
 
       if (options.planService) {
-        const inputRoutingPlan =
-          preexistingInputRoutingPlan ??
-          (await options.planService.getInputRoutingPlan(sessionId));
-        if (inputRoutingPlan) {
-          if (internalOptions.skipUserMessageAppend) {
-            const reply =
-              "当前会话已进入只读 Plan Mode，这个更早的 Skill 输入已作废；没有启动 Skill、普通 Agent 或写入工具。请直接在 Plan 输入框补充要求。";
-            await emitStatus.sendRequired({
-              state: "paused",
-              message: "旧 Skill 输入已作废，当前会话保持只读规划",
-              toolCallsExecuted: 0,
-            });
-            await persistStage.persistAssistantReply({
-              content: reply,
-              goalEventRef: `plan-invalidated-skill-input:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
-              settlementStatus: "paused",
-            });
-            return {
-              ok: true,
-              reply,
-              sessionId,
-              relatedMemories: [],
-              memoryId: null,
-              turnSettlementStatus: "paused",
-              plan: inputRoutingPlan,
-            };
-          }
-          const amendmentObjective = extractExplicitGoalAmendmentObjective(
-            userMessage,
-          );
-          if (
-            amendmentObjective &&
-            inputRoutingPlan.purpose === "runtime_replan" &&
-            inputRoutingPlan.goalId
-          ) {
-            if (!options.proposeGoalAmendment) {
-              return {
-                ok: false,
-                message: "当前运行时未启用受控 Goal 修订服务。",
-              };
-            }
-            emitStatus.send({
-              state: "reasoning",
-              message: "正在创建目标修订提案，当前 Goal 和活动 Plan 保持不变",
-              toolCallsExecuted: 0,
-            });
-            const amendment = await options.proposeGoalAmendment(
-              inputRoutingPlan.goalId,
-              amendmentObjective,
-              userMessage,
-            );
-            if (!amendment.ok) {
-              emitStatus.send({
-                state: "failed",
-                message: amendment.message,
-                toolCallsExecuted: 0,
-              });
-              await emitTerminalStreamEvent({
-                type: "failed",
-                message: amendment.message,
-              });
-              return { ok: false, message: amendment.message };
-            }
-            const reply = `${amendment.message} 当前 Goal 和活动 Plan 尚未改变；请在 Goal 详情中批准或拒绝。`;
-            await emitStatus.sendRequired({
-              state: "paused",
-              message: "目标修订提案等待明确批准",
-              toolCallsExecuted: 0,
-            });
-            await persistStage.persistAssistantReply({
-              content: reply,
-              goalEventRef: `goal-amendment:${amendment.proposal.id}`,
-              settlementStatus: "paused",
-            });
-            appendRawHistoryEntry({
-              historyIndexStore: options.historyIndexStore,
-              createId,
-              sessionId,
-              requestId,
-              role: "assistant",
-              content: reply,
-              workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
-              createdAt: new Date(getNowMs(options.now)).toISOString(),
-            });
-            return {
-              ok: true,
-              reply,
-              sessionId,
-              relatedMemories: [],
-              memoryId: null,
-              turnSettlementStatus: "paused",
-              plan: inputRoutingPlan,
-              ...(activeGoal?.id === inputRoutingPlan.goalId
-                ? { activeGoal }
-                : {}),
-            };
-          }
-          const canRevisePlan =
-            inputRoutingPlan.status === "awaiting_input" ||
-            inputRoutingPlan.status === "awaiting_confirmation" ||
-            (inputRoutingPlan.status === "paused" &&
-              Boolean(inputRoutingPlan.finalArtifact));
-          if (!canRevisePlan) {
-            const reply = formatLockedPlanReply(inputRoutingPlan);
-            await emitStatus.sendRequired({
-              state: "paused",
-              message: "计划仍处于只读状态，请先处理计划恢复入口",
-              toolCallsExecuted: 0,
-            });
-            await persistStage.persistAssistantReply({
-              content: reply,
-              goalEventRef: `plan-locked:${inputRoutingPlan.id}:${inputRoutingPlan.revision}`,
-              settlementStatus: "paused",
-            });
-            return {
-              ok: true,
-              reply,
-              sessionId,
-              relatedMemories: [],
-              memoryId: null,
-              turnSettlementStatus: "paused",
-              plan: inputRoutingPlan,
-            };
-          }
-          emitStatus.send({
-            state: "reasoning",
-            message: "正在把补充或修改意见纳入只读计划并重新执行规划辩论",
-            toolCallsExecuted: 0,
-          });
-          let continuation;
-          try {
-            continuation = await options.planService.continueWithInput(
-              inputRoutingPlan.id,
-              modelUserMessage,
-              runtimeOptions.signal,
-              input.planAutonomyMode,
-            );
-          } catch (error) {
-            if (isAbortError(error, runtimeOptions.signal)) {
-              emitStatus.send({
-                state: "canceled",
-                message: "规划已中断",
-                toolCallsExecuted: 0,
-              });
-              await emitTerminalStreamEvent({
-                type: "canceled",
-                message: "已中断任务。",
-              });
-              return { ok: false, code: "CANCELED", retryable: true, message: "已中断任务。" };
-            }
-            const message = "继续规划失败，已安全停止。";
-            emitStatus.send({
-              state: "failed",
-              message,
-              toolCallsExecuted: 0,
-            });
-            await emitTerminalStreamEvent({ type: "failed", message });
-            return { ok: false, message };
-          }
-          if (!continuation.ok) {
-            emitStatus.send({
-              state: "failed",
-              message: continuation.message,
-              toolCallsExecuted: 0,
-            });
-            await emitTerminalStreamEvent({
-              type: "failed",
-              message: continuation.message,
-            });
-            return { ok: false, message: continuation.message };
-          }
-          const plan = continuation.plan;
-          const reply = formatPlanContinuationReply(plan);
-          const planContinuationState =
-            plan.status === "awaiting_confirmation" ? "completed" : "paused";
-          const planContinuationEvent: Omit<
-            ChatTaskStatusEvent,
-            "sessionId" | "createdAt" | "elapsedMs"
-          > = {
-            state: planContinuationState,
-            message:
-              plan.status === "awaiting_confirmation"
-                ? "计划已更新，等待确认"
-                : "计划仍需补充信息或处理门禁",
-            toolCallsExecuted: 0,
-          };
-          if (planContinuationState === "paused") {
-            await emitStatus.sendRequired(planContinuationEvent);
-          } else {
-            emitStatus.send(planContinuationEvent);
-          }
-          await persistStage.persistAssistantReply({
-            content: reply,
-            goalEventRef: `plan-input:${plan.id}:${plan.revision}`,
-            settlementStatus:
-              plan.status === "awaiting_confirmation" ? "succeeded" : "paused",
-          });
-          appendRawHistoryEntry({
-            historyIndexStore: options.historyIndexStore,
-            createId,
-            sessionId,
-            requestId,
-            role: "assistant",
-            content: reply,
-            workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
-            createdAt: new Date(getNowMs(options.now)).toISOString(),
-          });
-          return {
-            ok: true,
-            reply,
-            sessionId,
-            relatedMemories: [],
-            memoryId: null,
-            turnSettlementStatus:
-              plan.status === "awaiting_confirmation" ? "succeeded" : "paused",
-            plan,
-          };
+        const __planInputResult = await legacyPlanInputStage.run();
+        if (__planInputResult !== legacyPlanInputContinue) {
+          return __planInputResult;
         }
       }
 
