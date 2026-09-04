@@ -1,4 +1,5 @@
 import { toRelatedMemory } from "./modulemessages";
+import { createLegacyTurnEmitStage } from "./legacyTurnEmitStage";
 import { createLegacySettleSupportStage } from "./legacySettleSupportStage";
 import { createLegacyPersistStage } from "./legacyPersistStage";
 import { estimateChatTurnUsage } from "./modulemessages";
@@ -211,26 +212,30 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       let accumulatedReasoningProjection = "";
       let terminalStreamEventSent = false;
 
-      function finalizeAssistantOutput(content: string): {
-        outputParts?: ChatOutputPart[];
-      } {
-        outputAssembler.setFinalText(redactCredentialString(content));
-        const outputParts = outputAssembler.parts();
-        return {
-          ...(outputParts.length > 0 ? { outputParts } : {}),
-        };
-      }
+      const emitStage = createLegacyTurnEmitStage({
+        options,
+        requestId,
+        publicationAuthority,
+        emitStatus,
+        outputAssembler,
+        terminalStreamEventSent: () => terminalStreamEventSent,
+        setTerminalStreamEventSent: (value: boolean) => {
+          terminalStreamEventSent = value;
+        },
+        currentCausalAttempt: () => currentCausalAttempt,
+        setCurrentCausalAttempt: (value: number) => {
+          currentCausalAttempt = value;
+        },
+        invalidatePublicationAuthority,
+      } as unknown as Parameters<typeof createLegacyTurnEmitStage>[0]);
+      const {
+        finalizeAssistantOutput,
+        emitOutputPart,
+        ensureCausalAttempt,
+        emitTerminalStreamEvent,
+        settleClaimOwnedFailure,
+      } = emitStage;
 
-      function emitOutputPart(
-        part: ChatOutputPart,
-        provenance: { domainStateAvailable?: false } = {},
-      ) {
-        emitStatus.sendStreamEvent({
-          type: "output_part",
-          part,
-          ...provenance,
-        });
-      }
 
       const causalTurnId = createConversationTurnId(requestId);
       const requestClaim = internalOptions.requestClaim !== undefined
@@ -260,136 +265,8 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       }
       currentCausalAttempt = requestClaim?.value?.attempts.at(-1)?.attempt ?? 0;
 
-      async function ensureCausalAttempt(): Promise<void> {
-        if (!options.conversationCausalStore) {
-          currentCausalAttempt = Math.max(1, currentCausalAttempt);
-          return;
-        }
-        const current = await options.conversationCausalStore.getRequest(requestId);
-        const last = current?.attempts.at(-1);
-        if (last?.state === "accepted") {
-          currentCausalAttempt = last.attempt;
-          return;
-        }
-        if (last?.state === "active") {
-          currentCausalAttempt = last.attempt;
-          return;
-        }
-        const nextAttempt = (last?.attempt ?? 0) + 1;
-        const begun = await options.conversationCausalStore.beginAttempt({
-          requestId,
-          attempt: nextAttempt,
-        });
-        if (begun.disposition !== "applied" && begun.disposition !== "duplicate") {
-          throw new Error("Conversation causal attempt could not be started.");
-        }
-        currentCausalAttempt = nextAttempt;
-      }
 
-      async function emitTerminalStreamEvent(event: {
-        type: "completed" | "failed" | "canceled";
-        message?: string;
-        finalMessageId?: string;
-        domainStateAvailable?: false;
-      }) {
-        if (terminalStreamEventSent) {
-          return;
-        }
-        const domainStateAvailable =
-          event.domainStateAvailable === false
-            || !publicationAuthority.domainStateAvailable()
-            ? false as const
-            : undefined;
-        if (
-          event.message &&
-          (event.type === "failed" || event.type === "canceled")
-        ) {
-          emitOutputPart(
-            outputAssembler.appendDiagnostic({
-              severity: event.type === "failed" ? "error" : "warning",
-              title: event.type === "failed" ? "请求失败" : "请求已取消",
-              message: event.message,
-            }),
-            domainStateAvailable === false
-              ? { domainStateAvailable: false }
-              : {},
-          );
-        }
-        terminalStreamEventSent = true;
-        await emitStatus.drainPersistence();
-        emitStatus.sendTerminalEvent({
-          ...event,
-          ...(domainStateAvailable === false
-            ? { domainStateAvailable: false as const }
-            : {}),
-        });
-      }
 
-      async function settleClaimOwnedFailure(message: string): Promise<void> {
-        const durableSessionId = publicationAuthority.durableSessionId();
-        if (durableSessionId && options.chatSessionStore?.appendActivityEvent) {
-          try {
-            await emitStatus.sendRequired({
-              state: "failed",
-              message,
-              toolCallsExecuted: 0,
-            });
-            await emitTerminalStreamEvent({
-              type: "failed",
-              message,
-            });
-            return;
-          } catch (error) {
-            if (
-              !(error instanceof RequiredConversationSettlementError)
-              || !error.failureStatusPersisted
-            ) {
-              invalidatePublicationAuthority("claim_terminal_activity_write_failed");
-            }
-            await options.conversationCausalStore?.addRefs({
-              requestId,
-              refs: [],
-              coverage: {
-                state: "degraded",
-                reasonCodes: ["claim_terminal_activity_write_failed"],
-              },
-            }).catch(() => undefined);
-            emitStatus.sendPublishedOnly({
-              state: "failed",
-              message,
-              toolCallsExecuted: 0,
-            });
-          }
-        } else {
-          invalidatePublicationAuthority(
-            durableSessionId
-              ? "chat_activity_adapter_unavailable"
-              : "session_binding_unproven",
-          );
-          await options.conversationCausalStore?.addRefs({
-            requestId,
-            refs: [],
-            coverage: {
-              state: "degraded",
-              reasonCodes: [
-                durableSessionId
-                  ? "chat_activity_adapter_unavailable"
-                  : "session_binding_unproven",
-              ],
-            },
-          }).catch(() => undefined);
-          emitStatus.sendPublishedOnly({
-            state: "failed",
-            message,
-            toolCallsExecuted: 0,
-          });
-        }
-        await emitTerminalStreamEvent({
-          type: "failed",
-          message,
-          domainStateAvailable: false,
-        });
-      }
 
       const replaySessionId = options.conversationCausalStore
         ? claimBinding?.sessionId
