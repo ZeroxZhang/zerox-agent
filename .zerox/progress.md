@@ -15084,4 +15084,18 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 - 剩余主战场：顺序主流程（~2000+ 行，无嵌套函数）按锚点分为：
   workspace/message 段、planService 段、continuation/skill/goalRoute
   段、agent-run 分支（~750，最大）、simple-chat+尾段（~450）。
-  每段为 ctx 化 stage 函数外移，逐段验证推进。
+  每段为 ctx 化 stage 函数外移，逐段验证推进。## legacyTurn agent-run 块切片尝试（回滚记录）
+
+- 尝试：把 `if (options.toolExecutor)` 主体（751 行、9 个提前 return、
+  0 嵌套函数、仅 6 个外层赋值：reply/toolCallsUsed/agentStatus/
+  accumulatedUsage/currentCausalAttempt/accumulatedReasoningProjection）
+  外移为 legacyAgentRunStage（sentinel run()）。setter 语句包装已实现
+  （wrap_assignments：赋值包装为 rt.setX(expr)，多行表达式以 `;`/`};`
+  结尾探测）。
+- 卡点：词替换把“对象字面量简写属性”与“位置实参”一并改写，且把
+  属性键位置（`createId: ...`）也替换掉，产生约 15 处 TS1005。
+- 结论：需上下文感知转换（括号/花括号栈 + 引号/模板字符串感知），
+  对每一行形如 `NAME,` 的候选按栈顶判定：'{' → 简写键化
+  `NAME: rt.NAME(),`；'(' → 位置实参保留 `rt.NAME()`；键位置 `NAME:`
+  不替换。生成器骨架保留在 .tmp_ph0/pf_*.py；已回滚保持树绿
+  （legacyTurn.ts 2462 = a614c70 状态），下一轮用上下文扫描器重做。
