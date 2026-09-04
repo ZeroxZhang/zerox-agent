@@ -1,0 +1,21 @@
+name: toolchain-probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: probe toolchain
+        run: |
+          echo '--- xcode-select ---'
+          xcode-select -p
+          echo '--- CLT SDKs ---'
+          ls -la /Library/Developer/CommandLineTools/SDKs/
+          echo '--- realpath ---'
+          realpath /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+          echo '--- clang ---'
+          /Library/Developer/CommandLineTools/usr/bin/clang --version | head -1
+          shasum -a 256 /Library/Developer/CommandLineTools/usr/bin/clang
+          echo '--- settings plist digest ---'
+          shasum -a 256 /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/SDKSettings.plist
