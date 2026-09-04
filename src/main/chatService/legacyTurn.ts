@@ -1,4 +1,5 @@
 import { toRelatedMemory } from "./modulemessages";
+import { createLegacySimpleChatStage, legacySimpleChatContinue } from "./legacySimpleChatStage";
 import { createLegacyAgentRunStage, legacyAgentRunContinue } from "./legacyAgentRunStage";
 import { createLegacyPlanInputStage, legacyPlanInputContinue } from "./legacyPlanInputStage";
 import { createLegacyTurnEmitStage } from "./legacyTurnEmitStage";
@@ -1446,7 +1447,7 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       }
 
       let reply = "";
-      const legacyAgentRunStage = createLegacyAgentRunStage({
+      const legacyStageRt = {
         options,
         sessionId: () => sessionId,
         requestId,
@@ -1500,7 +1501,14 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
         outputAssembler,
         emitTerminalStreamEvent,
         emitOutputPart,
-      } as unknown as Parameters<typeof createLegacyAgentRunStage>[0]);
+      };
+
+      const legacyAgentRunStage = createLegacyAgentRunStage(
+        legacyStageRt as unknown as Parameters<typeof createLegacyAgentRunStage>[0],
+      );
+      const legacySimpleChatStage = createLegacySimpleChatStage(
+        legacyStageRt as unknown as Parameters<typeof createLegacySimpleChatStage>[0],
+      );
       let toolCallsUsed = 0;
       let agentStatus: ChatAgentStatus | undefined;
       let accumulatedUsage: ChatSessionTokenUsage | null = null;
@@ -1511,169 +1519,9 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
           return __agentRunResult;
         }
       } else {
-        // Fallback: simple LLM chat (no tools)
-        const messages: ChatMessage[] = [
-          { role: "system", content: buildChatSystemPrompt(chatDate, chatTimeZone) },
-          ...chatMessages,
-        ];
-        try {
-          const response = await options.chatClient.complete({
-            ...profile,
-            messages,
-            ...(runtimeOptions.signal ? { signal: runtimeOptions.signal } : {}),
-          });
-          if (response.reasoningContent) {
-            emitStatus.send({
-              state: "reasoning",
-              message: normalizeReasoningForStatus(response.reasoningContent),
-              toolCallsExecuted: 0,
-            });
-          }
-          accumulatedUsage = mergeChatSessionTokenUsage(
-            accumulatedUsage,
-            toChatSessionTokenUsage(response.usage),
-          );
-          reply = redactCredentialString(response.content ?? "");
-          if (response.modelServiceNotice) {
-            const notice = sanitizeModelServiceNotice(
-              response.modelServiceNotice,
-            );
-            const continuationReason =
-              modelNoticeContinuationReason(notice);
-            pendingContinuations.set(sessionId, {
-              messages: [
-                ...messages,
-                ...(reply
-                  ? [{ role: "assistant" as const, content: reply }]
-                  : []),
-              ],
-              maxTurns: 1,
-              toolCallsExecuted: 0,
-              evidenceRunId: requestId,
-              createdAt: Date.now(),
-            });
-            agentStatus = {
-              state: "paused",
-              runId: requestId,
-              reason: continuationReason,
-              maxTurns: 1,
-              toolCallsExecuted: 0,
-              message: notice.message,
-              modelServiceNotice: notice,
-            };
-            emitOutputPart(
-              outputAssembler.appendDiagnostic({
-                severity: "warning",
-                title:
-                  notice.kind === "output_limit"
-                    ? "模型输出未完成"
-                    : "模型服务暂不可用",
-                message: notice.message,
-              }),
-            );
-            await emitStatus.sendRequired({
-              state: "paused",
-              message:
-                notice.kind === "output_limit"
-                  ? "模型输出被服务商截断，等待你继续"
-                  : "模型服务返回限制，等待你重试",
-              maxTurns: 1,
-              toolCallsExecuted: 0,
-              payload: {
-                chatContinuation: toPersistedChatContinuation(
-                  pendingContinuations.get(sessionId)!,
-                ),
-              },
-            });
-          } else {
-            pendingContinuations.delete(sessionId);
-            emitStatus.send({
-              state: "completed",
-              message: "任务已完成",
-              toolCallsExecuted: 0,
-            });
-          }
-        } catch (error) {
-          if (isAbortError(error, runtimeOptions.signal)) {
-            emitStatus.send({
-              state: "canceled",
-              message: "任务已中断",
-            });
-            await emitTerminalStreamEvent({
-              type: "canceled",
-              message: "已中断任务。",
-            });
-            return {
-              ok: false,
-              code: "CANCELED",
-              retryable: true,
-              message: "已中断任务。",
-            };
-          }
-          const notice = modelServiceNoticeFromError(error, {
-            provider: profile.providerId,
-            model: profile.model,
-          });
-          if (notice) {
-            reply = notice.message;
-            pendingContinuations.set(sessionId, {
-              messages,
-              maxTurns: 1,
-              toolCallsExecuted: 0,
-              evidenceRunId: requestId,
-              createdAt: Date.now(),
-            });
-            agentStatus = {
-              state: "paused",
-              runId: requestId,
-              reason: modelNoticeContinuationReason(notice),
-              maxTurns: 1,
-              toolCallsExecuted: 0,
-              message: notice.message,
-              modelServiceNotice: notice,
-            };
-            emitOutputPart(
-              outputAssembler.appendDiagnostic({
-                severity: "warning",
-                title: "模型服务暂不可用",
-                message: notice.message,
-              }),
-            );
-            await emitStatus.sendRequired({
-              state: "paused",
-              message: "模型服务返回限制，等待你重试",
-              maxTurns: 1,
-              toolCallsExecuted: 0,
-              payload: {
-                chatContinuation: toPersistedChatContinuation(
-                  pendingContinuations.get(sessionId)!,
-                ),
-              },
-            });
-          } else {
-            const failureMessage = toSecretSafeFailure(
-              error,
-              "INTERNAL_FAILURE",
-            ).publicMessage;
-            const publishFailureStatus = error instanceof RequiredConversationSettlementError
-              ? emitStatus.sendPublishedOnly
-              : emitStatus.send;
-            publishFailureStatus({
-              state: "failed",
-              message: failureMessage,
-            });
-            await emitTerminalStreamEvent({
-              type: "failed",
-              message: failureMessage,
-            });
-            return {
-              ok: false,
-              ...(error instanceof RequiredConversationSettlementError
-                ? { code: "INTERNAL_ERROR" as const }
-                : {}),
-              message: failureMessage,
-            };
-          }
+        const __fbResult = await legacySimpleChatStage.run();
+        if (__fbResult !== legacySimpleChatContinue) {
+          return __fbResult;
         }
       }
 
