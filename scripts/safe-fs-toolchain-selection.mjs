@@ -16,7 +16,7 @@ export const EXPECTED_SAFE_FS_SDK = Object.freeze({
 });
 
 export const EXPECTED_SAFE_FS_HELPER_DIGEST =
-  "sha256:8a01c653cc58e82a71001dacf3dcc1624565d021";
+  "sha256:7e8f46d4486b7fd01bfefab59dcb985bd7e3ffb2ad5dd0c8ce8f7215bf953861";
 
 export const SAFE_FS_TOOLCHAIN_POLICY_NAME =
   ".v392-pinned-safe-fs-toolchain.json";

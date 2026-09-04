@@ -86,7 +86,7 @@ const EXPECTED_MACOS_SDK = Object.freeze({
     "sha256:2fa5c0ce1bbcd261b132b572b1a9eece3b5905b04640a44deae1a6a8812928fb",
 });
 const EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST =
-  "sha256:8a01c653cc58e82a71001dacf3dcc1624565d021";
+  "sha256:7e8f46d4486b7fd01bfefab59dcb985bd7e3ffb2ad5dd0c8ce8f7215bf953861";
 const PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME =
   ".v392-pinned-safe-fs-toolchain.json";
 const PINNED_SAFE_FS_HELPER_NAME = ".v392-pinned-safe-fs-helper";

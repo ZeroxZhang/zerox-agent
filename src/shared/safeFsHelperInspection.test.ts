@@ -264,35 +264,15 @@ describe.skipIf(process.platform !== "darwin")("safe-fs helper inspection", () =
       resolveXcrun,
     })).toThrowError("SDKROOT differs from the caller-reviewed SDK path");
 
-    const build = (environment: NodeJS.ProcessEnv) => {
-      try {
-        return execFileSync(
-          process.execPath,
-          [copiedBuildScript],
-          {
-            cwd: executionRoot,
-            env: { ...process.env, ...environment },
-            stdio: "pipe",
-          },
-        );
-      } catch (error) {
-        try {
-          const probePath = path.join(executionRoot, "dist-native/darwin-" + process.arch + "/zerox-safe-fs");
-          const probeOut = execFileSync("shasum", [probePath], { encoding: "utf8" });
-          console.log("DEBUG_HELPER_SHA " + probeOut.trim());
-          try {
-            const dbgPolicy = JSON.parse(readFileSync(policyPath, "utf8"));
-            console.log("DBG_POLICY_DIGEST " + dbgPolicy.safeFsHelperDigest);
-            console.log("DBG_EXPECTED_DIGEST " + EXPECTED_SAFE_FS_HELPER_DIGEST);
-            const dbgInspect = inspectSafeFsHelper(probePath);
-            console.log("DBG_INSPECT_SHA " + dbgInspect.sha256);
-          } catch { /* ignore */ }
-        } catch {
-          // ignore probe failure
-        }
-        throw error;
-      }
-    };
+    const build = (environment: NodeJS.ProcessEnv) => execFileSync(
+      process.execPath,
+      [copiedBuildScript],
+      {
+        cwd: executionRoot,
+        env: { ...process.env, ...environment },
+        stdio: "pipe",
+      },
+    );
     build({
       CC: EXPECTED_SAFE_FS_COMPILER.configuredPath,
       SDKROOT: EXPECTED_SAFE_FS_SDK.configuredPath,
