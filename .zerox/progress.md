@@ -15059,4 +15059,16 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   之后按文档顺序 stage-settle / stage-agent-run / stage-simple-chat。
 - 17 个存量 >1500 产品文件（planDebateOrchestrator 3278、
   agentToolExecutor 2831、conversationDisclosureAcceptanceDriver 4178
-  等）按用户口径登记为范围外 backlog，不在本迭代拆分。
+  等）按用户口径登记为范围外 backlog，不在本迭代拆分。## 字面口径 ④ 收口进度（续）
+
+- 切片 (b)：settlement helper 簇 4 个嵌套函数（invalidate/
+  interruptRequiredSettlementAttempt/compensateRequiredSettlementFailure/
+  persistChatStatusEvent，182 行）→ chatService/legacySettleSupportStage.ts
+  （rt getter 运行时）；legacyTurn.ts 2944 → 2779 行；tsc/eslint 干净、
+  chatService.test.ts 176/176。commit c013a4f。
+- 剩余（legacyTurn.ts 2779 → ≤1500，约 1279 行）：remaining nested
+  helpers（finalize/emitOutputPart/ensureCausal/emitTerminal/
+  settle-flow 区，约 490-911 段 ~420 行）、settle 主流程、agent-run
+  分支（~750）与 simple-chat 分支（~460）。flown 区与闭包状态
+  （requestClaim/witnessedAttempt/persistedMessage/options.*）交织，
+  按 .zerox/legacyTurn-split-plan.md 顺序逐片推进、逐片验证。
