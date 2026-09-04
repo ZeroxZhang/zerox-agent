@@ -1,4 +1,5 @@
 import { toRelatedMemory } from "./modulemessages";
+import { createLegacyFinalizeStage, legacyFinalizeContinue } from "./legacyFinalizeStage";
 import { createLegacySimpleChatStage, legacySimpleChatContinue } from "./legacySimpleChatStage";
 import { createLegacyAgentRunStage, legacyAgentRunContinue } from "./legacyAgentRunStage";
 import { createLegacyPlanInputStage, legacyPlanInputContinue } from "./legacyPlanInputStage";
@@ -1477,6 +1478,10 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
         memoryLimit,
         runtimeOptions,
         chatDate,
+        persistStage,
+        input,
+        userMessage,
+        userMessageId,
         workspaceRunRecorder: () => workspaceRunRecorder,
         pendingContinuations,
         setReply: (value: string) => {
@@ -1510,6 +1515,10 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
         legacyStageRt as unknown as Parameters<typeof createLegacySimpleChatStage>[0],
       );
       let toolCallsUsed = 0;
+      const legacyFinalizeStage = createLegacyFinalizeStage(
+        legacyStageRt as unknown as Parameters<typeof createLegacyFinalizeStage>[0],
+      );
+
       let agentStatus: ChatAgentStatus | undefined;
       let accumulatedUsage: ChatSessionTokenUsage | null = null;
 
@@ -1538,79 +1547,11 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       }
 
       reply = redactCredentialString(reply);
-      const assistantMessageId = await persistStage.persistAssistantReply({
-        content: reply,
-        relatedMemoryIds: relatedMemoryResults.map((result) => result.record.id),
-        settlementStatus:
-          agentStatus?.state === "paused"
-            ? "paused"
-            : agentStatus?.state === "failed"
-              ? "failed"
-              : "succeeded",
-        ...(agentStatus?.state === "failed"
-          ? { terminalType: "failed" as const }
-          : {}),
-      });
-      appendRawHistoryEntry({
-        historyIndexStore: options.historyIndexStore,
-        createId,
-        sessionId,
-        requestId,
-        role: "assistant",
-        content: reply,
-        workspaceId: chatRunContext?.workspaceId ?? input.workspaceId,
-        createdAt: new Date(getNowMs(options.now)).toISOString(),
-      });
-      const memoryId = await writeSessionMemory({
-        memoryStore: options.memoryStore,
-        sessionId,
-        userMessage,
-        reply,
-        messageIds: compactMessageIds(userMessageId, assistantMessageId),
-      });
-      await writeAtomicMemories({
-        memoryStore: options.memoryStore,
-        memoryProfileStore: options.memoryProfileStore,
-        sessionId,
-        userMessageId,
-        assistantMessageId,
-        userMessage,
-        assistantReply: reply,
-      });
-      await recordSessionTokenUsage({
-        chatSessionStore: options.chatSessionStore,
-        sessionId,
-        usage:
-          accumulatedUsage ??
-          estimateChatTurnUsage([
-            { role: "system", content: buildChatSystemPrompt(chatDate, chatTimeZone) },
-            ...chatMessages,
-            { role: "assistant", content: reply },
-          ]),
-      });
-
-      return {
-        ok: true,
-        reply,
-        sessionId,
-        relatedMemories: relatedMemoryResults.map(toRelatedMemory),
-        memoryId,
-        ...(agentStatus ? { agentStatus } : {}),
-        turnSettlementStatus:
-          agentStatus?.state === "paused"
-            ? "paused"
-            : agentStatus?.state === "failed"
-              ? "failed"
-              : "succeeded",
-        ...(requestedSkill?.kind === "matched"
-          ? {
-              selectedSkill: {
-                name: requestedSkill.skill.manifest.name,
-                displayName: requestedSkill.skill.manifest.displayName,
-              },
-            }
-          : {}),
-      };
+      const __tailResult = await legacyFinalizeStage.run();
+      if (__tailResult !== legacyFinalizeContinue) {
+        return __tailResult;
+      }
+      return { ok: false, message: "Finalize stage did not settle the turn." };
   }
 
   return {
