@@ -1,6 +1,4 @@
 {
-  "userDataDir": "/var/folders/vy/yx08bh49311gn7s7kbvh_6qc0000gn/T/zerox-pd-acceptance-1788865399900",
-  "startedAt": "2026-09-08T11:03:19.905Z",
   "viewports": [
     {
       "width": 1440,
@@ -76,6 +74,5 @@
     "groupExpanded": true
   },
   "failures": [],
-  "ok": true,
-  "stderrTail": "\nDevTools listening on ws://127.0.0.1:54597/devtools/browser/91c15cfd-de19-431c-beaa-de02bc837293\n[storage] could not open SQLite authority (Error: The module '/Users/bytedance/Documents/trae_projects/zerox-agent/zerox-agent/node_modules/better-sqlite3/build/Release/better_sqlite3.node'\nwas compiled against a different Node.js version using\nNODE_MODULE_VERSION 137. This version of Node.js requires\nNODE_MODULE_VERSION 146. Please try re-compiling or re-installing\nthe module (for instance, using `npm rebuild` or `npm install`).).\n"
+  "ok": true
 }

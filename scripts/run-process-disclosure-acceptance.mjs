@@ -253,7 +253,9 @@ async function main() {
   });
 
   const failures = [];
-  const evidence = { userDataDir, startedAt: new Date().toISOString(), viewports: [] };
+  // Evidence stays deterministic: no timestamps, paths or captured stderr, so
+  // re-running the gate never churns the tracked record.
+  const evidence = { viewports: [] };
   let client;
   try {
     let page = null;
@@ -464,7 +466,6 @@ async function main() {
 
   evidence.failures = failures;
   evidence.ok = failures.length === 0;
-  evidence.stderrTail = stderr.slice(-2000);
   await writeFile(
     path.join(evidenceDir, "acceptance.json"),
     `${JSON.stringify(evidence, null, 2)}\n`,
