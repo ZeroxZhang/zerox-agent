@@ -287,26 +287,36 @@ export function AgentChatPanel({
     createChatStreamState(initialMessages),
   );
   const messages = chatStreamState.messages;
+  // LD01 render budget: a delta replaces only the streaming message object, so
+  // reusing the previous projection for every unchanged message keeps the
+  // memoized rows from re-rendering (and re-parsing markdown) on each delta.
+  const visibleMessageProjectionCacheRef = useRef(
+    new Map<
+      string,
+      { source: ChatStreamMessage; projected: VisibleChatMessage }
+    >(),
+  );
   const visibleChatMessages = useMemo<VisibleChatMessage[]>(() => {
+      const previousCache = visibleMessageProjectionCacheRef.current;
+      const nextCache = new Map<
+        string,
+        { source: ChatStreamMessage; projected: VisibleChatMessage }
+      >();
       const visibleMessages: VisibleChatMessage[] = [];
       for (const message of messages) {
-        if (message.role === "assistant") {
-          if (
-            message.goalEventRef &&
-            shouldHideGoalEventReply(message.goalEventRef)
-          ) {
-            continue;
-          }
-          const outputParts = outputPartsFromMessage(message);
-          if (outputParts.length > 0) {
-            visibleMessages.push({ ...message, role: "assistant", outputParts });
-          }
-          continue;
-        }
-
-        visibleMessages.push({ ...message, role: "user" });
+        const cached = previousCache.get(message.id);
+        const entry =
+          cached && cached.source === message
+            ? cached
+            : (() => {
+                const projected = projectVisibleChatMessage(message);
+                return projected ? { source: message, projected } : null;
+              })();
+        if (!entry) continue;
+        nextCache.set(message.id, entry);
+        visibleMessages.push(entry.projected);
       }
-
+      visibleMessageProjectionCacheRef.current = nextCache;
       return visibleMessages;
   }, [messages]);
   const [renderedMessageCount, setRenderedMessageCount] = useState(
@@ -514,6 +524,40 @@ export function AgentChatPanel({
     shouldStickToLatestMessageRef.current = true;
   }, []);
 
+  // LD01 render budget: a live delta updates `messages` many times per frame.
+  // Coalescing the follow-the-latest write to one animation frame keeps the
+  // scroll from forcing a synchronous layout read on every delta.
+  const scrollFrameRef = useRef<number | null>(null);
+  const scheduleScrollMessageListToBottom = useCallback(() => {
+    if (scrollFrameRef.current !== null) {
+      return;
+    }
+    if (typeof requestAnimationFrame !== "function") {
+      scrollMessageListToBottom();
+      return;
+    }
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      const messageList = messageListRef.current;
+      if (!messageList) {
+        return;
+      }
+      messageList.scrollTop = messageList.scrollHeight;
+    });
+  }, [scrollMessageListToBottom]);
+  useEffect(
+    () => () => {
+      if (scrollFrameRef.current === null) {
+        return;
+      }
+      if (typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(scrollFrameRef.current);
+      }
+      scrollFrameRef.current = null;
+    },
+    [],
+  );
+
   const handleMessageListScroll = useCallback(() => {
     const messageList = messageListRef.current;
     if (!messageList) {
@@ -610,14 +654,14 @@ export function AgentChatPanel({
     if (!shouldStickToLatestMessageRef.current) {
       return;
     }
-    scrollMessageListToBottom();
+    scheduleScrollMessageListToBottom();
   }, [
     goalRunEvents.length,
     messages,
     pendingInputRequest,
     pendingToolApproval,
     planModeDecisionOpen,
-    scrollMessageListToBottom,
+    scheduleScrollMessageListToBottom,
   ]);
 
   useEffect(() => {
@@ -6682,11 +6726,15 @@ const ChatMessageItem = memo(function ChatMessageItem({
 }) {
   return (
     <article
+      aria-busy={message.isStreaming ? true : undefined}
       className={`chat-message is-${message.role}${message.isStreaming ? " is-streaming" : ""}`}
       data-message-id={message.id}
     >
       <header className="chat-message-meta">
         <span>{message.role === "assistant" ? "智能体" : "你"}</span>
+        {message.isStreaming ? (
+          <span className="chat-message-streaming-badge">正在生成</span>
+        ) : null}
         <ChatMessageTimestamp createdAt={message.createdAt} role={message.role} />
       </header>
       {message.role === "assistant" ? (
@@ -7127,6 +7175,23 @@ function toChatMessage(message: ChatSessionRecord["messages"][number]): ChatMess
     ...(message.goalId ? { goalId: message.goalId } : {}),
     ...(message.goalEventRef ? { goalEventRef: message.goalEventRef } : {}),
   };
+}
+
+function projectVisibleChatMessage(
+  message: ChatStreamMessage,
+): VisibleChatMessage | null {
+  if (message.role === "assistant") {
+    if (message.goalEventRef && shouldHideGoalEventReply(message.goalEventRef)) {
+      return null;
+    }
+    const outputParts = outputPartsFromMessage(message);
+    if (outputParts.length === 0) {
+      return null;
+    }
+    return { ...message, role: "assistant", outputParts };
+  }
+
+  return { ...message, role: "user" };
 }
 
 function shouldHideGoalEventReply(goalEventRef: string): boolean {

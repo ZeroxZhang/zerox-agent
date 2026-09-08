@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-31T23:30:00.000+08:00",
+  "updatedAt": "2026-09-08T18:05:00.000+08:00",
   "features": [
     {
       "id": "P113-v3.9.2-disclosure-adversarial-acceptance",
@@ -6664,6 +6664,48 @@
         "npm run verify",
         "npm run smoke:prod",
         "npm run harness:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P115-live-delta-delivery-and-render-budget",
+      "priority": 145,
+      "status": "done",
+      "title": "v3.10.0 live delta delivery and render budget",
+      "files": [
+        "src/main/chatService/streamingStatus.ts",
+        "src/main/chatService.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/chat/OutputPartRenderer.tsx",
+        "src/renderer/styles/chat.css",
+        "src/renderer/materialDesign.test.ts",
+        "src/shared/packageScripts.test.ts",
+        "scripts/check-live-disclosure-program.mjs",
+        "scripts/check-release-program.mjs",
+        "scripts/check-harness-state.mjs",
+        "package.json",
+        ".zerox/live-disclosure-program.json",
+        ".zerox/live-disclosure-program.md",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "A running turn publishes assistant text and reasoning incrementally on a bounded time/byte window instead of only at attempt or terminal boundaries",
+        "Text publication stays lossless and ordered by type: same-type runs are joined before redaction so a credential that straddles a publication or tool boundary is still redacted, and sequence monotonicity, attempt lineage, and settlement idempotency keys are unchanged",
+        "Projected chat messages keep stable object identity so memoized message rows are not invalidated on every delta",
+        "Growing markdown is not re-parsed from scratch on every delta, and auto-scroll does not force a synchronous layout read per delta",
+        "A running turn exposes a redundant visual and assistive streaming state (class with real rules plus aria-busy), not a colour-only signal",
+        "Focused, full, build, verify, production smoke, harness, and program checks pass with recorded evidence"
+      ],
+      "verification": [
+        "npm test -- --run src/main/chatService.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts",
+        "npm test",
+        "npm run typecheck:tests",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run program:check",
         "git diff --check"
       ]
     }

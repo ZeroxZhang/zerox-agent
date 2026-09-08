@@ -276,6 +276,26 @@
   background: var(--chat-user-bubble-bg);
 }
 
+/* LD01: a running turn must expose a redundant, non-colour-only streaming
+   state. The border marks the region; the badge carries the text and the
+   article's aria-busy carries the assistive semantics. */
+.chat-message.is-streaming {
+  padding-left: 10px;
+  border-left: 2px solid var(--agent-executing-border);
+}
+
+.chat-message-streaming-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--agent-executing-border);
+  border-radius: var(--radius-sm);
+  color: var(--agent-executing-text);
+  background: var(--agent-executing-bg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
 .chat-message-meta {
   display: flex;
   align-items: center;

@@ -15,6 +15,24 @@ import type { StreamEvent as ModelStreamEvent } from "../openAiCompatibleClient"
 
 const defaultChatAgentLoopMaxTurns = 48;
 
+// LD01 bounded publication. A turn must disclose text while it runs, but the
+// renderer must never receive one IPC message per token. Text runs publish on a
+// time-or-byte window and before any non-text stream event, which keeps causal
+// order without unbounded buffering.
+const defaultStreamFlushIntervalMs = 60;
+const defaultStreamFlushMaxChars = 512;
+// Tail held back between two consecutive text publications so a credential that
+// straddles the window boundary is still redacted as one string. The durable
+// assistant text is redacted as a whole, so this only protects the live view.
+const streamRedactionCarryChars = 24;
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
 function normalizeAgentLoopMaxTurns(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return defaultChatAgentLoopMaxTurns;
@@ -29,6 +47,10 @@ function createChatStatusEmitter(options: {
   startedAtMs: number;
   initialSequence?: number;
   now?: () => Date;
+  /** Bounded publication window for buffered text runs. */
+  streamFlushIntervalMs?: number;
+  /** Bounded publication size for buffered text runs. */
+  streamFlushMaxChars?: number;
   getDomainStateAvailable?: () => boolean;
   onStatusEvent?: (event: ChatTaskStatusEvent) => void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
@@ -45,6 +67,19 @@ function createChatStatusEmitter(options: {
     type: "answer_delta" | "thinking_delta";
     text: string;
   }> = [];
+  const streamFlushIntervalMs = normalizePositiveInteger(
+    options.streamFlushIntervalMs,
+    defaultStreamFlushIntervalMs,
+  );
+  const streamFlushMaxChars = normalizePositiveInteger(
+    options.streamFlushMaxChars,
+    defaultStreamFlushMaxChars,
+  );
+  let lastTextFlushAtMs = options.startedAtMs;
+  const pendingTextCarry: Record<"answer_delta" | "thinking_delta", string> = {
+    answer_delta: "",
+    thinking_delta: "",
+  };
   let persistenceQueue: Promise<void> = Promise.resolve();
 
   function enqueuePersistence(statusEvent: ChatTaskStatusEvent): Promise<void> {
@@ -126,32 +161,88 @@ function createChatStatusEmitter(options: {
     }
   }
 
-  function flushBufferedTextEvents() {
-    const pending = bufferedTextEvents.splice(0);
-    const orderedTypes = [
+  function publishTextRun(
+    type: "answer_delta" | "thinking_delta",
+    text: string,
+  ) {
+    const safeText = redactCredentialString(text);
+    if (!safeText) {
+      return;
+    }
+    const nowMs = getNowMs(options.now);
+    try {
+      options.onStreamEvent?.({
+        type,
+        text: safeText,
+        ...createStreamBase(new Date(nowMs).toISOString()),
+      });
+    } catch {
+      // Renderer observers are best-effort.
+    }
+  }
+
+  /**
+   * Publish the buffered text of one bounded window.
+   *
+   * Same-type runs are joined before redaction, which is what keeps a
+   * credential assignment intact when the value arrives after a tool or status
+   * event. The per-type tail is held back on a non-final flush so a credential
+   * that straddles the publication boundary is still redacted as one string;
+   * the held-back tail is published first on the next flush of that type.
+   */
+  function flushBufferedTextEvents(final: boolean) {
+    const pending: Array<{ type: "answer_delta" | "thinking_delta"; text: string }> =
+      bufferedTextEvents.splice(0);
+    if (pending.length > 0) {
+      lastTextFlushAtMs = getNowMs(options.now);
+    }
+    const types: Array<"answer_delta" | "thinking_delta"> = [
       ...new Set(pending.map((event) => event.type)),
     ];
-    for (const type of orderedTypes) {
-      const text = redactCredentialString(
-        pending
-          .filter((event) => event.type === type)
-          .map((event) => event.text)
-          .join(""),
-      );
-      if (!text) {
+    if (final) {
+      // A final flush must also drain a held-back tail whose run is already
+      // published, otherwise the last characters of the turn would be lost.
+      for (const type of ["answer_delta", "thinking_delta"] as const) {
+        if (!types.includes(type)) types.push(type);
+      }
+    } else if (pending.length === 0) {
+      return;
+    }
+    for (const type of types) {
+      const buffered = pending
+        .filter((event) => event.type === type)
+        .map((event) => event.text)
+        .join("");
+      const joined = pendingTextCarry[type] + buffered;
+      if (!joined) {
         continue;
       }
-      const nowMs = getNowMs(options.now);
-      try {
-        options.onStreamEvent?.({
-          type,
-          text,
-          ...createStreamBase(new Date(nowMs).toISOString()),
-        });
-      } catch {
-        // Renderer observers are best-effort.
+      if (final) {
+        pendingTextCarry[type] = "";
+        publishTextRun(type, joined);
+        continue;
+      }
+      if (joined.length > streamRedactionCarryChars) {
+        pendingTextCarry[type] = joined.slice(-streamRedactionCarryChars);
+        publishTextRun(type, joined.slice(0, -streamRedactionCarryChars));
+      } else {
+        pendingTextCarry[type] = joined;
       }
     }
+  }
+
+  function shouldFlushBufferedText(): boolean {
+    if (bufferedTextEvents.length === 0) {
+      return false;
+    }
+    const bufferedChars = bufferedTextEvents.reduce(
+      (total, event) => total + event.text.length,
+      0,
+    );
+    if (bufferedChars >= streamFlushMaxChars) {
+      return true;
+    }
+    return getNowMs(options.now) - lastTextFlushAtMs >= streamFlushIntervalMs;
   }
 
   return {
@@ -184,7 +275,7 @@ function createChatStatusEmitter(options: {
       attempt: number;
       supersedesAttempt?: number;
     }) {
-      flushBufferedTextEvents();
+      flushBufferedTextEvents(true);
       currentAttempt = event.attempt;
       const nowMs = getNowMs(options.now);
       try {
@@ -262,18 +353,19 @@ function createChatStatusEmitter(options: {
       await persistenceQueue;
     },
     sendStreamEvent(event: ChatModelStreamEventInput) {
-      if (event.type === "answer_delta") {
+      if (event.type === "answer_delta" || event.type === "thinking_delta") {
         const previous = bufferedTextEvents.at(-1);
         if (previous?.type === event.type) previous.text += event.text;
         else bufferedTextEvents.push({ ...event });
+        if (shouldFlushBufferedText()) {
+          flushBufferedTextEvents(false);
+        }
         return;
       }
-      if (event.type === "thinking_delta") {
-        const previous = bufferedTextEvents.at(-1);
-        if (previous?.type === event.type) previous.text += event.text;
-        else bufferedTextEvents.push({ ...event });
-        return;
-      }
+      // Non-text events publish immediately. Buffered text deliberately keeps
+      // spanning them: same-type runs are joined before redaction, so a
+      // credential assignment whose value follows a tool or status event is
+      // still redacted as one string. The bounded window keeps the delay small.
       const nowMs = getNowMs(options.now);
       try {
         const clonedEvent = cloneChatModelStreamEventInput(event);
@@ -297,7 +389,7 @@ function createChatStatusEmitter(options: {
       finalMessageId?: string;
       domainStateAvailable?: false;
     }) {
-      flushBufferedTextEvents();
+      flushBufferedTextEvents(true);
       if (event.finalMessageId) {
         assistantMessageId = event.finalMessageId;
       }

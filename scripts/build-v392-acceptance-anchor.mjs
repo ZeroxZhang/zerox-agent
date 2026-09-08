@@ -116,7 +116,7 @@ const EXPECTED_GENERATED_NATIVE_CACHE = Object.freeze({
 });
 const CONTROL_DIGESTS = Object.freeze({
   "package.json":
-    "sha256:9c79e6deaa1658b428725628d0ee905cb8634321a1cbd35d2612fb386421b3ba",
+    "sha256:c2b76448f702525c2704ad29c3abb99aa2b6fe0d64513c616169f60da7847e82",
   "package-lock.json":
     "sha256:af9b511b059aea01bad371438da6bf22e09143dfdbd71162b1eb1ea2ab0abbf6",
   "electron-builder.yml":
@@ -124,7 +124,7 @@ const CONTROL_DIGESTS = Object.freeze({
   "scripts/after-pack-mac.mjs":
     "sha256:376f81d437bc6b06876ed4bcbcc7889d698103b9a91b9fc46f96512d0b52901b",
   "scripts/check-harness-state.mjs":
-    "sha256:e7885179ca0602358eacf295662b6183466ccb4701f8f70b7503bad5fe0f9ad2",
+    "sha256:0bb2c42059b0e0031a61d135392785dc9ca9b26b1543c121d8401a61b0cf5175",
   "scripts/capture-cd05-chat-browser.mjs":
     "sha256:e6e66bb1c3329b6db2f01e238a0ced4f1cf0e0e833aff1cddaefb17ac48e2c54",
   "scripts/capture-cd06-cross-surface-browser.mjs":

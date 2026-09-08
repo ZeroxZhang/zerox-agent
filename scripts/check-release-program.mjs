@@ -10,6 +10,11 @@ const packageJson = await readJson("package.json");
 const conversationProgram = await readJson(
   "archive/disclosure-history/program/conversation-disclosure-program.json",
 );
+// The live process disclosure program is the current governed successor: it
+// owns the single open Feature once the archived disclosure program closed.
+const liveDisclosureProgram = await readJson(
+  ".zerox/live-disclosure-program.json",
+);
 const errors = [];
 
 if (manifest.schemaVersion !== 1) {
@@ -148,15 +153,22 @@ function validateHistoricalV391() {
   if (packageJson.version !== "3.9.1" && !governedV392Successor) {
     errors.push("v3.9.1 history may only yield to the governed v3.9.2 successor");
   }
+  const governedOpenFeatureIds = [conversationProgram, liveDisclosureProgram]
+    .filter((program) => program?.status === "active")
+    .map((program) => program.activeFeatureId)
+    .filter(
+      (featureId) => typeof featureId === "string" && featureId.length > 0,
+    );
   if (
     openFeatures.length > 0
     && (
       openFeatures.length !== 1
-      || openFeatures[0]?.id !== p113?.id
-      || conversationProgram.activeFeatureId !== p113.id
+      || !governedOpenFeatureIds.includes(openFeatures[0]?.id)
     )
   ) {
-    errors.push("historical release closure may only coexist with active P113");
+    errors.push(
+      "historical release closure may only coexist with a governed successor Feature",
+    );
   }
 }
 

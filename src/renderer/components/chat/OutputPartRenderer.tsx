@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { memo, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   parseInlineMarkdown,
   parseMarkdownBlocks,
@@ -171,6 +171,30 @@ const TextPartView = memo(function TextPartView({
   return <MarkdownTextView text={part.text} />;
 });
 
+const MARKDOWN_PARSE_CACHE_LIMIT = 64;
+const MARKDOWN_PARSE_INTERVAL_MS = 100;
+const markdownBlockCache = new Map<string, MarkdownBlock[]>();
+
+// LD01 render budget: a live answer re-renders on every delta, and re-parsing
+// the whole growing markdown each time is quadratic. Identical text is served
+// from a bounded cache, and an append-only growth inside the parse interval
+// reuses the previous parse instead of re-parsing the whole document.
+function parseMarkdownBlocksCached(text: string): MarkdownBlock[] {
+  const cached = markdownBlockCache.get(text);
+  if (cached) {
+    return cached;
+  }
+  const blocks = parseMarkdownBlocks(text);
+  markdownBlockCache.set(text, blocks);
+  if (markdownBlockCache.size > MARKDOWN_PARSE_CACHE_LIMIT) {
+    const oldest = markdownBlockCache.keys().next().value;
+    if (oldest !== undefined) {
+      markdownBlockCache.delete(oldest);
+    }
+  }
+  return blocks;
+}
+
 const MarkdownTextView = memo(function MarkdownTextView({
   text,
 }: {
@@ -179,10 +203,31 @@ const MarkdownTextView = memo(function MarkdownTextView({
   const [expanded, setExpanded] = useState(false);
   const shouldPreview = shouldRenderMarkdownPreview(text);
   const previewText = useMemo(() => createMarkdownPreview(text), [text]);
-  const blocks = useMemo(
-    () => (shouldPreview && !expanded ? [] : parseMarkdownBlocks(text)),
-    [expanded, shouldPreview, text],
-  );
+  const lastParseRef = useRef<{
+    text: string;
+    blocks: MarkdownBlock[];
+    at: number;
+  } | null>(null);
+  const blocks = useMemo(() => {
+    if (shouldPreview && !expanded) {
+      return [];
+    }
+    const last = lastParseRef.current;
+    if (last?.text === text) {
+      return last.blocks;
+    }
+    const now = Date.now();
+    if (
+      last
+      && text.startsWith(last.text)
+      && now - last.at < MARKDOWN_PARSE_INTERVAL_MS
+    ) {
+      return last.blocks;
+    }
+    const parsed = parseMarkdownBlocksCached(text);
+    lastParseRef.current = { text, blocks: parsed, at: now };
+    return parsed;
+  }, [expanded, shouldPreview, text]);
 
   return (
     <div className="chat-output-text markdown-message">

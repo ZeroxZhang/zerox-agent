@@ -15121,3 +15121,60 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   harness:check 与 program:check 全绿（产品契约 + 4 程序检查）；
   tsc --noEmit 0 错；eslint 干净。17 个存量 >1500 文件保持范围外
   backlog 登记（本轮前已记录）。字面口径 ④ 达成。
+## v3.10.0 实时过程披露程序（LD01 / P115）实时投递与渲染预算
+
+- 分支：`3.10.0`（自 main 693b001 起）。
+- 治理：新增 `.zerox/live-disclosure-program.json`（LD01–LD05 五个工作流、
+  LD1–LD8 八条 finding）、操作指南 `.zerox/live-disclosure-program.md`、
+  检查器 `scripts/check-live-disclosure-program.mjs`；登记进
+  `package.json#program:check` 与 `scripts/check-harness-state.mjs`。
+  `scripts/check-release-program.mjs` 的"历史发布闭环只能与受治理后继并存"
+  规则由硬编码 P113 改为读取受治理后继程序的 `activeFeatureId`（语义不变：
+  仍然只允许一个受治理的未完成 Feature）。方案源：
+  `docs/design/zerox-agent-3-10-0-live-process-disclosure.md`（已加入
+  `.gitignore` 白名单，与 3-8-x 设计文档同口径）。特性编号自 P115 起，
+  避开 `check-release-program.mjs` 为 v3.9.2 预留的 `P114`。
+- RED 基线：新增 `src/main/chatService/streamingStatus.test.ts`（8 项）。改前
+  4 项失败，证明三个真实缺口：answer/thinking 只在 attempt 控制与终态才 flush
+  （有界窗口不存在）、同一窗口内跨类型事件被按类型重排、非文本事件会先于其
+  前置文本发布。
+- GREEN 实现（`src/main/chatService/streamingStatus.ts`）：文本发布改为有界
+  窗口——距上次发布 ≥60ms 或缓冲 ≥512 字符触发非终态 flush；attempt 控制与
+  终态执行终态 flush；同类型文本在脱敏前合并，保留"凭据赋值跨工具/状态边界
+  仍被脱敏"的既有安全属性；按类型回退 24 字符尾巴，使跨发布边界的凭据仍作为
+  整串脱敏，终态 flush 排空尾巴。事件类型、payload、持久化 schema 未变；
+  `chatService.test.ts` 176 项改前改后全绿（固定时钟不触发有界窗口），
+  证明向后兼容。
+- 渲染预算（`AgentChatPanel.tsx`）：消息投影按 id 缓存，源对象未变即复用投影
+  对象，避免每个 delta 重建全部消息对象导致 memo 全部失效；自动滚动改为
+  requestAnimationFrame 合并，消除每个 delta 的同步布局读写；
+  `OutputPartRenderer.tsx` 的 markdown 解析增加有界缓存与 100ms 解析间隔，
+  避免增长文本每个 delta 全量重解析。
+- 流式状态：`.chat-message.is-streaming` 增加真实样式（左侧强调边 + "正在生成"
+  徽标），消息 article 增加 `aria-busy`；状态冗余编码、不依赖颜色、未引入
+  动画（符合设计系统的无装饰动画约束）。
+- 治理同步：`materialDesign.test.ts` 两条源级断言随实现更新
+  （`outputParts.length === 0`、`parseMarkdownBlocksCached(text)`）；
+  `scripts/build-v392-acceptance-anchor.mjs` 的 CONTROL_DIGESTS 重新固定
+  `package.json` 与 `scripts/check-harness-state.mjs` 的字节摘要。
+- 验证证据：`npm run typecheck:tests` 321/321 覆盖；focused 5 文件 / 321 项通过；
+  全量 `npm test` 319 文件通过 / 1 跳过，仅
+  `src/shared/safeFsHelperInspection.test.ts` 1 项失败；`npm run build` 通过；
+  `npm run smoke:prod` 通过（renderer 渲染 agent chat UI + Electron ABI 146 +
+  SQLite 8 域权威）；`npm run harness:check` 与 `npm run program:check` 全绿；
+  `git diff --check` 干净。
+- 环境阻塞（非本特性引入）：`safeFsHelperInspection` 的
+  `EXPECTED_SAFE_FS_SDK.canonicalPath` 固定为
+  `/Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk`，本机 CLT 为
+  `MacOSX26.5.sdk`，构建脚本按调用方复核路径 fail-closed。已在 base commit
+  693b001 的干净 worktree 上复现同一失败（`git worktree add /tmp/zerox-base-check
+  693b001` + 同一单测 → 同样 1 项失败），故与本特性无关；该测试不在本特性文件
+  集内，且未改动它依赖的 SDK/编译器 pin 常量。`npm run verify` 因此在本机无法
+  整链通过，其余各门以独立命令取证：全量单测排除该项后 319 文件 / 3814 项通过
+  （6 跳过）、`run-agent-evals` passRate 1 / failures []、`run-memory-evals` 通过。
+- 残留风险：有界窗口把"同类型文本合并脱敏"的边界从"整轮一次"缩小到
+  60ms/512B，因此窗口内跨类型的先后顺序会被按类型归并（answer 先于 thinking
+  发布）；这是为保住既有脱敏属性而做的取舍，已记录在 `streamingStatus.ts`
+  注释与 `live-disclosure-program.json#LD01.architectureDecision`。
+- 回滚：`streamingStatus.ts` 恢复为只在 attempt 控制与终态 flush；渲染层恢复
+  逐 delta 重建投影、去掉 rAF 合并与 markdown 缓存；不涉及持久化数据。

@@ -405,7 +405,7 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain(
       "!isTerminalGoalStatus(result.activeGoal.status)",
     );
-    expect(chatPanelSource).toContain("outputParts.length > 0");
+    expect(chatPanelSource).toContain("outputParts.length === 0");
     expect(chatPanelSource).toContain("<AnswerBlock parts={message.outputParts} />");
     expect(chatPanelSource).not.toContain("outputMarkdownFromMessage");
     expect(answerBlockSource).toContain("OutputPartRenderer");
@@ -1697,9 +1697,8 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(answerBlockSource).toContain("memo(function AnswerBlock");
     expect(outputPartRendererSource).toContain("memo(function OutputPartRenderer");
     expect(outputPartRendererSource).toContain("const TextPartView = memo(function TextPartView");
-    expect(outputPartRendererSource).toContain(
-      "shouldPreview && !expanded ? [] : parseMarkdownBlocks(text)",
-    );
+    expect(outputPartRendererSource).toContain("if (shouldPreview && !expanded)");
+    expect(outputPartRendererSource).toContain("parseMarkdownBlocksCached(text)");
     expect(styles).toContain(".markdown-plain-preview");
     expect(chatPanelSource).not.toContain("refreshSessions(sessionIdToLoad)");
   });

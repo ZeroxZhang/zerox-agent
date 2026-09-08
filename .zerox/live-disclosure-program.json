@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "programId": "live-process-disclosure-2026",
+  "title": "Zerox Live Process Disclosure Program",
+  "sourceReview": "docs/design/zerox-agent-3-10-0-live-process-disclosure.md",
+  "operatingGuide": ".zerox/live-disclosure-program.md",
+  "updatedAt": "2026-09-08T18:05:00.000+08:00",
+  "status": "active",
+  "activeFeatureId": null,
+  "nextFeatureId": "P116-process-fact-source-reasoning",
+  "maxActiveFeatures": 1,
+  "requiredFindings": [
+    "LD1",
+    "LD2",
+    "LD3",
+    "LD4",
+    "LD5",
+    "LD6",
+    "LD7",
+    "LD8"
+  ],
+  "findingLegend": {
+    "LD1": "A turn delivers no incremental assistant text: answer/thinking deltas are buffered unbounded in the main process and flushed only at attempt boundaries or terminal settlement (G0).",
+    "LD2": "Reasoning is not a first-class process fact: it is transient renderer-only state, truncated, cleared on attempt reset, never persisted, and read by no component (G0b, G1, G2).",
+    "LD3": "Tool and approval facts are removed by three independent filters (session read projection, renderer output projection, compact process rows), so the transcript contradicts the live run (G3).",
+    "LD4": "The disclosure projection engine carries only the answer channel and is not the default renderer path, so process facts never reach the live surface (G4, G5).",
+    "LD5": "Plan step execution has no process fact, so planning progress is only visible as a status summary (G6).",
+    "LD6": "There is no streaming visual or assistive state: the is-streaming class has no rules and aria-busy/role=log are absent, while status is partly colour-only (G9, G12).",
+    "LD7": "Rendering cannot absorb high-frequency deltas: every delta re-allocates all projected messages, defeats memoization, and re-parses growing markdown (G10).",
+    "LD8": "Governance and continuity guard against this feature: a source-level test forbids tool/reasoning previews in the main interface, and leaving the chat section destroys in-flight state (G13, G11)."
+  },
+  "requiredClosureGates": [
+    "focused_tests",
+    "full_tests",
+    "build",
+    "verify",
+    "runtime_smoke",
+    "harness_check",
+    "program_check",
+    "diff_check",
+    "progress_evidence"
+  ],
+  "workstreams": [
+    {
+      "id": "LD01",
+      "title": "Live delta delivery and render budget",
+      "state": "completed",
+      "featureId": "P115-live-delta-delivery-and-render-budget",
+      "findings": [
+        "LD1",
+        "LD6",
+        "LD7"
+      ],
+      "dependsOn": [],
+      "architectureDecisionRequired": true,
+      "architectureDecision": "Semantic publication classes replace the unbounded text buffer: text/reasoning runs publish on a bounded time-or-byte window, same-type runs stay joined so redaction state survives a tool or status boundary, and sequence monotonicity, attempt lineage, and idempotency keys are unchanged. No event type, payload field, or persisted schema changes.",
+      "rollback": "Restore all-or-nothing buffering at attempt/terminal boundaries, the per-message projection that re-allocates every message, and the unthrottled scroll effect. No persisted schema or user data is involved.",
+      "verification": [
+        "npm test -- --run src/main/chatService.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts",
+        "npm test",
+        "npm run typecheck:tests",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run program:check",
+        "git diff --check",
+        "npm test -- --run src/main/chatService/streamingStatus.test.ts"
+      ]
+    },
+    {
+      "id": "LD02",
+      "title": "Process fact source: reasoning as a bounded, redacted fact",
+      "state": "planned",
+      "featureId": "P116-process-fact-source-reasoning",
+      "findings": [
+        "LD2",
+        "LD8"
+      ],
+      "dependsOn": [
+        "LD01"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": "Reasoning enters the durable fact set as a bounded, redacted block with an explicit provider/persist/deliver/authorize/display gate chain. Raw chain of thought is never persisted or displayed by default; only safe, redacted summaries are eligible for display.",
+      "rollback": "Stop emitting reasoning output parts and drop the reasoning projection; persisted messages keep the bounded redacted blocks as inert data that older renderers ignore.",
+      "verification": [
+        "focused reasoning persistence and redaction tests",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "LD03",
+      "title": "Inline process blocks with attention-driven disclosure",
+      "state": "planned",
+      "featureId": "P117-inline-process-blocks",
+      "findings": [
+        "LD3",
+        "LD4"
+      ],
+      "dependsOn": [
+        "LD02"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": "The three process filters become one policy decision driven by the existing disclosure resolver: default collapsed, automatic expansion only for blocking, failed, or waiting states, and user preference may override. The main-conversation guard test is rewritten to assert the new policy instead of the removed implementation.",
+      "rollback": "Re-enable the three filters and restore the previous guard assertion; the projected disclosure mode flag returns to legacy.",
+      "verification": [
+        "focused disclosure policy and renderer tests",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "LD04",
+      "title": "Plan and progress disclosure with intervention points",
+      "state": "planned",
+      "featureId": "P118-plan-progress-disclosure-and-intervention",
+      "findings": [
+        "LD5",
+        "LD3"
+      ],
+      "dependsOn": [
+        "LD03"
+      ],
+      "architectureDecisionRequired": false,
+      "rollback": "Remove plan-step facts and intervention affordances; Goal/Plan authority and existing review gates remain unchanged.",
+      "verification": [
+        "focused plan, goal, and approval tests",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "LD05",
+      "title": "Replay, preference, and learning closure",
+      "state": "planned",
+      "featureId": "P119-replay-preference-and-learning-closure",
+      "findings": [
+        "LD4",
+        "LD8",
+        "LD1"
+      ],
+      "dependsOn": [
+        "LD04"
+      ],
+      "architectureDecisionRequired": false,
+      "rollback": "Disable the disclosure preference setting and keep process facts out of trajectory learning candidates; live and persisted views fall back to the LD03 defaults.",
+      "verification": [
+        "focused replay, preference, and episode-export tests",
+        "npm test",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run episode:export",
+        "npm run program:check"
+      ]
+    }
+  ]
+}

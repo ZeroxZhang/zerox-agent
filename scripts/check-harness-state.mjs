@@ -34,5 +34,6 @@ await import("./check-runtime-convergence-program.mjs");
 await import("./check-kernel-migration-program.mjs");
 await import("./check-storage-convergence-program.mjs");
 await import("./check-release-program.mjs");
+await import("./check-live-disclosure-program.mjs");
 
 console.log("Harness product contract check passed.");
