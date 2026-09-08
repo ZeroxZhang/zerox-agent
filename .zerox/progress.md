@@ -15247,3 +15247,68 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   不落库，`truncated` 标记留给 LD03 做"已截断 + 证据跳转"。
 - 回滚：停止发射 reasoning `output_part` 并移除联合成员；已落库部件成为惰性数据，
   不需要删除用户数据。
+
+### LD03 架构决策评审（实施前，P117）
+
+- 变更对象：reasoning / tool_call / tool_result / approval 从"主对话过滤"改为"内联过程块 + 三级密度 + 注意力驱动披露"。
+- **政策反转（用户已确认）**：v3.9.2 的"主对话只保留真正需要用户处理的内容"被替换为"主对话内联过程块，默认折叠，注意力自动展开，用户可覆盖"。政策**目标**（不被过程噪音淹没）由三级密度保证，而不是靠整体收纳。
+- 三级密度（用户原型评审后确定）：
+  - L0 折叠组「更早的过程 · K 步」：更早的非注意力块收进一行；
+  - L1 摘要行：最近 3 条 + 全部注意力块；
+  - L2 块内容：展开后可见。
+- 不变量：
+  - **注意力块永不被密度策略隐藏**（失败/阻塞/等待授权/被拒绝），继承 P104 D9；
+  - 三层过滤器收敛为**一个策略决策**，不再有互相矛盾的过滤层；
+  - 事件类型、payload、持久化 schema 不变（纯投影 + 渲染）；
+  - 不新增授权路径；审批卡继续复用 `ToolAuthorizationService`；
+  - a11y：`aria-expanded` + `aria-controls`、阻塞态 `role="alert"`、状态非色-only、不引入装饰动画；
+  - 序列号 / attempt 谱系 / settlement 幂等键不变。
+- 兼容：`getConversationDisclosureMode()` 的 legacy/projected 开关保留一个版本作为回退；旧数据（无 reasoning 部件）正常渲染。
+- 迁移：无 schema 迁移。
+- 回滚：恢复 `isMainConversationOutputPart` 的排除项并移除 `ProcessBlock` 渲染即可；不涉及用户数据。
+- 治理：`src/renderer/materialDesign.test.ts:1644-1650` 的守卫断言**改写为新政策断言**（默认折叠 + 注意力自动展开 + 偏好可覆盖），不是删除。
+- 越权检查：不涉及权限扩展、工作区检查或沙箱。
+
+## v3.10.0 LD03 / P117 内联过程块 + 三级密度
+
+- 架构决策已先行记录（见上节"LD03 架构决策评审"）；政策反转经用户确认。
+- 共享策略模块 `src/shared/processDisclosure.ts`（纯函数，12 项测试）：
+  - `PROCESS_RECENT_WINDOW_SIZE = 3`；
+  - `resolveProcessDensity`：最近 3 条非注意力块 + 全部注意力块留在 L1，
+    **只折叠连续前缀**（若早期块是注意力块，则其后普通块不再被折叠，
+    保证渲染顺序 = 因果顺序）；
+  - `resolveProcessBlockExpanded`（auto/compact/open/pinned，用户显式覆盖优先）；
+  - `resolveLeadingGroupExpanded`、`resolveSettledTurnFolded`。
+- 渲染层：
+  - 新增 `ProcessBlock.tsx`：`ProcessBlock`（L1/L2，`aria-expanded` + `aria-controls`
+    + 共享 expand/collapse 图标 + `展开/收起{label}详情`）、`ProcessGroup`（L0）、
+    `SettledProcessFold`（本轮结束折叠）；
+  - `AnswerBlock.tsx`：按"连续过程段"切分，段内应用三级密度；`settled` 时把整轮
+    过程折成一行并保留答案；
+  - `chatOutputModel.isMainConversationOutputPart` 改为恒真——**三层过滤器收敛为
+    一个策略决策**（LD03 决策项）；
+  - `AgentChatPanel` 向 `AnswerBlock` 传 `settled={message.isStreaming !== true}`；
+  - `chat.css` 新增过程块/折叠组/结束折叠样式，注意力态用 warning/error 语义 +
+    文本标签（非色-only），未引入装饰动画；640px 以下摘要行换行。
+- 治理：`materialDesign.test.ts` 的"禁止工具/思考预览进入主界面"守卫断言
+  **改写为新政策断言**（内联 + 三级密度 + 注意力不可被折叠 + a11y 契约 +
+  样式钩子存在），并按决策记录保留理由。
+- 受影响的旧政策断言同步更新：`chatOutputModel.test.ts` 4 项（ledger_event 现在
+  参与主对话、legacy 内容与过程部件共存、过程部件进入内联流、markdown 转换包含
+  过程文本）；`materialDesign.test.ts` 1 项（`<AnswerBlock>` 现在带 `settled`）。
+- 新增 `processPartPresentation.test.ts`（5 项）：过程部件分类、注意力映射
+  （失败/审批=blocking、reasoning 恒为 normal 因而永不自动展开）、摘要单行化。
+- 验证证据：`typecheck:tests` 323/323 覆盖；focused 全绿（materialDesign 98、
+  chatOutputModel 12、processDisclosure 12、processPartPresentation 5）；
+  全量排除环境固定的 `safeFsHelperInspection` 后 **320 文件 / 3841 项通过**
+  （6 跳过）；`npm run build`、`npm run smoke:prod`、`npm run harness:check`、
+  `npm run program:check` 全绿；eslint 干净；`git diff --check` 干净。
+- 已知噪声：`sourceImportCasing`（3s 走盘用例）在满载并行下会触碰默认超时，
+  单独运行通过；`safeFsHelperInspection` 为 LD01 记录的 SDKROOT 环境固定问题。
+- 交互验证：原型 `docs/design/zerox-agent-3-10-0-process-blocks-prototype.html`
+  在 Electron 离屏实测——自动模式恰好展开失败工具与审批卡、紧凑 0 条、展开 7 条、
+  L0 组可单独展开、本轮结束折叠/还原、aria 一致、1440/900/390 无横向溢出。
+- 残留风险：偏好四档目前只有默认 `auto`，设置项与持久化归 LD05；`settled` 折叠
+  目前按"消息不再流式"判定，若未来出现暂停后再续写的轮次需复核。
+- 回滚：恢复 `isMainConversationOutputPart` 的排除项并移除 `ProcessBlock` 渲染；
+  不涉及用户数据。

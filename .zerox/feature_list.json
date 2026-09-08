@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-08T19:00:00.000+08:00",
+  "updatedAt": "2026-09-08T20:20:00.000+08:00",
   "features": [
     {
       "id": "P113-v3.9.2-disclosure-adversarial-acceptance",
@@ -6739,6 +6739,46 @@
       ],
       "verification": [
         "npm test -- --run src/main/chatOutputAssembler.test.ts src/main/chatService/streamingStatus.test.ts src/main/chatService.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts",
+        "npm test",
+        "npm run typecheck:tests",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run program:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P117-inline-process-blocks",
+      "priority": 147,
+      "status": "done",
+      "title": "v3.10.0 inline process blocks with three-level density",
+      "files": [
+        "src/shared/processDisclosure.ts",
+        "src/shared/processDisclosure.test.ts",
+        "src/renderer/components/chat/ProcessBlock.tsx",
+        "src/renderer/components/chat/OutputPartRenderer.tsx",
+        "src/renderer/chatOutputModel.ts",
+        "src/renderer/chatOutputModel.test.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/materialDesign.test.ts",
+        "src/renderer/styles/chat.css",
+        "src/shared/conversationDisclosure.ts",
+        ".zerox/live-disclosure-program.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Reasoning, tool call, tool result and approval facts render inline in the main conversation as process blocks instead of being filtered out",
+        "Density is three-level: older non-attention blocks fold into one group line, the latest three plus every attention block stay as one-line summaries, bodies stay collapsed until opened",
+        "Attention state (failed, blocked, waiting for approval, denied) is never hidden by the density policy and auto-expands",
+        "A settled turn folds its whole process stream into one summary line that can be reopened",
+        "The main-conversation guard test asserts the new policy instead of the removed implementation",
+        "Focused, full, build, verify, production smoke, harness, and program checks pass with recorded evidence"
+      ],
+      "verification": [
+        "npm test -- --run src/shared/processDisclosure.test.ts src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/main/chatService.test.ts",
         "npm test",
         "npm run typecheck:tests",
         "npm run build",

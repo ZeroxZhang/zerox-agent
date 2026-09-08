@@ -12,21 +12,12 @@ export type RenderedOutputPart = ChatOutputPart & {
 };
 
 /**
- * LD02 display gate: reasoning is a durable process fact, but the main
- * conversation does not show it until the disclosure policy opens the gate
- * (LD03). Until then the part stays in renderer state and in durable storage.
+ * LD03: process facts are no longer filtered out of the main conversation.
+ * Reasoning, tool calls, tool results and approvals render inline as process
+ * blocks whose density and expansion come from the shared disclosure policy.
  */
-export function isMainConversationOutputPart(part: ChatOutputPart): boolean {
-  return !(
-    part.type === "approval_request" ||
-    part.type === "command_output" ||
-    part.type === "file_ref" ||
-    part.type === "input_request" ||
-    part.type === "ledger_event" ||
-    part.type === "reasoning" ||
-    part.type === "tool_call" ||
-    part.type === "tool_result"
-  );
+export function isMainConversationOutputPart(_part: ChatOutputPart): boolean {
+  return true;
 }
 
 export function outputPartsFromMessage(

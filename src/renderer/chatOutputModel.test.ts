@@ -100,12 +100,12 @@ describe("chat output model", () => {
       "text",
       "table",
       "code",
+      "ledger_event",
     ]);
-    expect(parts.map((part) => part.type)).not.toContain("ledger_event");
     expect(parts.every((part) => part.source === "persisted")).toBe(true);
   });
 
-  it("preserves legacy content without leaking tool parts into the main transcript", () => {
+  it("keeps legacy content and the process parts it was persisted beside", () => {
     const message: ChatMessageRecord = {
       id: "m3",
       role: "assistant",
@@ -122,19 +122,19 @@ describe("chat output model", () => {
       ],
     };
 
-    expect(outputPartsFromMessage(message)).toEqual([
-      {
-        id: "m3:text",
-        type: "text",
-        text: "Legacy answer summary",
-        format: "markdown",
-        renderKey: "m3:text",
-        source: "persisted",
-      },
-    ]);
+    const parts = outputPartsFromMessage(message);
+    expect(parts.map((part) => part.type)).toEqual(["text", "tool_call"]);
+    expect(parts[0]).toEqual({
+      id: "m3:text",
+      type: "text",
+      text: "Legacy answer summary",
+      format: "markdown",
+      renderKey: "m3:text",
+      source: "persisted",
+    });
   });
 
-  it("keeps tool and runtime process parts out of the main transcript", () => {
+  it("keeps tool and runtime process parts available to the inline process stream", () => {
     const message: ChatMessageRecord = {
       id: "m-process",
       role: "assistant",
@@ -194,7 +194,15 @@ describe("chat output model", () => {
       ],
     };
 
-    expect(outputPartsFromMessage(message)).toEqual([]);
+    expect(outputPartsFromMessage(message).map((part) => part.type)).toEqual([
+      "tool_call",
+      "tool_result",
+      "file_ref",
+      "command_output",
+      "ledger_event",
+      "approval_request",
+      "input_request",
+    ]);
   });
 
   it("builds markdown for assistant messages from text and evidence parts", () => {
@@ -237,8 +245,7 @@ describe("chat output model", () => {
     expect(markdown).toContain("Rendered summary");
     expect(markdown).toContain("| Name | Score |");
     expect(markdown).toContain("```diff");
-    expect(markdown).not.toContain("Tool call: read_file");
-    expect(markdown).not.toContain("notes.md");
+    expect(markdown).toContain("Tool call: read_file");
     expect(markdown).not.toContain("Legacy summary");
   });
 
@@ -314,8 +321,8 @@ describe("chat output model", () => {
   });
 });
 
-describe("LD02 reasoning display gate", () => {
-  it("keeps persisted reasoning out of the main conversation while it stays in state", () => {
+describe("LD03 reasoning display gate", () => {
+  it("keeps persisted reasoning in the main conversation parts", () => {
     const message: ChatMessageRecord = {
       id: "m-reasoning",
       role: "assistant",
@@ -340,10 +347,10 @@ describe("LD02 reasoning display gate", () => {
     };
 
     const rendered = outputPartsFromMessage(message);
-    expect(rendered.map((part) => part.type)).toEqual(["text"]);
+    expect(rendered.map((part) => part.type)).toEqual(["reasoning", "text"]);
   });
 
-  it("hides a reasoning-only message instead of rendering an empty bubble", () => {
+  it("renders a reasoning-only message instead of dropping it", () => {
     const message: ChatMessageRecord = {
       id: "m-reasoning-only",
       role: "assistant",
@@ -361,6 +368,44 @@ describe("LD02 reasoning display gate", () => {
       ],
     };
 
-    expect(outputPartsFromMessage(message)).toEqual([]);
+    expect(outputPartsFromMessage(message).map((part) => part.type)).toEqual([
+      "reasoning",
+    ]);
+  });
+
+  it("keeps tool calls and approvals available to the inline process stream", () => {
+    const message: ChatMessageRecord = {
+      id: "m-process",
+      role: "assistant",
+      content: "answer text",
+      createdAt: "2026-09-08T00:00:00.000Z",
+      outputParts: [
+        {
+          id: "text_1",
+          type: "text",
+          text: "answer text",
+          format: "markdown",
+        },
+        {
+          id: "tool_1",
+          type: "tool_call",
+          toolCallId: "call_1",
+          toolName: "file_list",
+        },
+        {
+          id: "approval_1",
+          type: "approval_request",
+          approvalId: "approval_1",
+          toolName: "file_write",
+          riskLevel: "medium",
+        },
+      ],
+    };
+
+    expect(outputPartsFromMessage(message).map((part) => part.type)).toEqual([
+      "text",
+      "tool_call",
+      "approval_request",
+    ]);
   });
 });

@@ -6747,7 +6747,10 @@ const ChatMessageItem = memo(function ChatMessageItem({
               <p>{terminalTruth.detail}</p>
             </section>
           ) : null}
-          <AnswerBlock parts={message.outputParts} />
+          <AnswerBlock
+            parts={message.outputParts}
+            settled={message.isStreaming !== true}
+          />
         </>
       ) : (
         <>

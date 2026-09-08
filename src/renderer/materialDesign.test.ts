@@ -406,7 +406,9 @@ describe("Design System — Obsidian desktop control surface", () => {
       "!isTerminalGoalStatus(result.activeGoal.status)",
     );
     expect(chatPanelSource).toContain("outputParts.length === 0");
-    expect(chatPanelSource).toContain("<AnswerBlock parts={message.outputParts} />");
+    expect(chatPanelSource).toContain("<AnswerBlock");
+    expect(chatPanelSource).toContain("parts={message.outputParts}");
+    expect(chatPanelSource).toContain("settled={message.isStreaming !== true}");
     expect(chatPanelSource).not.toContain("outputMarkdownFromMessage");
     expect(answerBlockSource).toContain("OutputPartRenderer");
     expect(answerBlockSource).not.toContain("EvidenceRail");
@@ -1649,13 +1651,29 @@ describe("Design System — Obsidian desktop control surface", () => {
     expect(chatPanelSource).toContain("contextWindowSource");
   });
 
-  it("keeps tool and raw reasoning previews out of the main interface", () => {
-    expect(chatPanelSource).not.toContain("RuntimeTextDisclosure");
-    expect(chatPanelSource).not.toContain("ToolCallPreviewDisclosure");
-    expect(chatPanelSource).not.toContain("latestToolCallPreview");
-    expect(chatPanelSource).not.toContain("context-thinking-disclosure");
-    expect(chatPanelSource).not.toContain("tool-call-preview-block");
-    expect(chatPanelSource).toContain("getChatStatusMessageFromStatusEvent");
+  it("inlines process facts behind the three-level disclosure policy", () => {
+    // v3.10.0 reverses the v3.9.2 "keep process out of the transcript" policy
+    // (LD03, user-approved). The guard now asserts the NEW policy: process
+    // facts are inlined, but density is three-level and attention state is
+    // never folded away.
+    const answerBlockSource = readChatOutputComponent("AnswerBlock.tsx");
+    const processBlockSource = readChatOutputComponent("ProcessBlock.tsx");
+    const processDisclosureSource = readFileSync(
+      path.join(process.cwd(), "src/shared/processDisclosure.ts"),
+      "utf8",
+    );
+
+    expect(answerBlockSource).toContain("resolveProcessDensity");
+    expect(answerBlockSource).toContain("ProcessBlock");
+    expect(answerBlockSource).toContain("ProcessGroup");
+    expect(answerBlockSource).toContain("SettledProcessFold");
+    expect(processBlockSource).toContain("aria-expanded={expanded}");
+    expect(processBlockSource).toContain("aria-controls={bodyId}");
+    expect(processDisclosureSource).toContain("PROCESS_RECENT_WINDOW_SIZE = 3");
+    expect(processDisclosureSource).toContain("isProcessAttention(item.attention)");
+    expect(styles).toContain(".process-block");
+    expect(styles).toContain(".process-group");
+    expect(styles).toContain(".settled-process-fold");
   });
 
   it("renders guided skill input in the main chat surface with all required controls", () => {

@@ -2377,3 +2377,164 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
 }
+
+/* ── LD03 inline process blocks ─────────────────────────────────────────────
+   Three-level density: L0 folded group, L1 summary row, L2 body. Attention
+   rows stay visible and use warning/error semantics, never colour alone. */
+.process-block-run,
+.process-group-body,
+.settled-process-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.process-block {
+  border: 1px solid var(--color-border-subtle);
+  border-left: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-primary);
+  overflow: hidden;
+}
+
+.process-block-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.process-block-head:hover {
+  background: var(--color-surface-hover);
+}
+
+.process-block-head:focus-visible,
+.process-group-head:focus-visible,
+.settled-process-head:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.process-block-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-muted);
+}
+
+.process-block-label {
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
+.process-block-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.process-block-meta {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.process-block-body {
+  padding: 0 var(--space-3) var(--space-3);
+  border-top: 1px dashed var(--color-border-subtle);
+}
+
+.process-block.is-thinking { border-left-color: var(--agent-thinking-border); }
+.process-block.is-thinking .process-block-label { color: var(--agent-thinking-text); }
+.process-block.is-thinking .process-block-dot { background: var(--agent-thinking-text); }
+.process-block.is-tool { border-left-color: var(--agent-executing-border); }
+.process-block.is-tool .process-block-label { color: var(--agent-executing-text); }
+.process-block.is-tool .process-block-dot { background: var(--agent-executing-text); }
+.process-block.is-tool-ok { border-left-color: var(--agent-evidence-border); }
+.process-block.is-tool-ok .process-block-label { color: var(--agent-evidence-text); }
+.process-block.is-tool-ok .process-block-dot { background: var(--agent-evidence-text); }
+.process-block.is-tool-error,
+.process-block.is-blocking {
+  border-left-color: var(--status-error-border);
+  background: var(--status-error-bg);
+}
+.process-block.is-tool-error .process-block-label,
+.process-block.is-blocking .process-block-label { color: var(--status-error-text); }
+.process-block.is-tool-error .process-block-dot,
+.process-block.is-blocking .process-block-dot { background: var(--status-error-text); }
+.process-block.is-approval {
+  border-left-color: var(--agent-approval-border);
+  background: var(--agent-approval-bg);
+}
+.process-block.is-approval .process-block-label { color: var(--agent-approval-text); }
+.process-block.is-approval .process-block-dot { background: var(--agent-approval-text); }
+.process-block.is-plan { border-left-color: var(--status-info-border); }
+.process-block.is-plan .process-block-label { color: var(--status-info-text); }
+.process-block.is-model { border-left-color: var(--color-border); }
+.process-block.is-model .process-block-label { color: var(--color-text-secondary); }
+
+.process-group,
+.settled-process-fold {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  overflow: hidden;
+}
+
+.process-group-head,
+.settled-process-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.process-group-head:hover,
+.settled-process-head:hover {
+  background: var(--color-surface-hover);
+}
+
+.process-group-head strong,
+.settled-process-head strong {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
+.process-group-head small,
+.settled-process-head small {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.process-group-body,
+.settled-process-body {
+  padding: var(--space-2);
+  border-top: 1px dashed var(--color-border-subtle);
+}
+
+@media (max-width: 640px) {
+  .process-block-head { flex-wrap: wrap; }
+  .process-block-summary { flex: 1 1 100%; order: 3; white-space: normal; }
+}
