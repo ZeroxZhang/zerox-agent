@@ -246,7 +246,10 @@ export const AnswerBlock = memo(function AnswerBlock({
               preference={preference}
               summary={`${processParts.length} 步`}
             >
-              {processParts.map((part) => renderPart(part, preference))}
+              {/* The settled view uses the same three-level density as the
+                  running view, so reopening a finished turn never dumps every
+                  block flat. */}
+              {renderProcessRun(processParts, preference)}
             </SettledProcessFold>
             {narrative.map((part) => (
               <OutputPartRenderer key={part.renderKey} part={part} />

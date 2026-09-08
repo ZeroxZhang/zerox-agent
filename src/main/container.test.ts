@@ -3572,7 +3572,23 @@ describe("app container goal drafts", () => {
     const rendererSession = await container.getChatSession(appended.session.id);
     const storedSession = await container.chatSessionStore().get(appended.session.id);
 
-    expect(rendererSession?.messages[0].outputParts).toEqual([outputParts[0]]);
+    // LD03/LD04: the renderer keeps the process facts and only loses their
+    // unbounded preview payloads, while storage keeps the full record.
+    const rendererParts = rendererSession?.messages[0].outputParts ?? [];
+    expect(rendererParts.map((part) => part.type)).toEqual([
+      "text",
+      "tool_result",
+      "command_output",
+    ]);
+    expect(rendererParts[1]).toMatchObject({
+      type: "tool_result",
+      resultPreview: "[已省略：内容过大，请查看证据]",
+    });
+    expect(
+      rendererParts[2]?.type === "command_output"
+        ? rendererParts[2].stdout.length < 4_000
+        : false,
+    ).toBe(true);
     expect(storedSession?.messages[0].outputParts).toEqual(outputParts);
     expect(JSON.stringify(rendererSession).length).toBeLessThan(
       JSON.stringify(storedSession).length / 20,

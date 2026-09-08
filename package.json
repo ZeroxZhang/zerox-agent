@@ -43,7 +43,9 @@
     "test": "npm run native:build && vitest run",
     "test:watch": "vitest",
     "typecheck:tests": "tsc -p tsconfig.tests.json && node scripts/check-test-type-coverage.mjs",
-    "stress:runtime": "ZEROX_RUNTIME_STRESS=1 vitest run --run src/main/runtimeStress.test.ts --maxWorkers=1"
+    "stress:runtime": "ZEROX_RUNTIME_STRESS=1 vitest run --run src/main/runtimeStress.test.ts --maxWorkers=1",
+    "smoke:process-disclosure": "npm run build && node scripts/run-process-disclosure-acceptance.mjs",
+    "smoke:process-disclosure:built": "node scripts/run-process-disclosure-acceptance.mjs"
   },
   "keywords": [],
   "author": "",

@@ -3,7 +3,7 @@ import type { ChatSessionRecord } from "./chat";
 import { projectChatSessionForTranscript } from "./chatSessionProjection";
 
 describe("chat session projection", () => {
-  it("drops non-transcript output parts before a persisted session is sent to the renderer", () => {
+  it("bounds oversized previews without dropping the process fact on reload", () => {
     const largeToolResult = { rows: Array.from({ length: 200 }, (_, index) => ({
       id: index,
       value: "x".repeat(1_000),
@@ -49,20 +49,31 @@ describe("chat session projection", () => {
 
     const projected = projectChatSessionForTranscript(session);
 
-    expect(projected.messages[0].outputParts).toEqual([
-      {
-        id: "text_1",
-        type: "text",
-        text: "Done",
-        format: "markdown",
-      },
+    // LD03/LD04: process facts survive the read path; only their unbounded
+    // preview payloads are replaced by a marker.
+    const parts = projected.messages[0].outputParts ?? [];
+    expect(parts.map((part) => part.type)).toEqual([
+      "text",
+      "tool_result",
+      "command_output",
     ]);
+    const toolResult = parts.find((part) => part.type === "tool_result");
+    expect(toolResult).toMatchObject({
+      type: "tool_result",
+      toolCallId: "call_1",
+      ok: true,
+      resultPreview: "[已省略：内容过大，请查看证据]",
+    });
+    const commandOutput = parts.find((part) => part.type === "command_output");
+    expect(commandOutput?.type === "command_output"
+      ? commandOutput.stdout.length <= 2_048 + 64
+      : false).toBe(true);
     expect(JSON.stringify(projected).length).toBeLessThan(
       JSON.stringify(session).length / 20,
     );
   });
 
-  it("removes outputParts entirely when no transcript part remains", () => {
+  it("keeps a process-only message readable after reload", () => {
     const session: ChatSessionRecord = {
       id: "session_1",
       title: "Only tool detail",
@@ -88,9 +99,11 @@ describe("chat session projection", () => {
       ],
     };
 
-    expect(projectChatSessionForTranscript(session).messages[0]).not.toHaveProperty(
-      "outputParts",
-    );
+    const parts = projectChatSessionForTranscript(session).messages[0].outputParts;
+    expect(parts?.map((part) => part.type)).toEqual(["tool_result"]);
+    expect(parts?.[0]).toMatchObject({
+      resultPreview: "[已省略：内容过大，请查看证据]",
+    });
   });
 });
 
@@ -139,6 +152,7 @@ describe("LD02 reasoning transcript survival", () => {
     expect(projected?.outputParts?.map((part) => part.type)).toEqual([
       "reasoning",
       "text",
+      "tool_result",
     ]);
   });
 });

@@ -15375,3 +15375,38 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 - 残留风险：偏好是 renderer 本地 UI 状态，不随账号或设备同步（与其它渲染层偏好
   一致）；四档中 `pinned` 只保留"本次会话手动展开过的块"，跨重启不记忆单块状态。
 - 回滚：删除偏好控件与存储读写，`AnswerBlock` 回落到默认 `auto`；不影响持久化数据。
+
+## v3.10.0 实机验收闸门（LD01–LD05 收口）
+
+- 新增 `scripts/run-process-disclosure-acceptance.mjs` + npm 脚本
+  `smoke:process-disclosure`：向 JSON 会话存储写入一条真实会话（含 reasoning /
+  tool_call / 工具失败 / 审批 / plan_step / model_call / text 共 7 个过程部件），
+  以 `ZEROX_STORAGE_BACKEND=json` + 隔离 userData 启动**真实 Electron 应用**，
+  通过 CDP 驱动并断言真实 DOM，产出
+  `.zerox/verification/process-disclosure/{acceptance.json,chat-process-blocks.png}`。
+  单次运行约 10s。
+- 断言覆盖：7 个过程事实（5 可见 + L0 折叠 2）、注意力块恰好 2 个自动展开、
+  L0 默认折叠且可单独展开、本轮结束折叠为一行、四档偏好实时生效
+  （紧凑 0 / 展开 7 且展开 L0）、`aria-expanded`/`aria-controls` 一致、
+  1440/1180/900/640/390 五档无横向溢出。
+- **闸门抓到两个真实缺陷（此前所有单测与原型都没发现）**：
+  1. **读取路径仍在丢弃过程事实**：`chatSessionProjection` 的转录白名单没有
+     tool_call/tool_result/approval_request/plan_step/model_call，重载会话后
+     7 个过程部件只剩 1 个（"本轮过程 1 步"）。这正是 LD03 缺口表里的 G3①，
+     LD03 只打开了渲染层过滤器。已修复：白名单覆盖全部 17 种部件，并改为
+     **有界投影**——超长 `resultPreview` / `argsPreview` / `command_output` 文本
+     替换为"[已省略：内容过大，请查看证据]"，`reasoning` 超限截断并置
+     `truncated`，因此"不向渲染层投递无界负载"的原意保留，过程事实不再丢失。
+     同时修掉投影里的提前返回（按数量判断导致有界化被跳过，改为按引用比较）。
+  2. **本轮结束视图绕过了三级密度**：`SettledProcessFold` 直接平铺全部部件，
+     展开后没有 L0 折叠组。已改为与运行中视图共用 `renderProcessRun`。
+- 受影响断言同步更新：`chatSessionProjection.test.ts` 3 项改为"有界但保留事实"
+  契约；`container.test.ts` 的渲染层投影断言改为断言 3 个部件均保留且预览被省略。
+- 验证证据：`typecheck:tests` 324/324；全量排除环境固定的
+  `safeFsHelperInspection` 后 **322 文件 / 3856 项全部通过**（6 跳过）；
+  `npm run build`、`npm run smoke:process-disclosure:built`、
+  `npm run smoke:prod`、`npm run harness:check`、`npm run program:check` 全绿；
+  `git diff --check` 干净。`package.json` 变更已同步刷新
+  `build-v392-acceptance-anchor.mjs` 的 CONTROL_DIGESTS。
+- 结论：LD01–LD05 的过程披露链路现在有**真实应用级**回归闸门，后续 LD06 可以
+  在"事实确实会被渲染"的前提下继续。
