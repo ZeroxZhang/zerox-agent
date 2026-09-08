@@ -119,6 +119,24 @@
   .pblock-body pre { margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); background: var(--color-surface-muted); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--text-xs); overflow-x: auto; color: var(--color-text-secondary); }
   .pblock-note { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-muted); }
 
+  /* Level 0: older steps fold into one line so the stream cannot pile up. */
+  .pgroup { border: 1px dashed var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); overflow: hidden; }
+  .pgroup-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); background: transparent; border: 0; text-align: left; cursor: pointer; color: var(--color-text-muted); }
+  .pgroup-head:hover { background: var(--color-surface-hover); }
+  .pgroup-head .pgroup-title { font-size: var(--text-sm); font-weight: 600; }
+  .pgroup-head .pgroup-tail { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+  .pgroup[data-expanded="true"] .pblock-chevron { transform: rotate(90deg); }
+  .pgroup-body { display: grid; gap: var(--space-2); padding: var(--space-2); border-top: 1px dashed var(--color-border-subtle); }
+  .pgroup-body[hidden] { display: none; }
+
+  /* Settled turn: the whole process stream folds to one line. */
+  .turn-settled { border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-surface-primary); }
+  .turn-settled-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); background: transparent; border: 0; text-align: left; cursor: pointer; }
+  .turn-settled-head:hover { background: var(--color-surface-hover); }
+  .turn-settled-title { font-size: var(--text-sm); font-weight: 600; }
+  .turn-settled-meta { flex: 1 1 auto; font-size: var(--text-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+  .turn-settled[data-expanded="true"] .pblock-chevron { transform: rotate(90deg); }
+
   .pblock.is-thinking { border-left-color: var(--agent-thinking-border); }
   .pblock.is-thinking .pblock-label { color: var(--agent-thinking-text); }
   .pblock.is-tool { border-left-color: var(--agent-executing-border); }
@@ -219,6 +237,7 @@
         <button type="button" data-mode="pinned" aria-pressed="false">固定</button>
       </div>
       <button type="button" class="ghost" id="legacyToggle" aria-pressed="false">对照旧版</button>
+      <button type="button" class="ghost" id="settleToggle" aria-pressed="false">本轮结束</button>
       <button type="button" class="ghost" id="replay">重放这一轮</button>
     </header>
 
@@ -231,33 +250,43 @@
         <p class="hint" id="streamHint">下面是这一轮的过程块：默认只给一行摘要，需要时展开；阻塞和失败会自动展开。</p>
 
         <div class="process-stream" id="processStream">
-          <!-- 思考 -->
-          <section class="pblock is-thinking" data-kind="thinking" data-state="done" data-expanded="false">
-            <button class="pblock-head" aria-expanded="false" aria-controls="pb-thinking-1">
-              <span class="status-dot" aria-hidden="true"></span>
-              <span class="pblock-label">思考</span>
-              <span class="pblock-summary">先确认 README 的现有结构，再决定 v3.9.2 段落要改哪几行</span>
-              <span class="pblock-meta">14s</span>
+          <!-- Level 0: older steps fold into one line (never buries blocking/失败) -->
+          <section class="pgroup" data-expanded="false" data-kind="group">
+            <button class="pgroup-head" aria-expanded="false" aria-controls="pgroup-body-1">
               <span class="pblock-chevron" aria-hidden="true">›</span>
+              <span class="pgroup-title">更早的过程 · 2 步</span>
+              <span class="pgroup-tail">思考 · 读取 README.md · 14s + 0.3s</span>
             </button>
-            <div class="pblock-body" id="pb-thinking-1" hidden>
-              <p>README 的中文段落在前、英文段落在后，两边都有版本小节。v3.9.2 小节目前只写了会话披露，需要补上实时投递和渲染预算这两条。英文侧要同步，但不能逐句直译。</p>
-              <p class="pblock-note">已脱敏：路径与凭据已替换</p>
-            </div>
-          </section>
+            <div class="pgroup-body" id="pgroup-body-1" hidden>
+              <!-- 思考 -->
+              <section class="pblock is-thinking" data-kind="thinking" data-state="done" data-expanded="false">
+                <button class="pblock-head" aria-expanded="false" aria-controls="pb-thinking-1">
+                  <span class="status-dot" aria-hidden="true"></span>
+                  <span class="pblock-label">思考</span>
+                  <span class="pblock-summary">先确认 README 的现有结构，再决定 v3.9.2 段落要改哪几行</span>
+                  <span class="pblock-meta">14s</span>
+                  <span class="pblock-chevron" aria-hidden="true">›</span>
+                </button>
+                <div class="pblock-body" id="pb-thinking-1" hidden>
+                  <p>README 的中文段落在前、英文段落在后，两边都有版本小节。v3.9.2 小节目前只写了会话披露，需要补上实时投递和渲染预算这两条。英文侧要同步，但不能逐句直译。</p>
+                  <p class="pblock-note">已脱敏：路径与凭据已替换</p>
+                </div>
+              </section>
 
-          <!-- 工具：成功 -->
-          <section class="pblock is-tool is-ok" data-kind="tool" data-state="ok" data-expanded="false">
-            <button class="pblock-head" aria-expanded="false" aria-controls="pb-tool-1">
-              <span class="status-dot" aria-hidden="true"></span>
-              <span class="pblock-label">读取 README.md</span>
-              <span class="pblock-summary">12.4 KB · 549 行</span>
-              <span class="pblock-meta">0.3s</span>
-              <span class="pblock-chevron" aria-hidden="true">›</span>
-            </button>
-            <div class="pblock-body" id="pb-tool-1" hidden>
-              <pre>{ "path": "README.md", "bytes": 12698, "lines": 549 }</pre>
-              <p class="pblock-note">结果摘要 12.4 KB，完整内容已存入证据</p>
+              <!-- 工具：成功 -->
+              <section class="pblock is-tool is-ok" data-kind="tool" data-state="ok" data-expanded="false">
+                <button class="pblock-head" aria-expanded="false" aria-controls="pb-tool-1">
+                  <span class="status-dot" aria-hidden="true"></span>
+                  <span class="pblock-label">读取 README.md</span>
+                  <span class="pblock-summary">12.4 KB · 549 行</span>
+                  <span class="pblock-meta">0.3s</span>
+                  <span class="pblock-chevron" aria-hidden="true">›</span>
+                </button>
+                <div class="pblock-body" id="pb-tool-1" hidden>
+                  <pre>{ "path": "README.md", "bytes": 12698, "lines": 549 }</pre>
+                  <p class="pblock-note">结果摘要 12.4 KB，完整内容已存入证据</p>
+                </div>
+              </section>
             </div>
           </section>
 
@@ -365,20 +394,22 @@
 
   <aside class="context">
     <div class="card">
-      <h3>进度</h3>
-      <p>执行中 · 第 3 轮 · 已调用 4 次工具</p>
-      <ol>
-        <li>更新中文小节</li>
-        <li>同步英文小节</li>
-      </ol>
+      <h3>目标与任务阶段</h3>
+      <p>目标：更新 README 并验证</p>
+      <p style="margin-top:var(--space-1)">阶段：执行中 · 计划 2/3</p>
     </div>
     <div class="card">
       <h3>会话上下文</h3>
       <p>当前占用 18% · 压缩 0 次</p>
     </div>
     <div class="card">
+      <h3>运行环境</h3>
+      <p>工作区 · zerox-agent（main）</p>
+      <p style="margin-top:var(--space-1)">模型 · agent-model</p>
+    </div>
+    <div class="card">
       <h3>说明</h3>
-      <p>右栏保持不变，继续承担全局运行状态；主对话负责本轮因果链。</p>
+      <p>右栏只放全局与目标/阶段信息，不再重复本轮步骤；本轮因果链留在主对话的过程块里。</p>
     </div>
   </aside>
 </div>
@@ -387,16 +418,20 @@
 (function () {
   var stream = document.getElementById("processStream");
   var blocks = Array.prototype.slice.call(stream.querySelectorAll(".pblock"));
+  var group = stream.querySelector(".pgroup");
   var modeButtons = Array.prototype.slice.call(document.querySelectorAll(".modes button"));
   var legacyToggle = document.getElementById("legacyToggle");
+  var settleToggle = document.getElementById("settleToggle");
   var replayButton = document.getElementById("replay");
   var answerText = document.getElementById("answerText");
   var streamHint = document.getElementById("streamHint");
+  var turn = document.querySelector(".turn");
   var answer = "已更新中文与英文的 v3.9.2 小节，正在等待写入授权，随后会重跑测试。";
 
   var userToggled = new WeakMap();
   var pinned = new WeakMap();
   var currentMode = "auto";
+  var settled = false;
 
   function autoExpanded(block) {
     var kind = block.dataset.kind;
@@ -416,6 +451,16 @@
     body.hidden = !expanded;
   }
 
+  // Level 0: older steps stay folded unless the mode opens everything or the
+  // user opened the group by hand.
+  function setGroupExpanded(expanded) {
+    group.dataset.expanded = expanded ? "true" : "false";
+    var head = group.querySelector(".pgroup-head");
+    var body = group.querySelector(".pgroup-body");
+    head.setAttribute("aria-expanded", expanded ? "true" : "false");
+    body.hidden = !expanded;
+  }
+
   function applyMode() {
     blocks.forEach(function (block) {
       var expanded;
@@ -428,9 +473,22 @@
       }
       setBlockExpanded(block, expanded);
     });
-    var expandedCount = blocks.filter(function (b) { return b.dataset.expanded === "true"; }).length;
-    streamHint.textContent = "过程块 " + blocks.length + " 条 · 当前展开 " + expandedCount +
-      " 条 · 模式：" + ({ auto: "自动", compact: "紧凑", open: "展开", pinned: "固定" }[currentMode]);
+
+    if (currentMode === "open") setGroupExpanded(true);
+    else if (currentMode === "compact") setGroupExpanded(false);
+    else setGroupExpanded(pinned.get(group) === true);
+
+    var visible = blocks.filter(function (block) {
+      var groupBody = block.closest(".pgroup-body");
+      return block.dataset.expanded === "true" && (!groupBody || !groupBody.hidden);
+    }).length;
+    var hiddenInGroup = blocks.filter(function (block) {
+      return Boolean(block.closest(".pgroup-body"));
+    }).length;
+    streamHint.textContent = "过程块 " + blocks.length + " 条（其中 " + hiddenInGroup +
+      " 条已收进「更早的过程」）· 当前可见展开 " + visible + " 条 · 模式：" +
+      ({ auto: "自动", compact: "紧凑", open: "展开", pinned: "固定" }[currentMode]) +
+      (settled ? " · 本轮已结束" : "");
   }
 
   blocks.forEach(function (block) {
@@ -442,6 +500,13 @@
       setBlockExpanded(block, next);
       applyMode();
     });
+  });
+
+  group.querySelector(".pgroup-head").addEventListener("click", function () {
+    var next = group.dataset.expanded !== "true";
+    pinned.set(group, next);
+    setGroupExpanded(next);
+    applyMode();
   });
 
   modeButtons.forEach(function (button) {
@@ -464,8 +529,47 @@
     if (!hidden) applyMode();
   });
 
+  // Settled turn: the whole process stream becomes one summary line.
+  settleToggle.addEventListener("click", function () {
+    settled = !settled;
+    settleToggle.setAttribute("aria-pressed", String(settled));
+    var existing = turn.querySelector(".turn-settled");
+    if (settled) {
+      if (!existing) {
+        var summary = document.createElement("section");
+        summary.className = "turn-settled";
+        summary.dataset.expanded = "false";
+        summary.innerHTML =
+          '<button class="turn-settled-head" aria-expanded="false" aria-controls="turn-settled-body">' +
+          '<span class="pblock-chevron" aria-hidden="true">›</span>' +
+          '<span class="turn-settled-title">本轮过程 · 7 步</span>' +
+          '<span class="turn-settled-meta">用时 41s · 2 次工具 · 1 项待授权</span></button>' +
+          '<div id="turn-settled-body" hidden></div>';
+        stream.parentNode.insertBefore(summary, stream);
+        summary.querySelector(".turn-settled-head").addEventListener("click", function () {
+          var expanded = summary.dataset.expanded !== "true";
+          summary.dataset.expanded = expanded ? "true" : "false";
+          summary.querySelector(".turn-settled-head").setAttribute("aria-expanded", String(expanded));
+          summary.querySelector("#turn-settled-body").hidden = !expanded;
+          stream.hidden = !expanded;
+        });
+      }
+      stream.hidden = true;
+    } else {
+      if (existing) existing.remove();
+      stream.hidden = false;
+      applyMode();
+    }
+    applyMode();
+  });
+
   replayButton.addEventListener("click", function () {
     // Reset the turn, then reveal blocks on the cadence the bounded window uses.
+    settled = false;
+    settleToggle.setAttribute("aria-pressed", "false");
+    var existing = turn.querySelector(".turn-settled");
+    if (existing) existing.remove();
+    stream.hidden = false;
     answerText.textContent = "";
     blocks.forEach(function (block) {
       block.dataset.appear = "pending";
