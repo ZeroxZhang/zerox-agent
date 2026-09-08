@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ChatSessionRecord } from "./chat";
-import { projectChatSessionForTranscript } from "./chatSessionProjection";
+import {
+  projectChatProcessFacts,
+  projectChatSessionForTranscript,
+} from "./chatSessionProjection";
 
 describe("chat session projection", () => {
   it("bounds oversized previews without dropping the process fact on reload", () => {
@@ -154,5 +157,86 @@ describe("LD02 reasoning transcript survival", () => {
       "text",
       "tool_result",
     ]);
+  });
+});
+
+describe("LD06 episode process fact projection", () => {
+  it("keeps only the run's process facts and applies the transcript bounds", () => {
+    const session: ChatSessionRecord = {
+      id: "session_episode",
+      title: "Episode",
+      summary: "Episode",
+      createdAt: "2026-09-08T00:00:00.000Z",
+      updatedAt: "2026-09-08T00:00:00.000Z",
+      messages: [
+        {
+          id: "user_1",
+          role: "user",
+          content: "question",
+          createdAt: "2026-09-08T00:00:00.000Z",
+        },
+        {
+          id: "assistant_1",
+          role: "assistant",
+          content: "answer",
+          createdAt: "2026-09-08T00:00:00.000Z",
+          outputParts: [
+            {
+              id: "reasoning_1",
+              type: "reasoning",
+              text: "thought",
+              redacted: true,
+              truncated: false,
+              streaming: false,
+            },
+            {
+              id: "tool_call_1",
+              type: "tool_call",
+              toolCallId: "call_1",
+              toolName: "file_read",
+              argsPreview: { path: "README.md" },
+            },
+            {
+              id: "tool_result_1",
+              type: "tool_result",
+              toolCallId: "call_1",
+              ok: true,
+              resultPreview: { blob: "x".repeat(50_000) },
+            },
+            { id: "text_1", type: "text", text: "answer", format: "markdown" },
+          ],
+        },
+      ],
+    };
+
+    const facts = projectChatProcessFacts(session.messages);
+
+    // Narrative parts are not process facts; the user message is skipped.
+    expect(facts.map((fact) => fact.part.type)).toEqual([
+      "reasoning",
+      "tool_call",
+      "tool_result",
+    ]);
+    expect(facts.every((fact) => fact.messageId === "assistant_1")).toBe(true);
+    expect(facts[1]?.part).toMatchObject({
+      type: "tool_call",
+      argsPreview: { path: "README.md" },
+    });
+    expect(facts[2]?.part).toMatchObject({
+      type: "tool_result",
+      resultPreview: "[已省略：内容过大，请查看证据]",
+    });
+    expect(JSON.stringify(facts)).not.toContain("x".repeat(1_000));
+  });
+
+  it("returns nothing for a message set with no process facts", () => {
+    expect(projectChatProcessFacts([
+      {
+        id: "assistant_plain",
+        role: "assistant",
+        content: "just an answer",
+        createdAt: "2026-09-08T00:00:00.000Z",
+      },
+    ])).toEqual([]);
   });
 });

@@ -106,6 +106,111 @@ describe("exportAgentEpisodeFromConfig", () => {
       .resolves.toContain("\"fileCount\": 8");
   });
 
+  it("carries bounded chat process facts for the exported run", async () => {
+    await writeFile(
+      path.join(configDir, "agent-runs.jsonl"),
+      `${JSON.stringify(createRun("run_pd"))}\n`,
+    );
+    await mkdir(path.join(configDir, "agent-trajectories"), { recursive: true });
+    await writeFile(
+      path.join(configDir, "agent-trajectories", "run_pd.jsonl"),
+      formatJsonl([
+        trajectory("event_summary_pd", 1, "final_summary", {
+          status: "succeeded",
+          summary: "done",
+        }),
+      ]),
+    );
+    await writeFile(
+      path.join(configDir, "chat-sessions.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        sessions: [
+          {
+            id: "session_pd",
+            title: "pd",
+            summary: "pd",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            messages: [
+              {
+                id: "message_pd",
+                role: "assistant",
+                content: "answer",
+                createdAt: timestamp,
+                executedRunId: "run_pd",
+                outputParts: [
+                  {
+                    id: "reasoning_1",
+                    type: "reasoning",
+                    text: "bounded thought",
+                    redacted: false,
+                    truncated: false,
+                    streaming: false,
+                  },
+                  {
+                    id: "tool_result_1",
+                    type: "tool_result",
+                    toolCallId: "call_1",
+                    ok: true,
+                    resultPreview: { blob: "x".repeat(50_000) },
+                  },
+                  {
+                    id: "text_1",
+                    type: "text",
+                    text: "answer",
+                    format: "markdown",
+                  },
+                ],
+              },
+              {
+                id: "message_other_run",
+                role: "assistant",
+                content: "other",
+                createdAt: timestamp,
+                executedRunId: "run_other",
+                outputParts: [
+                  {
+                    id: "reasoning_other",
+                    type: "reasoning",
+                    text: "must not be exported",
+                    redacted: false,
+                    truncated: false,
+                    streaming: false,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }, null, 2)}\n`,
+    );
+
+    await exportAgentEpisodeFromConfig({
+      configDir,
+      outDir,
+      runId: "run_pd",
+      backend: "json",
+      exportedAt: timestamp,
+    });
+
+    const facts = await readJson(
+      path.join(outDir, "chat-process-facts.json"),
+    ) as unknown as Array<{
+      part: { type: string; resultPreview?: unknown };
+    }>;
+    // Only the run's own assistant message, and only its process facts.
+    expect(facts.map((fact) => fact.part.type)).toEqual([
+      "reasoning",
+      "tool_result",
+    ]);
+    expect(JSON.stringify(facts)).not.toContain("x".repeat(1_000));
+    expect(facts[1]?.part.resultPreview).toBe("[已省略：内容过大，请查看证据]");
+    expect(JSON.stringify(facts)).not.toContain("must not be exported");
+    await expect(readFile(path.join(outDir, "metadata.json"), "utf8"))
+      .resolves.toContain('"chatProcessFactCount": 2');
+  });
+
   it("rejects an unsafe run id before reading run-scoped files or creating output", async () => {
     const unsafeRunId = "../outside";
     await writeFile(

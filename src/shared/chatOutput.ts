@@ -378,3 +378,28 @@ export function outputPartsToPlainText(parts: ChatOutputPart[]): string {
     .filter(Boolean)
     .join("\n\n");
 }
+
+/**
+ * LD06: the part types that describe process rather than narrative. Kept in one
+ * place so the renderer, the transcript projection and the episode evidence
+ * pack agree on what a process fact is.
+ */
+export const CHAT_PROCESS_PART_TYPES: ReadonlySet<ChatOutputPart["type"]> =
+  new Set<ChatOutputPart["type"]>([
+    "approval_request",
+    "command_output",
+    "file_ref",
+    "input_request",
+    "ledger_event",
+    "model_call",
+    "plan_step",
+    "reasoning",
+    "tool_call",
+    "tool_result",
+  ]);
+
+export function isChatProcessPartType(
+  type: ChatOutputPart["type"],
+): boolean {
+  return CHAT_PROCESS_PART_TYPES.has(type);
+}

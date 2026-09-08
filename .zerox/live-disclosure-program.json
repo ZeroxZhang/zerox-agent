@@ -4,10 +4,10 @@
   "title": "Zerox Live Process Disclosure Program",
   "sourceReview": "docs/design/zerox-agent-3-10-0-live-process-disclosure.md",
   "operatingGuide": ".zerox/live-disclosure-program.md",
-  "updatedAt": "2026-09-08T21:55:00.000+08:00",
-  "status": "active",
+  "updatedAt": "2026-09-08T22:45:00.000+08:00",
+  "status": "completed",
   "activeFeatureId": null,
-  "nextFeatureId": "P120-chat-process-facts-in-episode-evidence",
+  "nextFeatureId": null,
   "maxActiveFeatures": 1,
   "requiredFindings": [
     "LD1",
@@ -167,7 +167,7 @@
     {
       "id": "LD06",
       "title": "Episode evidence: chat process facts in the exported pack",
-      "state": "planned",
+      "state": "completed",
       "featureId": "P120-chat-process-facts-in-episode-evidence",
       "findings": [
         "LD2",

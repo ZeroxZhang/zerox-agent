@@ -3,6 +3,7 @@ import type { AgentLearningCandidate } from "../shared/agentLearning";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
 import type { KernelEvent } from "../shared/kernelContract";
+import type { ChatProcessFactRecord } from "../shared/chatSessionProjection";
 import { projectRunGraph } from "../shared/runGraph";
 import type {
   ChatTrajectoryEvent,
@@ -30,6 +31,8 @@ export function createAgentEpisodePackage(input: {
   chatTrajectory?: ChatTrajectoryEvent[];
   workspaceRunEvents?: WorkspaceRunEvent[];
   learningCandidates: AgentLearningCandidate[];
+  /** LD06: bounded, redacted process facts from the run's chat session. */
+  chatProcessFacts?: ChatProcessFactRecord[];
   verification: AgentEpisodeVerification;
   exportedAt: string;
 }): AgentEpisodePackage {
@@ -60,6 +63,15 @@ export function createAgentEpisodePackage(input: {
       null,
       2,
     )}\n`,
+    ...(input.chatProcessFacts
+      ? {
+          "chat-process-facts.json": `${JSON.stringify(
+            input.chatProcessFacts,
+            null,
+            2,
+          )}\n`,
+        }
+      : {}),
     "verification.json": `${JSON.stringify(input.verification, null, 2)}\n`,
     "eval-candidate.json": `${JSON.stringify(evalCandidate, null, 2)}\n`,
   };
@@ -69,6 +81,9 @@ export function createAgentEpisodePackage(input: {
     exportedAt: input.exportedAt,
     fileCount: Object.keys(files).length + 1,
     redaction: summarizeRedaction(input.trajectory),
+    ...(input.chatProcessFacts
+      ? { chatProcessFactCount: input.chatProcessFacts.length }
+      : {}),
   };
   files["metadata.json"] = `${JSON.stringify(metadata, null, 2)}\n`;
 

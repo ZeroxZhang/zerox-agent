@@ -6,6 +6,8 @@ import type { AgentExecutionCheckpoint } from "../shared/agentExecution";
 import type { AgentLearningCandidate } from "../shared/agentLearning";
 import type { AgentRunRecord } from "../shared/agentRuns";
 import type { AgentTrajectoryEvent } from "../shared/agentTrajectory";
+import type { ChatMessageRecord, ChatSessionRecord } from "../shared/chat";
+import { projectChatProcessFacts } from "../shared/chatSessionProjection";
 import type { Storage, StorageBackend } from "../shared/storageContract";
 import { createAgentEpisodePackage } from "./agentEpisodeExporter";
 import { assertSafeStoreEntityId } from "./storeEntityId";
@@ -49,12 +51,14 @@ export async function exportAgentEpisodeFromConfig(
     passed: source.trajectory.some((event) => event.type === "final_summary"),
     checks: ["run_record", "trajectory_final_summary"],
   };
+  const chatProcessFacts = projectChatProcessFacts(source.chatMessages);
   const episode = createAgentEpisodePackage({
     run: source.run,
     sourceAuthority: source.sourceAuthority,
     checkpoint: source.checkpoint,
     trajectory: source.trajectory,
     learningCandidates: source.learningCandidates,
+    ...(chatProcessFacts.length > 0 ? { chatProcessFacts } : {}),
     verification,
     exportedAt: options.exportedAt ?? new Date().toISOString(),
   });
@@ -79,6 +83,8 @@ type EpisodeSource = {
   checkpoint: AgentExecutionCheckpoint | null;
   trajectory: AgentTrajectoryEvent[];
   learningCandidates: AgentLearningCandidate[];
+  /** LD06: chat messages that executed this run, for the process projection. */
+  chatMessages: ChatMessageRecord[];
 };
 
 async function readJsonEpisodeSource(
@@ -109,7 +115,38 @@ async function readJsonEpisodeSource(
       ),
     ),
     learningCandidates: await readLearningCandidates(configDir, runId),
+    chatMessages: await readJsonChatMessagesForRun(configDir, runId),
   };
+}
+
+/**
+ * LD06: the chat session store stays the authority. The episode only needs the
+ * assistant messages whose executed run matches, projected through the same
+ * bounding rules as the live transcript.
+ */
+async function readJsonChatMessagesForRun(
+  configDir: string,
+  runId: string,
+): Promise<ChatMessageRecord[]> {
+  const stored = await readJsonOrNull<{ sessions?: ChatSessionRecord[] }>(
+    path.join(configDir, "chat-sessions.json"),
+  );
+  return collectRunChatMessages(stored?.sessions ?? [], runId);
+}
+
+function collectRunChatMessages(
+  sessions: readonly ChatSessionRecord[],
+  runId: string,
+): ChatMessageRecord[] {
+  const messages: ChatMessageRecord[] = [];
+  for (const session of sessions) {
+    for (const message of session.messages ?? []) {
+      if (message.executedRunId === runId) {
+        messages.push(message);
+      }
+    }
+  }
+  return messages;
 }
 
 async function readSqliteEpisodeSource(
@@ -160,10 +197,32 @@ async function readSqliteEpisodeSource(
       learningCandidates: createLearningRepository(storage)
         .list()
         .filter((candidate) => candidate.sourceRunId === runId),
+      chatMessages: readSqliteChatMessagesForRun(storage, runId),
     };
   } finally {
     storage.close();
   }
+}
+
+function readSqliteChatMessagesForRun(
+  storage: Storage,
+  runId: string,
+): ChatMessageRecord[] {
+  const rows = storage.db
+    .prepare("SELECT payload FROM chat_messages WHERE payload LIKE ?")
+    .all(`%${runId}%`) as Array<{ payload: string }>;
+  const messages: ChatMessageRecord[] = [];
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.payload) as ChatMessageRecord;
+      if (parsed?.executedRunId === runId && parsed.role === "assistant") {
+        messages.push(parsed);
+      }
+    } catch {
+      // A malformed row must not break the evidence export.
+    }
+  }
+  return messages;
 }
 
 function deriveTrajectoryRun(

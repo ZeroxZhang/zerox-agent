@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-08T21:55:00.000+08:00",
+  "updatedAt": "2026-09-08T22:45:00.000+08:00",
   "features": [
     {
       "id": "P113-v3.9.2-disclosure-adversarial-acceptance",
@@ -6860,6 +6860,39 @@
         "npm run verify",
         "npm run smoke:prod",
         "npm run episode:export",
+        "npm run harness:check",
+        "npm run program:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P120-chat-process-facts-in-episode-evidence",
+      "priority": 150,
+      "status": "done",
+      "title": "v3.10.0 chat process facts in the episode evidence pack",
+      "files": [
+        "src/main/agentEpisodeExport.ts",
+        "src/main/agentEpisodeExport.test.ts",
+        "src/main/agentEpisodeExportCli.ts",
+        "src/shared/agentEpisode.ts",
+        "scripts/export-agent-episode.mjs",
+        ".zerox/live-disclosure-program.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "The exported episode pack carries a bounded, redacted projection of the chat process facts for the run it describes",
+        "The chat session store stays the authority: the pack holds a projection, never a copy of raw messages",
+        "The projection reuses the transcript bounding rules so an episode cannot carry unbounded or unredacted process payloads",
+        "Focused, full, build, verify, production smoke, harness, and program checks pass with recorded evidence"
+      ],
+      "verification": [
+        "npm test -- --run src/main/agentEpisodeExport.test.ts src/shared/chatSessionProjection.test.ts src/shared/processDisclosure.test.ts",
+        "npm test",
+        "npm run typecheck:tests",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:process-disclosure:built",
         "npm run harness:check",
         "npm run program:check",
         "git diff --check"

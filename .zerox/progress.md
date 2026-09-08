@@ -15410,3 +15410,36 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `build-v392-acceptance-anchor.mjs` 的 CONTROL_DIGESTS。
 - 结论：LD01–LD05 的过程披露链路现在有**真实应用级**回归闸门，后续 LD06 可以
   在"事实确实会被渲染"的前提下继续。
+
+## v3.10.0 LD06 / P120 聊天过程事实进入 episode 证据包
+
+- 架构决策（实施前，见 LD06 登记项）：聊天过程事实通过既有 run 工件导出器进入
+  episode 证据包；**chat session store 仍是权威**，证据包只保存有界、脱敏的投影，
+  不复制原始消息。
+- 共享化：`CHAT_PROCESS_PART_TYPES` / `isChatProcessPartType` 收进
+  `src/shared/chatOutput.ts`，渲染层、转录投影与证据包共用同一份"什么是过程事实"
+  定义（原先渲染层自持一份列表）。
+- 投影：`chatSessionProjection.projectChatProcessFacts(messages)` 复用
+  `projectChatMessageForTranscript` 的**同一套有界/脱敏规则**，只取 assistant 消息，
+  产出 `{messageId, partId, type, createdAt, part}` 列表。
+- 导出：`createAgentEpisodePackage` 新增可选 `chatProcessFacts` → 写出
+  `chat-process-facts.json`，并在 `metadata.json` 记 `chatProcessFactCount`；
+  `agentEpisodeExportCli` 按 `message.executedRunId === runId` 关联会话消息
+  （JSON 后端读 `chat-sessions.json`；SQLite 后端按 payload 过滤并逐行容错解析）。
+- 测试：`agentEpisodeExportCli.test.ts` 端到端（跨 run 的消息不被导出、超长
+  `resultPreview` 被替换为省略标记、metadata 计数正确）；`chatSessionProjection.test.ts`
+  新增 2 项（只保留过程事实并应用边界、无过程事实时返回空）。
+- 验证证据：`typecheck:tests` 324/324；focused 4 文件 / 23 项通过；全量排除环境固定的
+  `safeFsHelperInspection` 后 **322 文件 / 3859 项通过**（6 跳过）；`npm run build`、
+  `npm run smoke:process-disclosure:built`（真实应用闸门）、`npm run harness:check`、
+  `npm run program:check` 全绿；eslint 干净；`git diff --check` 干净。
+- 残留风险：SQLite 后端用 `payload LIKE '%runId%'` 做粗过滤，导出大库时是全表扫描；
+  当前只在导出 CLI 的只读路径使用，若将来数据量增大应改为按 `executed_run_id` 建索引列。
+- 回滚：移除 `chatProcessFacts` 入参与其文件写出即可；run 工件导出保持不变。
+
+## v3.10.0 程序收口
+
+- 六个工作流 LD01–LD06 全部 completed；`.zerox/live-disclosure-program.json`
+  `status: completed`、`activeFeatureId: null`、`nextFeatureId: null`。
+- 最终证据：全量 322 文件 / 3859 项通过（6 跳过，排除 1 项环境固定的 SDKROOT 测试）；
+  真实应用验收闸门通过（7 个过程事实、注意力自动展开 2、L0 折叠、五档视口无溢出）。

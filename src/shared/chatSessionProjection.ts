@@ -1,5 +1,5 @@
 import type { ChatMessageRecord, ChatSessionRecord } from "./chat";
-import type { ChatOutputPart } from "./chatOutput";
+import { isChatProcessPartType, type ChatOutputPart } from "./chatOutput";
 
 /**
  * Parts the renderer needs to rebuild the transcript, including the LD03/LD04
@@ -117,4 +117,43 @@ function boundText(value: string): string {
   return value.length > TRANSCRIPT_PART_PREVIEW_MAX_CHARS
     ? `${value.slice(0, TRANSCRIPT_PART_PREVIEW_MAX_CHARS)}\n${OMITTED_PREVIEW_MARKER}`
     : value;
+}
+
+/** One bounded, redacted process fact in an exported evidence pack. */
+export type ChatProcessFactRecord = {
+  messageId: string;
+  partId: string;
+  type: ChatOutputPart["type"];
+  createdAt?: string;
+  part: ChatOutputPart;
+};
+
+/**
+ * LD06: project the process facts a run produced, using the same bounding and
+ * redaction rules as the live transcript. The episode pack holds this
+ * projection; the chat session store stays the authority for the full record.
+ */
+export function projectChatProcessFacts(
+  messages: readonly ChatMessageRecord[],
+): ChatProcessFactRecord[] {
+  const facts: ChatProcessFactRecord[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    const projected = projectChatMessageForTranscript(message);
+    for (const part of projected.outputParts ?? []) {
+      if (!isChatProcessPartType(part.type)) {
+        continue;
+      }
+      facts.push({
+        messageId: message.id,
+        partId: part.id,
+        type: part.type,
+        ...(part.createdAt ? { createdAt: part.createdAt } : {}),
+        part,
+      });
+    }
+  }
+  return facts;
 }

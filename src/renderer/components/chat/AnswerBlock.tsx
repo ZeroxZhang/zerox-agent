@@ -4,6 +4,7 @@ import {
   type ProcessAttention,
   type ProcessDisclosurePreference,
 } from "../../../shared/processDisclosure";
+import { isChatProcessPartType } from "../../../shared/chatOutput";
 import type { RenderedOutputPart } from "../../chatOutputModel";
 import { OutputPartRenderer } from "./OutputPartRenderer";
 import {
@@ -20,21 +21,8 @@ type AnswerBlockProps = {
   settled?: boolean;
 };
 
-const PROCESS_PART_TYPES = new Set<RenderedOutputPart["type"]>([
-  "approval_request",
-  "command_output",
-  "file_ref",
-  "input_request",
-  "ledger_event",
-  "model_call",
-  "plan_step",
-  "reasoning",
-  "tool_call",
-  "tool_result",
-]);
-
 export function isProcessOutputPart(part: RenderedOutputPart): boolean {
-  return PROCESS_PART_TYPES.has(part.type);
+  return isChatProcessPartType(part.type);
 }
 
 export function processPartAttention(part: RenderedOutputPart): ProcessAttention {
