@@ -4,10 +4,10 @@
   "title": "Zerox Live Process Disclosure Program",
   "sourceReview": "docs/design/zerox-agent-3-10-0-live-process-disclosure.md",
   "operatingGuide": ".zerox/live-disclosure-program.md",
-  "updatedAt": "2026-09-08T21:10:00.000+08:00",
+  "updatedAt": "2026-09-08T21:55:00.000+08:00",
   "status": "active",
   "activeFeatureId": null,
-  "nextFeatureId": "P119-replay-preference-and-learning-closure",
+  "nextFeatureId": "P120-chat-process-facts-in-episode-evidence",
   "maxActiveFeatures": 1,
   "requiredFindings": [
     "LD1",
@@ -142,7 +142,7 @@
     {
       "id": "LD05",
       "title": "Replay, preference, and learning closure",
-      "state": "planned",
+      "state": "completed",
       "featureId": "P119-replay-preference-and-learning-closure",
       "findings": [
         "LD4",
@@ -161,6 +161,29 @@
         "npm run verify",
         "npm run smoke:prod",
         "npm run episode:export",
+        "npm run program:check"
+      ]
+    },
+    {
+      "id": "LD06",
+      "title": "Episode evidence: chat process facts in the exported pack",
+      "state": "planned",
+      "featureId": "P120-chat-process-facts-in-episode-evidence",
+      "findings": [
+        "LD2",
+        "LD4"
+      ],
+      "dependsOn": [
+        "LD05"
+      ],
+      "architectureDecisionRequired": true,
+      "architectureDecision": "Chat reasoning and plan facts enter the episode evidence pack through the existing run-artifact exporter. The chat store stays the authority; the pack gains a bounded, redacted projection instead of copying raw messages.",
+      "rollback": "Drop the chat process projection from the episode pack; run-artifact exports are unchanged.",
+      "verification": [
+        "focused episode export tests",
+        "npm test",
+        "npm run build",
+        "npm run verify",
         "npm run program:check"
       ]
     }

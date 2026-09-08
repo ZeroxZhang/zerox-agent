@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-08T21:10:00.000+08:00",
+  "updatedAt": "2026-09-08T21:55:00.000+08:00",
   "features": [
     {
       "id": "P113-v3.9.2-disclosure-adversarial-acceptance",
@@ -6823,6 +6823,43 @@
         "npm run build",
         "npm run verify",
         "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run program:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P119-replay-preference-and-learning-closure",
+      "priority": 149,
+      "status": "done",
+      "title": "v3.10.0 process disclosure preference and replay closure",
+      "files": [
+        "src/shared/processDisclosure.ts",
+        "src/shared/processDisclosure.test.ts",
+        "src/main/settingsStore.ts",
+        "src/preload/index.ts",
+        "src/renderer/components/AgentChatPanel.tsx",
+        "src/renderer/components/chat/AnswerBlock.tsx",
+        "src/renderer/components/ModelSettingsPanel.tsx",
+        "scripts/export-agent-episode.mjs",
+        ".zerox/live-disclosure-program.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "The process disclosure preference (auto/compact/open/pinned) persists across restarts and drives inline process blocks",
+        "A reloaded session rebuilds the same process structure from persisted parts without relying on renderer-only state",
+        "The evidence/learning projection of chat process facts is tracked as workstream LD06 (feature P120) instead of being claimed here, because the episode exporter consumes run artifacts and needs its own architecture decision",
+        "Focused, full, build, verify, production smoke, harness, and program checks pass with recorded evidence"
+      ],
+      "verification": [
+        "npm test -- --run src/shared/processDisclosure.test.ts src/renderer/chatOutputModel.test.ts src/renderer/processPartPresentation.test.ts",
+        "npm test",
+        "npm run typecheck:tests",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run episode:export",
         "npm run harness:check",
         "npm run program:check",
         "git diff --check"

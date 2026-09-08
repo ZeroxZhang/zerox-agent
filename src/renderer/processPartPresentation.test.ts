@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { RenderedOutputPart } from "./chatOutputModel";
+import { resolveProcessDensity } from "../shared/processDisclosure";
+import type { ChatMessageRecord } from "../shared/chat";
+import {
+  outputPartsFromMessage,
+  type RenderedOutputPart,
+} from "./chatOutputModel";
 import {
   isProcessOutputPart,
   processPartAttention,
@@ -186,5 +191,63 @@ describe("plan step and turn progress presentation", () => {
     expect(presentation.tone).toBe("model");
     expect(presentation.label).toBe("第 3 轮");
     expect(presentation.summary).toBe("已调用 5 次工具");
+  });
+});
+
+describe("LD05 replay closure", () => {
+  it("rebuilds the same process structure from persisted parts after a reload", () => {
+    const message: ChatMessageRecord = {
+      id: "m-replay",
+      role: "assistant",
+      content: "answer",
+      createdAt: "2026-09-08T00:00:00.000Z",
+      outputParts: [
+        {
+          id: "reasoning_1",
+          type: "reasoning",
+          text: "first thought",
+          redacted: false,
+          truncated: false,
+          streaming: false,
+        },
+        { id: "tool_1", type: "tool_call", toolCallId: "c1", toolName: "file_list" },
+        {
+          id: "plan_1",
+          type: "plan_step",
+          steps: [{ id: "s1", label: "第一步", status: "active" }],
+          currentIndex: 0,
+          total: 1,
+        },
+        {
+          id: "model_call_1",
+          type: "model_call",
+          turn: 1,
+          toolCallsExecuted: 1,
+        },
+        { id: "text_1", type: "text", text: "answer", format: "markdown" },
+      ],
+    };
+
+    const parts = outputPartsFromMessage(message);
+    const processParts = parts.filter(isProcessOutputPart);
+    const density = resolveProcessDensity(
+      processParts.map((entry) => ({
+        id: entry.renderKey,
+        attention: processPartAttention(entry),
+      })),
+    );
+
+    // Four process facts, none of them attention: the oldest one folds.
+    expect(processParts).toHaveLength(4);
+    expect(density.leading.map((entry) => entry.id)).toEqual([
+      "m-replay:reasoning_1",
+    ]);
+    expect(density.recent.map((entry) => entry.id)).toEqual([
+      "m-replay:tool_1",
+      "m-replay:plan_1",
+      "m-replay:model_call_1",
+    ]);
+    // The answer stays a narrative part, outside the process stream.
+    expect(parts.filter((entry) => !isProcessOutputPart(entry))).toHaveLength(1);
   });
 });

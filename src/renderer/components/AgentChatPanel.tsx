@@ -11,6 +11,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import type { ProcessDisclosurePreference } from "../../shared/processDisclosure";
 import type {
   AgentBootstrapValidationReport,
   AgentBootstrapValidationSnapshot,
@@ -151,6 +152,11 @@ import {
   getPlanOutcomePresentation,
 } from "../planFailurePresentation";
 import { AnswerBlock } from "./chat/AnswerBlock";
+import {
+  PROCESS_DISCLOSURE_PREFERENCE_OPTIONS,
+  loadProcessDisclosurePreference,
+  saveProcessDisclosurePreference,
+} from "../processDisclosurePreference";
 import { GoalDetailDrawer } from "./GoalDetailDrawer";
 import { GoalStatusStrip } from "./GoalStatusStrip";
 import { Icon, type IconName } from "./Icon";
@@ -286,6 +292,19 @@ export function AgentChatPanel({
   const [chatStreamState, setChatStreamState] = useState(() =>
     createChatStreamState(initialMessages),
   );
+  const [processPreference, setProcessPreference] = useState<
+    ProcessDisclosurePreference
+  >(() =>
+    loadProcessDisclosurePreference(
+      typeof window === "undefined" ? undefined : window.localStorage,
+    ),
+  );
+  useEffect(() => {
+    saveProcessDisclosurePreference(
+      typeof window === "undefined" ? undefined : window.localStorage,
+      processPreference,
+    );
+  }, [processPreference]);
   const messages = chatStreamState.messages;
   // LD01 render budget: a delta replaces only the streaming message object, so
   // reusing the previous projection for every unchanged message keeps the
@@ -3818,6 +3837,23 @@ export function AgentChatPanel({
             </span>
           )}
         </div>
+        <div
+          aria-label="过程披露偏好"
+          className="process-preference"
+          role="group"
+        >
+          {PROCESS_DISCLOSURE_PREFERENCE_OPTIONS.map((option) => (
+            <button
+              aria-pressed={processPreference === option.value}
+              key={option.value}
+              onClick={() => setProcessPreference(option.value)}
+              title={option.title}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
 
           {firstRunGuide.primaryAction.command === "prepare" && !modelSettings.hasApiKey && (
           <section className="first-run-guide" aria-label="首次启动引导">
@@ -3852,6 +3888,7 @@ export function AgentChatPanel({
               hiddenMessageCount={hiddenMessageCount}
               messages={renderedChatMessages}
               onLoadEarlier={handleLoadEarlierMessages}
+          processPreference={processPreference}
             />
         )}
 
@@ -6665,12 +6702,14 @@ const ChatMessageList = memo(function ChatMessageList({
   hiddenMessageCount,
   messages,
   onLoadEarlier,
+  processPreference,
 }: {
   earlierMessagesPending: boolean;
   goal: Goal | null;
   hiddenMessageCount: number;
   messages: VisibleChatMessage[];
   onLoadEarlier: () => void;
+  processPreference: ProcessDisclosurePreference;
 }) {
   const [now, setNow] = useState(() => new Date());
   const terminalTruth = useMemo(
@@ -6707,6 +6746,7 @@ const ChatMessageList = memo(function ChatMessageList({
             activeGoalId={goal?.id ?? null}
             key={message.id}
             message={message}
+            processPreference={processPreference}
             terminalTruth={terminalTruth}
           />
         ))}
@@ -6718,10 +6758,12 @@ const ChatMessageList = memo(function ChatMessageList({
 const ChatMessageItem = memo(function ChatMessageItem({
   activeGoalId,
   message,
+  processPreference,
   terminalTruth,
 }: {
   activeGoalId: string | null;
   message: VisibleChatMessage;
+  processPreference: ProcessDisclosurePreference;
   terminalTruth: ReturnType<typeof getGoalTerminalTruthNotice>;
 }) {
   return (
@@ -6749,6 +6791,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
           ) : null}
           <AnswerBlock
             parts={message.outputParts}
+            preference={processPreference}
             settled={message.isStreaming !== true}
           />
         </>

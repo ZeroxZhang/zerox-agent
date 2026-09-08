@@ -15349,3 +15349,29 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   pending），因此步骤推进只有在运行时后续发出 requirement 更新时才会变化；
   `model_call` 每轮一个部件，长任务下依赖 L0 折叠控制密度。
 - 回滚：移除两个部件类型与其发射/渲染分支即可；已落库部件成为惰性数据。
+
+## v3.10.0 LD05 / P119 过程披露偏好与重放闭环
+
+- 偏好持久化：新增 `src/renderer/processDisclosurePreference.ts`（5 项测试）——
+  四档 `auto/compact/open/pinned`，未知值、读取异常、写入被拒一律回退 `auto`；
+  存储沿用 renderer 既有 UI 偏好做法（`localStorage`，与证据选择、预览快照同口径）。
+- 接线：`AgentChatPanel` 持有偏好状态、写回存储、在 chat-hero 渲染分段控件
+  （`aria-pressed` + `title` 说明），并经 `ChatMessageList` → `ChatMessageItem`
+  传入 `AnswerBlock`；`chat.css` 新增 `.process-preference` 样式（640px 以下换行）。
+- 重放闭环：新增测试证明**持久化部件重载后重建同一结构**——`outputPartsFromMessage`
+  → 过程部件分类 → `resolveProcessDensity` 得到与实时一致的 L0/L1 划分，答案仍为
+  叙述部件、不混入过程流。
+- 证据/学习闭环：**未在本工作流交付**。`scripts/export-agent-episode.mjs` 走
+  `dist-electron/main/agentEpisodeExportCli.js`，产出的是 run 工件
+  （run.json / checkpoint.json / trajectory.jsonl / run-graph.json /
+  learning-candidates.json 等），且需要 `--config-dir` + `--run-id`；聊天过程事实
+  存在 chat session store 中，接入需要一次独立证据管道变更与架构决策。已登记为
+  **LD06（feature P120）**，程序保持 `active` 并把 `nextFeatureId` 指向它，而不是
+  在本工作流里虚报完成。
+- 验证证据：`typecheck:tests` 324/324；全量排除环境固定的 `safeFsHelperInspection`
+  后 **322 文件 / 3856 项全部通过**（6 跳过，本轮 `sourceImportCasing` 也通过）；
+  `npm run build`、`npm run smoke:prod`、`npm run harness:check`、
+  `npm run program:check` 全绿；eslint 干净；`git diff --check` 干净。
+- 残留风险：偏好是 renderer 本地 UI 状态，不随账号或设备同步（与其它渲染层偏好
+  一致）；四档中 `pinned` 只保留"本次会话手动展开过的块"，跨重启不记忆单块状态。
+- 回滚：删除偏好控件与存储读写，`AnswerBlock` 回落到默认 `auto`；不影响持久化数据。
