@@ -15443,3 +15443,26 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   `status: completed`、`activeFeatureId: null`、`nextFeatureId: null`。
 - 最终证据：全量 322 文件 / 3859 项通过（6 跳过，排除 1 项环境固定的 SDKROOT 测试）；
   真实应用验收闸门通过（7 个过程事实、注意力自动展开 2、L0 折叠、五档视口无溢出）。
+
+## v3.10.0 打包实机走查（受阻 + 替代取证）
+
+- **`npm run pack:mac` 在本机失败**（非本特性引入）：本地 CLT 为
+  `MacOSX26.5.sdk`，`scripts/safe-fs-toolchain-selection.mjs` 的
+  `EXPECTED_SAFE_FS_HELPER_DIGEST` 固定为 caller-reviewed 构建
+  （`sha256:7e8f46d4…`，对应 `MacOSX15.2.sdk`），本机实际构建出
+  `sha256:58b2493f…`，打包在 stage 阶段 fail-closed：
+  "Failed to stage the caller-reviewed safe-fs helper: pinned safe-fs helper
+  digest mismatch"。`release/mac-arm64/Zerox Agent.app` 仍是 2026-08-16 的
+  3.9.1 旧包，未生成新包。
+- **未绕过该 pin**：`zerox-safe-fs` 属于沙箱栈（`localFileOrganizer` 用它执行
+  受限文件操作），改 digest 不只是打包形式问题，会改变应用的安全行为，属于
+  `AGENTS.md` 的硬边界。
+- 替代取证：真实应用走查截图 9 张（1440×940 @2x，隔离 userData + JSON 后端 +
+  种子会话），存于
+  `.zerox/verification/process-disclosure/walkthrough/`：
+  `01-chat-empty` / `02-settled-turn` / `03-process-blocks-expanded` /
+  `04-approval-expanded` / `05-preference-compact` / `06-preference-open` /
+  `07-runs` / `08-settings-model` / `09-tasks`。
+  三态截图哈希互不相同，证明偏好切换确实改变了界面。
+- 未覆盖：真实模型对话（本机 `model-settings.json` 只有 1 个无密钥连接、0 个
+  profile，无可用凭证）。
