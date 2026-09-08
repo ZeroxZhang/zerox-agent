@@ -233,9 +233,15 @@ async function main() {
     `${JSON.stringify({ schemaVersion: 1, sessions: [session] }, null, 2)}\n`,
   );
 
+  // ZEROX_ACCEPTANCE_APP_PATH lets the same gate run against a packaged bundle.
+  const appPath = process.env.ZEROX_ACCEPTANCE_APP_PATH?.trim();
+  const executable = appPath || path.join(root, "node_modules/.bin/electron");
+  const executableArgs = appPath
+    ? [`--remote-debugging-port=${debugPort}`]
+    : [".", `--remote-debugging-port=${debugPort}`];
   const child = spawn(
-    path.join(root, "node_modules/.bin/electron"),
-    [".", `--remote-debugging-port=${debugPort}`],
+    executable,
+    executableArgs,
     {
       cwd: root,
       env: {

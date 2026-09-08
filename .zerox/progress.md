@@ -15466,3 +15466,32 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   三态截图哈希互不相同，证明偏好切换确实改变了界面。
 - 未覆盖：真实模型对话（本机 `model-settings.json` 只有 1 个无密钥连接、0 个
   profile，无可用凭证）。
+
+## v3.10.0 打包实机走查（已达成，附仓库缺陷）
+
+- **根因更正**：`pack:mac` 失败不是本机工具链问题，而是 **main 上的仓库自相矛盾**——
+  `693b001` 把 `EXPECTED_SAFE_FS_HELPER_DIGEST` 改成 `sha256:7e8f46d4…`
+  （提交信息自称是"inspection sha，inspect-normalized"），但仓库实际提交的
+  `native/zerox-safe-fs-darwin-arm64` 原始字节是 `sha256:58b2493f…`。
+  `package-mac.mjs:140` 用**原始字节**与常量比对，而
+  `after-sign-mac.mjs` 的 `assertSafeFsHelper` 期望的是**inspection 摘要**，
+  两个检查对同一个常量含义不一致，因此**任何机器**上 `pack:mac` 都会 fail-closed。
+- 经用户明确授权（"不会发布"），做了一次**本地临时对齐**并打包：
+  在本地建一个标注 `LOCAL-ONLY (do not push)` 的提交把常量对齐到已提交二进制的
+  原始摘要，跑 `pack:mac`，随后**立即 `git reset --hard` 还原**——
+  pin 已恢复为 `sha256:7e8f46d4…`，工作树干净，该提交未推送、未保留。
+- 产物：`release/mac-arm64/Zerox Agent.app`，**版本 3.9.2**，19:16 构建，
+  含 `app.asar`（37MB）与已 stage 的 `Resources/safe-fs/zerox-safe-fs`。
+  electron-builder 在 `afterSignMac` 的 helper 校验处停止，因此**该包未签名、
+  仅供本地走查，不可发布**。
+- 走查证据：
+  - **验收闸门在打包包上通过**（`ZEROX_ACCEPTANCE_APP_PATH=…/Zerox Agent`）：
+    5 可见过程块 + L0 折叠 2、注意力自动展开 2、紧凑 0 / 展开 7、五档视口无溢出。
+  - 9 张打包包截图：`.zerox/verification/process-disclosure/packaged-walkthrough/`
+    （空态 / 本轮结束折叠 / 展开后的三级密度 / 审批块 / 紧凑 / 展开 / 运行 / 模型设置 / 定时任务）。
+- 闸门脚本新增 `ZEROX_ACCEPTANCE_APP_PATH` 参数，可对源码运行或打包包运行同一套断言。
+- 仍**未覆盖真实模型对话**：本机 `model-settings.json` 只有 1 个无密钥连接、0 个
+  profile。需要可用凭证才能走通真实推理。
+- 建议的仓库修复（未在本轮实施，属 main 的既有缺陷）：让 `package-mac.mjs` 的
+  stage 检查与 `assertSafeFsHelper` 对同一个常量的语义一致——要么都按原始字节、
+  要么都按 inspection 摘要，并重新固定 `693b001` 引入的值。
