@@ -38,6 +38,7 @@ docs/design/*
 !docs/design/zerox-agent-3-8-0-debate-user-path-acceptance.md
 !docs/design/zerox-agent-3-8-1-model-and-conversation-ux.md
 !docs/design/zerox-agent-3-10-0-live-process-disclosure.md
+!docs/design/zerox-agent-3-10-0-process-blocks-prototype.html
 .tmp_*
 .zerox/product-design-audit-*/
 # Transient PlanStore runtime scratch written during real-app acceptance
