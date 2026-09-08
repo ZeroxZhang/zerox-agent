@@ -10,7 +10,10 @@ import {
   type ChatFileRefPart,
   type ChatInputRequestPart,
   type ChatLedgerEventPart,
+  type ChatModelCallPart,
   type ChatOutputPart,
+  type ChatPlanStepPart,
+  type ChatPlanStepStatus,
   type ChatReasoningPart,
   type ChatTextPart,
   type ChatToolCallPart,
@@ -75,6 +78,22 @@ export type ChatOutputAssembler = {
    * when no block is open.
    */
   completeReasoning(): ChatReasoningPart | undefined;
+  /**
+   * LD04: upsert one step of the active plan. The first call creates the part;
+   * later calls update the same ordered step list.
+   */
+  upsertPlanStep(input: {
+    stepId: string;
+    label: string;
+    status: ChatPlanStepStatus;
+  }): ChatPlanStepPart;
+  /** LD04: upsert the progress row for one model turn. */
+  upsertModelCall(input: {
+    turn: number;
+    maxTurns?: number;
+    toolCallsExecuted?: number;
+    elapsedMs?: number;
+  }): ChatModelCallPart;
   parts(): ChatOutputPart[];
 };
 
@@ -381,6 +400,63 @@ export function createChatOutputAssembler(
       }
       const changed = completeReasoningPart();
       return changed ? clonePart(reasoningBuffer.part) : undefined;
+    },
+
+    upsertPlanStep(input) {
+      let part = parts.find(
+        (candidate): candidate is ChatPlanStepPart =>
+          candidate.type === "plan_step",
+      );
+      if (!part) {
+        part = {
+          id: "plan_step_1",
+          type: "plan_step",
+          steps: [],
+          currentIndex: -1,
+          total: 0,
+          createdAt: now(),
+        };
+        parts.push(part);
+      }
+      const existing = part.steps.find((step) => step.id === input.stepId);
+      if (existing) {
+        existing.label = input.label;
+        existing.status = input.status;
+      } else {
+        part.steps.push({
+          id: input.stepId,
+          label: input.label,
+          status: input.status,
+        });
+      }
+      part.total = part.steps.length;
+      part.currentIndex = part.steps.findIndex(
+        (step) => step.status === "active",
+      );
+      return clonePart(part);
+    },
+
+    upsertModelCall(input) {
+      const id = `model_call_${input.turn}`;
+      let part = parts.find(
+        (candidate): candidate is ChatModelCallPart =>
+          candidate.type === "model_call" && candidate.id === id,
+      );
+      if (!part) {
+        part = {
+          id,
+          type: "model_call",
+          turn: input.turn,
+          createdAt: now(),
+        };
+        parts.push(part);
+      }
+      if (input.maxTurns !== undefined) part.maxTurns = input.maxTurns;
+      if (input.toolCallsExecuted !== undefined) {
+        part.toolCallsExecuted = input.toolCallsExecuted;
+      }
+      if (input.elapsedMs !== undefined) part.elapsedMs = input.elapsedMs;
+      return clonePart(part);
     },
 
     parts() {

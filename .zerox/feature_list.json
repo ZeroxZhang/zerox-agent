@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-08T20:20:00.000+08:00",
+  "updatedAt": "2026-09-08T21:10:00.000+08:00",
   "features": [
     {
       "id": "P113-v3.9.2-disclosure-adversarial-acceptance",
@@ -6779,6 +6779,45 @@
       ],
       "verification": [
         "npm test -- --run src/shared/processDisclosure.test.ts src/renderer/chatOutputModel.test.ts src/renderer/materialDesign.test.ts src/renderer/chatStreamReducer.test.ts src/main/chatService.test.ts",
+        "npm test",
+        "npm run typecheck:tests",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run program:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P118-plan-progress-disclosure-and-intervention",
+      "priority": 148,
+      "status": "done",
+      "title": "v3.10.0 plan step and turn progress disclosure",
+      "files": [
+        "src/shared/chatOutput.ts",
+        "src/main/chatOutputAssembler.ts",
+        "src/main/chatOutputAssembler.test.ts",
+        "src/main/chatService/streamingStatus.ts",
+        "src/main/chatService/streamingStatus.test.ts",
+        "src/renderer/components/chat/AnswerBlock.tsx",
+        "src/renderer/components/chat/ProcessBlock.tsx",
+        "src/renderer/chatOutputModel.test.ts",
+        "src/renderer/processPartPresentation.test.ts",
+        "src/renderer/styles/chat.css",
+        ".zerox/live-disclosure-program.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "Plan step advancement produces an ordered plan-step process fact that renders as a step block under the same three-level density as other process facts",
+        "The current step is marked, completed steps are readable, and a failed step becomes an attention block that auto-expands",
+        "Turn progress (turn, max turns, tool calls executed, elapsed) is disclosed as a process row instead of only a status summary",
+        "Intervention affordances reuse the existing approval and goal review authorities; no new authorization path is introduced",
+        "Focused, full, build, verify, production smoke, harness, and program checks pass with recorded evidence"
+      ],
+      "verification": [
+        "npm test -- --run src/main/chatOutputAssembler.test.ts src/main/chatService/streamingStatus.test.ts src/renderer/processPartPresentation.test.ts src/renderer/chatOutputModel.test.ts src/main/chatService.test.ts src/main/goalRuntimeEngine.test.ts",
         "npm test",
         "npm run typecheck:tests",
         "npm run build",

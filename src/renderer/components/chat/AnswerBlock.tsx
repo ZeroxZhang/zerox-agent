@@ -26,6 +26,8 @@ const PROCESS_PART_TYPES = new Set<RenderedOutputPart["type"]>([
   "file_ref",
   "input_request",
   "ledger_event",
+  "model_call",
+  "plan_step",
   "reasoning",
   "tool_call",
   "tool_result",
@@ -38,6 +40,11 @@ export function isProcessOutputPart(part: RenderedOutputPart): boolean {
 export function processPartAttention(part: RenderedOutputPart): ProcessAttention {
   if (part.type === "approval_request") {
     return "blocking";
+  }
+  if (part.type === "plan_step") {
+    return part.steps.some((step) => step.status === "failed")
+      ? "blocking"
+      : "normal";
   }
   if (part.type === "tool_result") {
     return part.ok ? "normal" : "blocking";
@@ -99,6 +106,28 @@ export function processPartPresentation(part: RenderedOutputPart): {
         tone: "approval",
         label: "需要补充信息",
         summary: part.skillName,
+      };
+    case "plan_step": {
+      const current = part.steps[part.currentIndex];
+      const failed = part.steps.find((step) => step.status === "failed");
+      return {
+        tone: "plan",
+        label: part.currentIndex >= 0
+          ? `计划 · 步骤 ${part.currentIndex + 1}/${part.total}`
+          : `计划 · ${part.total} 步`,
+        summary: failed
+          ? `步骤失败：${failed.label}`
+          : current?.label ?? "全部步骤已结束",
+        ...(failed ? { meta: "需要处理" } : {}),
+      };
+    }
+    case "model_call":
+      return {
+        tone: "model",
+        label: `第 ${part.turn} 轮`,
+        summary: part.toolCallsExecuted !== undefined
+          ? `已调用 ${part.toolCallsExecuted} 次工具`
+          : "调用模型",
       };
     case "ledger_event":
       return {

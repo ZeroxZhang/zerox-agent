@@ -156,6 +156,40 @@ export const OutputPartRenderer = memo(function OutputPartRenderer({
     // closed in the main conversation until the disclosure policy opens it.
     case "reasoning":
       return null;
+    // LD04: plan steps and turn progress render as process block bodies.
+    case "plan_step":
+      return (
+        <ol className="process-step-list">
+          {part.steps.map((step, index) => (
+            <li
+              className={`process-step is-${step.status}`}
+              data-step-status={step.status}
+              key={step.id}
+            >
+              <span aria-hidden="true" className="process-step-index">
+                {index + 1}
+              </span>
+              <span className="process-step-label">{step.label}</span>
+              <small className="process-step-status">
+                {stepStatusLabel(step.status)}
+              </small>
+            </li>
+          ))}
+        </ol>
+      );
+    case "model_call":
+      return (
+        <p className="process-model-call">
+          <span>第 {part.turn} 轮</span>
+          {part.maxTurns ? <span>上限 {part.maxTurns} 轮</span> : null}
+          {part.toolCallsExecuted !== undefined ? (
+            <span>已调用 {part.toolCallsExecuted} 次工具</span>
+          ) : null}
+          {part.elapsedMs !== undefined ? (
+            <span>{Math.max(0, Math.round(part.elapsedMs / 1000))}s</span>
+          ) : null}
+        </p>
+      );
     default: {
       const exhaustivePart: never = part;
       return exhaustivePart;
@@ -372,4 +406,11 @@ function InlineMarkdown({ text }: { text: string }): ReactNode {
     }
     return <span key={`${segment.type}-${index}`}>{segment.text}</span>;
   });
+}
+
+function stepStatusLabel(status: string): string {
+  if (status === "active") return "进行中";
+  if (status === "done") return "已完成";
+  if (status === "failed") return "失败";
+  return "待执行";
 }

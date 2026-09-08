@@ -110,10 +110,14 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
       const chatTimeZone = options.systemTimeZone ?? getSystemTimeZone();
       // Anchor date to turn start, interpreted in the user's system timezone.
       const chatDate = formatDateInTimeZone(new Date(startedAtMs), chatTimeZone);
+      const outputAssembler = createChatOutputAssembler(() =>
+        new Date(getNowMs(options.now)).toISOString(),
+      );
       const emitStatus = createChatStatusEmitter({
         sessionId,
         requestId,
         startedAtMs,
+        outputAssembler,
         initialSequence: internalOptions.initialStreamSequence,
         now: options.now,
         onStatusEvent: runtimeOptions.onStatusEvent,
@@ -126,9 +130,6 @@ export function createLegacyTurnRuntime(rt: LegacyTurnRuntime) {
           await persistChatStatusEvent(event, true);
         },
       });
-      const outputAssembler = createChatOutputAssembler(() =>
-        new Date(getNowMs(options.now)).toISOString(),
-      );
       let accumulatedReasoningProjection = "";
       let terminalStreamEventSent = false;
 

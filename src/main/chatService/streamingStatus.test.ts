@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ChatStreamEvent } from "../../shared/chat";
-import type { ChatReasoningPart } from "../../shared/chatOutput";
+import type {
+  ChatModelCallPart,
+  ChatPlanStepPart,
+  ChatReasoningPart,
+} from "../../shared/chatOutput";
 import { createChatOutputAssembler } from "../chatOutputAssembler";
 import { createChatStatusEmitter, emitModelStreamEvent } from "./streamingStatus";
 
@@ -283,5 +287,107 @@ describe("chat status emitter reasoning facts", () => {
       text: "thinking",
       streaming: false,
     });
+  });
+});
+
+// LD04 / G6: plan steps and turn progress must become process facts, not just
+// status summaries that the inline stream cannot see.
+describe("chat status emitter plan and progress facts", () => {
+  function createPlanHarness() {
+    const events: ChatStreamEvent[] = [];
+    const assembler = createChatOutputAssembler(
+      () => "2026-09-08T00:00:00.000Z",
+    );
+    const emitter = createChatStatusEmitter({
+      sessionId: "session-plan",
+      requestId: "request-plan",
+      startedAtMs: 0,
+      now: () => new Date(0),
+      outputAssembler: assembler,
+      onStreamEvent: (event) => {
+        events.push(event);
+      },
+    });
+    return {
+      emitter,
+      events,
+      planStepParts(): ChatPlanStepPart[] {
+        return events.flatMap((event) =>
+          event.type === "output_part" && event.part.type === "plan_step"
+            ? [event.part]
+            : [],
+        );
+      },
+      modelCallParts(): ChatModelCallPart[] {
+        return events.flatMap((event) =>
+          event.type === "output_part" && event.part.type === "model_call"
+            ? [event.part]
+            : [],
+        );
+      },
+    };
+  }
+
+  it("publishes one plan-step part that accumulates ordered requirements", () => {
+    const harness = createPlanHarness();
+
+    harness.emitter.send({
+      state: "requirement",
+      message: "子任务：更新中文小节",
+      payload: {
+        requirementId: "goal-requirement-1",
+        label: "更新中文小节",
+        status: "active",
+      },
+    });
+    harness.emitter.send({
+      state: "requirement",
+      message: "子任务：同步英文小节",
+      payload: {
+        requirementId: "goal-requirement-2",
+        label: "同步英文小节",
+        status: "pending",
+      },
+    });
+
+    const parts = harness.planStepParts();
+    expect(parts.length).toBeGreaterThan(0);
+    const latest = parts.at(-1)!;
+    expect(latest.total).toBe(2);
+    expect(latest.currentIndex).toBe(0);
+    expect(latest.steps.map((step) => [step.id, step.status])).toEqual([
+      ["goal-requirement-1", "active"],
+      ["goal-requirement-2", "pending"],
+    ]);
+  });
+
+  it("publishes a turn-progress part for each model turn", () => {
+    const harness = createPlanHarness();
+
+    harness.emitter.send({
+      state: "model",
+      message: "正在调用模型（第 2 轮）",
+      turn: 2,
+      toolCallsExecuted: 3,
+    });
+
+    const parts = harness.modelCallParts();
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      type: "model_call",
+      turn: 2,
+      toolCallsExecuted: 3,
+    });
+    // elapsedMs is derived from the emitter clock, not the caller payload.
+    expect(typeof parts[0]?.elapsedMs).toBe("number");
+  });
+
+  it("does not publish process facts for unrelated status states", () => {
+    const harness = createPlanHarness();
+
+    harness.emitter.send({ state: "workspace", message: "正在确定工作区" });
+
+    expect(harness.planStepParts()).toEqual([]);
+    expect(harness.modelCallParts()).toEqual([]);
   });
 });

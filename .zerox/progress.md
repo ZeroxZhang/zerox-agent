@@ -15312,3 +15312,40 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   目前按"消息不再流式"判定，若未来出现暂停后再续写的轮次需复核。
 - 回滚：恢复 `isMainConversationOutputPart` 的排除项并移除 `ProcessBlock` 渲染；
   不涉及用户数据。
+
+## v3.10.0 LD04 / P118 计划步骤与轮次进度披露
+
+- 运行时事实盘点：`ChatTaskStatusEvent.state === "requirement"` 携带
+  `payload.{requirementId,label,status}`（`chatService/moduleruntime.ts:770-792`
+  `emitGoalRequirementStatusEvents`）；`state === "model"` 携带
+  `turn` / `toolCallsExecuted` / `elapsedMs`（`legacyAgentRunStage.ts:355-364`）。
+  两者此前只进状态摘要，内联过程流看不到。
+- 新增事实：
+  - `ChatPlanStepPart`（`type: "plan_step"`）：有序步骤 `{id,label,status}` +
+    `currentIndex` + `total`，一个计划只产生一个部件，后续步骤原地更新；
+  - `ChatModelCallPart`（`type: "model_call"`）：`turn` / `maxTurns` /
+    `toolCallsExecuted` / `elapsedMs`，按轮次 id 去重更新。
+- 组装器：`upsertPlanStep` / `upsertModelCall`（幂等，按 id 更新，不重复追加）；
+  3 项新测试。
+- 发射器：`createChatStatusEmitter` 新增可选 `outputAssembler`；`requirement` 与
+  `model` 状态事件在发布状态后追加一次 `output_part`（`legacyTurn.ts` 调整为先建
+  组装器再建发射器）。3 项新测试覆盖：步骤累积、轮次进度、无关状态不产出事实。
+- 渲染：`OutputPartRenderer` 新增 `plan_step`（步骤列表，状态用文字标签而非仅颜色）
+  与 `model_call`（轮次行）分支；`AnswerBlock` 的注意力映射把**含失败步骤的计划**
+  判为 `blocking`（自动展开且不参与折叠），进行中的计划为 `normal`；3 项展示层测试。
+- 受影响的既有断言：`creates and immediately starts a session goal...` 改为
+  `arrayContaining` 并新增 plan_step 断言（目标需求步骤现在会落成过程事实）。
+- 验证证据：`typecheck:tests` 323/323；focused 全绿（chatService 177、
+  streamingStatus 14、chatOutputAssembler 11、processPartPresentation 8、
+  materialDesign 98）；全量排除环境固定的 `safeFsHelperInspection` 后
+  **320 文件 / 3849 项通过**（6 跳过）；`npm run build`、`npm run smoke:prod`、
+  `npm run harness:check`、`npm run program:check` 全绿；eslint 干净；
+  `git diff --check` 干净。
+- 干预入口：本工作流**未新增授权路径**——审批仍走既有 `ToolApprovalPanel` /
+  `ToolAuthorizationService`，计划失败在过程块内以 `blocking` 行自动展开并给出
+  可见状态；"点开审批"的深链交互与 Goal 审核门的复用归 LD05（需要跨组件焦点
+  协议，避免在 LD04 引入半成品交互）。
+- 残留风险：`requirement` 事件目前在目标开始时一次性发出（首步 active、其余
+  pending），因此步骤推进只有在运行时后续发出 requirement 更新时才会变化；
+  `model_call` 每轮一个部件，长任务下依赖 L0 折叠控制密度。
+- 回滚：移除两个部件类型与其发射/渲染分支即可；已落库部件成为惰性数据。

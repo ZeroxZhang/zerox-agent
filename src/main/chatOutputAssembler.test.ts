@@ -222,3 +222,37 @@ describe("chat output assembler reasoning facts", () => {
     ]);
   });
 });
+
+describe("chat output assembler plan and progress facts", () => {
+  it("accumulates ordered plan steps into one part and marks the active one", () => {
+    const assembler = createChatOutputAssembler(
+      () => "2026-09-08T00:00:00.000Z",
+    );
+
+    assembler.upsertPlanStep({ stepId: "s1", label: "第一步", status: "active" });
+    assembler.upsertPlanStep({ stepId: "s2", label: "第二步", status: "pending" });
+    const part = assembler.upsertPlanStep({
+      stepId: "s1",
+      label: "第一步",
+      status: "done",
+    });
+
+    expect(part.total).toBe(2);
+    expect(part.currentIndex).toBe(-1);
+    expect(assembler.parts().filter((entry) => entry.type === "plan_step"))
+      .toHaveLength(1);
+  });
+
+  it("updates the same turn-progress part instead of duplicating it", () => {
+    const assembler = createChatOutputAssembler(
+      () => "2026-09-08T00:00:00.000Z",
+    );
+
+    assembler.upsertModelCall({ turn: 1, toolCallsExecuted: 0 });
+    const updated = assembler.upsertModelCall({ turn: 1, toolCallsExecuted: 4 });
+
+    expect(updated.toolCallsExecuted).toBe(4);
+    expect(assembler.parts().filter((entry) => entry.type === "model_call"))
+      .toHaveLength(1);
+  });
+});

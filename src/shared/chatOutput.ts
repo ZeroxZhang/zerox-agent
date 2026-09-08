@@ -146,6 +146,34 @@ export type ChatReasoningPart = ChatOutputPartBase & {
   streaming: boolean;
 };
 
+export type ChatPlanStepStatus = "pending" | "active" | "done" | "failed";
+
+/**
+ * LD04 plan disclosure: the ordered steps of the active plan or goal, with the
+ * current step marked. Rendered as one process block under the same
+ * three-level density as every other process fact.
+ */
+export type ChatPlanStepPart = ChatOutputPartBase & {
+  type: "plan_step";
+  steps: Array<{
+    id: string;
+    label: string;
+    status: ChatPlanStepStatus;
+  }>;
+  /** Index of the active step, or -1 when none is active. */
+  currentIndex: number;
+  total: number;
+};
+
+/** LD04 turn progress: which model turn is running and how much it has done. */
+export type ChatModelCallPart = ChatOutputPartBase & {
+  type: "model_call";
+  turn: number;
+  maxTurns?: number;
+  toolCallsExecuted?: number;
+  elapsedMs?: number;
+};
+
 export type ChatOutputPart =
   | ChatTextPart
   | ChatTablePart
@@ -161,7 +189,9 @@ export type ChatOutputPart =
   | ChatInputRequestPart
   | ChatDiagnosticPart
   | ChatLedgerEventPart
-  | ChatReasoningPart;
+  | ChatReasoningPart
+  | ChatPlanStepPart
+  | ChatModelCallPart;
 
 const SECRET_FIELD_PATTERN = /(token|key|secret|password|authorization)/i;
 

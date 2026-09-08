@@ -1,4 +1,7 @@
-import type { ChatOutputPart } from "../../shared/chatOutput";
+import type {
+  ChatOutputPart,
+  ChatPlanStepStatus,
+} from "../../shared/chatOutput";
 import {
   redactCredentials,
   redactCredentialString,
@@ -56,6 +59,11 @@ function createChatStatusEmitter(options: {
   onStreamEvent?: (event: ChatStreamEvent) => void;
   onPersistEvent?: (event: ChatTaskStatusEvent) => void | Promise<void>;
   onRequiredPersistEvent?: (event: ChatTaskStatusEvent) => Promise<void>;
+  /**
+   * LD04: when present, plan-requirement and model-turn status events also
+   * publish a process fact so the inline stream can disclose them.
+   */
+  outputAssembler?: ReturnType<typeof createChatOutputAssembler>;
 }) {
   let sessionId = options.sessionId;
   let assistantMessageId: string | undefined;
@@ -75,6 +83,7 @@ function createChatStatusEmitter(options: {
     options.streamFlushMaxChars,
     defaultStreamFlushMaxChars,
   );
+  let requirementSequence = 0;
   let lastTextFlushAtMs = options.startedAtMs;
   const pendingTextCarry: Record<"answer_delta" | "thinking_delta", string> = {
     answer_delta: "",
@@ -155,6 +164,57 @@ function createChatStatusEmitter(options: {
         ...(assistantMessageId ? { assistantMessageId } : {}),
         createdAt: statusEvent.createdAt,
         domainStateAvailable: statusEvent.domainStateAvailable === true,
+      });
+    } catch {
+      // Renderer observers are best-effort.
+    }
+    publishStatusProcessPart(statusEvent);
+  }
+
+  function publishStatusProcessPart(statusEvent: ChatTaskStatusEvent) {
+    const assembler = options.outputAssembler;
+    if (!assembler) {
+      return;
+    }
+    let part: ChatOutputPart | undefined;
+    if (statusEvent.state === "requirement") {
+      const payload = statusEvent.payload ?? {};
+      const stepId = typeof payload.requirementId === "string"
+        && payload.requirementId
+        ? payload.requirementId
+        : `requirement-${++requirementSequence}`;
+      const label = typeof payload.label === "string" && payload.label
+        ? payload.label
+        : statusEvent.message;
+      const rawStatus = payload.status;
+      const status: ChatPlanStepStatus =
+        rawStatus === "active" || rawStatus === "done" || rawStatus === "failed"
+          ? rawStatus
+          : "pending";
+      part = assembler.upsertPlanStep({ stepId, label, status });
+    } else if (statusEvent.state === "model" && typeof statusEvent.turn === "number") {
+      part = assembler.upsertModelCall({
+        turn: statusEvent.turn,
+        ...(typeof statusEvent.maxTurns === "number"
+          ? { maxTurns: statusEvent.maxTurns }
+          : {}),
+        ...(typeof statusEvent.toolCallsExecuted === "number"
+          ? { toolCallsExecuted: statusEvent.toolCallsExecuted }
+          : {}),
+        ...(typeof statusEvent.elapsedMs === "number"
+          ? { elapsedMs: statusEvent.elapsedMs }
+          : {}),
+      });
+    }
+    if (!part) {
+      return;
+    }
+    const nowMs = getNowMs(options.now);
+    try {
+      options.onStreamEvent?.({
+        type: "output_part",
+        part,
+        ...createStreamBase(new Date(nowMs).toISOString()),
       });
     } catch {
       // Renderer observers are best-effort.

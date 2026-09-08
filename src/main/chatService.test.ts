@@ -893,14 +893,22 @@ describe("chat service", () => {
           "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
         goalId: "goal_release",
         goalEventRef: "goal_started",
-        outputParts: [
+        outputParts: expect.arrayContaining([
           expect.objectContaining({
             type: "text",
             text:
               "已设置并开始执行目标：发布 v1.8.0，直到 GitHub Release 完成才算结束。",
             createdAt: "2026-06-12T08:00:00.000Z",
           }),
-        ],
+          // LD04: the goal's requirement steps become a plan-step fact.
+          expect.objectContaining({
+            type: "plan_step",
+            currentIndex: 0,
+            steps: expect.arrayContaining([
+              expect.objectContaining({ status: "active" }),
+            ]),
+          }),
+        ]),
       }),
     ]);
     const completedIndex = streamEvents.findIndex(

@@ -134,3 +134,57 @@ describe("process part presentation", () => {
     expect(approval.meta).toBe("等待中");
   });
 });
+
+describe("plan step and turn progress presentation", () => {
+  it("marks a failed plan step as attention", () => {
+    expect(processPartAttention(part({
+      id: "plan",
+      type: "plan_step",
+      steps: [
+        { id: "s1", label: "第一步", status: "done" },
+        { id: "s2", label: "第二步", status: "failed" },
+      ],
+      currentIndex: -1,
+      total: 2,
+      renderKey: "m:plan",
+      source: "persisted",
+    }))).toBe("blocking");
+  });
+
+  it("keeps an in-progress plan step as a normal row", () => {
+    const inProgress = part({
+      id: "plan",
+      type: "plan_step",
+      steps: [
+        { id: "s1", label: "第一步", status: "done" },
+        { id: "s2", label: "第二步", status: "active" },
+      ],
+      currentIndex: 1,
+      total: 2,
+      renderKey: "m:plan",
+      source: "persisted",
+    });
+
+    expect(processPartAttention(inProgress)).toBe("normal");
+    expect(processPartPresentation(inProgress)).toMatchObject({
+      tone: "plan",
+      label: "计划 · 步骤 2/2",
+      summary: "第二步",
+    });
+  });
+
+  it("summarizes a turn-progress row", () => {
+    const presentation = processPartPresentation(part({
+      id: "model_call_3",
+      type: "model_call",
+      turn: 3,
+      toolCallsExecuted: 5,
+      renderKey: "m:model_call_3",
+      source: "persisted",
+    }));
+
+    expect(presentation.tone).toBe("model");
+    expect(presentation.label).toBe("第 3 轮");
+    expect(presentation.summary).toBe("已调用 5 次工具");
+  });
+});
