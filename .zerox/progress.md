@@ -15495,3 +15495,28 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 - 建议的仓库修复（未在本轮实施，属 main 的既有缺陷）：让 `package-mac.mjs` 的
   stage 检查与 `assertSafeFsHelper` 对同一个常量的语义一致——要么都按原始字节、
   要么都按 inspection 摘要，并重新固定 `693b001` 引入的值。
+
+## v3.10.0 打包包 + 真实模型端到端走查（完成）
+
+- 在打包包 `release/mac-arm64/Zerox Agent.app`（3.9.2）上完成配置与真实对话走查。
+- 配置（经应用自身 preload 桥接写入，密钥由应用 safeStorage 加密，未手写文件）：
+  - 连接：`阿里云百炼 Coding Plan`（`providerKind: dashscope-coding`，
+    `baseUrl: https://coding.dashscope.aliyuncs.com/v1`），真实连通测试
+    **通过**（`verification.status = passed`，1359ms）。
+  - 模型：`qwen3.7-plus`（profile「Qwen3.7 Plus」），单独跑 profile 测试
+    **通过**（1313ms）后设为 `defaultChatProfileId`。
+  - 期间发现并处理：`testAndSaveProviderConnection` 会额外自动建一个同名
+    profile，已删除重复项；新 profile 默认 `thinkingEnabled: false`，
+    已改为 `true`（否则模型不返回思考内容），随后重新测试并重设默认。
+- **真实模型端到端走查**（打包包内实际对话，非种子数据）：一轮工具型任务
+  落库 50 个过程事实——
+  `reasoning: 1`（1149 字，`redacted: true`）、`tool_call: 16`、
+  `tool_result: 8`、`model_call: 9`、`ledger_event: 13`、
+  **`approval_request: 1`（真实授权请求）**、`file_ref: 1`、`text: 1`。
+- 真实会话在打包包界面中的渲染（`.settled-process-fold` 展开 + L0 展开后）：
+  **49 个可见过程块 + L0 折叠 4 条**；其中 `is-thinking: 1`、
+  `is-tool: 17`、`is-tool-ok: 4`、`is-tool-error: 4`、`is-approval: 1`、
+  `is-model: 22`；5 个 `blocking` 块全部自动展开、未被折叠掩盖。
+  截图：`.zerox/verification/process-disclosure/live-turn/live-session-expanded.png`
+  与 `live-turn.png`。
+- 结论：LD01–LD06 的过程披露链路在**打包包 + 真实模型**下端到端可用。
