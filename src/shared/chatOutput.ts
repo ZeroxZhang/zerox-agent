@@ -123,6 +123,29 @@ export type ChatLedgerEventPart = ChatOutputPartBase & {
   toolName?: string;
 };
 
+/**
+ * LD02 process fact: a bounded, redacted reasoning block.
+ *
+ * `text` is never raw chain of thought. It is the provider text after
+ * credential and path redaction, cut at {@link REASONING_PART_MAX_CHARS}.
+ * The display gate is closed by default: the main conversation filters this
+ * part out until the disclosure policy opens it.
+ */
+export const REASONING_PART_MAX_CHARS = 32_768;
+
+export type ChatReasoningPart = ChatOutputPartBase & {
+  type: "reasoning";
+  text: string;
+  /** 1-based provider turn this block belongs to, when known. */
+  turn?: number;
+  /** True when redaction replaced or removed content. */
+  redacted: boolean;
+  /** True when the block was cut at {@link REASONING_PART_MAX_CHARS}. */
+  truncated: boolean;
+  /** True while the provider is still streaming this block. */
+  streaming: boolean;
+};
+
 export type ChatOutputPart =
   | ChatTextPart
   | ChatTablePart
@@ -137,7 +160,8 @@ export type ChatOutputPart =
   | ChatApprovalPart
   | ChatInputRequestPart
   | ChatDiagnosticPart
-  | ChatLedgerEventPart;
+  | ChatLedgerEventPart
+  | ChatReasoningPart;
 
 const SECRET_FIELD_PATTERN = /(token|key|secret|password|authorization)/i;
 

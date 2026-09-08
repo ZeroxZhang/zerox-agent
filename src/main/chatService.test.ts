@@ -3759,9 +3759,70 @@ describe("chat service", () => {
             type: "tool_call",
             toolCallId: "preview_call_1",
           }),
+          // LD02: reasoning is a durable, bounded, redacted process fact.
+          expect.objectContaining({
+            type: "reasoning",
+            text: "Checking available tools.",
+            redacted: false,
+            truncated: false,
+            streaming: false,
+          }),
         ]),
       }),
     ]);
+  });
+
+  it("never sends persisted reasoning into the model request context", async () => {
+    const reasoningCanary = "reasoning-context-canary";
+    const modelRequests: ChatMessage[][] = [];
+    const chatMessages: AppendChatMessageInput[] = [];
+    let streamCalls = 0;
+    const chatClient: ChatClient & StreamingChatClient = {
+      async complete() {
+        throw new Error("non-streaming complete should not be used");
+      },
+      async *streamComplete(request) {
+        modelRequests.push(request.messages);
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "reasoning_delta", text: reasoningCanary };
+          yield { type: "content_delta", text: "first reply" };
+          yield { type: "done", finishReason: "stop" };
+          return;
+        }
+        yield { type: "content_delta", text: "second reply" };
+        yield { type: "done", finishReason: "stop" };
+      },
+    };
+    const service = createChatService({
+      chatClient,
+      getModelProfile: createCompleteProfile,
+      memoryStore: createMemoryStore(),
+      chatSessionStore: createChatSessionStore(chatMessages),
+      toolExecutor: createToolExecutor(),
+      createId: createSequentialId("chat_reasoning_context"),
+      now: () => new Date("2026-09-08T00:00:00.000Z"),
+    });
+
+    const first = await service.sendMessage(
+      { requestId: "request_reasoning_context_1", message: "first" },
+      { onStreamEvent() {} },
+    );
+    expect(first).toMatchObject({ ok: true, reply: "first reply" });
+    const second = await service.sendMessage(
+      {
+        requestId: "request_reasoning_context_2",
+        sessionId: "persisted_session",
+        message: "second",
+      },
+      { onStreamEvent() {} },
+    );
+    expect(second).toMatchObject({ ok: true, reply: "second reply" });
+
+    expect(modelRequests.length).toBeGreaterThanOrEqual(2);
+    const secondRequest = JSON.stringify(modelRequests.at(-1));
+    expect(secondRequest).toContain("first reply");
+    expect(secondRequest).not.toContain(reasoningCanary);
   });
 
   it("publishes durable retry controls and persists only the accepted stream attempt", async () => {

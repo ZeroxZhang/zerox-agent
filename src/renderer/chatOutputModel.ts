@@ -11,6 +11,11 @@ export type RenderedOutputPart = ChatOutputPart & {
   source: RenderedOutputPartSource;
 };
 
+/**
+ * LD02 display gate: reasoning is a durable process fact, but the main
+ * conversation does not show it until the disclosure policy opens the gate
+ * (LD03). Until then the part stays in renderer state and in durable storage.
+ */
 export function isMainConversationOutputPart(part: ChatOutputPart): boolean {
   return !(
     part.type === "approval_request" ||
@@ -18,6 +23,7 @@ export function isMainConversationOutputPart(part: ChatOutputPart): boolean {
     part.type === "file_ref" ||
     part.type === "input_request" ||
     part.type === "ledger_event" ||
+    part.type === "reasoning" ||
     part.type === "tool_call" ||
     part.type === "tool_result"
   );

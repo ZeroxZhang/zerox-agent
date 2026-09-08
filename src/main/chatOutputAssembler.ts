@@ -1,4 +1,5 @@
 import {
+  REASONING_PART_MAX_CHARS,
   maskPreviewSecrets,
   type ChatApprovalPart,
   type ChatArtifactPart,
@@ -10,6 +11,7 @@ import {
   type ChatInputRequestPart,
   type ChatLedgerEventPart,
   type ChatOutputPart,
+  type ChatReasoningPart,
   type ChatTextPart,
   type ChatToolCallPart,
   type ChatToolResultPart,
@@ -22,6 +24,7 @@ import {
   redactCredentials,
   redactCredentialString,
 } from "../shared/credentialRedaction";
+import { redactConversationDisclosurePaths } from "../shared/conversationDisclosure";
 
 export type ChatOutputAssembler = {
   appendText(text: string): ChatTextPart | undefined;
@@ -59,6 +62,19 @@ export type ChatOutputAssembler = {
     message: string;
     relatedToolCallId?: string;
   }): ChatDiagnosticPart;
+  /**
+   * LD02: accumulate provider reasoning into one bounded, redacted fact.
+   * Returns the current part so the caller can publish it as an output part.
+   */
+  appendReasoning(input: {
+    text: string;
+    turn?: number;
+  }): ChatReasoningPart | undefined;
+  /**
+   * Close the current reasoning block. Returns the part once, or undefined
+   * when no block is open.
+   */
+  completeReasoning(): ChatReasoningPart | undefined;
   parts(): ChatOutputPart[];
 };
 
@@ -67,22 +83,76 @@ type ToolCallBuffer = {
   argumentsText: string;
 };
 
+type ReasoningBuffer = {
+  part: ChatReasoningPart;
+  rawText: string;
+};
+
 export function createChatOutputAssembler(
   now = () => new Date().toISOString(),
 ): ChatOutputAssembler {
   const parts: ChatOutputPart[] = [];
   const toolCalls = new Map<string, ToolCallBuffer>();
   const rawTextByPartId = new Map<string, string>();
+  let reasoningBuffer: ReasoningBuffer | null = null;
 
   function pushPart<T extends ChatOutputPart>(part: T): T {
     parts.push(part);
     return clonePart(part);
   }
 
+  function completeReasoningPart(): boolean {
+    if (!reasoningBuffer || !reasoningBuffer.part.streaming) {
+      return false;
+    }
+    reasoningBuffer.part.streaming = false;
+    return true;
+  }
+
+  function appendOrUpdateReasoning(input: {
+    text: string;
+    turn?: number;
+  }): ChatReasoningPart | undefined {
+    if (!input.text) {
+      return undefined;
+    }
+    if (!reasoningBuffer) {
+      const part: ChatReasoningPart = {
+        id: "reasoning_1",
+        type: "reasoning",
+        text: "",
+        redacted: false,
+        truncated: false,
+        streaming: true,
+        ...(input.turn !== undefined ? { turn: input.turn } : {}),
+        createdAt: now(),
+      };
+      parts.push(part);
+      reasoningBuffer = { part, rawText: "" };
+    }
+
+    const buffer = reasoningBuffer;
+    if (buffer.part.turn === undefined && input.turn !== undefined) {
+      buffer.part.turn = input.turn;
+    }
+    buffer.rawText += input.text;
+    const truncated = buffer.rawText.length > REASONING_PART_MAX_CHARS;
+    const boundedText = truncated
+      ? buffer.rawText.slice(0, REASONING_PART_MAX_CHARS)
+      : buffer.rawText;
+    const safeText = sanitizeReasoningText(boundedText);
+    buffer.part.text = safeText;
+    buffer.part.redacted = safeText !== boundedText;
+    buffer.part.truncated = truncated;
+    buffer.part.streaming = true;
+    return clonePart(buffer.part);
+  }
+
   function appendOrUpdateText(text: string): ChatTextPart | undefined {
     if (!text) {
       return undefined;
     }
+    completeReasoningPart();
 
     const existingPart = parts.find(
       (part): part is ChatTextPart => part.type === "text",
@@ -124,6 +194,7 @@ export function createChatOutputAssembler(
       if (!text) {
         return undefined;
       }
+      completeReasoningPart();
 
       const firstTextIndex = parts.findIndex((part) => part.type === "text");
       if (firstTextIndex === -1) {
@@ -159,6 +230,7 @@ export function createChatOutputAssembler(
     },
 
     appendToolCall(input) {
+      completeReasoningPart();
       const toolCallId = input.toolCallId || `tool_call_${toolCalls.size + 1}`;
       let existing = toolCalls.get(toolCallId);
       if (
@@ -200,6 +272,7 @@ export function createChatOutputAssembler(
     },
 
     appendToolResult(input) {
+      completeReasoningPart();
       const emitted: ChatOutputPart[] = [];
       toolCalls.delete(input.toolCallId);
       emitted.push(pushPart({
@@ -298,7 +371,20 @@ export function createChatOutputAssembler(
       });
     },
 
+    appendReasoning(input) {
+      return appendOrUpdateReasoning(input);
+    },
+
+    completeReasoning() {
+      if (!reasoningBuffer) {
+        return undefined;
+      }
+      const changed = completeReasoningPart();
+      return changed ? clonePart(reasoningBuffer.part) : undefined;
+    },
+
     parts() {
+      completeReasoningPart();
       return parts.map((part) => clonePart(part));
     },
   };
@@ -306,6 +392,15 @@ export function createChatOutputAssembler(
 
 function sanitizePreview(value: unknown): unknown {
   return maskPreviewSecrets(redactCredentials(value));
+}
+
+/**
+ * LD02: reasoning text is a safe summary, never raw chain of thought. Apply
+ * the same credential and path redaction used for disclosure summaries before
+ * the text can be persisted or delivered.
+ */
+function sanitizeReasoningText(text: string): string {
+  return redactConversationDisclosurePaths(redactCredentialString(text));
 }
 
 function normalizeArgsPreview(argumentsText: string): unknown {

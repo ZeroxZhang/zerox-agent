@@ -441,6 +441,7 @@ function emitModelStreamEvent(
   event: ModelStreamEvent,
 ) {
   if (event.type === "content_delta") {
+    emitReasoningCompletion(emitter, outputAssembler);
     emitter.sendStreamEvent({ type: "answer_delta", text: event.text });
     outputAssembler.appendText(event.text);
     return;
@@ -448,10 +449,15 @@ function emitModelStreamEvent(
 
   if (event.type === "reasoning_delta") {
     emitter.sendStreamEvent({ type: "thinking_delta", text: event.text });
+    const part = outputAssembler.appendReasoning({ text: event.text });
+    if (part) {
+      emitter.sendStreamEvent({ type: "output_part", part });
+    }
     return;
   }
 
   if (event.type === "tool_call_delta") {
+    emitReasoningCompletion(emitter, outputAssembler);
     const index = normalizeToolCallPreviewIndex(event.index);
     const toolCallId = event.id || (index !== undefined ? `index:${index}` : "");
     emitter.sendStreamEvent({
@@ -471,6 +477,16 @@ function emitModelStreamEvent(
         ...(event.arguments ? { argumentsText: event.arguments } : {}),
       }),
     });
+  }
+}
+
+function emitReasoningCompletion(
+  emitter: ReturnType<typeof createChatStatusEmitter>,
+  outputAssembler: ReturnType<typeof createChatOutputAssembler>,
+) {
+  const completed = outputAssembler.completeReasoning();
+  if (completed) {
+    emitter.sendStreamEvent({ type: "output_part", part: completed });
   }
 }
 

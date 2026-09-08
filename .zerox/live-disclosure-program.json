@@ -4,10 +4,10 @@
   "title": "Zerox Live Process Disclosure Program",
   "sourceReview": "docs/design/zerox-agent-3-10-0-live-process-disclosure.md",
   "operatingGuide": ".zerox/live-disclosure-program.md",
-  "updatedAt": "2026-09-08T18:05:00.000+08:00",
+  "updatedAt": "2026-09-08T19:00:00.000+08:00",
   "status": "active",
   "activeFeatureId": null,
-  "nextFeatureId": "P116-process-fact-source-reasoning",
+  "nextFeatureId": "P117-inline-process-blocks",
   "maxActiveFeatures": 1,
   "requiredFindings": [
     "LD1",
@@ -71,7 +71,7 @@
     {
       "id": "LD02",
       "title": "Process fact source: reasoning as a bounded, redacted fact",
-      "state": "planned",
+      "state": "completed",
       "featureId": "P116-process-fact-source-reasoning",
       "findings": [
         "LD2",

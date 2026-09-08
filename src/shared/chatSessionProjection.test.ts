@@ -93,3 +93,52 @@ describe("chat session projection", () => {
     );
   });
 });
+
+describe("LD02 reasoning transcript survival", () => {
+  it("keeps the bounded reasoning part so a reloaded session still holds the fact", () => {
+    const session: ChatSessionRecord = {
+      id: "session_reasoning",
+      title: "Reasoning",
+      summary: "Reasoning",
+      createdAt: "2026-09-08T00:00:00.000Z",
+      updatedAt: "2026-09-08T00:00:00.000Z",
+      messages: [
+        {
+          id: "message_reasoning",
+          role: "assistant",
+          content: "Answer.",
+          createdAt: "2026-09-08T00:00:00.000Z",
+          outputParts: [
+            {
+              id: "reasoning_1",
+              type: "reasoning",
+              text: "redacted reasoning summary",
+              redacted: true,
+              truncated: false,
+              streaming: false,
+            },
+            {
+              id: "text_1",
+              type: "text",
+              text: "Answer.",
+              format: "markdown",
+            },
+            {
+              id: "tool_result_1",
+              type: "tool_result",
+              toolCallId: "call_1",
+              ok: true,
+              resultPreview: { files: ["README.md"] },
+            },
+          ],
+        },
+      ],
+    };
+
+    const projected = projectChatSessionForTranscript(session).messages[0];
+    expect(projected?.outputParts?.map((part) => part.type)).toEqual([
+      "reasoning",
+      "text",
+    ]);
+  });
+});

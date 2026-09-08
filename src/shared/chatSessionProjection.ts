@@ -7,6 +7,7 @@ const transcriptOutputPartTypes = new Set<ChatOutputPart["type"]>([
   "code",
   "diagnostic",
   "file_diff",
+  "reasoning",
   "table",
   "text",
 ]);

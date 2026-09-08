@@ -15178,3 +15178,72 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   注释与 `live-disclosure-program.json#LD01.architectureDecision`。
 - 回滚：`streamingStatus.ts` 恢复为只在 attempt 控制与终态 flush；渲染层恢复
   逐 delta 重建投影、去掉 rAF 合并与 markdown 缓存；不涉及持久化数据。
+
+### LD02 架构决策评审（实施前，P116）
+
+- 变更对象：reasoning 从"渲染层临时状态"升级为"有界、脱敏、可持久的过程事实"。
+- 五个独立闸门（对齐 P104 D7 的 provider / persist / deliver / authorize / display）：
+  1. **provider**：只有 provider 真实产出 `reasoning_delta` 时该事实才存在；不推断、不补全。
+  2. **persist**：落库文本必须是**脱敏 + 长度有界**的形态，并带 `redacted` / `truncated`
+     标记。原始 CoT **永不落库**（默认策略，本阶段不提供开关）。
+  3. **deliver**：以 `output_part` 形式投递给渲染层，与既有 `thinking_delta` 并存。
+  4. **authorize**：本阶段 reasoning 是只读展示事实，不授予任何执行权限，不新增授权路径，
+     不绕过 `ToolAuthorizationService`。
+  5. **display**：主对话展示闸门**默认关闭**（保持 v3.9.2 政策与 P104 D7 结论），
+     由 LD03 按披露策略开启。
+- 不变量：
+  - reasoning 永不进入模型请求上下文。模型消息类型仅含 role/content/tool_calls
+    （`openAiCompatibleClient.ts:22-29`），历史构造只取 content/role
+    （`chatService/modulemessages.ts:922-928`），`outputParts` 不参与。
+  - `thinking_delta` 继续发射，现有 `chatService.test.ts` 176 项断言不变。
+  - 事件类型与 payload 只增不改；`ChatOutputPart` 联合新增成员，旧 `switch` 走 default。
+  - 序列号、attempt 谱系、settlement 幂等键不变。
+- 兼容与回退：
+  - 旧渲染器遇到 `reasoning` 部件：`OutputPartRenderer` 新增 case 返回 null（不显示、不报错）。
+  - 旧持久化数据无 `reasoning` 部件：读取路径无变化。
+  - 新数据被旧版本读取：`chatSessionStore.normalizeOutputParts` 是透传转换
+    （`chatSessionStore.ts:1903-1911`），不校验类型，安全。
+- 迁移：无 schema 迁移；复用 `chat_messages.payload.outputParts`。
+- 回滚：停止发射 reasoning `output_part` 并从联合移除成员即可；已落库的 reasoning
+  部件成为惰性数据（旧渲染器忽略），**不需要删除用户数据**。
+- 越权检查：不涉及权限扩展、不涉及工作区检查、不涉及沙箱。
+
+## v3.10.0 LD02 / P116 过程事实源：reasoning 有界、脱敏、可持久
+
+- 架构决策已先行记录（见上节"LD02 架构决策评审"），实施与决策一致。
+- RED 基线：`src/main/chatService/streamingStatus.test.ts` 新增 3 项，改前全失败
+  ——reasoning 只有 `thinking_delta` 字符串，没有可持久化的过程事实。
+- 实现：
+  - `src/shared/chatOutput.ts`：新增 `ChatReasoningPart`（type/text/turn/redacted/
+    truncated/streaming）与 `REASONING_PART_MAX_CHARS = 32_768`，加入
+    `ChatOutputPart` 联合。
+  - `src/main/chatOutputAssembler.ts`：新增 `appendReasoning` / `completeReasoning`，
+    单条消息内累积为一个 reasoning 部件；文本先做 `redactCredentialString` +
+    `redactConversationDisclosurePaths`，再按 32KB 截断并置 `truncated`；
+    `redacted` 由脱敏是否改变文本得出。文本/工具/终稿追加时自动关闭该部件。
+  - `src/main/chatService/streamingStatus.ts`：`reasoning_delta` 同时发射
+    `thinking_delta`（向后兼容）与 `output_part`（reasoning 事实）；content/tool
+    开始前发射一次完成态 `output_part`，让渲染层看到 `streaming:false`。
+  - `src/shared/chatSessionProjection.ts`：reasoning 进入转录白名单，会话重载后
+    事实仍在（新增测试覆盖）。
+  - `src/renderer/chatOutputModel.ts` + `OutputPartRenderer.tsx`：display 闸门
+    **默认关闭**——主对话过滤 reasoning，且渲染器 case 返回 null；只含 reasoning
+    的消息不渲染空气泡（新增测试覆盖）。
+- 不变量取证：新增 `never sends persisted reasoning into the model request context`
+  ——两轮对话后断言第二次模型请求不含 reasoning 文本，证明过程事实不进模型上下文
+  （结构上由 `ChatMessage` 只含 role/content/tool_calls 保证）。
+- 兼容：`chatService.test.ts` 原有 176 项全绿；`thinking_delta` 继续发射。
+- 验证证据：`npm run typecheck:tests` 321/321 覆盖（并修掉一处 vitest 转译模式
+  掩盖的测试类型错误）；focused 7 文件 / 328 项通过；全量排除环境固定的
+  `safeFsHelperInspection` 后 **319 文件 / 3824 项通过**（6 跳过）；`npm run build`
+  通过；`npm run smoke:prod` 通过；`npm run harness:check`、`npm run program:check`
+  全绿；eslint 干净；`git diff --check` 干净。
+- 已知环境/负载噪声：`planDebateOrchestrator.test.ts` 的 15 步 clarification 用例
+  在满载并行下会触碰 5s 默认超时（单独运行 1.6s 通过），加 `--testTimeout=30000`
+  后全量 319/319 通过；`safeFsHelperInspection` 仍是 LD01 记录的 SDKROOT 环境固定
+  问题。两者均与本特性文件集无关。
+- 残留风险：reasoning 部件当前只做"安全摘要"级展示准备，主对话默认不显示；
+  真正的折叠与偏好由 LD03 决定。截断策略保留头部（稳定、可预测），被截断的尾部
+  不落库，`truncated` 标记留给 LD03 做"已截断 + 证据跳转"。
+- 回滚：停止发射 reasoning `output_part` 并移除联合成员；已落库部件成为惰性数据，
+  不需要删除用户数据。

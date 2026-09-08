@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ChatStreamEvent } from "../../shared/chat";
-import { createChatStatusEmitter } from "./streamingStatus";
+import type { ChatReasoningPart } from "../../shared/chatOutput";
+import { createChatOutputAssembler } from "../chatOutputAssembler";
+import { createChatStatusEmitter, emitModelStreamEvent } from "./streamingStatus";
 
 // LD01 / G0 baseline: a running turn must publish assistant text and reasoning
 // on a bounded time-or-byte window, in causal order, before the turn settles.
@@ -186,5 +188,100 @@ describe("chat status emitter live publication", () => {
     harness.emitter.sendTerminalEvent({ type: "completed" });
 
     expect(harness.textEvents()).toEqual([["answer_delta", "onetwothree"]]);
+  });
+});
+
+// LD02 / G1: reasoning must become a durable, bounded, redacted process fact
+// delivered as an output part, not only a transient thinking_delta string.
+describe("chat status emitter reasoning facts", () => {
+  function createReasoningHarness() {
+    let clockMs = 0;
+    const events: ChatStreamEvent[] = [];
+    const emitter = createChatStatusEmitter({
+      sessionId: "session-reasoning",
+      requestId: "request-reasoning",
+      startedAtMs: 0,
+      now: () => new Date(clockMs),
+      onStreamEvent: (event) => {
+        events.push(event);
+      },
+    });
+    const assembler = createChatOutputAssembler(
+      () => "2026-09-08T00:00:00.000Z",
+    );
+    return {
+      emitter,
+      assembler,
+      events,
+      feed(event: Parameters<typeof emitModelStreamEvent>[2]) {
+        emitModelStreamEvent(emitter, assembler, event);
+      },
+      reasoningParts(): ChatReasoningPart[] {
+        return events.flatMap((event) =>
+          event.type === "output_part" && event.part.type === "reasoning"
+            ? [event.part]
+            : [],
+        );
+      },
+      advance(ms: number) {
+        clockMs += ms;
+      },
+    };
+  }
+
+  it("delivers a bounded reasoning output part alongside the legacy thinking delta", () => {
+    const harness = createReasoningHarness();
+
+    harness.feed({ type: "reasoning_delta", text: "weighing options" });
+
+    const parts = harness.reasoningParts();
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      type: "reasoning",
+      text: "weighing options",
+      redacted: false,
+      truncated: false,
+      streaming: true,
+    });
+    expect(
+      harness.events.filter((event) => event.type === "thinking_delta"),
+    ).toEqual([]);
+    // The legacy channel still delivers the same text once the window closes.
+    harness.emitter.sendTerminalEvent({ type: "completed" });
+    expect(
+      harness.events.filter((event) => event.type === "thinking_delta"),
+    ).toEqual([
+      expect.objectContaining({ type: "thinking_delta", text: "weighing options" }),
+    ]);
+  });
+
+  it("redacts credentials and paths from the delivered reasoning part", () => {
+    const harness = createReasoningHarness();
+
+    harness.feed({
+      type: "reasoning_delta",
+      text: "read api_key=reasoning-canary from /Users/secret/project/notes.md",
+    });
+
+    const parts = harness.reasoningParts();
+    expect(parts).toHaveLength(1);
+    expect(parts[0]?.text).toContain("[redacted]");
+    expect(parts[0]?.text).not.toContain("reasoning-canary");
+    expect(parts[0]?.text).not.toContain("/Users/secret/project/notes.md");
+    expect(parts[0]?.redacted).toBe(true);
+  });
+
+  it("closes the reasoning part once the answer text starts", () => {
+    const harness = createReasoningHarness();
+
+    harness.feed({ type: "reasoning_delta", text: "thinking" });
+    harness.feed({ type: "content_delta", text: "answer" });
+
+    const parts = harness.reasoningParts();
+    expect(parts.at(-1)).toMatchObject({
+      type: "reasoning",
+      text: "thinking",
+      streaming: false,
+    });
   });
 });

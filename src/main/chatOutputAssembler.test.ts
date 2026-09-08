@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { REASONING_PART_MAX_CHARS } from "../shared/chatOutput";
 import { createChatOutputAssembler } from "./chatOutputAssembler";
 
 describe("chat output assembler", () => {
@@ -158,5 +159,66 @@ describe("chat output assembler", () => {
     expect(serialized).toContain("[redacted]");
     expect(serialized).not.toContain(canary);
     expect(inputRequest).toEqual(original);
+  });
+});
+
+describe("chat output assembler reasoning facts", () => {
+  it("accumulates reasoning into one bounded, redacted part", () => {
+    const assembler = createChatOutputAssembler(
+      () => "2026-09-08T00:00:00.000Z",
+    );
+
+    assembler.appendReasoning({ text: "step one. ", turn: 2 });
+    assembler.appendReasoning({
+      text: "read api_key=reasoning-bound-canary from /Users/secret/notes.md",
+    });
+
+    const reasoningParts = assembler
+      .parts()
+      .filter((part) => part.type === "reasoning");
+    expect(reasoningParts).toHaveLength(1);
+    expect(reasoningParts[0]).toMatchObject({
+      type: "reasoning",
+      turn: 2,
+      streaming: false,
+      redacted: true,
+      truncated: false,
+    });
+    expect(reasoningParts[0]?.text).toContain("step one.");
+    expect(reasoningParts[0]?.text).not.toContain("reasoning-bound-canary");
+    expect(reasoningParts[0]?.text).not.toContain("/Users/secret/notes.md");
+  });
+
+  it("bounds reasoning text at the storage limit and marks truncation", () => {
+    const assembler = createChatOutputAssembler(
+      () => "2026-09-08T00:00:00.000Z",
+    );
+
+    assembler.appendReasoning({
+      text: "y".repeat(REASONING_PART_MAX_CHARS + 64),
+    });
+
+    const reasoningPart = assembler
+      .parts()
+      .find((part) => part.type === "reasoning");
+    expect(reasoningPart?.truncated).toBe(true);
+    expect(reasoningPart?.text.length).toBe(REASONING_PART_MAX_CHARS);
+  });
+
+  it("closes the reasoning part when answer text arrives", () => {
+    const assembler = createChatOutputAssembler(
+      () => "2026-09-08T00:00:00.000Z",
+    );
+
+    const streamingPart = assembler.appendReasoning({ text: "considering" });
+    expect(streamingPart?.streaming).toBe(true);
+    expect(assembler.completeReasoning()).toMatchObject({ streaming: false });
+    expect(assembler.completeReasoning()).toBeUndefined();
+
+    assembler.appendText("answer");
+    expect(assembler.parts().map((part) => part.type)).toEqual([
+      "reasoning",
+      "text",
+    ]);
   });
 });

@@ -313,3 +313,54 @@ describe("chat output model", () => {
     expect(outputPartFromStreamEvent(event)).toBeUndefined();
   });
 });
+
+describe("LD02 reasoning display gate", () => {
+  it("keeps persisted reasoning out of the main conversation while it stays in state", () => {
+    const message: ChatMessageRecord = {
+      id: "m-reasoning",
+      role: "assistant",
+      content: "answer text",
+      createdAt: "2026-09-08T00:00:00.000Z",
+      outputParts: [
+        {
+          id: "reasoning_1",
+          type: "reasoning",
+          text: "redacted reasoning summary",
+          redacted: true,
+          truncated: false,
+          streaming: false,
+        },
+        {
+          id: "text_1",
+          type: "text",
+          text: "answer text",
+          format: "markdown",
+        },
+      ],
+    };
+
+    const rendered = outputPartsFromMessage(message);
+    expect(rendered.map((part) => part.type)).toEqual(["text"]);
+  });
+
+  it("hides a reasoning-only message instead of rendering an empty bubble", () => {
+    const message: ChatMessageRecord = {
+      id: "m-reasoning-only",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-09-08T00:00:00.000Z",
+      outputParts: [
+        {
+          id: "reasoning_1",
+          type: "reasoning",
+          text: "redacted reasoning summary",
+          redacted: true,
+          truncated: false,
+          streaming: false,
+        },
+      ],
+    };
+
+    expect(outputPartsFromMessage(message)).toEqual([]);
+  });
+});

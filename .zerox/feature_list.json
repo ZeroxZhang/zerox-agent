@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-08T18:05:00.000+08:00",
+  "updatedAt": "2026-09-08T19:00:00.000+08:00",
   "features": [
     {
       "id": "P113-v3.9.2-disclosure-adversarial-acceptance",
@@ -6699,6 +6699,46 @@
       ],
       "verification": [
         "npm test -- --run src/main/chatService.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts src/shared/packageScripts.test.ts",
+        "npm test",
+        "npm run typecheck:tests",
+        "npm run build",
+        "npm run verify",
+        "npm run smoke:prod",
+        "npm run harness:check",
+        "npm run program:check",
+        "git diff --check"
+      ]
+    },
+    {
+      "id": "P116-process-fact-source-reasoning",
+      "priority": 146,
+      "status": "done",
+      "title": "v3.10.0 process fact source: bounded redacted reasoning",
+      "files": [
+        "src/shared/chatOutput.ts",
+        "src/main/chatOutputAssembler.ts",
+        "src/main/chatOutputAssembler.test.ts",
+        "src/main/chatService/streamingStatus.ts",
+        "src/main/chatService/streamingStatus.test.ts",
+        "src/shared/chatSessionProjection.ts",
+        "src/renderer/chatOutputModel.ts",
+        "src/renderer/components/chat/OutputPartRenderer.tsx",
+        "src/main/chatSessionStore.ts",
+        "src/main/agentLoop.ts",
+        ".zerox/live-disclosure-program.json",
+        ".zerox/feature_list.json",
+        ".zerox/progress.md"
+      ],
+      "definitionOfDone": [
+        "A provider reasoning delta produces a bounded, redacted reasoning output part that is persisted with the assistant message and survives a session reload",
+        "Raw chain of thought is never persisted: stored reasoning text is the redacted, length-bounded form and carries explicit redacted/truncated flags",
+        "The provider, persist, deliver, authorize, and display gates are explicit and testable; the main-conversation display gate stays closed by default",
+        "Reasoning text never enters the model request context",
+        "Backward compatibility: thinking_delta is still emitted and every existing chat service assertion stays green",
+        "Focused, full, build, verify, production smoke, harness, and program checks pass with recorded evidence"
+      ],
+      "verification": [
+        "npm test -- --run src/main/chatOutputAssembler.test.ts src/main/chatService/streamingStatus.test.ts src/main/chatService.test.ts src/renderer/chatStreamReducer.test.ts src/renderer/materialDesign.test.ts",
         "npm test",
         "npm run typecheck:tests",
         "npm run build",

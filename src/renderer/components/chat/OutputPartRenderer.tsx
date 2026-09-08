@@ -152,6 +152,10 @@ export const OutputPartRenderer = memo(function OutputPartRenderer({
           <RunLedgerView part={part} />
         </section>
       );
+    // LD02: reasoning is persisted and delivered, but its display gate is
+    // closed in the main conversation until the disclosure policy opens it.
+    case "reasoning":
+      return null;
     default: {
       const exhaustivePart: never = part;
       return exhaustivePart;
