@@ -15530,3 +15530,10 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 - README 版本引用更新至 v3.10.0（徽标/下载链接/当前版本/What changed/限制），新增「通过终端在本地运行」命令（open / npm ci && npm start / npm run dev），结构与风格保持不变；英文节同步。
 - 新增 .github/release-notes/v3.10.0.md（主要更新 / 稳定性验证 / 兼容性 / macOS 安装说明 / 本地运行命令）。
 - 验证与提交证据见后续条目。
+
+## 2026-09-09 - v3.10.0 发版准备：safe-fs 二进制与 pin 对齐（更正）
+
+- 第一次本地打包验证通过后，CI verify 在 `safeFsHelperInspection.test.ts` fail-closed：CI 的 pinned 工具链重建出的 helper ≠ 仓库提交的二进制（58b2493f）。
+- 根因更正（比 3.10.0 分支记录的更完整）：693b001 把 caller-reviewed 摘要定为 CI 可复现的 7e8f46d4，但 2026-09-02 提交的 `native/zerox-safe-fs-darwin-arm64`（58b2493f）从未被替换，常量与二进制永久脱节——测试按重建字节校验常量（CI 绿），打包按提交二进制校验常量（任何机器红）。
+- 修复：用一次性临时 workflow 在 macos-14（pinned CLT 15.2 工具链 + caller-owned policy）重建 helper，产物 sha256 与常量 **逐字节一致**（7e8f46d4…，arm64，53568 字节）；将其提交为新的 `native/zerox-safe-fs-darwin-arm64`，常量保持不变，临时 workflow 随即删除。
+- 现在单一常量同时满足：CI 工具链重建校验（测试）与打包 overlay 校验（package-mac.mjs 原始字节）。
