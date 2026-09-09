@@ -1,0 +1,32 @@
+name: tmp-build-safe-fs-helper
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Materialize caller-owned toolchain policy
+        shell: bash
+        run: |
+          cat > "${GITHUB_WORKSPACE}/../.v392-pinned-safe-fs-toolchain.json" <<'POLICY'
+          {"schemaVersion": 1, "kind": "v3.9.2-pinned-safe-fs-toolchain", "compiler": {"configuredPath": "/Library/Developer/CommandLineTools/usr/bin/clang", "canonicalPath": "/Library/Developer/CommandLineTools/usr/bin/clang", "digest": "sha256:60468f3efd513d53f6ce581ec8d00595855ebf5a31a496d685b91c104aee1ca0"}, "sdk": {"configuredPath": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk", "canonicalPath": "/Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk", "settingsDigest": "sha256:2fa5c0ce1bbcd261b132b572b1a9eece3b5905b04640a44deae1a6a8812928fb"}, "safeFsHelperDigest": "sha256:7e8f46d4486b7fd01bfefab59dcb985bd7e3ffb2ad5dd0c8ce8f7215bf953861", "digest": "sha256:a5ac620eccc3efb6a84276c73be0bec5cb086c586e6bbedcded4154aef0caaa7"}
+          POLICY
+          cat "${GITHUB_WORKSPACE}/../.v392-pinned-safe-fs-toolchain.json" | head -c 200
+      - name: Build pinned safe-fs helper
+        shell: bash
+        run: |
+          node scripts/build-safe-fs-helper.mjs
+          shasum -a 256 dist-native/darwin-arm64/zerox-safe-fs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safe-fs-helper
+          path: dist-native/darwin-arm64/zerox-safe-fs
