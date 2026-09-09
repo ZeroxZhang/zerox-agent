@@ -15537,3 +15537,11 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
 - 根因更正（比 3.10.0 分支记录的更完整）：693b001 把 caller-reviewed 摘要定为 CI 可复现的 7e8f46d4，但 2026-09-02 提交的 `native/zerox-safe-fs-darwin-arm64`（58b2493f）从未被替换，常量与二进制永久脱节——测试按重建字节校验常量（CI 绿），打包按提交二进制校验常量（任何机器红）。
 - 修复：用一次性临时 workflow 在 macos-14（pinned CLT 15.2 工具链 + caller-owned policy）重建 helper，产物 sha256 与常量 **逐字节一致**（7e8f46d4…，arm64，53568 字节）；将其提交为新的 `native/zerox-safe-fs-darwin-arm64`，常量保持不变，临时 workflow 随即删除。
 - 现在单一常量同时满足：CI 工具链重建校验（测试）与打包 overlay 校验（package-mac.mjs 原始字节）。
+
+## 2026-09-09 - v3.10.0 发布完成
+
+- CI verify（main @ e71f594）：323/324 文件、3869 项测试全绿（含 safeFsHelperInspection：CI pinned 工具链重建 == 7e8f46d4 == 常量），typecheck/stress/build/agent eval 26/26/memory eval 通过。
+- 本地 legacy-adhoc dist:mac 两次通过（第二次使用对齐后的二进制）；应用包 3.10.0、ad-hoc 签名校验 OK。
+- annotated tag v3.10.0 → e71f594；release workflow（macos-14, 6m43s）全绿：身份校验 → 全量门禁 → legacy-adhoc 打包 + Ed25519 更新清单签名 + preflight → GitHub Release 发布。
+- 发布结果：非草稿、非预发布、6 个资产（DMG/ZIP + 两个 blockmap + latest-mac.yml + latest-mac.yml.sig），目标提交 e71f594，URL https://github.com/ZeroxZhang/zerox-agent/releases/tag/v3.10.0。
+- README 保持原有结构，版本引用更新至 v3.10.0，新增「通过终端在本地运行」命令；release notes 见 .github/release-notes/v3.10.0.md。
