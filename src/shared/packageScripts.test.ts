@@ -226,7 +226,7 @@ describe("package scripts", () => {
     expect(mainSource).toContain("app.requestSingleInstanceLock()");
   });
 
-  it("sets live package metadata to v3.9.2", () => {
+  it("sets live package metadata to v3.10.0", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -235,7 +235,7 @@ describe("package scripts", () => {
     ) as { version?: string; packages?: Record<string, { version?: string }> };
     const readme = readFileSync(path.join(process.cwd(), "README.md"), "utf8");
 
-    expect(packageJson.version).toBe("3.9.2");
+    expect(packageJson.version).toBe("3.10.0");
     expect(packageJson.scripts?.["smoke:providers"]).toContain(
       "smoke-multi-provider.mjs",
     );
@@ -244,10 +244,10 @@ describe("package scripts", () => {
     );
     // package-lock.json is updated by `npm install`; check it matches the
     // declared package version once dependencies are installed.
-    expect(packageLock.version).toBe("3.9.2");
-    expect(packageLock.packages?.[""]?.version).toBe("3.9.2");
-    expect(readme).toContain("current release: v3.9.2");
-    expect(readme).toContain("当前版本是 **v3.9.2**");
+    expect(packageLock.version).toBe("3.10.0");
+    expect(packageLock.packages?.[""]?.version).toBe("3.10.0");
+    expect(readme).toContain("current release: v3.10.0");
+    expect(readme).toContain("当前版本是 **v3.10.0**");
   });
 
   it("keeps the local candidate bound to one source snapshot", () => {
@@ -887,7 +887,7 @@ describe("package scripts", () => {
     expect(releaseNotes).toContain("xattr -dr com.apple.quarantine");
   });
 
-  it("keeps release gates tracked through the v3.9.2 successor", () => {
+  it("keeps release gates tracked through the v3.10.0 successor", () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as PackageJson;
@@ -1078,7 +1078,7 @@ describe("package scripts", () => {
       (feature) => feature.id === "P28-v3.0.0-execution-context-spine",
     );
 
-    expect(packageJson.version).toBe("3.9.2");
+    expect(packageJson.version).toBe("3.10.0");
     expect(openFeatureIds.length).toBeLessThanOrEqual(
       Math.min(
         runtimeProgram.maxActiveFeatures,

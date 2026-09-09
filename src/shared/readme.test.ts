@@ -19,8 +19,8 @@ describe("README", () => {
       '<img src="build/icon.svg" width="88" alt="Zerox Agent" />',
     );
     expect(existsSync(path.join(process.cwd(), "logo.png"))).toBe(true);
-    expect(readme).toContain("当前版本是 **v3.9.2**");
-    expect(readme).toContain("The current release: v3.9.2");
+    expect(readme).toContain("当前版本是 **v3.10.0**");
+    expect(readme).toContain("The current release: v3.10.0");
     expect(readme).toContain("local-first desktop control plane");
     expect(readme).toContain("recoverable agent runs");
     expect(readme).toContain("workspace");
@@ -38,10 +38,27 @@ describe("README", () => {
     );
     expect(readme.match(/^# 中文$/gm)).toHaveLength(1);
     expect(readme.match(/^# English$/gm)).toHaveLength(1);
-    expect(readme.split("\n").length).toBeLessThan(800);
+    expect(readme.split("\n").length).toBeLessThan(850);
     expect(readme).not.toContain("v3.2.2 interface system");
     expect(readme).not.toContain("25 built-in tools");
     expect(readme).not.toContain("A fixed local resource budget");
+  });
+
+  it("documents the v3.10.0 live process disclosure release", () => {
+    const readme = readReadme();
+
+    for (const statement of [
+      "## v3.10.0 实时过程披露",
+      "过程事实",
+      "三级密度",
+      "披露偏好",
+      "## What changed in v3.10.0",
+      "process facts",
+      "three-level density",
+      "disclosure preference",
+    ]) {
+      expect(readme).toContain(statement);
+    }
   });
 
   it("documents the v3.9.2 disclosure and runtime resilience release", () => {
@@ -225,7 +242,7 @@ describe("README", () => {
       expect(readme).toContain(command);
     }
 
-    expect(readme).toContain("Zerox-Agent-3.9.2-arm64.dmg");
+    expect(readme).toContain("Zerox-Agent-3.10.0-arm64.dmg");
     expect(readme).toContain("xattr -dr com.apple.quarantine");
     expect(readme).toContain("legacy-adhoc");
     expect(readme).toContain("未经过 Apple Developer ID 签名与公证");

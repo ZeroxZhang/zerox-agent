@@ -10,8 +10,9 @@ const packageJson = await readJson("package.json");
 const conversationProgram = await readJson(
   "archive/disclosure-history/program/conversation-disclosure-program.json",
 );
-// The live process disclosure program is the current governed successor: it
-// owns the single open Feature once the archived disclosure program closed.
+// The live process disclosure program is the governed successor: it owns the
+// v3.10.0 release (LD01-LD06 / P115-P120), mirroring how the archived
+// disclosure program governed the v3.9.2 successor.
 const liveDisclosureProgram = await readJson(
   ".zerox/live-disclosure-program.json",
 );
@@ -150,8 +151,38 @@ function validateHistoricalV391() {
       === "conversation-progressive-disclosure-v3.9.2-2026-08"
     && ["active", "completed"].includes(conversationProgram.status)
     && ["in_progress", "done"].includes(p113?.status);
-  if (packageJson.version !== "3.9.1" && !governedV392Successor) {
-    errors.push("v3.9.1 history may only yield to the governed v3.9.2 successor");
+  // The v3.10.0 release is governed by the completed live process disclosure
+  // program (LD01-LD06 / P115-P120): the same successor pattern v3.9.2 used
+  // with the archived conversation-disclosure program.
+  const liveDisclosureWorkstreams = liveDisclosureProgram.workstreams ?? [];
+  const p115toP120 = [
+    "P115-live-delta-delivery-and-render-budget",
+    "P116-process-fact-source-reasoning",
+    "P117-inline-process-blocks",
+    "P118-plan-progress-disclosure-and-intervention",
+    "P119-replay-preference-and-learning-closure",
+    "P120-chat-process-facts-in-episode-evidence",
+  ];
+  const governedV3100Successor =
+    packageJson.version === "3.10.0"
+    && liveDisclosureProgram.programId === "live-process-disclosure-2026"
+    && liveDisclosureProgram.status === "completed"
+    && liveDisclosureProgram.activeFeatureId === null
+    && liveDisclosureProgram.nextFeatureId === null
+    && liveDisclosureWorkstreams.length === 6
+    && liveDisclosureWorkstreams.every(
+      (workstream) => workstream.state === "completed",
+    )
+    && p113?.status === "done"
+    && p115toP120.every((id) => feature(id)?.status === "done");
+  if (
+    packageJson.version !== "3.9.1"
+    && !governedV392Successor
+    && !governedV3100Successor
+  ) {
+    errors.push(
+      "v3.9.1 history may only yield to the governed v3.9.2 or v3.10.0 successor",
+    );
   }
   const governedOpenFeatureIds = [conversationProgram, liveDisclosureProgram]
     .filter((program) => program?.status === "active")

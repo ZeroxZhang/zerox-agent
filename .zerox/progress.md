@@ -15520,3 +15520,13 @@ defects (B1-B9), then the authoritative anchor was driven to completion.
   截图：`.zerox/verification/process-disclosure/live-turn/live-session-expanded.png`
   与 `live-turn.png`。
 - 结论：LD01–LD06 的过程披露链路在**打包包 + 真实模型**下端到端可用。
+
+## 2026-09-09 - v3.10.0 发版准备（进行中）
+
+- 分支 3.10.0 完成彻底 review 后 fast-forward 合并进 main 并推送（693b001..3b898bd，13 commits，61 files）。
+- 修复打包阻塞根因：`EXPECTED_SAFE_FS_HELPER_DIGEST`（scripts/safe-fs-toolchain-selection.mjs 与 scripts/build-v392-acceptance-anchor.mjs）重新固定为仓库提交的未签名 helper `native/zerox-safe-fs-darwin-arm64`（acde71f）的原始 SHA-256 `58b2493f…`——693b001 引入的 7e8f46d4 与打包检查的原始字节语义不一致，任何机器 pack:mac 都 fail-closed；两个消费点现在语义一致（均为 raw bytes）。
+- 版本 3.9.2 → 3.10.0：package.json、package-lock.json（两处）、anchor CONTROL_DIGESTS（package.json / package-lock.json 重新固定）、packageScripts.test.ts 版本断言。
+- 治理：check-release-program.mjs 增加 governed v3.10.0 successor 分支（live-disclosure program completed + P113 done + P115–P120 done）；release-program.json 保持 v3.9.1 闭包记录不变（沿用 v3.9.2 的 successor 模式）。
+- README 版本引用更新至 v3.10.0（徽标/下载链接/当前版本/What changed/限制），新增「通过终端在本地运行」命令（open / npm ci && npm start / npm run dev），结构与风格保持不变；英文节同步。
+- 新增 .github/release-notes/v3.10.0.md（主要更新 / 稳定性验证 / 兼容性 / macOS 安装说明 / 本地运行命令）。
+- 验证与提交证据见后续条目。

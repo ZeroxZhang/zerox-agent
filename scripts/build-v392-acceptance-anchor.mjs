@@ -86,7 +86,7 @@ const EXPECTED_MACOS_SDK = Object.freeze({
     "sha256:2fa5c0ce1bbcd261b132b572b1a9eece3b5905b04640a44deae1a6a8812928fb",
 });
 const EXPECTED_UNSIGNED_SAFE_FS_HELPER_DIGEST =
-  "sha256:7e8f46d4486b7fd01bfefab59dcb985bd7e3ffb2ad5dd0c8ce8f7215bf953861";
+  "sha256:58b2493f585d2bc814ff44092fdde3b3debb793ea715a4a14b7fc638b0c04ad6";
 const PINNED_SAFE_FS_TOOLCHAIN_POLICY_NAME =
   ".v392-pinned-safe-fs-toolchain.json";
 const PINNED_SAFE_FS_HELPER_NAME = ".v392-pinned-safe-fs-helper";
@@ -116,9 +116,9 @@ const EXPECTED_GENERATED_NATIVE_CACHE = Object.freeze({
 });
 const CONTROL_DIGESTS = Object.freeze({
   "package.json":
-    "sha256:d1fcffe27b07899c06b3388b3027e0864315da0b2e415510b55b38177479a68a",
+    "sha256:cfe33a4792e10bbc56d35a1e5f295dde0b85830f6ff645951cd6a20dd620bddd",
   "package-lock.json":
-    "sha256:af9b511b059aea01bad371438da6bf22e09143dfdbd71162b1eb1ea2ab0abbf6",
+    "sha256:e22a2b84d46100494cc7861995531ea1312729e8dbc1d2016a51585367451f30",
   "electron-builder.yml":
     "sha256:f6b3347462c9a1a0eb21dd6853f7ff8bcfecea7f85008e9d13a968e05b98d973",
   "scripts/after-pack-mac.mjs":
